@@ -6,7 +6,7 @@ UPPER = NAME.upper()
 PREFIX = NAME
 CAPITAL = NAME.capitalize()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from record_tables import tables
+from record_tables import tables, SUBSTITUTES
 GROUPS, KIND = tables(NAME)
 fields = [field for group in GROUPS for field in group[2]]
 
@@ -41,8 +41,8 @@ def layout(group):
 
 def default_vals(group):
     result = "fv_nil()"
-    for _, kind in reversed(group[2]):
-        result = f"fv_i32(0, {result})" if kind == "i" else f"fv_str(bnil(), {result})"
+    for name, kind in reversed(group[2]):
+        result = f"fv_i32(0, {result})" if kind == "i" else f"fv_str({bytes_lit(SUBSTITUTES.get(name, ''))}, {result})"
     return result
 
 
@@ -63,8 +63,15 @@ def layoutv(group):
 
 def defaultv(group):
     result = "FVV_nil()"
-    for _, kind in reversed(group[2]):
-        result = f"FVV_i32(int32_zero(), {result})" if kind == "i" else f"FVV_str(blist_nil(), {result})"
+    for name, kind in reversed(group[2]):
+        result = f"FVV_i32(int32_zero(), {result})" if kind == "i" else f"FVV_str({textv(SUBSTITUTES.get(name, ''))}, {result})"
+    return result
+
+
+def textv(text):
+    result = "blist_nil()"
+    for letter in reversed(text):
+        result = f"blist_cons({ord(letter)}, {result})"
     return result
 
 
@@ -75,9 +82,19 @@ def tagv(tag):
     return result
 
 
+def different_from_later(position):
+    """The proof that the tag of the group at position is none of the tags after it (NOTKNOWN): quire#510,
+    the tags of a record's groups are all different, so that a chunk is read for one group alone"""
+    proof = "NOTKNOWN_nil()"
+    for _ in GROUPS[position + 1:]:
+        proof = f"NOTKNOWN_cons(TAGDIFF_mk(), {proof})"
+    return proof
+
+
 runtime = "SPV_nil()"
-for group in reversed(GROUPS):
-    runtime = f"SPV_cons(TAGNOT_mk() | {tagv(group[0])}, {layoutv(group)}, Mode{group[1].capitalize()}(), {defaultv(group)}, {runtime})"
+for position in reversed(range(len(GROUPS))):
+    group = GROUPS[position]
+    runtime = f"SPV_cons(TAGNOT_mk(), {different_from_later(position)} | {tagv(group[0])}, {layoutv(group)}, Mode{group[1].capitalize()}(), {defaultv(group)}, {runtime})"
 emit(f"#pub fun @p@_specs (): specsv(@U@_SPECS, {len(GROUPS)})\n")
 emit(f"implement @p@_specs () = {runtime}\n")
 
@@ -220,7 +237,7 @@ primplement @p@_enc_dec {@p@_value}{format_version,least_version}{kept_extras}{o
    and the chunks kept *)
 #pub datavtype @p@record(@p@x, int, int, extras) =
   | {@p@_value:@p@x}{format_version,least_version:int | 0 <= format_version; format_version < 256; 0 <= least_version; least_version <= READER}{kept_extras:extras}{extra_count:nat}
-    @C@Record(@p@_value, format_version, least_version, kept_extras) of (int format_version, int least_version, @p@v(@p@_value), extrasv(kept_extras, extra_count))
+    @C@Record(@p@_value, format_version, least_version, kept_extras) of (int format_version, int least_version, @p@v(@p@_value), extrasv(@U@_SPECS, kept_extras, extra_count))
 
 #pub datavtype @p@read(@p@res) =
   | {@p@_value:@p@x}{format_version,least_version:int}{kept_extras:extras} @QU@_ok(@ql@_ok(@p@_value, format_version, least_version, kept_extras)) of @p@record(@p@_value, format_version, least_version, kept_extras)

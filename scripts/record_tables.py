@@ -2,14 +2,23 @@
 # (name, "i" a 32-bit number or "s" a string of up to 255 bytes). The tags are in
 # ascending order, which is the order they are written in.
 #
-# A group is one of three, "req", "opt" or "added" (quire#497):
-#   req    the record needs it: one without it, or with it damaged, is damaged;
-#   opt    every version of the format has written it: one without it is damaged, one with it
-#          damaged is read with the group's defaults (lost, and its bytes kept when the record is repaired);
+# A group is one of three, "req", "opt" or "added" (quire#497, quire#510: nothing makes a record unusable but what
+# is not a record at all, so req and opt differ in what they say, not in whether the record is used):
+#   req    the record needs it: one without it, or with it damaged, is read with the group's substitutes
+#          (SUBSTITUTES below), and the group is lost (said, and the bytes kept when the record is repaired);
+#   opt    every version of the format has written it: as req, a record without it or with it damaged is
+#          read with the group's defaults and the group is lost;
 #   added  a group added to the format after records were written: one without it was written before
 #          the group existed, which is no loss and no damage (it reads with the group's defaults, as an
 #          absent PNG ancillary chunk, a protobuf field or an SQLite column added with a default does),
-#          and one with it damaged is lost as an "opt" one is. Every group added from now on is "added".
+#          and one with it damaged is lost as an "opt" one is. Every group added from now on is "added"
+#          (quire#515: tests/static/groups.py), and is named in RELEASES with a library of the table before it.
+# What stands in for a group that is lost or missing (quire#510): the defaults of its fields are 0 and the empty
+# string, except for the fields named here. A record is used whatever it lost, so even a group the record needs has
+# a substitute: a book whose title is lost is shown as "Untitled" (the word the contents panel uses for a label with
+# none) and its ids are the record's own key's (libstore); the title and author can be read again from the book's
+# file when it is next opened.
+SUBSTITUTES = {"title": "Untitled"}
 BOOK_GROUPS = [
   ("AUTH", "req", [("author", "s")]),
   ("BOOK", "req", [("id_high", "i"), ("id_low", "i")]),
@@ -32,6 +41,11 @@ BOOK_GROUPS = [
   ("tdir", "added", [("text_directions", "i")]),
 ]
 BOOK_KIND = 1
+# The "added" groups in the order they were added, each with the commit that added it (quire#515). Every
+# table that ever shipped is a prefix of this list on top of the first table's groups (the req and opt ones),
+# and e2e/old-library.spec.js opens a library of each: tests/static/groups.py fails a group that is not
+# here, one added as "req" or "opt", and a table with no such library.
+RELEASES = [("prog", "bb473e5"), ("tdir", "04dcf63"), ("snum", "6002bcf")]
 INDEX_GROUPS = [
   ("LEGA", "opt", [("legacy_size", "i"), ("legacy_sum", "i")]),
   ("NAMS", "req", [("name_count", "i")] + [(f"name{k}", "s") for k in range(8)]),

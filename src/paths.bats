@@ -12,12 +12,15 @@ fun _after_last_slash {l:agz}{n:pos}{position,path_end:nat | position <= path_en
   : [found:int | after_slash <= found; found <= path_end] int found =
   if position >= path_end then after_slash
   else if byte2int0($A.get<byte>(path, position)) = 47 then _after_last_slash(path, position + 1, path_end, position + 1)
+  (* a backslash, in the name of an entry written by a tool for Windows *)
+  else if byte2int0($A.get<byte>(path, position)) = 92 then _after_last_slash(path, position + 1, path_end, position + 1)
   else _after_last_slash(path, position + 1, path_end, after_slash)
 
 (* The end of the segment of path[start, path_len): the next '/' at or
-   after start, or path_len *)
-fun _segment_end {l:agz}{path_len:pos}{start:nat | start <= path_len} .<path_len - start>.
-  (path: !$A.arr(byte, l, path_len), path_len: int path_len, start: int start)
+   after start, or path_len (the array holds size bytes, path_len of
+   them the path) *)
+fun _segment_end {l:agz}{size:pos}{path_len:nat | path_len <= size}{start:nat | start <= path_len} .<path_len - start>.
+  (path: !$A.arr(byte, l, size), path_len: int path_len, start: int start)
   : [stop:int | start <= stop; stop <= path_len] int stop =
   if start >= path_len then start
   else if byte2int0($A.get<byte>(path, start)) = 47 then start
@@ -25,8 +28,8 @@ fun _segment_end {l:agz}{path_len:pos}{start:nat | start <= path_len} .<path_len
 
 (* Just past the last '/' of path[0, position], or 0: where ".." leaves a
    path path[0, position + 2) that ends with '/' *)
-fun _parent_end {l:agz}{path_len:pos}{position:int | position < path_len} .<max(position + 1, 0)>.
-  (path: !$A.arr(byte, l, path_len), position: int position)
+fun _parent_end {l:agz}{size:pos}{position:int | position < size} .<max(position + 1, 0)>.
+  (path: !$A.arr(byte, l, size), position: int position)
   : [parent_end:nat | parent_end <= max(position + 1, 0)] int parent_end =
   if position < 0 then 0
   else if byte2int0($A.get<byte>(path, position)) = 47 then position + 1
@@ -34,8 +37,8 @@ fun _parent_end {l:agz}{path_len:pos}{position:int | position < path_len} .<max(
 
 (* path[source, source + count) to path[target, target + count), front
    first (target <= source) *)
-fun _move_bytes {l:agz}{path_len:pos}{source,target,count:nat | target <= source; source + count <= path_len} .<count>.
-  (path: !$A.arr(byte, l, path_len), source: int source, target: int target, count: int count): void =
+fun _move_bytes {l:agz}{size:pos}{source,target,count:nat | target <= source; source + count <= size} .<count>.
+  (path: !$A.arr(byte, l, size), source: int source, target: int target, count: int count): void =
   if count <= 0 then ()
   else let
     val () = $A.set<byte>(path, target, $A.get<byte>(path, source))
@@ -44,8 +47,8 @@ fun _move_bytes {l:agz}{path_len:pos}{source,target,count:nat | target <= source
 (* path[0, path_len) with its empty, "." and ".." segments
    resolved, in place: the segments read from read_at on are written
    from write_at on (write_at <= read_at); the resolved length *)
-fun _normalize {l:agz}{path_len:pos}{read_at,write_at:nat | write_at <= read_at; read_at <= path_len} .<path_len - read_at>.
-  (path: !$A.arr(byte, l, path_len), path_len: int path_len, read_at: int read_at, write_at: int write_at)
+fun _normalize {l:agz}{size:pos}{path_len:nat | path_len <= size}{read_at,write_at:nat | write_at <= read_at; read_at <= path_len} .<path_len - read_at>.
+  (path: !$A.arr(byte, l, size), path_len: int path_len, read_at: int read_at, write_at: int write_at)
   : [resolved_len:nat | resolved_len <= path_len] int resolved_len =
   if read_at >= path_len then write_at
   else let
@@ -71,6 +74,52 @@ fun _normalize {l:agz}{path_len:pos}{read_at,write_at:nat | write_at <= read_at;
     else let
       val () = _move_bytes(path, read_at, write_at, segment_len)
     in write_at + segment_len end
+  end
+
+(* The value of a hexadecimal digit, or -1 for a byte that is not one *)
+fn _hex_value (letter: int): int =
+  if letter >= 48 then
+    (if letter <= 57 then letter - 48
+     else if letter >= 65 then
+       (if letter <= 70 then letter - 55
+        else if letter >= 97 then (if letter <= 102 then letter - 87 else ~1)
+        else ~1)
+     else ~1)
+  else ~1
+
+(* path[read_at, size) with its percent-escapes decoded, written from
+   write_at on (in place; write_at <= read_at); where the decoded path
+   ends. A '%' not followed by two hexadecimal digits is itself. *)
+fun _unescape {l:agz}{size:pos}{read_at,write_at:nat | write_at <= read_at; read_at <= size} .<size - read_at>.
+  (path: !$A.arr(byte, l, size), size: int size, read_at: int read_at, write_at: int write_at)
+  : [stop:nat | stop <= size] int stop =
+  if read_at >= size then write_at
+  else let
+    val letter = byte2int0($A.get<byte>(path, read_at))
+    (* the byte as it is, when it does not start an escape *)
+    val kept = (if letter = 37 then false else true): bool
+  in
+    if kept then let
+      val () = $A.set<byte>(path, write_at, $A.get<byte>(path, read_at))
+    in _unescape(path, size, read_at + 1, write_at + 1) end
+    else if read_at + 2 < size then let
+      val high = _hex_value(byte2int0($A.get<byte>(path, read_at + 1)))
+      val low = _hex_value(byte2int0($A.get<byte>(path, read_at + 2)))
+    in
+      if high >= 0 then
+        (if low >= 0 then let
+           val () = $A.set<byte>(path, write_at, $A.int2byte($AR.low_byte(high * 16 + low)))
+         in _unescape(path, size, read_at + 3, write_at + 1) end
+         else let
+           val () = $A.set<byte>(path, write_at, $A.get<byte>(path, read_at))
+         in _unescape(path, size, read_at + 1, write_at + 1) end)
+      else let
+        val () = $A.set<byte>(path, write_at, $A.get<byte>(path, read_at))
+      in _unescape(path, size, read_at + 1, write_at + 1) end
+    end
+    else let
+      val () = $A.set<byte>(path, write_at, $A.get<byte>(path, read_at))
+    in _unescape(path, size, read_at + 1, write_at + 1) end
   end
 
 (* The end of an src value data[src_offset, src_offset + src_len): its
@@ -171,6 +220,24 @@ implement path_dir_end (path, path_len) = _after_last_slash(path, 0, path_len, 0
   : [resolved_len:nat | resolved_len <= path_len] int resolved_len
 
 implement path_norm (path, path_len) = _normalize(path, path_len, 0, 0)
+
+(* path[0, path_len) of the array of size bytes, resolved as path_norm
+   does; the resolved length *)
+#pub fn path_norm_in {l:agz}{size:pos}{path_len:nat | path_len <= size}
+  (path: !$A.arr(byte, l, size), size: int size, path_len: int path_len)
+  : [resolved_len:nat | resolved_len <= path_len] int resolved_len
+
+implement path_norm_in (path, size, path_len) = _normalize(path, path_len, 0, 0)
+
+(* An href is a URL, so the path part of it that is in path[from, size)
+   (the array's last bytes, after the directory the href is relative to)
+   is decoded: "my%20chapter.xhtml" names the entry "my chapter.xhtml"
+   (RFC 3986, section 2.1; the URL standard's percent-decode). In place;
+   the length of the whole path then. *)
+#pub fn path_unescape {l:agz}{size:pos}{from:nat | from <= size}
+  (path: !$A.arr(byte, l, size), size: int size, from: int from): [stop:nat | stop <= size] int stop
+
+implement path_unescape (path, size, from) = _unescape(path, size, from, from)
 
 (* The length of an href or src data[src_offset, src_offset + src_len)
    before its '#' *)

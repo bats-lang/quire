@@ -6,7 +6,7 @@
 
 import { test, expect } from './fixtures.js';
 import {
-  epubFile, importFiles, openBook, toLibrary, reload, bookPage, place, chapters, openReadingSettings, readingSettings, fixedLayoutBook, readFixed, fixedPlace, japaneseChapters,
+  epubFile, importFiles, openBook, placeChanged, toLibrary, reload, bookPage, place, chapters, openReadingSettings, readingSettings, fixedLayoutBook, readFixed, fixedPlace, japaneseChapters,
 } from './helpers.js';
 import { launch, relaunch, chapterShown, nextChapter } from './relaunch.js';
 import { legacyLibrary, store, put, forgetRecords } from './legacy-library.js';
@@ -139,14 +139,64 @@ test('a window swap keeps the paragraph when scrolled, in two columns, and verti
   await expect.poll(() => onScreen(page, top)).toBe(true);
 });
 
+/** The first words of the first paragraph whose first line begins at or
+    below the top of the page shown, scrolled: the paragraph a reader sees
+    first from the top */
+async function topParagraph(page) {
+  return bookPage(page).evaluate(doc => {
+    const c = doc.getBoundingClientRect();
+    for (const e of doc.querySelectorAll('p')) {
+      const r = e.getClientRects()[0];
+      if (r && r.top >= c.top - 2 && r.top < c.bottom) return e.textContent.slice(0, 14);
+    }
+    return null;
+  });
+}
+
+// scrolled, the place is the paragraph at the top of what the reader sees,
+// not the first paragraph of the screenful they scrolled part of (#485)
+test('scrolled, a hand scroll within one screenful is the place a window swap keeps', async ({ page }) => {
+  await page.clock.install();
+  await page.goto('/');
+  const size = page.viewportSize();
+  await importFiles(page, [epubFile(paged)], 1);
+  await openBook(page, paged.title);
+  await change(page, 'Page', sheet => group(sheet, 'Layout', 'Scroll'));
+  // one whole screenful down, so the screenful's first paragraph is known
+  await bookPage(page).evaluate(doc => { doc.scrollTop = doc.clientHeight; });
+  await page.waitForTimeout(1500);
+  const first = await topParagraph(page);
+  // a hand scroll of less than half a screen, so the screenful is the same,
+  // far enough that another paragraph is at the top
+  const moved = await bookPage(page).evaluate(doc => {
+    const start = doc.scrollTop;
+    const firstTop = () => { const c = doc.getBoundingClientRect(); for (const e of doc.querySelectorAll('p')) { const r = e.getClientRects()[0]; if (r && r.top >= c.top - 2 && r.top < c.bottom) return e; } return null; };
+    const was = firstTop();
+    while (doc.scrollTop - start < doc.clientHeight * 0.45 && firstTop() === was) doc.scrollTop += 10;
+    return doc.scrollTop - start;
+  });
+  expect(moved).toBeGreaterThan(0);
+  await page.waitForTimeout(1500);
+  const top = await topParagraph(page);
+  expect(top).toBeTruthy();
+  // the scroll moved the paragraph at the top, or the test would prove nothing
+  expect(top).not.toBe(first);
+  await swapWindow(page, { width: size.height, height: size.width });
+  await expect.poll(() => topParagraph(page)).toBe(top);
+  await swapWindow(page, size);
+  await expect.poll(() => topParagraph(page)).toBe(top);
+});
+
+// checked after the debounced relayout has run (swapWindow), not before it (#484)
 test('a vertical book keeps its paragraph across a window swap', async ({ page }) => {
+  await page.clock.install();
   await page.goto('/');
   const size = page.viewportSize();
   await readFar(page, vertical);
   const top = await middleParagraph(page);
-  await page.setViewportSize({ width: size.height, height: size.width });
+  await swapWindow(page, { width: size.height, height: size.width });
   await expect.poll(() => onScreen(page, top)).toBe(true);
-  await page.setViewportSize(size);
+  await swapWindow(page, size);
   await expect.poll(() => onScreen(page, top)).toBe(true);
 });
 

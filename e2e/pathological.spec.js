@@ -63,7 +63,16 @@ async function arrange(page, mode) {
     await readingSettings(page).getByRole('group', { name: 'Pages on screen' }).getByRole('button', { name: 'Two', exact: true }).click();
   }
   await page.keyboard.press('Escape');
-  await expect(readingSettings(page)).toBeHidden();
+  // the dialog is hidden at once (#522: its data-hide flips within a few
+  // milliseconds of the key, measured), but whether Playwright finds it
+  // hidden needs the page laid out, and the columns just chosen are laid
+  // out in the next frame: a megabyte of one word on a phone takes Chrome
+  // over 15 s of one task on a loaded runner, with the answer waiting
+  // behind it. So the app's part, the hide, is asserted by its attribute
+  // (no layout needed), and the dialog gone from the screen waits as long
+  // as the layout it follows
+  await expect(page.locator('#typography-panel')).toHaveAttribute('data-hide', '1');
+  await slow(readingSettings(page)).toBeHidden();
   await expect.poll(() => indicator(page).textContent()).toMatch(mode === 'scrolled' ? /% of chapter/ : mode === 'columns' ? /pages 1–2 of/ : / page 1 of/);
   return Date.now() - started;
 }
@@ -204,11 +213,24 @@ const ms = (times) => times.map(Math.round).join(', ');
 const slack = (instant) => Math.max(50, instant * 0.5);
 
 /** The middle turn of six, instant (less motion) and animated, in this page */
+const motionOf = new WeakMap();
+async function motion(page, preference) {
+  if ((motionOf.get(page) || 'no-preference') === preference) return;
+  motionOf.set(page, preference);
+  await page.emulateMedia({ reducedMotion: preference });
+}
+
 async function turnBudget(page) {
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  const instant = await turnTimes(page);
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  // a change of the media preference makes Chrome recalculate the style of
+  // every element (2.3 to 2.8 s for the 30,000 of the 5 MB chapter, and the
+  // same again for the inert copy of the page, measured in a trace as
+  // PlatformColorChange with subtree), a cost that is the harness's: no reader
+  // changes it. So it is changed once, from the context's default (motion) to
+  // reduced, and the operations after the turns are measured with it
+  await motion(page, 'no-preference');
   const animated = await turnTimes(page);
+  await motion(page, 'reduce');
+  const instant = await turnTimes(page);
   return { instant, animated };
 }
 
@@ -304,7 +326,7 @@ test.describe('a table cell over many pages', { tag: '@serial' }, () => {
       expect(cellBox.scrollHeight, 'the cell holds more than a page, scrolled inside the table').toBeGreaterThan(cellBox.clientHeight * 3);
 
       // every page across the cell: the place, the footer and the text
-      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await motion(page, 'reduce');
       await page.keyboard.press('Home');
       await expect.poll(async () => (await where(page)).fraction).toBe(0);
       await barsDown(page);
@@ -453,13 +475,18 @@ const opened = (page, title, heading) => elapsedUntil(page,
     search for the word on the last page (found, then gone to) and a
     highlight near the end */
 async function operations(page) {
+  const phases = {};
+  let phaseStart = Date.now();
+  const phase = (name) => { phases[name] = Date.now() - phaseStart; phaseStart = Date.now(); };
   const turns = await turnBudget(page);
+  phase('turns');
   const end = await elapsedUntil(page, () => page.keyboard.press('End'), atEndOfChapter);
   // the closing paragraph is on the page, whatever the arrangement
   await expect.poll(() => bookPage(page).evaluate(doc => doc.textContent.includes('last Zanzibarquartz') && [...doc.querySelectorAll('p')].some(p => p.textContent.includes('last Zanzibarquartz') && [...p.getClientRects()].some(r => { const c = doc.getBoundingClientRect(); return r.right > c.left && r.left < c.right && r.bottom > c.top && r.top < c.bottom; })))).toBe(true);
+  phase('end');
   await page.keyboard.press('Home');
   await page.waitForFunction(atStartOfChapter, null, { polling: 10, timeout: 30000 });
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  phase('home');
   const summary = await (async () => {
     const started = Date.now();
     const status = await searchFor(page, TAIL_WORD);
@@ -469,13 +496,17 @@ async function operations(page) {
   const found = await elapsedUntil(page, () => goToResult(page).catch(() => {}), oneMark);
   await expect.poll(async () => (await marks(page)).text).toBe(TAIL_WORD);
   await expect.poll(async () => (await where(page)).end).toBe(true);
+  phase('search');
   await closeSearch(page);
   await page.keyboard.press('End');
   await page.waitForFunction(atEndOfChapter, null, { polling: 10, timeout: 30000 });
+  phase('end again');
   await selectIn(page, 'Novel last', 5);
   await expect(selectionButton(page, 'Highlight')).toBeVisible();
+  phase('select');
   const highlight = await elapsedUntil(page, () => selectionButton(page, 'Highlight').click(), oneMark);
-  return { turns, end, summary, found, highlight };
+  phase('highlight');
+  return { turns, end, summary, found, highlight, phases };
 }
 
 test.describe('a single-file book of 5 MB', { tag: '@serial' }, () => {
@@ -493,14 +524,26 @@ test.describe('a single-file book of 5 MB', { tag: '@serial' }, () => {
 
   for (const mode of MODES) {
     test(`${mode}: opening, the first turn, a jump to the end, a search and a highlight each cost in proportion to the text`, async ({ page }) => {
-      // one more layout and frame of the 5 MB chapter, for the open budget
-      test.setTimeout(120000);
+      // Where the time goes (#471, a trace of each step on the desktop,
+      // 1024 x 768, the chapter at 5 MB): the app's own script is 20 to
+      // 30 ms a turn and 3 ms for the highlight; the rest is Chrome's style
+      // recalculation of the chapter's 30,000 elements (2.3 to 2.8 s each
+      // time: the first layout, a media preference change, a ::highlight
+      // pseudo-class invalidated on every element, the inert copy of the
+      // page) and, paged, its PrePaint across about 1800 columns (6.5 s for
+      // the highlight). Opening is 0.9 to 1.3 times Chrome's own time for
+      // the same DOM (below). The whole test took 78 s paged, 87 s in two
+      // columns and 30 s scrolled on the desktop, so paged and in columns
+      // 120 s is 1.4 times the slowest; scrolled it is a minute
+      test.setTimeout(mode === 'scrolled' ? 60000 : 120000);
+      const testStarted = Date.now();
       const errors = await start(page);
       // the arrangement is chosen on the small book, and kept for the big one
       await readBook(page, smallBook());
       await arrange(page, mode);
       await settled(page);
       await toLibrary(page);
+      const smallSetupMs = Date.now() - testStarted;
       const smallOpen = await opened(page, 'Small Novel', 'Novel chapter');
       await settled(page);
       const small = await operations(page);
@@ -517,6 +560,7 @@ test.describe('a single-file book of 5 MB', { tag: '@serial' }, () => {
         `search ${small.summary} -> ${big.summary}, go ${small.found} -> ${big.found}; highlight ${small.highlight} -> ${big.highlight}; ` +
         `turns animated ${ms(small.turns.animated)} -> ${ms(big.turns.animated)}, instant ${ms(small.turns.instant)} -> ${ms(big.turns.instant)}`;
       console.log(log);
+      console.log(`${mode}: wall ${Date.now() - testStarted} ms; small set-up ${smallSetupMs} ms; steps of the small chapter ${JSON.stringify(small.phases)}; steps of the big ${JSON.stringify(big.phases)}`);
       // Paged, Chrome's own cost of drawing a page of this chapter is not
       // in proportion to the text either (below: a second a page at 5 MB,
       // against about 10 ms at 300 KB: its columns times its boxes), and the
@@ -543,7 +587,9 @@ test.describe('a single-file book of 5 MB', { tag: '@serial' }, () => {
       // held to the small chapter's within 30 ms there is the app's own
       // script, which was 200 to 280 ms on this chapter before #423 and is
       // 20 to 30 ms now; the first frame is printed.
-      // (scrolled, a trace of a key on this chapter on the desktop: 19 ms of
+      // (the margin stays at 60 ms: here the first frame is 15 to 18 ms later
+      // than the small chapter's, but CI's PrePaint and paint are not known to
+      // be as fast, and a flake is a bug; a trace of a key on this chapter on the desktop: 19 ms of
       // the app's script, then 37 ms of Chrome's PrePaint of its 30,000
       // boxes and 27 ms of paint, which grow with the chapter: the margin is
       // the 30 ms of the script's and the same again for the browser's)
@@ -651,6 +697,28 @@ test.describe('ten thousand short paragraphs in one chapter', { tag: '@serial' }
 });
 
 test.describe('one paragraph of a megabyte without a space', { tag: '@serial' }, () => {
+  // #522: Close does not wait for the layout of what was just chosen. The
+  // click on Two and the Escape are one script, so no frame (and so no
+  // layout of the columns) lies between them: the dialog's hide must
+  // already be made when the script ends, and the layout then follows
+  test('Close takes effect before the layout of the columns just chosen', async ({ page }) => {
+    test.setTimeout(sizedTo(page) < 0.5 ? 420000 : 300000);
+    const errors = await start(page);
+    await openTimed(page, unbrokenBook());
+    await settled(page);
+    await openReadingSettings(page, 'Page');
+    const hide = await page.evaluate(() => {
+      const two = [...document.querySelectorAll('#typography-panel [aria-label="Pages on screen"] button')].find(button => button.textContent === 'Two');
+      two.click();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      return document.getElementById('typography-panel').getAttribute('data-hide');
+    });
+    expect(hide, 'the dialog is hidden when the script that chose the columns and pressed Escape ends').toBe('1');
+    await slow(readingSettings(page)).toBeHidden();
+    await slow.poll(() => indicator(page).textContent()).toMatch(/pages 1–2 of/);
+    expect(errors).toEqual([]);
+  });
+
   for (const mode of MODES) {
     test(`${mode}: shown, paged, turned within budget and searchable`, async ({ page }) => {
       // a phone fits a third of the text a page, so a megabyte is three

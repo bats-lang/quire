@@ -1304,7 +1304,11 @@ implement dict_panel_open (code, code_len) = let
   val () = _language_choice((if language > 0 then language else ENGLISH): int)
   val () = ui_text_buf("dictionaries-status", $A.alloc<byte>(1), 0)
   val () = layer_open(LDictionaries())
-in ui_focus("dictionaries-done") end
+in let
+  (* focus goes to Back in the screen's top bar, and the screen is shown
+     from its top *)
+  val () = ui_focus("dictionaries-back")
+in ui_scroll_to_top("dictionaries-box") end end
 
 (* ============================================================
    The Trash's dictionaries (#396)

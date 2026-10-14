@@ -15,6 +15,7 @@
 staload "epub_xml.sats"
 staload "entity.sats"
 staload "book.sats"
+staload "locator.sats"
 staload "paths.sats"
 staload "ui.sats"
 staload "mem.sats"
@@ -126,35 +127,15 @@ end
    Finding the document, in the OPF
    ============================================================ *)
 
-(* The entry of book serial (file_size bytes) named name[0, name_len);
-   frees name *)
-fn _find_entry {file_size:pos}{name_loc:agz}{name_size:pos | name_size <= 1048576}{name_len:nat | name_len <= name_size}
-  (serial: int, file_size: int file_size, name: $A.arr(byte, name_loc, name_size), name_size: int name_size, name_len: int name_len): entry_hit(file_size) =
-  if name_len <= 0 then let val () = $A.free<byte>(name) in EntryMiss() end
-  else let
-    val exact = $A.alloc<byte>(name_len)
-    val name = $S.copy_arr_region(name, 0, name_size, exact, name_len, name_len)
-    val () = $A.free<byte>(name)
-    val @(exact_frozen, exact_bytes) = $A.freeze<byte>(exact)
-    val hit = book_find_entry(serial, file_size, exact_bytes, name_len)
-    val () = release_bytes(exact_frozen, exact_bytes)
-  in hit end
-
 (* The entry of book serial (file_size bytes) that href
    opf_bytes[href_offset, href_offset + href_len) names, after the OPF's
-   directory (opf_dir_len bytes of the name at opf_name_offset) *)
+   directory (opf_dir_len bytes of the name at opf_name_offset): a URL, so
+   "./", "../" and percent-escapes are resolved and a path-absolute one is
+   the container's own *)
 fn _opf_entry {file_size:pos}{opf_name_offset:nat}{opf_dir_len:nat | opf_name_offset + opf_dir_len <= file_size; opf_dir_len < 65536}{opf_loc:agz}{opf_size:pos}{href_offset,href_len:nat | href_offset + href_len <= opf_size}
   (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, opf_dir_len: int opf_dir_len, opf_bytes: !$A.borrow(byte, opf_loc, opf_size), opf_size: int opf_size,
    href_offset: int href_offset, href_len: int href_len): entry_hit(file_size) =
-  if href_len <= 0 then EntryMiss()
-  else if opf_dir_len + href_len > 1048576 then EntryMiss()
-  else let
-    val path_size = opf_dir_len + href_len
-    val path = $A.alloc<byte>(path_size)
-    val _ = book_read(serial, file_size, opf_name_offset, path, opf_dir_len)
-    val () = $S.copy_from_borrow(opf_bytes, href_offset, opf_size, path, opf_dir_len, path_size, href_len)
-    val path_len = path_norm(path, path_size)
-  in _find_entry(serial, file_size, path, path_size, path_len) end
+  book_find_relative(serial, file_size, opf_name_offset, opf_dir_len, opf_bytes, opf_size, href_offset, href_len)
 
 (* The length of the href data[offset, offset + href_len) before its '#' *)
 fn _path_part {l:agz}{n:pos}{offset,href_len:nat | offset + href_len <= n}
@@ -493,17 +474,10 @@ fn _chapter_of {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <
   (* an href of 64 KiB or more names no zip entry: the book's data,
      checked here *)
   else if path_len >= 65536 then ~1
-  else let
-    val path_size = dir_len + path_len
-    val path = $A.alloc<byte>(path_size)
-    val _ = book_read(serial, file_size, name_offset, path, dir_len)
-    val () = $S.copy_from_borrow(data, href_offset, data_size, path, dir_len, path_size, path_len)
-    val normal_len = path_norm(path, path_size)
-  in
-    case+ _find_entry(serial, file_size, path, path_size, normal_len) of
+  else
+    case+ book_find_relative(serial, file_size, name_offset, dir_len, data, data_size, href_offset, path_len) of
     | ~EntryHit(_, _, _, entry_name_offset, _) => book_chapter_of(serial, entry_name_offset)
     | ~EntryMiss() => ~1
-  end
 
 (* The length of the href data[href_offset, href_offset + href_len)
    before its '#' *)
@@ -625,27 +599,81 @@ fun _current {count:nat} .<count>. (entries: !toc(count), chapter: int, i: int, 
     in found end
     else let prval () = fold@(entries) in best end
 
+(* Where chapter chapter (from 0) starts in the open book: its page in a
+   fixed-layout book, else how far into the book, by the chapters' sizes
+   (the footer's scale); the same for a Contents row and an annotation's
+   chapter (#383) *)
+#pub fn toc_place_of (chapter: Int): @(locator_kind, Int)
+
+implement toc_place_of (chapter) = let
+  val serial = book_serial()
+in
+  if book_fixed(serial) then @(ByPage(), chapter + 1)
+  else let
+    val @(size_before, _, book_size) = book_weights(serial, chapter)
+  in @(ByPercent(), locator_thousandth(size_before, book_size)) end
+end
+
+(* Where content node node of chapter chapter (from 0), which has total
+   content nodes, is in the open book: the same as toc_place_of in a
+   fixed-layout book (a spine item is a page), else the chapter's start
+   plus the node's share of the chapter's size, as a search hit's place
+   is (#525) *)
+#pub fn toc_place_at (chapter: Int, node: Int, total: Int): @(locator_kind, Int)
+
+implement toc_place_at (chapter, node, total) = let
+  val serial = book_serial()
+in
+  if book_fixed(serial) then @(ByPage(), chapter + 1)
+  else let
+    val @(size_before, chapter_size, book_size) = book_weights(serial, chapter)
+    val within = (if total > 0 then (if node <= 0 then 0 else if node >= total then 1000 else node * 1000 / total) else 0): Int
+    val inside = (if chapter_size < 2000000 then chapter_size * within / 1000 else (chapter_size / 1000) * within): Int
+  in @(ByPercent(), locator_thousandth(size_before + inside, book_size)) end
+end
+
 fn _level_class {level:nat | level <= 3} (level: int level): [class_len:pos | class_len < 256] string class_len =
   if level = 0 then "pi" else if level = 1 then "pi pi1" else if level = 2 then "pi pi2" else "pi pi3"
 
-(* A row of the list: button toc-row<i> with the label
-   label_bytes[0, label_len) *)
+(* A row of the list: a line toc-line<i> holding the button toc-row<i> with
+   the label label_bytes[0, label_len) and, over its right end (a tap on it
+   is the button's), where the entry is in the book (toc-place<i>); an
+   entry that leads to no chapter has none *)
 fn _row {label_loc:agz}{label_size:pos}{label_len:pos | label_len <= LABEL_MAX; label_len <= label_size}{i:nat}{level:nat | level <= 3}
-  (i: int i, level: int level, label_bytes: !$A.arr(byte, label_loc, label_size), label_len: int label_len, current: bool): void = let
+  (i: int i, level: int level, label_bytes: !$A.arr(byte, label_loc, label_size), label_len: int label_len, current: bool, chapter: Int): void = let
+  val @(line_id, line_id_len) = nid_make("toc-line", i)
+  val () = ui_add_n("contents-list", line_id, line_id_len, TDiv)
+  val @(line_id, line_id_len) = nid_make("toc-line", i)
+  val () = ui_attr_n(line_id, line_id_len, AClass, "tocline")
+  val @(line_id, line_id_len) = nid_make("toc-line", i)
   val @(row_id, row_id_len) = nid_make("toc-row", i)
-  val () = ui_btn_n("contents-list", row_id, row_id_len, _level_class(level))
+  val () = ui_btn_nn(line_id, line_id_len, row_id, row_id_len, _level_class(level))
   val @(row_id, row_id_len) = nid_make("toc-row", i)
   val () = (if current then ui_attr_n(row_id, row_id_len, ACurrent, "true") else ui_attr_n(row_id, row_id_len, ACurrent, "false"))
   val label_copy = $A.alloc<byte>(label_len)
   val () = _copy_bytes(label_bytes, label_copy, label_len, 0)
   val @(row_id, row_id_len) = nid_make("toc-row", i)
-in ui_text_n_buf(row_id, row_id_len, label_copy, label_len) end
+  val () = ui_text_n_buf(row_id, row_id_len, label_copy, label_len)
+in
+  if chapter >= 0 then let
+    val @(line_id, line_id_len) = nid_make("toc-line", i)
+    val @(place_id, place_id_len) = nid_make("toc-place", i)
+    val () = ui_add_nn(line_id, line_id_len, place_id, place_id_len, TSpan)
+    val @(place_id, place_id_len) = nid_make("toc-place", i)
+    val () = ui_attr_n(place_id, place_id_len, AClass, "tocplace")
+    val @(kind, number) = toc_place_of(chapter)
+    val place_text = $A.alloc<byte>(32)
+    val place_end = locator_put(place_text, 0, kind, number)
+    val @(place_id, place_id_len) = nid_make("toc-place", i)
+  in ui_text_n_buf(place_id, place_id_len, place_text, place_end) end
+  else ()
+end
 
 fun _rows {count:nat}{i:nat} .<count>. (entries: !toc(count), i: int i, current: int): void =
   case+ entries of
   | toc_nil() => ()
-  | @toc_cons(label_bytes, label_len, level, _, _, _, rest) => let
-      val () = _row(i, level, label_bytes, label_len, i = current)
+  | @toc_cons(label_bytes, label_len, level, chapter, _, _, rest) => let
+      val () = _row(i, level, label_bytes, label_len, i = current, chapter)
       val () = _rows(rest, i + 1, current)
       prval () = fold@(entries)
     in end
@@ -662,7 +690,7 @@ fun _chapter_rows {i,chapter_count:nat} .<max(chapter_count - i, 0)>. (i: int i,
   if i >= chapter_count then ()
   else let
     val @(label_bytes, label_len) = _chapter_label(i + 1)
-    val () = _row(i, 0, label_bytes, label_len, i = current)
+    val () = _row(i, 0, label_bytes, label_len, i = current, i)
     val () = $A.free<byte>(label_bytes)
   in _chapter_rows(i + 1, chapter_count, current) end
 

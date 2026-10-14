@@ -85,7 +85,7 @@ async function importDictionary(page, dict, language, options) {
   if (options && options.refused) return;
   await expect(dictionaries(page).getByRole('group', { name: new RegExp(dict.name) })).toBeVisible({ timeout: 30000 });
   await expect(dictionaries(page).getByRole('status')).toHaveText('Dictionary added.');
-  await dictionaries(page).getByRole('button', { name: 'Done' }).click();
+  await dictionaries(page).getByRole('button', { name: 'Back' }).click();
   await expect(dictionaries(page)).toBeHidden();
   await page.keyboard.press('Escape');
   await expect(settingsScreen(page)).toBeHidden();
@@ -312,24 +312,24 @@ test('a dictionary without its .idx, or whose .idx is not the size its .ifo give
   await importDictionary(page, english, 'en', { without: ['idx'], refused: true });
   await expect(refusal).toBeVisible();
   await expect(refusal).toContainText('.idx file is missing');
-  await refusal.getByRole('button', { name: 'OK' }).click();
+  await refusal.getByRole('button', { name: 'Done' }).click();
   await expect(dictionaries(page).getByText('No dictionaries yet')).toBeVisible();
   await page.keyboard.press('Escape');
 
   await importDictionary(page, { ...english, idxFileSize: 12345 }, 'en', { refused: true });
   await expect(refusal).toBeVisible();
   await expect(refusal).toContainText('not the size its .ifo gives');
-  await refusal.getByRole('button', { name: 'OK' }).click();
+  await refusal.getByRole('button', { name: 'Done' }).click();
   await page.keyboard.press('Escape');
 
   await importDictionary(page, { ...english, offsetBits: 64 }, 'en', { refused: true });
   await expect(refusal).toContainText('64-bit offsets');
-  await refusal.getByRole('button', { name: 'OK' }).click();
+  await refusal.getByRole('button', { name: 'Done' }).click();
   await page.keyboard.press('Escape');
 
   await importDictionary(page, english, 'en', { without: ['dict'], refused: true });
   await expect(refusal).toContainText('.dict or .dict.dz file is missing');
-  await refusal.getByRole('button', { name: 'OK' }).click();
+  await refusal.getByRole('button', { name: 'Done' }).click();
   await expect(dictionaries(page).getByText('No dictionaries yet')).toBeVisible();
 });
 

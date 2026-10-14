@@ -5,7 +5,7 @@
 // is never shown wrong and never written over.
 
 import { test, expect } from './fixtures.js';
-import { legacyLibrary, hex7, bookKey, store, put, forgetRecords } from './legacy-library.js';
+import { legacyLibrary, hex7, bookKey, store, put, forgetRecords, syncEnded, reloadSettled } from './legacy-library.js';
 import {
   start, epubFile, importFiles, card, cards, titles, bookMenu, menuItem, dialog, reload,
   librarySettings, settingsButton, settingsScreen, openShelf, emptyTrash,
@@ -24,12 +24,20 @@ const books = [
 /** The app started with "lib" holding the library, version version */
 async function startWithLegacy(page, version, library = books) {
   await start(page);
+  await syncEnded(page);
   await forgetRecords(page);
   await put(page, 'lib', [...legacyLibrary(version, ['To read', 'Shared'], library)]);
-  await reload(page);
+  await reloadSettled(page);
+  await recordsWritten(page, library);
+}
+
+/** The records the conversion of "lib" makes are in the store */
+async function recordsWritten(page, library) {
+  for (const book of library) await expect.poll(async () => (await store(page))[bookKey(book)] !== undefined, { message: `the record of ${book.title} is written` }).toBe(true);
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const bookId = `${hex7(books[0].idHigh)}${hex7(books[0].idLow)}`;
 
 for (let version = 1; version <= 6; version++) {
   test(`a library kept as QLB${version} is converted to records, and its record is not changed`, async ({ page }) => {
@@ -68,7 +76,9 @@ test('a change to a book is saved in its own record, only where it changed', asy
   await reload(page);
   const after = await store(page);
   const changed = Object.keys(after).filter(key => key.startsWith('library/') && !same(after[key], before[key]));
-  expect(changed).toEqual([bookKey(books[0])]);
+  // the book's record, the version of it before (#510) and when it was written: nothing of any other book
+  expect(changed.sort()).toEqual([bookKey(books[0]), `library/previous/${bookId}`, `library/stamp/${bookId}`].sort());
+  expect(same(after[`library/previous/${bookId}`], before[bookKey(books[0])])).toBe(true);
   expect(same(after.lib, before.lib)).toBe(true);
   // the other records are the very bytes that were there
   expect(same(after[bookKey(books[2])], before[bookKey(books[2])])).toBe(true);
@@ -181,7 +191,7 @@ test('a damaged book record and a damaged collections record are set aside, thei
   damagedIndex[10] ^= 0x5a;
   await put(page, bookKey(books[0]), damagedBook);
   await put(page, 'library/index', damagedIndex);
-  await reload(page);
+  await reloadSettled(page);
   await expect(card(page, 'Alpha Tales')).toHaveCount(0);
   await expect(card(page, 'Gamma Days')).toBeVisible();
   const before = await store(page);
@@ -218,7 +228,7 @@ test('a record a newer Quire wrote, or one that reads, is not offered to be set 
   const newer = stored[bookKey(books[0])].slice();
   newer[6] = 9;
   await put(page, bookKey(books[0]), newer);
-  await reload(page);
+  await reloadSettled(page);
   await librarySettings(page);
   await expect(setAside(page)).toBeHidden();
   expect(same((await store(page))[bookKey(books[0])], newer)).toBe(true);
@@ -230,7 +240,7 @@ test('a set aside that is aborted midway leaves the old record byte for byte, an
   const damaged = (await store(page))[bookKey(books[0])].slice();
   damaged[10] ^= 0x5a;
   await put(page, bookKey(books[0]), damaged);
-  await reload(page);
+  await reloadSettled(page);
   await librarySettings(page);
   // the transaction is aborted after the copy is put and before the key is deleted
   await page.evaluate(() => {
@@ -320,7 +330,6 @@ const without = (record, tags) => {
   return Uint8Array.from([...record].filter((_, i) => !cut.some(g => i >= g.start && i < g.end)));
 };
 const tagsOf = record => chunks(record).map(g => g.tag);
-const bookId = `${hex7(books[0].idHigh)}${hex7(books[0].idLow)}`;
 
 for (const missing of [['prog'], ['snum'], ['tdir'], ['prog', 'snum'], ['prog', 'snum', 'tdir']]) {
   test(`a record written before ${missing.join(', ')} existed opens whole with nothing said, and its save writes ${missing.length > 1 ? 'them' : 'it'} (#497)`, async ({ page }) => {
@@ -379,4 +388,320 @@ test('a group that is there and damaged is still lost: the book opens with its d
   expect(copies).toHaveLength(1);
   expect(same(saved[copies[0]], damaged)).toBe(true);
   expect(tagsOf(saved[bookKey(books[0])])).toContain('snum');
+});
+
+// ---- a record is a set of chunks looked up by tag (#510) ----
+
+/** The chunks of a record, each with its bytes whole (length, tag, data, CRC); the last is the end chunk */
+const partsOf = record => chunks(record).map(one => ({ tag: one.tag, bytes: record.slice(one.start, one.end) }));
+/** The record with the header of record and these parts */
+const assemble = (record, parts) => [...record.slice(0, 7), ...parts.flatMap(part => part.bytes)];
+/** The parts with extra ones put before the end chunk */
+const before_end = (parts, extra) => [...parts.slice(0, -1), ...extra, parts[parts.length - 1]];
+/** A seeded shuffle (the same orders on every run) */
+function shuffled(items, seed) {
+  const out = items.slice();
+  let state = seed;
+  for (let i = out.length - 1; i > 0; i--) {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    const j = state % (i + 1);
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+/** A chunk of tag with data: length, tag, data and CRC-32 */
+function makeChunk(tag, data) {
+  const body = [...tag].map(c => c.charCodeAt(0)).concat(data);
+  let crc = 0xffffffff;
+  for (const b of body) { crc ^= b; for (let k = 0; k < 8; k++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1; }
+  crc = (crc ^ 0xffffffff) >>> 0;
+  const le = n => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
+  return { tag, bytes: [...le(data.length), ...body, ...le(crc)] };
+}
+const ascending = tags => tags.every((tag, i) => i === 0 || tags[i - 1] < tag);
+
+test('a record with its chunks in any order opens as the same book, unchanged, and a save writes them in ascending order (#510)', async ({ page }) => {
+  await startWithLegacy(page, 6);
+  await expect(cards(page)).toHaveCount(2);
+  const record = (await store(page))[bookKey(books[0])];
+  const all = partsOf(record);
+  const known = all.slice(0, -1);
+  expect(all[all.length - 1].tag).toBe('IEND');
+  const orders = [known.slice().reverse(), [...known.slice(1), known[0]], [known[known.length - 1], ...known.slice(0, -1)],
+    ...[1, 2, 3, 4, 5, 6].map(seed => shuffled(known, seed))];
+  for (const order of orders) {
+    const reordered = assemble(record, [...order, all[all.length - 1]]);
+    await put(page, bookKey(books[0]), reordered);
+    await reloadSettled(page);
+    await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
+    await expect(card(page, 'Alpha Tales')).toContainText('First Series · 2');
+    await expect(alert(page)).toBeHidden();
+    const opened = await store(page);
+    // opening wrote nothing: no record changed, no copy kept
+    expect(same(opened[bookKey(books[0])], reordered), order.map(part => part.tag).join()).toBe(true);
+    expect(damagedKeys(opened, bookId)).toHaveLength(0);
+  }
+  // a save writes the chunks in ascending order, as one book, and nothing was damaged
+  await put(page, bookKey(books[0]), assemble(record, [...known.slice().reverse(), all[all.length - 1]]));
+  await reloadSettled(page);
+  await bookMenu(page, 'Alpha Tales');
+  await menuItem(page, 'Hide').click();
+  await reload(page);
+  const saved = await store(page);
+  const tags = tagsOf(saved[bookKey(books[0])]);
+  expect(ascending(tags.slice(0, -1))).toBe(true);
+  expect(tags[tags.length - 1]).toBe('IEND');
+  expect(tags).toEqual(tagsOf(record));
+  expect(damagedKeys(saved, bookId)).toHaveLength(0);
+  await expect(alert(page)).toBeHidden();
+  await openShelf(page, 'Hidden');
+  await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
+});
+
+test('a group twice: the last whole chunk is used, the record is read with a loss, and a save writes one chunk and keeps the old bytes (#510)', async ({ page }) => {
+  await startWithLegacy(page, 6);
+  await expect(cards(page)).toHaveCount(2);
+  const stored = await store(page);
+  const record = stored[bookKey(books[0])];
+  const parts = partsOf(record);
+  // Beta's shelf chunk says hidden (shelf 1), Alpha's own says the main shelf
+  const betaShelf = partsOf(stored[bookKey(books[1])]).find(part => part.tag === 'SHLF');
+  const ownShelf = parts.find(part => part.tag === 'SHLF');
+  expect(same(betaShelf.bytes, ownShelf.bytes)).toBe(false);
+
+  // the own chunk after the other: the own is used
+  const own_last = assemble(record, before_end(parts.filter(part => part.tag !== 'SHLF'), [betaShelf, ownShelf]));
+  await put(page, bookKey(books[0]), own_last);
+  await reloadSettled(page);
+  await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
+  await expect(cards(page)).toHaveCount(2);
+  // said, as a loss is
+  await expect(alert(page)).toContainText('Some details of your library were damaged');
+  expect(damagedKeys(await store(page), bookId)).toHaveLength(0);
+
+  // the other chunk after the own: the other is used, and the book is on the hidden shelf
+  const other_last = assemble(record, before_end(parts.filter(part => part.tag !== 'SHLF'), [ownShelf, betaShelf]));
+  await put(page, bookKey(books[0]), other_last);
+  await reloadSettled(page);
+  await expect(cards(page)).toHaveCount(1);
+  await expect(card(page, 'Alpha Tales')).toHaveCount(0);
+  await expect(alert(page)).toContainText('Some details of your library were damaged');
+  await openShelf(page, 'Hidden');
+  await expect(card(page, 'Alpha Tales')).toBeVisible();
+  expect(damagedKeys(await store(page), bookId)).toHaveLength(0);
+
+  // a later copy that is damaged does not hide an earlier whole one
+  const damagedShelf = { tag: 'SHLF', bytes: betaShelf.bytes.slice() };
+  damagedShelf.bytes[8] ^= 0x5a;
+  const bad_last = assemble(record, before_end(parts, [damagedShelf]));
+  await put(page, bookKey(books[0]), bad_last);
+  await reloadSettled(page);
+  await expect(cards(page)).toHaveCount(2);
+  await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
+  await expect(alert(page)).toContainText('Some details of your library were damaged');
+
+  // a save writes the record whole, one chunk of each tag, and keeps the old bytes
+  await put(page, bookKey(books[0]), own_last);
+  await reloadSettled(page);
+  await bookMenu(page, 'Alpha Tales');
+  await menuItem(page, 'Hide').click();
+  await reload(page);
+  const saved = await store(page);
+  const tags = tagsOf(saved[bookKey(books[0])]);
+  expect(tags.filter(tag => tag === 'SHLF')).toHaveLength(1);
+  expect(tags).toEqual(tagsOf(record));
+  const copies = damagedKeys(saved, bookId);
+  expect(copies).toHaveLength(1);
+  expect(same(saved[copies[0]], own_last)).toBe(true);
+});
+
+test('a chunk this version does not know is kept whole, twice if it was there twice, and written after the groups (#510)', async ({ page }) => {
+  await startWithLegacy(page, 6);
+  await expect(cards(page)).toHaveCount(2);
+  const record = (await store(page))[bookKey(books[0])];
+  const parts = partsOf(record);
+  // a newer Quire's chunk (a lower case first letter), once before the groups and twice among them
+  const later = (tag, text) => makeChunk(tag, [...text].map(c => c.charCodeAt(0)));
+  const first = later('newa', 'first'), second = later('newa', 'second');
+  const mixed = assemble(record, [first, ...parts.slice(0, 3), second, ...parts.slice(3)]);
+  await put(page, bookKey(books[0]), mixed);
+  await reloadSettled(page);
+  await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
+  await expect(alert(page)).toBeHidden();
+  expect(same((await store(page))[bookKey(books[0])], mixed)).toBe(true);
+  await bookMenu(page, 'Alpha Tales');
+  await menuItem(page, 'Hide').click();
+  await reload(page);
+  const saved = await store(page);
+  const tags = tagsOf(saved[bookKey(books[0])]);
+  // the groups ascending, then both copies of the unknown chunk in the order they were in, then the end
+  expect(tags.slice(0, -3)).toEqual(tagsOf(record).slice(0, -1));
+  expect(tags.slice(-3)).toEqual(['newa', 'newa', 'IEND']);
+  const kept = chunks(saved[bookKey(books[0])]).filter(one => one.tag === 'newa').map(one => String.fromCharCode(...one.data));
+  expect(kept).toEqual(['first', 'second']);
+  expect(damagedKeys(saved, bookId)).toHaveLength(0);
+});
+
+// ---- a group the record needs, lost (#510): the record is used, with the group's substitute ----
+
+const le32 = bytes => bytes[0] + bytes[1] * 256 + bytes[2] * 65536 + bytes[3] * 16777216;
+
+for (const group of ['AUTH', 'BOOK', 'TITL']) {
+  for (const how of ['absent', 'damaged']) {
+    test(`a record whose ${group} group is ${how} is used with the group's substitute, said once, and its save writes the group and keeps the old bytes (#510)`, async ({ page }) => {
+      await startWithLegacy(page, 6);
+      await expect(cards(page)).toHaveCount(2);
+      const record = (await store(page))[bookKey(books[0])];
+      const variant = assemble(record, partsOf(record).flatMap(part => {
+        if (part.tag !== group) return [part];
+        if (how === 'absent') return [];
+        const bytes = part.bytes.slice();
+        bytes[8] ^= 0x5a;
+        return [{ tag: part.tag, bytes }];
+      }));
+      await put(page, bookKey(books[0]), variant);
+      await reloadSettled(page);
+      // the title is lost with its group: the word the contents panel uses for a label with none
+      const shown = group === 'TITL' ? 'Untitled' : 'Alpha Tales';
+      await expect(card(page, shown)).toBeVisible();
+      if (group === 'AUTH') await expect(card(page, shown)).not.toContainText('Ann Writer');
+      else await expect(card(page, shown)).toContainText('Ann Writer');
+      await expect(cards(page)).toHaveCount(2);
+      await expect(alert(page)).toContainText('Some details of your library were damaged');
+      // nothing is unreadable: nothing to set aside, no copy yet, nothing written by opening
+      await librarySettings(page);
+      await expect(setAside(page)).toBeHidden();
+      const opened = await store(page);
+      // opening writes nothing; but on the android project the app syncs as it opens, and the save that makes
+      // (the library's own) repairs a record that lost a group at once, keeping the bytes it had
+      if (test.info().project.name !== 'android') {
+        expect(same(opened[bookKey(books[0])], variant)).toBe(true);
+        expect(damagedKeys(opened, bookId)).toHaveLength(0);
+      }
+      // a save writes the record whole, with the ids it is under, and keeps the bytes it had
+      await reload(page);
+      await bookMenu(page, shown);
+      await menuItem(page, 'Hide').click();
+      await reload(page);
+      const saved = await store(page);
+      const savedRecord = saved[bookKey(books[0])];
+      expect(tagsOf(savedRecord)).toEqual(tagsOf(record));
+      const ids = chunks(savedRecord).find(one => one.tag === 'BOOK').data;
+      expect([le32(ids.slice(0, 4)), le32(ids.slice(4, 8))]).toEqual([books[0].idHigh, books[0].idLow]);
+      const copies = damagedKeys(saved, bookId);
+      expect(copies).toHaveLength(1);
+      expect(same(saved[copies[0]], variant)).toBe(true);
+    });
+  }
+}
+
+test('a record under the key of another book than the ids it holds is the key\'s book, and its save writes the ids of the key (#510)', async ({ page }) => {
+  await startWithLegacy(page, 6);
+  await expect(cards(page)).toHaveCount(2);
+  const record = (await store(page))[bookKey(books[0])];
+  // the ids of a book that is not there
+  const wrong = makeChunk('BOOK', [1, 0, 0, 0, 2, 0, 0, 0]);
+  const variant = assemble(record, partsOf(record).map(part => (part.tag === 'BOOK' ? wrong : part)));
+  await put(page, bookKey(books[0]), variant);
+  await reloadSettled(page);
+  await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
+  await expect(cards(page)).toHaveCount(2);
+  await expect(alert(page)).toContainText('Some details of your library were damaged');
+  expect(same((await store(page))[bookKey(books[0])], variant)).toBe(true);
+  await bookMenu(page, 'Alpha Tales');
+  await menuItem(page, 'Hide').click();
+  await reload(page);
+  const saved = await store(page);
+  const ids = chunks(saved[bookKey(books[0])]).find(one => one.tag === 'BOOK').data;
+  expect([le32(ids.slice(0, 4)), le32(ids.slice(4, 8))]).toEqual([books[0].idHigh, books[0].idLow]);
+  const copies = damagedKeys(saved, bookId);
+  expect(copies).toHaveLength(1);
+  expect(same(saved[copies[0]], variant)).toBe(true);
+});
+
+// ---- the version before: a record is kept as it was before a save, once in a minute at most (#510) ----
+
+/** The seconds since 2025 now, as a stamp's four bytes (little-endian) say them, minus ago seconds */
+const stampBytes = ago => {
+  const seconds = Math.floor(Date.now() / 1000) - 1735689600 - ago;
+  return [seconds & 255, (seconds >>> 8) & 255, (seconds >>> 16) & 255, (seconds >>> 24) & 255];
+};
+const stampSeconds = bytes => bytes[0] + bytes[1] * 256 + bytes[2] * 65536 + bytes[3] * 16777216;
+
+for (const [ago, rotates] of [[5, false], [600, true]]) {
+  test(`a save ${rotates ? 'keeps the record as it was' : 'leaves the version before it as it was'} when the record was written ${ago} seconds ago (#510)`, async ({ page }) => {
+    await startWithLegacy(page, 6);
+    await expect(cards(page)).toHaveCount(2);
+    const stored = await store(page);
+    const record = stored[bookKey(books[0])];
+    // a version before it that is some other record's bytes, and the time the record was written
+    const marker = stored[bookKey(books[2])];
+    await put(page, `library/previous/${bookId}`, marker);
+    const written = stampBytes(ago);
+    await put(page, `library/stamp/${bookId}`, written);
+    await reloadSettled(page);
+    await bookMenu(page, 'Alpha Tales');
+    await menuItem(page, 'Hide').click();
+    await expect.poll(async () => stampSeconds((await store(page))[`library/stamp/${bookId}`])).toBeGreaterThan(stampSeconds(written) + 1);
+    const saved = await store(page);
+    expect(same(saved[`library/previous/${bookId}`], rotates ? record : marker)).toBe(true);
+    // the record is the new one
+    expect(same(saved[bookKey(books[0])], record)).toBe(false);
+    // nothing was damaged
+    expect(damagedKeys(saved, bookId)).toHaveLength(0);
+  });
+}
+
+test('a book whose record is broken beyond recovery is read from its previous version, and its save writes the record anew and keeps the bytes (#510)', async ({ page }) => {
+  await startWithLegacy(page, 6);
+  await expect(cards(page)).toHaveCount(2);
+  // a save makes the previous version: the record as it was
+  const record = (await store(page))[bookKey(books[0])];
+  await bookMenu(page, 'Alpha Tales');
+  await menuItem(page, 'Hide').click();
+  await expect.poll(async () => (await store(page))[`library/previous/${bookId}`] !== undefined).toBe(true);
+  await openShelf(page, 'Hidden');
+  await bookMenu(page, 'Alpha Tales');
+  await menuItem(page, 'Unhide').click();
+  await expect.poll(async () => same((await store(page))[bookKey(books[0])], record)).toBe(false);
+  // its record is broken so that it is no record (a length past the end)
+  const current = (await store(page))[bookKey(books[0])].slice();
+  const broken = current.slice();
+  broken[10] ^= 0x5a;
+  await put(page, bookKey(books[0]), broken);
+  await reloadSettled(page);
+  // the book is there, from the version before; nothing is offered to be set aside
+  await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
+  await expect(cards(page)).toHaveCount(2);
+  await expect(alert(page)).toContainText('Some details of your library were damaged');
+  await librarySettings(page);
+  await expect(setAside(page)).toBeHidden();
+  // a save writes the record anew, and keeps the bytes it was
+  await reload(page);
+  await bookMenu(page, 'Alpha Tales');
+  await menuItem(page, 'Hide').click();
+  await expect.poll(async () => damagedKeys(await store(page), bookId).length).toBe(1);
+  const saved = await store(page);
+  expect(same(saved[damagedKeys(saved, bookId)[0]], broken)).toBe(true);
+  expect(tagsOf(saved[bookKey(books[0])])).toEqual(tagsOf(record));
+  await reload(page);
+  await expect(alert(page)).toBeHidden();
+  await openShelf(page, 'Hidden');
+  await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
+});
+
+test('emptying the Trash deletes the version before and the time written with the record (#510)', async ({ page }) => {
+  await startWithLegacy(page, 6, [books[0], { ...books[1], shelf: 3 }, books[2]]);
+  await expect(cards(page)).toHaveCount(2);
+  const betaId = `${hex7(books[1].idHigh)}${hex7(books[1].idLow)}`;
+  await put(page, `library/previous/${betaId}`, (await store(page))[bookKey(books[1])]);
+  await put(page, `library/stamp/${betaId}`, stampBytes(5));
+  await reloadSettled(page);
+  await emptyTrash(page);
+  await reload(page);
+  const after = await store(page);
+  expect(after[bookKey(books[1])]).toBeUndefined();
+  expect(after[`library/previous/${betaId}`]).toBeUndefined();
+  expect(after[`library/stamp/${betaId}`]).toBeUndefined();
+  expect(after[bookKey(books[0])]).toBeDefined();
 });

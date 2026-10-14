@@ -18,7 +18,7 @@ const bg = async page => (await colours(page)).bg.join(',');
 async function exportBackup(page) {
   await librarySettings(page);
   const text = await exportedBackup(page);
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   return text;
 }
 
@@ -31,7 +31,7 @@ async function restoreBackup(page, path) {
 // A reset with its Trash emptied: nothing of the library is left
 async function factoryReset(page) {
   await librarySettings(page);
-  await settingsButton(page, 'Factory reset').click();
+  await settingsButton(page, 'Remove all books').click();
   await expect(cards(page)).toHaveCount(0);
   await emptyTrash(page);
   await expect(importOffered(page)).toBeVisible();
@@ -117,7 +117,7 @@ test('a backup restored after a reset brings everything back, and a book importe
   await expect(restored(page)).toContainText('Restored 1 book, 1 highlight or bookmark, your settings');
   // the book the library does not have is said, not counted as restored
   await expect(restored(page)).toContainText('1 book in the backup is not in your library');
-  await restored(page).getByRole('button', { name: 'OK' }).click();
+  await restored(page).getByRole('button', { name: 'Done' }).click();
   await expect.poll(() => bg(page)).toBe(sepia);
   // book one is hidden again
   await expect(card(page, 'Kept One')).toHaveCount(0);
@@ -163,7 +163,7 @@ test('a highlight\'s print page is in the backup, and a restore keeps it', async
   await importFiles(page, [file], 1);
   await restoreBackup(page, path);
   await expect(restored(page)).toContainText('Restored 1 book, 2 highlights and bookmarks, your settings');
-  await restored(page).getByRole('button', { name: 'OK' }).click();
+  await restored(page).getByRole('button', { name: 'Done' }).click();
   // the restored highlight cites its page in the export, and is in the
   // next backup with it
   await openBook(page, 'Printed Backup');
@@ -186,7 +186,7 @@ test('a file that is not a backup is refused with a message', async ({ page }) =
   await start(page);
   await restoreBackup(page, rawFile('notes.json', Buffer.from('{"hello": [1, 2, 3]}')));
   await expect(refused(page)).toContainText('not a Quire backup');
-  await refused(page).getByRole('button', { name: 'OK' }).click();
+  await refused(page).getByRole('button', { name: 'Done' }).click();
   await restoreBackup(page, rawFile('broken.json', Buffer.from('{"quire":1,"books":[{"id":"00')));
   await expect(refused(page)).toContainText('not a Quire backup');
 });
@@ -196,7 +196,7 @@ test('the same backup can be restored twice in a row', async ({ page }) => {
   await importFiles(page, [epubFile({ title: 'Twice Restored', author: 'R' })], 1);
   const path = rawFile('twice.json', await exportBackup(page));
   await restoreBackup(page, path);
-  await restored(page).getByRole('button', { name: 'OK' }).click();
+  await restored(page).getByRole('button', { name: 'Done' }).click();
   await restoreBackup(page, path);
   await expect(restored(page)).toBeVisible();
 });
@@ -224,7 +224,7 @@ test('a backup holds the collections, and restoring it puts each book back in it
   await factoryReset(page);
   await importFiles(page, [one, two], 2);
   await restoreBackup(page, path);
-  await restored(page).getByRole('button', { name: 'OK' }).click();
+  await restored(page).getByRole('button', { name: 'Done' }).click();
   const row = page.getByRole('group', { name: 'Collection' });
   await row.getByRole('button', { name: 'Essays' }).click();
   await expect(cards(page)).toHaveCount(1);
@@ -285,17 +285,17 @@ test('a backup holds reading aloud\'s speed and voices, the brightness, the rota
   // are shown in the library whatever is set, and hidden when a book is
   // read with its own bars away: quire#348)
   await librarySettings(page);
-  await settingsButton(page, 'Reset settings').click();
+  await settingsButton(page, 'Reset reading settings').click();
   await expect.poll(() => page.evaluate(() => window.hidden)).toBe(false);
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(() => page.evaluate(() => window.hidden)).toBe(false);
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   const undone = JSON.parse(await exportBackup(page));
   expect(undone.settings).toMatchObject({ rotationLocked: true, fullScreen: true });
   // reset, then restored
   await librarySettings(page);
-  await settingsButton(page, 'Reset settings').click();
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Reset reading settings').click();
+  await settingsButton(page, 'Back').click();
   await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
   const reset = JSON.parse(await exportBackup(page));
   expect(reset.settings).toMatchObject({ readingSpeed: 100, brightness: 'system', rotationLocked: false, fullScreen: false, voices: {} });
@@ -303,7 +303,7 @@ test('a backup holds reading aloud\'s speed and voices, the brightness, the rota
   const path = rawFile('device-backup.json', json);
   await restoreBackup(page, path);
   await expect(restored(page)).toBeVisible();
-  await restored(page).getByRole('button', { name: 'OK' }).click();
+  await restored(page).getByRole('button', { name: 'Done' }).click();
   await expect.poll(() => page.evaluate(() => window.calls.slice(-3))).toContain('brightness {"brightness":0.37}');
   await openBook(page, 'Device Backup');
   await openReadingSettings(page, 'Read aloud');
@@ -338,7 +338,7 @@ test('a restore can be undone: the settings, the notes and the places it replace
   await toLibrary(page);
   await restoreBackup(page, path);
   await expect(restored(page)).toContainText('Restored 1 book, your settings');
-  await restored(page).getByRole('button', { name: 'OK' }).click();
+  await restored(page).getByRole('button', { name: 'Done' }).click();
   // what the backup held is back: the plain theme, and no highlight
   await expect.poll(() => bg(page)).toBe(plain);
   await openBook(page, 'Undo Restore');

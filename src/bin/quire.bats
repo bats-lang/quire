@@ -547,6 +547,8 @@ fn _library_shown (save_view: bool): void = let
   (* a reload now comes back here *)
   val () = (if save_view then _view_save(~1, 0, 0) else ())
   val () = reader_search_stop()
+  (* what was typed in the book's search is the book's: the next book's field is empty (#435) *)
+  val () = app_book_search()
   val () = reader_stack_clear()
   (* a page turn under way ends with the book *)
   val () = reader_turn_settle()
@@ -577,7 +579,7 @@ in screen_immersive_set(_in_reader()) end
 fn _chrome_set (shown: bool): void = let
   (* bringing the bars up leaves the place a jump landed on: the back
      button goes *)
-  val () = (if shown && ~(!_chrome) then reader_stack_clear() else ())
+  val () = (if shown && ~(!_chrome) then reader_back_rest() else ())
   val () = !_chrome := shown
   val () = (if shown then ui_attr("reader", AClass, "rv") else ui_attr("reader", AClass, "rv chrome-off"))
   val () = (if _in_reader() then banner_place_set(if shown then BannerUnderBars() else BannerAtTop()) else ())
@@ -635,7 +637,9 @@ fn _hint_offer (): void =
     val () = release_bytes(value_frozen, value_bytes)
     val () = ui_show("turn-hint", true)
   in
-    $P.finish<Int>($P.vow($TM.timer_set(8000)), llam(_) => _hint_hide())
+    (* the bars are up for the first 5 s, over the hint; it is seen for 8 s
+       after they hide *)
+    $P.finish<Int>($P.vow($TM.timer_set(13000)), llam(_) => _hint_hide())
   end
 
 (* What opened a book: the reader (a card, a key), whose focus goes to
@@ -1339,6 +1343,18 @@ in
     | Final() => lib_shelved_free(shelved))
 end
 
+(* The Trash's Restore all books (quire#494): every book in it goes back on
+   the shelf, and Undo puts exactly those books back in the Trash *)
+fn _restore_all (): void = let
+  val moved = lib_restore_all()
+  val () = ui_focus("shelf-back")
+in
+  $P.finish<settled>(undo_offer(BooksRestored()), llam(settling) =>
+    case+ settling of
+    | Undone() => lib_untrash_all(moved)
+    | Final() => lib_shelved_free(moved))
+end
+
 (* The collections panel for the book, its toggles pressed as the book's
    collections are *)
 fn _collections_open {book:int} (book: int book): void = let
@@ -1390,7 +1406,7 @@ end
 fn _about_open (): void = let
   val () = ui_show("about-error-copy", notice_details_kept())
   val () = layer_open(LAbout())
-in ui_focus("about-done") end
+in ui_focus("about-back") end
 
 (* Opens the Settings screen, its Sync row and goal as they are now *)
 fn _settings_open (): void = let
@@ -1434,14 +1450,14 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
           val () = (if _in_reader() then _show_library() else ())
         in _factory_reset() end
         | ~$R.some(SettingsAbout()) => _about_open()
-        | ~$R.some(SettingsDone()) => layer_close(LSettings()))
+        | ~$R.some(SettingsBack()) => layer_close(LSettings()))
     in 0 end)
   (* the About screen: its links leave the app by themselves; Done
      goes back to Settings *)
   val listeners = RCons(listeners, OnEl("about-screen"), "click", llam(h) => let
       val clicked = _target(h)
       val () = (case+ _about_control(clicked) of
-        | ~$R.some(AboutDone()) => let
+        | ~$R.some(AboutBack()) => let
             val () = layer_close(LAbout())
             (* back where it was opened: Settings' row, or the library menu's button *)
           in (if layer_is_open(LSettings()) then ui_focus("settings-about") else ui_focus("library-menu-button")) end
@@ -1486,7 +1502,13 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
   (* import: from the bar, or from the empty library's message *)
   val listeners = RCons(listeners, OnEl("import-button"), "change", llam(_) => let val () = import_picked() in 0 end)
   val listeners = RCons(listeners, OnEl("empty-import"), "change", llam(_) => let val () = import_picked_empty() in 0 end)
-  val listeners = RCons(listeners, OnEl("empty-catalogues"), "click", llam(_) => let val () = catalogue_panel_open() in 0 end)
+  (* the empty library's offers: free books, or sync from another device *)
+  val listeners = RCons(listeners, OnEl("library-empty-actions"), "click", llam(h) => let
+      val clicked = _target(h)
+      val () = (if _is(clicked, "empty-catalogues") then catalogue_panel_open()
+        else if _is(clicked, "empty-sync") then sync_screen_open() else ())
+      val () = _target_free(clicked)
+    in 0 end)
   (* drag and drop *)
   val listeners = RCons(listeners, OnEl("library"), "dragover", llam(_) => let
       val () = $EV.prevent_default()
@@ -1632,6 +1654,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
   val listeners = RCons(listeners, OnEl("trash-panel"), "click", llam(h) => let
       val clicked = _target(h)
       val restored = _row_of(clicked, "restore-dict")
+      val () = (if _is(clicked, "trash-restore-all") then _restore_all() else ())
       val () = (case+ _harm_clicked(clicked) of
         | ~Some_vt(the_harm) =>
           $P.finish<reply>(lib_ask_harm(the_harm, dict_trash_count()), llam(answer) =>
@@ -1687,6 +1710,9 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
         | ~$R.some(MenuSettings()) => let
           val () = layer_close(LLibraryMenu())
         in _settings_open() end
+        | ~$R.some(MenuSync()) => let
+          val () = layer_close(LLibraryMenu())
+        in sync_screen_open() end
         | ~$R.some(MenuAbout()) => let
           val () = layer_close(LLibraryMenu())
         in _about_open() end
@@ -1734,9 +1760,9 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
       val () = _target_free(clicked)
       val () = (case+ control of
         | ~$R.none() => (if removed >= 0 then dict_remove(removed) else ())
-        | ~$R.some(DictionariesDone()) => layer_close(LDictionaries())
-        (* a click outside *)
-        | ~$R.some(DictionariesPanel()) => layer_close(LDictionaries()))
+        | ~$R.some(DictionariesBack()) => layer_close(LDictionaries())
+        (* a screen has no outside to click (#389) *)
+        | ~$R.some(DictionariesPanel()) => ())
     in 0 end)
   (* a dictionary's files picked to import (the input is made again to
      be cleared: its events are taken on its box) *)
@@ -1763,7 +1789,13 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
         | ~$R.some(NextcloudSignIn()) => sync_nextcloud_sign_in()
         | ~$R.some(SyncDropbox()) => sync_dropbox()
         | ~$R.some(SyncOff()) => sync_off()
-        | ~$R.some(SyncDone()) => layer_close(LSync())
+        (* Back as Escape is: with a service's sign-in step open it ends
+           the step and shows the list; else the screen closes *)
+        | ~$R.some(SyncBack()) =>
+          if layer_is_open(LSyncStep()) then let
+            val () = layer_close(LSyncStep())
+          in sync_step_cancel() end
+          else layer_close(LSync())
         (* a service's row: its own sign-in step (#331) *)
         | ~$R.some(SyncRowGoogle()) => sync_step_open(ServiceGoogle())
         | ~$R.some(SyncRowDropbox()) => sync_step_open(ServiceDropbox())
@@ -2267,6 +2299,7 @@ fn _search_key (pressed: key, held: modifiers): void =
 fn _toc_open (): void = let
   val () = (case+ reading_get() of
     | @(_, _, chapter, chapter_count) => toc_render((if chapter > 0 then chapter - 1 else 0), chapter_count))
+  val () = reader_back_row()
   val () = ui_attr("contents-tab", ASelected, "true")
   val () = ui_attr("bookmarks-tab", ASelected, "false")
   val () = ui_attr("pages-tab", ASelected, "false")
@@ -2281,6 +2314,7 @@ in ui_focus("contents-close") end
 (* The contents panel, open on its bookmarks tab *)
 fn _bookmarks_open (): void = let
   val () = annot_render_bookmarks()
+  val () = reader_annotation_places()
   val () = ui_attr("contents-tab", ASelected, "false")
   val () = ui_attr("bookmarks-tab", ASelected, "true")
   val () = ui_attr("pages-tab", ASelected, "false")
@@ -2512,6 +2546,9 @@ fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
         | ~$R.some(ContentsTab()) => _toc_open()
         | ~$R.some(BookmarksTab()) => _bookmarks_open()
         | ~$R.some(PagesTab()) => _pages_open()
+        | ~$R.some(ContentsBack()) => let
+            val () = layer_close(LContents())
+          in reader_back() end
         | ~$R.none() =>
         if print_page >= 0 then
           (* a row that leads nowhere keeps the panel up: nothing moved *)
@@ -2662,6 +2699,7 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
     end)
   val listeners = RCons(listeners, OnEl("annotations-button"), "click", llam(_) => let
       val () = annot_render()
+      val () = reader_annotation_places()
       val () = layer_open(LAnnotations())
     in let val () = ui_focus("annotations-close") in 0 end end)
   val listeners = RCons(listeners, OnEl("annotations-panel"), "click", llam(h) => let
@@ -2741,10 +2779,13 @@ fn _highlight_tapped (node: Int, x: Int, y: Int): bool =
   | ~$R.none() => false
   | ~$R.some(offset) => annot_tap_select(node, offset)
 
-fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 19) = let
+fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 21) = let
   val listeners = RCons(listeners, OnEl("back-to-library"), "click", llam(_) => let val () = _show_library() in 0 end)
   val listeners = RCons(listeners, OnEl("previous-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
   val listeners = RCons(listeners, OnEl("next-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_next() in 0 end end)
+  (* a chapter at a time: no further than the first or the last *)
+  val listeners = RCons(listeners, OnEl("chapter-previous"), "click", llam(_) => let val () = _hint_hide() in let val () = reader_chapter_step(~1) in 0 end end)
+  val listeners = RCons(listeners, OnEl("chapter-next"), "click", llam(_) => let val () = _hint_hide() in let val () = reader_chapter_step(1) in 0 end end)
   (* what is selected as a pointer goes down: the press clears it *)
   val listeners = RCons(listeners, OnEl("page"), "pointerdown", llam(_) => let
       val () = !_press_selected := _has_selection()

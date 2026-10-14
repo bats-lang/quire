@@ -24,6 +24,7 @@ staload "modal.sats"
 staload "undo.sats"
 staload "library.sats"
 staload "toc.sats"
+staload "locator.sats"
 staload "jsonio.sats"
 staload "mem.sats"
 staload "clock.sats"
@@ -256,6 +257,90 @@ fn _put (cell: annotations_cell): void = let
   val () = ref_exch_elt<annotations_cell>(_cell, previous)
   val+ ~AnnotationsCell(annotations, _) = previous
 in annotations_free(annotations) end
+
+(* How many content nodes each chapter has (chapter, count), of the book
+   serial _totals_serial, for the place of an annotation inside its chapter
+   (#525). Decided by research: Readium's locators keep the progression
+   they were made with, and Kobo and Apple Books keep a CFI, but a kept
+   count would be stale once a book is replaced by a corrected file (the
+   annotations are moved by their node numbers, not by a count), and the
+   count is a property of the chapter, so it is recomputed by a pass over
+   the chapters that hold annotations (reader_annotation_places, the same
+   walk as a search, one chapter at a time) each time an annotations list
+   opens, and kept here only so the lists drawn again meanwhile (a
+   deletion, its Undo, a note, a filter) show it at once *)
+datavtype totals(int) =
+  | TotalsNil(0) of ()
+  | {count:nat} TotalsCons(count + 1) of (Int, Int, totals(count))
+
+fun _totals_free {count:nat} .<count>. (totals: totals(count)): void =
+  case+ totals of
+  | ~TotalsNil() => ()
+  | ~TotalsCons(_, _, rest) => _totals_free(rest)
+
+val _totals = ref<[count:nat] totals(count)>(TotalsNil())
+val _totals_serial = ref<int>(~1)
+(* Which lists are drawn, so a place found later is put in a list that has its rows *)
+val _highlights_drawn = ref<bool>(false)
+val _bookmarks_drawn = ref<bool>(false)
+
+fn _totals_take (): [count:nat] totals(count) = let
+  var taken: [count:nat] totals(count) = TotalsNil()
+  val () = ref_exch_elt<[count:nat] totals(count)>(_totals, taken)
+in taken end
+
+fn _totals_put {count:nat} (totals: totals(count)): void = let
+  var previous: [count:nat] totals(count) = totals
+  val () = ref_exch_elt<[count:nat] totals(count)>(_totals, previous)
+in _totals_free(previous) end
+
+fun _total_in {count:nat} .<count>. (totals: !totals(count), chapter: Int): Int =
+  case+ totals of
+  | TotalsNil() => ~1
+  | @TotalsCons(this_chapter, total, rest) => let
+      val own = total
+      val found = (if this_chapter = chapter then own else _total_in(rest, chapter)): Int
+      prval () = fold@(totals)
+    in found end
+
+fun _total_without {count:nat} .<count>. (totals: totals(count), chapter: Int): [kept:nat] totals(kept) =
+  case+ totals of
+  | ~TotalsNil() => TotalsNil()
+  | ~TotalsCons(this_chapter, total, rest) => let
+      val kept = _total_without(rest, chapter)
+    in if this_chapter = chapter then kept else TotalsCons(this_chapter, total, kept) end
+
+(* Chapter chapter's content node count, or -1 when it is not known *)
+fn _total_of (chapter: Int): Int = let
+  val totals = _totals_take()
+  val found = _total_in(totals, chapter)
+  val () = _totals_put(totals)
+in found end
+
+(* Element id_prefix<i> says where content node node of chapter chapter
+   is in the book (" · 32%", with its separator when dotted), once the
+   chapter's node count is known; until then, or in a fixed-layout book
+   (a spine item is a page, and the heading says it), it is left as it is *)
+fn _own_place_show {prefix_len:pos | prefix_len <= 16}{i:nat}
+  (id_prefix: string prefix_len, i: int i, chapter: Int, node: Int, dotted: bool): void = let
+  val total = _total_of(chapter)
+in
+  if total < 0 then ()
+  else if node < 0 then ()
+  else if book_fixed(book_serial()) then ()
+  else let
+    val @(kind, number) = toc_place_at(chapter, node, total)
+    val place_text = $A.alloc<byte>(32)
+    (* " · " (a space, U+00B7, a space), written at the head and used when dotted *)
+    val () = $A.set<byte>(place_text, 0, $A.int2byte(32))
+    val () = $A.set<byte>(place_text, 1, $A.int2byte(194))
+    val () = $A.set<byte>(place_text, 2, $A.int2byte(183))
+    val () = $A.set<byte>(place_text, 3, $A.int2byte(32))
+    val at = (if dotted then 4 else 0): [at:nat | at <= 5] int at
+    val place_end = locator_put(place_text, at, kind, number)
+    val @(place_id, place_id_len) = nid_make(id_prefix, i)
+  in ui_text_n_buf(place_id, place_id_len, place_text, place_end) end
+end
 
 (* The mark sets highlights are shown in, one a style *)
 datatype mark_set = YellowMarks | OrangeMarks | UnderlineMarks
@@ -808,16 +893,26 @@ fn _here (): int = let
   val () = _put(cell)
 in found end
 
-(* The bookmark button: "added" when the page shown has a bookmark *)
+(* Whether the page shown has a bookmark *)
+datatype bookmark_state = Marked | Unmarked
+
+fn _state_here (): bookmark_state = if _here() >= 0 then Marked() else Unmarked()
+
+(* The bookmark button: "added" when the page shown has a bookmark, and
+   the mark in the page's corner, which shows once the bars hide (Kindle
+   and Kobo draw it there; #388) *)
 #pub fn annot_star (): void
 
 implement annot_star () =
-  if _here() >= 0 then let
-    val () = ui_icon_set("bookmark-button", IcBookmarked)
-  in ui_attr("bookmark-button", APressed, "true") end
-  else let
-    val () = ui_icon_set("bookmark-button", IcBookmark)
-  in ui_attr("bookmark-button", APressed, "false") end
+  case+ _state_here() of
+  | Marked() => let
+      val () = ui_icon_set("bookmark-button", IcBookmarked)
+      val () = ui_attr("bookmark-mark", AClass, "bmk bmk-on")
+    in ui_attr("bookmark-button", APressed, "true") end
+  | Unmarked() => let
+      val () = ui_icon_set("bookmark-button", IcBookmark)
+      val () = ui_attr("bookmark-mark", AClass, "bmk")
+    in ui_attr("bookmark-button", APressed, "false") end
 
 (* annotations without its i-th annotation *)
 fun _remove {count:nat} .<count>. (annotations: annotations(count), i: int): [kept_count:nat | kept_count <= count] @(annotations(kept_count), int kept_count) =
@@ -1546,6 +1641,12 @@ fn _child_text_button {parent_prefix_len,child_prefix_len:pos | parent_prefix_le
   val @(child_id, child_id_len) = nid_make(child_prefix, i)
 in ui_text_btn_nn(parent_id, parent_id_len, child_id, child_id_len, class_name, label) end
 
+(* A button child named by its label, quiet: Delete has Undo, so it is
+   no equal of the button beside it (#383) *)
+fn _child_quiet_button {parent_prefix_len,child_prefix_len:pos | parent_prefix_len <= 16; child_prefix_len <= 16}{i:nat}{label_len:pos | label_len < 256}
+  (parent_prefix: string parent_prefix_len, child_prefix: string child_prefix_len, i: int i, label: string label_len): void =
+  _child_text_button(parent_prefix, child_prefix, i, "hbtn quiet", label)
+
 (* Element id_prefix<i>'s text: text[0, text_len) *)
 fn _text_of {id_prefix_len:pos | id_prefix_len <= 16}{i:nat}{l:agz}{n:pos}{text_len:nat | text_len < n; text_len < 65536}
   (id_prefix: string id_prefix_len, i: int i, text: !$A.arr(byte, l, n), text_len: int text_len): void = let
@@ -1564,13 +1665,32 @@ fn _heading {list_id_len:pos | list_id_len < 256}{chapter:nat} (list_id: string 
 in
   if chapter >= LOST_CHAPTER then ui_text_n(group_id, group_id_len, "Not found in this version")
   else let
+    val @(title_id, title_id_len) = nid_make("annot-heading", chapter)
+    val () = ui_add_nn(group_id, group_id_len, title_id, title_id_len, TSpan)
     val @(label_bytes, label_len) = toc_label_of(chapter)
-  in ui_text_n_buf(group_id, group_id_len, label_bytes, label_len) end
+    val @(title_id, title_id_len) = nid_make("annot-heading", chapter)
+    val () = ui_text_n_buf(title_id, title_id_len, label_bytes, label_len)
+    (* where the chapter starts in the book, as Contents says it *)
+    val @(group_id, group_id_len) = nid_make("annot-group", chapter)
+    val @(place_id, place_id_len) = nid_make("annot-place", chapter)
+    val () = ui_add_nn(group_id, group_id_len, place_id, place_id_len, TSpan)
+    val @(place_id, place_id_len) = nid_make("annot-place", chapter)
+    val () = ui_attr_n(place_id, place_id_len, AClass, "cnt")
+    val @(kind, number) = toc_place_of(chapter)
+    val place_text = $A.alloc<byte>(32)
+    (* " · " (a space, U+00B7, a space), then the place *)
+    val () = $A.set<byte>(place_text, 0, $A.int2byte(32))
+    val () = $A.set<byte>(place_text, 1, $A.int2byte(194))
+    val () = $A.set<byte>(place_text, 2, $A.int2byte(183))
+    val () = $A.set<byte>(place_text, 3, $A.int2byte(32))
+    val place_end = locator_put(place_text, 4, kind, number)
+    val @(place_id, place_id_len) = nid_make("annot-place", chapter)
+  in ui_text_n_buf(place_id, place_id_len, place_text, place_end) end
 end
 
 (* One row of the annotations list: highlight i *)
 fn _highlight_row {i:nat}{text_loc,note_loc:agz}{text_size,note_size:pos}{text_len:nat | text_len < text_size; text_len < 65536}{note_len:nat | note_len < note_size; note_len < 65536}
-  (i: int i, style: highlight_style, text: !$A.arr(byte, text_loc, text_size), text_len: int text_len, note: !$A.arr(byte, note_loc, note_size), note_len: int note_len): void = let
+  (i: int i, chapter: Int, node: Int, style: highlight_style, text: !$A.arr(byte, text_loc, text_size), text_len: int text_len, note: !$A.arr(byte, note_loc, note_size), note_len: int note_len): void = let
   val @(row_id, row_id_len) = nid_make("highlight-row", i)
   val () = ui_add_n("annotations-list", row_id, row_id_len, TDiv)
   val @(row_id, row_id_len) = nid_make("highlight-row", i)
@@ -1581,6 +1701,9 @@ fn _highlight_row {i:nat}{text_loc,note_loc:agz}{text_size,note_size:pos}{text_l
   val () = _child("highlight-go", "highlight-style", i, TSpan, "hstyle")
   val @(style_id, style_id_len) = nid_make("highlight-style", i)
   val () = ui_text_n(style_id, style_id_len, style_label(style))
+  (* where in the book it is (#525), known once its chapter has been counted *)
+  val () = _child("highlight-go", "highlight-place", i, TSpan, "hstyle")
+  val () = _own_place_show("highlight-place", i, chapter, node, true)
   val () = (case+ style of
     | Orange() => _child("highlight-go", "highlight-quote", i, TSpan, "hq hq-orange")
     | Underlined() => _child("highlight-go", "highlight-quote", i, TSpan, "hq hq-under")
@@ -1592,7 +1715,7 @@ fn _highlight_row {i:nat}{text_loc,note_loc:agz}{text_size,note_size:pos}{text_l
   val () = _child("highlight-row", "highlight-tools", i, TDiv, "hbtns")
   val () = (if note_len > 0 then _child_text_button("highlight-tools", "highlight-edit", i, "hbtn", "Edit note")
     else _child_text_button("highlight-tools", "highlight-edit", i, "hbtn", "Add note"))
-in _child_text_button("highlight-tools", "highlight-delete", i, "hbtn", "Delete") end
+in _child_quiet_button("highlight-tools", "highlight-delete", i, "Delete") end
 
 (* The highlights the annotations list shows: every one, or one style's *)
 #pub datatype style_filter = EveryStyle | OnlyYellow | OnlyOrange | OnlyUnderlined
@@ -1619,12 +1742,12 @@ fn _style_of (kind: annotation_kind): highlight_style =
 fun _highlight_rows {count:nat}{i:nat} .<count>. (annotations: !annotations(count), i: int i, last_chapter: Int): int =
   case+ annotations of
   | annotations_nil() => i
-  | @annotations_cons(kind, chapter, _, _, _, _, _, _, _, text, text_len, note, note_len, _, _, rest) => let
+  | @annotations_cons(kind, chapter, start_node, _, _, _, _, _, _, text, text_len, note, note_len, _, _, rest) => let
       val shown = _listed(kind)
       val group = _group_of(chapter)
       val () = (if shown then let
           val () = (if group <> last_chapter then (if group >= 0 then _heading("annotations-list", group) else ()) else ())
-        in _highlight_row(i, _style_of(kind), text, text_len, note, note_len) end else ())
+        in _highlight_row(i, chapter, start_node, _style_of(kind), text, text_len, note, note_len) end else ())
       val new_last_chapter = (if shown then group else last_chapter): Int
       val rows_end = _highlight_rows(rest, i + 1, new_last_chapter)
       prval () = fold@(annotations)
@@ -1673,6 +1796,7 @@ in ui_text("annotations-empty", message) end
 
 implement annot_render () = let
   val () = ui_clear("annotations-list")
+  val () = !_highlights_drawn := true
   val () = _filter_show()
   val cell = _take()
   val+ @AnnotationsCell(annotations, _) = cell
@@ -1696,7 +1820,7 @@ in annot_render() end
 
 (* One row of the bookmarks list: bookmark i *)
 fn _bookmark_row {i:nat}{chapter:nat}{text_loc,note_loc:agz}{text_size,note_size:pos}{text_len:nat | text_len < text_size; text_len < 65536}{note_len:nat | note_len < note_size; note_len < 65536}
-  (i: int i, chapter: int chapter, text: !$A.arr(byte, text_loc, text_size), text_len: int text_len, note: !$A.arr(byte, note_loc, note_size), note_len: int note_len): void = let
+  (i: int i, chapter: int chapter, node: Int, text: !$A.arr(byte, text_loc, text_size), text_len: int text_len, note: !$A.arr(byte, note_loc, note_size), note_len: int note_len): void = let
   val @(row_id, row_id_len) = nid_make("bookmark-row", i)
   val () = ui_add_n("bookmarks-list", row_id, row_id_len, TDiv)
   val @(row_id, row_id_len) = nid_make("bookmark-row", i)
@@ -1708,6 +1832,16 @@ fn _bookmark_row {i:nat}{chapter:nat}{text_loc,note_loc:agz}{text_size,note_size
     else let
       val @(label_bytes, label_len) = toc_label_of(chapter)
     in ui_text_n_buf(title_id, title_id_len, label_bytes, label_len) end)
+  (* where the chapter starts in the book, as Contents says it *)
+  val () = (if chapter >= LOST_CHAPTER then () else let
+      val () = _child("bookmark-go", "bookmark-place", i, TSpan, "hstyle")
+      val @(kind, number) = toc_place_of(chapter)
+      val place_text = $A.alloc<byte>(32)
+      val place_end = locator_put(place_text, 0, kind, number)
+      val @(place_id, place_id_len) = nid_make("bookmark-place", i)
+      val () = ui_text_n_buf(place_id, place_id_len, place_text, place_end)
+      (* its own place, once its chapter has been counted (#525) *)
+    in _own_place_show("bookmark-place", i, chapter, node, false) end)
   val () = (if text_len > 0 then let
       val () = _child("bookmark-go", "bookmark-snippet", i, TSpan, "snip")
     in _text_of("bookmark-snippet", i, text, text_len) end else ())
@@ -1717,13 +1851,13 @@ fn _bookmark_row {i:nat}{chapter:nat}{text_loc,note_loc:agz}{text_size,note_size
   val () = _child("bookmark-row", "bookmark-tools", i, TDiv, "hbtns")
   val () = (if note_len > 0 then _child_text_button("bookmark-tools", "bookmark-edit", i, "hbtn", "Edit note")
     else _child_text_button("bookmark-tools", "bookmark-edit", i, "hbtn", "Add note"))
-in _child_text_button("bookmark-tools", "bookmark-delete", i, "hbtn", "Delete") end
+in _child_quiet_button("bookmark-tools", "bookmark-delete", i, "Delete") end
 
 fun _bookmark_rows {count:nat}{i:nat} .<count>. (annotations: !annotations(count), i: int i): void =
   case+ annotations of
   | annotations_nil() => ()
-  | @annotations_cons(kind, chapter, _, _, _, _, _, _, _, text, text_len, note, note_len, _, _, rest) => let
-      val () = (if _is_bookmark(kind) then (if chapter >= 0 then _bookmark_row(i, chapter, text, text_len, note, note_len) else ()) else ())
+  | @annotations_cons(kind, chapter, start_node, _, _, _, _, _, _, text, text_len, note, note_len, _, _, rest) => let
+      val () = (if _is_bookmark(kind) then (if chapter >= 0 then _bookmark_row(i, chapter, start_node, text, text_len, note, note_len) else ()) else ())
       val () = _bookmark_rows(rest, i + 1)
       prval () = fold@(annotations)
     in end
@@ -1733,6 +1867,7 @@ fun _bookmark_rows {count:nat}{i:nat} .<count>. (annotations: !annotations(count
 
 implement annot_render_bookmarks () = let
   val () = ui_clear("bookmarks-list")
+  val () = !_bookmarks_drawn := true
   val cell = _take()
   val+ @AnnotationsCell(annotations, _) = cell
   val bookmark_count = _count_where(annotations, CountBookmarks())
@@ -1746,6 +1881,57 @@ in
   in ui_text("bookmarks-empty", "No bookmarks yet. Tap the star to add one.") end
   else ()
 end
+
+(* The places of the annotations of chapter chapter, in the rows drawn *)
+fun _places_show {count:nat}{i:nat} .<count>. (annotations: !annotations(count), i: int i, chapter: Int): void =
+  case+ annotations of
+  | annotations_nil() => ()
+  | @annotations_cons(kind, this_chapter, start_node, _, _, _, _, _, _, _, _, _, _, _, _, rest) => let
+      val () = (if this_chapter <> chapter then ()
+        else if _is_bookmark(kind) then (if !_bookmarks_drawn then _own_place_show("bookmark-place", i, chapter, start_node, false) else ())
+        else if _listed(kind) then (if !_highlights_drawn then _own_place_show("highlight-place", i, chapter, start_node, true) else ())
+        else ())
+      val () = _places_show(rest, i + 1, chapter)
+      prval () = fold@(annotations)
+    in end
+
+(* Chapter chapter of book serial has total content nodes: the annotations
+   of it are put at their place in the book (#525) *)
+#pub fn annot_total_set (serial: int, chapter: Int, total: Int): void
+
+implement annot_total_set (serial, chapter, total) = let
+  val () = (if serial <> !_totals_serial then let
+      val () = _totals_put(TotalsNil())
+    in !_totals_serial := serial end else ())
+  val () = _totals_put(TotalsCons(chapter, total, _total_without(_totals_take(), chapter)))
+  val cell = _take()
+  val+ @AnnotationsCell(annotations, _) = cell
+  val () = _places_show(annotations, 0, chapter)
+  prval () = fold@(cell)
+in _put(cell) end
+
+(* The first chapter after chapter (from 0; -1 for the start) that holds
+   an annotation placed on a node, -1 when none does: the chapters
+   reader_annotation_places counts *)
+fun _chapter_after {count:nat} .<count>. (annotations: !annotations(count), chapter: Int): Int =
+  case+ annotations of
+  | annotations_nil() => ~1
+  | @annotations_cons(_, this_chapter, start_node, _, _, _, _, _, _, _, _, _, _, _, _, rest) => let
+      val own = (if this_chapter > chapter then (if start_node >= 0 then (if _is_lost(this_chapter) then ~1 else this_chapter) else ~1) else ~1): Int
+      val later = _chapter_after(rest, chapter)
+      val first = (if own < 0 then later else if later < 0 then own else if own < later then own else later): Int
+      prval () = fold@(annotations)
+    in first end
+
+#pub fn annot_chapter_after (chapter: Int): [next:int | next >= ~1] int next
+
+implement annot_chapter_after (chapter) = let
+  val cell = _take()
+  val+ @AnnotationsCell(annotations, _) = cell
+  val next = _chapter_after(annotations, chapter)
+  prval () = fold@(cell)
+  val () = _put(cell)
+in (if next >= 0 then next else ~1) end
 
 (* ============================================================
    Export: Markdown

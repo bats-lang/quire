@@ -170,11 +170,36 @@ and no flag (the flag wins). Nothing is written first: bats writes the
 version's facts from HEAD (above). A check takes 6 to 10 minutes on a
 cold build: run it in the background and wait for it, never push on the
 hope that it passes. Two bats in one checkout take turns (bats holds a
-lock on `bats.toml` and says it waits); two checkouts or worktrees do not
-lock each other (bats-lang/bats#252), so a machine shared by sessions
-runs one heavy build at a time by a lock of its own, `flock
-/tmp/quire-build.lock bats check ...` (and the same lock around `gen-pwa
-test`), until bats has a machine-wide limit.
+lock on `bats.toml` and says it waits). Two checkouts or worktrees take
+turns by bats's machine-wide slots (bats-lang/bats#252), which are opt-in:
+with `BATS_SLOTS=N` (1 to 64) in the environment, `check`, `build`,
+`test` and `run`'s build each hold one of N slots, after the project's
+lock, so a bats waiting for its project holds none. A slot is a file,
+`<BATS_LOCK_DIR>/slot-<i>.lock` (`BATS_LOCK_DIR` defaults to
+`~/.cache/bats`), locked by the kernel's `flock`: it is released however
+bats ends, even killed, and no file is ever stale. Free slots are taken
+without waiting; when all are busy bats says so and who last took slot 0
+("waiting for another bats on this machine ... was last taken by bats
+build in /path"). What bats starts runs in its slot (`BATS_SLOT_HELD`
+names the file), so a nested bats takes none. These are the same files
+`gen-pwa test` uses for `PWA_TEST_SLOTS` in `PWA_TEST_LOCK_DIR`, so
+pointing `BATS_LOCK_DIR` and `PWA_TEST_LOCK_DIR` at one directory makes
+builds and e2e runs one pool, and separate directories two (bats reads no
+`PWA_TEST_*`). A machine shared by sessions sets, in the shell's profile,
+`BATS_SLOTS=1`, `BATS_LOCK_DIR` and `PWA_TEST_LOCK_DIR` (one directory),
+`PWA_TEST_SLOTS=1`, `BATS_CACHE_DIR` (below) and `BATS_REPOSITORY`, and
+runs `bats check` and `gen-pwa test` with no wrapper of its own.
+
+A shell that reads no profile (an agent's, a CI-like step) gets the same
+from a machine-specific env file that is not in the repo (say
+`~/quire.env`, holding those variables), through `scripts/with-env
+<env-file> <command> [args...]`: it sources the file (every variable
+exported) and `exec`s the command exactly as given, so its arguments and
+exit status are the command's own: `scripts/with-env ~/quire.env bats
+check`, `scripts/with-env ~/quire.env ./dist/debug/gen-pwa test --
+<spec>`. `tests/with-env/run.sh` tests it (a step of check.yml, like
+`tests/play-release/run.sh`; `tests/groups.json` holds only the e2e and
+static groups).
 
 `BATS_CACHE_DIR=<dir>` keeps patsopt's C in that directory, keyed by
 what patsopt reads (the toolchain, its arguments and every file a
@@ -741,6 +766,21 @@ proven, or missing) are kept in the book (`book_spine_set`), so loading
 chapter i only walks to it (`book_chapter_get`); the OPF is not read
 again.
 
+A chapter's data is checked against its CRC-32 (#529): the central
+directory record the index keeps states it (offset 16), `book_entry_sum`
+reads it by the chapter's name offset, and `take_text_sum` (in place of
+`take_text`) computes the CRC-32 of the inflated bytes, before they are
+made UTF-8 (`crc_of_borrow`, `src/crc.bats`: a table made by the proven
+byte step, tested against the proven fold in `tests/codec`, not proved
+equal), and answers no content for a mismatch or an unknown sum, so the
+chapter is `ChapterNotRead` ("Chapter N of this book could not be read")
+and the others read. libzip (`ZIP_ER_CRC`), Python's `zipfile`
+(`BadZipFile: Bad CRC-32`) and Java's `ZipFile` check the same sum at the
+end of the entry. The chapter shown and the facing page of a spread are
+checked; the OPF, the container, images and the chapter reads for
+search, notes and read aloud are not (yet). `e2e/containers.spec.js`
+("a chapter whose CRC is not its data's").
+
 ### Note popups (#414)
 
 A note opens as its text, in one popup (`footnote`): an element's text
@@ -895,6 +935,26 @@ under epubcheck 2.0 rules except those invalid on purpose.
   `style-type`. Search (`_scan_node`) does not match inside `rt`, `rtc`
   or `rp`, but counts their content nodes as render makes them, so a
   hit or an annotation after a ruby keeps its node number.
+
+* Where a place is (#383): the footer, the bar's label (`scrubber-percent`)
+  and its tip say how far into the book in one wording, "6% of book"
+  (`_put_book_percent`, over `_put_percent`; "<1%" once reading has begun),
+  where the label said "6%" beside the footer's "6% of book". A Contents
+  row and an annotation's chapter (its heading in the list, a bookmark's
+  row) say where the chapter starts, by `toc_place_of` over src/locator.bats
+  (the same `locator_kind` and number as a search hit; `ByPage` in a
+  fixed-layout book, `book_fixed`; `locator_thousandth` is the one rule of
+  the percent, shared with `_thousandth`). The Contents place is a span
+  over the row's right end (`toc-place`, in `toc-line`), not text of the
+  button, so a row's name stays its label. The `place_text` datatype of
+  the issue's "Prevent" is not made: a flat datatype cannot carry the
+  number, and the number's wording is written in one place instead
+  (`_put_book_percent`, `locator_put`). An annotation's row goes to its
+  place by the whole row (`.hgo`, with a chevron at its end), Delete is
+  quiet (`.quiet`: no edge, muted; it has Undo, so it is no equal of Add
+  note), and each style's filter has a swatch. `e2e/places.spec.js`.
+  Not done, filed as a follow-up: a place for each annotation row (the
+  chapter's is shown, not the annotation's own page).
 
 * A search result row (#381) shows the hit in its snippet, the match in
   bold (`.mk`; no new colour pair), and where it is in the book. The
@@ -1117,8 +1177,52 @@ audio is: not done). Leaving the chapter removes the element, which stops it.
 * **The package's fonts are the Book font** (`cnt-css-fonts_ot`, `_tt`, `_woff`,
   `_woff2`): the book's CSS is dropped (#411), so which text uses a font is the
   reader's: Font: Book loads the first font of the manifest (`font/otf`, `font/ttf`,
-  `font/woff`, `font/woff2`) for the text. An obfuscated font (`ocf-font_obfuscation`,
-  a should) is not undone: IDPF's obfuscation needs SHA-1, which Quire has no package for.
+  `font/woff`, `font/woff2`) for the text. An obfuscated font is undone (#410, below).
+
+## Obfuscated fonts are undone (#410)
+
+EPUB OCF 3.3 section 4.1.2 requires a reading system with a viewport to undo
+the two font obfuscations, and a reader that skips them falls back to a default
+face without a word. `src/font_obfuscation.bats` undoes both (xor is its own
+inverse, `font_unmask`): IDPF's (`http://www.idpf.org/2008/embedding`: the
+key is the SHA-1 of the package's unique identifier with its white space,
+U+0020, U+0009, U+000D and U+000A, taken out, 20 bytes, xored with the font's
+first 1040 bytes going round; `idpf_key`) and Adobe's
+(`http://ns.adobe.com/pdf/enc#RC`: the 16 bytes of the identifier's UUID, after its
+last colon and without its dashes, xored with the first 1024; `adobe_key`).
+SHA-1 is `src/sha1.bats` (pure Bats, as the sha256 package is written; it is
+used for nothing but this key, and belongs in a package of its own when one is
+made). The unique identifier is the `dc:identifier` the package's
+`unique-identifier` names (`opf_unique_identifier`, copied by `_font_locate`).
+Which algorithm a font has comes from `META-INF/encryption.xml`, read as the font
+is loaded (`_font_cipher_find`): each `EncryptedData`
+(`encrypted_nth`) names a `CipherReference` URI, found with `book_find_relative`
+from the container's root, and it is the font's when its entry is the font's
+(`font_cipher`: `FontNotListed`, `FontObfuscatedIdpf`, `FontObfuscatedAdobe`,
+`FontCipherOther`). The font is unmasked in its piece before its blob URL is made
+(`_font_blob`), every time the book is opened, so a reload works as an import does.
+It degrades where it is (no banner for the book; the text is set in the reader's
+own face, `var(--bookfont,Georgia),serif`): an algorithm Quire has no client for
+(`FontCipherOther`), an identifier that makes no key (an Adobe one that is no UUID,
+none, over 4096 bytes), a font the archive lacks, noise, and one shorter than the masked
+bytes (the browser's decoder refuses it). By research: the OCF specification
+gives both algorithms and requires them of a reading system; Readium's streamer
+(`FontDecoder`), Calibre (`oeb/polish` font deobfuscation) and foliate-js
+(`epub.js` deobfuscators) each undo both the same way, and a resource they cannot
+decode is not drawn, not a failure of the book.
+
+**A font encrypted in an unknown algorithm does not make the book DRM** (#410
+against #427): `_encrypted_data_unknown` (`src/epub_xml.bats`) passes an
+`EncryptedData` whose `CipherReference` is a font file (`.otf`, `.ttf`, `.ttc`,
+`.woff`, `.woff2`) even when its algorithm is none of the two, since the text
+of such a book reads and only the face cannot be had. Anything else under an
+unknown algorithm is refused as before (`e2e/drm.spec.js`), and a namespace of
+ADEPT, LCP or Kobo anywhere in the file still is. `e2e/fonts.spec.js` plays
+`e2e/font-books.js` (checked by epubcheck, the font `e2e/marker-font.ttf` has one
+glyph no system has, U+E000, 1.7 em wide, so the page's face is told by measuring
+it; `create-epub.js` has `obfuscatedFonts`, `identifier` and `manifestOnly`, and
+`obfuscateFont`, written apart from the app's): masked each way, an identifier with
+white space, a reload, no Book chosen, and each degrading case.
 
 ### Settled by research, kept failing (#419)
 
@@ -1328,9 +1432,16 @@ only where its platform has it, by its own `data-hide`.
   a page opened again starts out of it, its switch off, and a click
   there does not change what is kept, and the page is in full screen or
   not as that click left it.
-  Where the device refuses the rotation lock (bridge's `LockRefused`),
-  Lock rotation is not offered again that session (`_lock_refused` in
-  `src/screen_controls.bats`) and the banner says so (quire#355): a
+  The rotation lock is the Capacitor plugin's alone in the app (bridge
+  never takes the web API there, where Chromium's WebView has none; quire#355).
+  `_lock` matches every `lock_outcome` with `case+`: `Locked`;
+  `LockRefused(text)`, the plugin's rejection, which removes the row for
+  the session and says in the banner what happened and what to do, the
+  plugin's error kept as written in the Copy details (`notice_rotation_refused`,
+  not a claim that the device cannot lock); `LockUnavailable`, nothing to
+  lock with, which removes the row with no banner (availability is also
+  decided before the tab is drawn, `screen_controls_show`); and
+  `LockUnexpected(code)`, through `notice_unexpected`. A
   control that cannot work is not shown. While the reader is immersive and full screen is on, a page shown hides the
   bars again (`_bars_hidden_again` in `src/reader.bats`), since Android
   brings them back at a swipe from the edge, the reader's own way out of
@@ -1402,11 +1513,15 @@ reader's `READER`), then chunks as PNG has them: a u32le length under
 2 to the 20, a 4-byte tag, the data and a CRC-32 (IEEE, 0xEDB88320, the
 check value of "123456789" is 0xCBF43926) as its low 16 bits and then
 its high 16 bits, little endian, over the tag and the data; the last
-chunk is `IEND`. A record is a set of groups, one chunk each, in
-ascending tag order (a book's: `AUTH BOOK COLL ELSE FNSH ORDR PLCE SERI SHLF
-SIZE TIME TITL`, the index's `LEGA NAMS`); each group is required (its
-loss makes the record `Undecodable`) or optional (its loss gives its
-defaults and `DecodedWithLoss`). A chunk of a tag this version does not
+chunk is `IEND`. A record is a set of groups, one chunk each, written
+in ascending tag order (a book's: `AUTH BOOK COLL ELSE FNSH ORDR PLCE SERI SHLF
+SIZE TIME TITL`, the index's `LEGA NAMS`) and read by tag, in any order
+(#510, below); a group the record needs or that every version has
+written (`req`, `opt`), when it is lost (absent, its CRC bad or its fields
+not parsing), is read with its substitute (`SUBSTITUTES` in
+`scripts/record_tables.py`, else 0 and empty) and said to be lost, and the
+record is used (`rr_loss`); nothing about a group makes a record unusable.
+A chunk of a tag this version does not
 know is kept as it is, at the end, when its first letter is lower case
 (ancillary, as in PNG), so a newer Quire's addition survives this one's
 save; a capital one (critical), or a least version over `READER`, makes
@@ -1414,6 +1529,118 @@ the record `Newer`, and a first four bytes that are not `QREC` make it
 `NotQuire`. What a record is decoded to is one of those five outcomes
 (`recres`: `rr_ok`, `rr_loss`, `rr_notquire`, `rr_newer`, `rr_damaged`);
 a decode never fails to say which.
+
+**Chunks are looked up by tag, in any order, a tag twice is a loss that
+is used** (#510). Research (written on the issue): protobuf "parsers must
+be able to parse fields in any order" and take the last value of a field
+twice; PNG fixes the order only of its critical chunks and lets a
+decoder pass over an unknown ancillary one; EBML has no order among the
+children of an element, ignores what it does not know and reads an absent
+element as its default; CBOR leaves a map with a key twice to the
+decoder. So the format is a set of chunks found by their tags, and the
+order is the writer's, not the format's.
+
+* `CANON` (`src/schema.bats`) puts the chunks of a record in the order of
+  the groups before they are read: for each group in turn, `EXT` takes
+  every chunk of its tag out of the list wherever it stands and chooses
+  the last whole one (else a damaged one, else none); what is left
+  follows, as the chunks a newer Quire added. `SDEC` then reads that
+  list as it always did. `canon_functional`, `ext_functional` and
+  `lostcat_functional` make the result one, `canon_read` is the run time
+  one (`ext_read` per group), and `record_read` is total as before.
+* A tag twice is damaged but recoverable, not `Damaged`: the later
+  whole chunk wins (a later one whose CRC is bad does not hide an earlier
+  whole one: protobuf and CBOR take the last because they have no
+  checksum to tell which is whole), the earlier ones are dropped from the
+  value and their tag is among the `lost` of `rr_loss`, so the book is a
+  `LossyBook`, said once, and the next save writes one chunk of each tag
+  and keeps the old bytes under `library/damaged/<id>/<crc>`. `JOIN`
+  joins the dropped tags to the groups' own losses (`LOSTCAT`).
+* A chunk this version does not know (a lower case first letter) is kept
+  whole and in order, twice if it was there twice: it is opaque, and a
+  repeat can be the newer writer's list (PNG allows several tEXt chunks),
+  so it is not for this version to drop one. They are written after the
+  groups. One whose tag is a group's is not kept (`NOTKNOWN`).
+* What makes the written chunks read back as they were is a proof the
+  writer carries: the tags of the groups are all different
+  (`SPECSOK`, from each `SPV_cons`, generated by `scripts/gen-record.py`)
+  and the tag of a kept chunk is none of the groups' (`extrasv` carries
+  it: `EXV_cons(ANC, NOTKNOWN | ...)`), so `senc_canon` shows that the
+  chunks written are their own canonical ones (`tests/static/reject/
+  codec-group-twice-earlier-wins`, `codec-group-twice-not-said`).
+* **A group the record needs, lost, is substituted (stage 2b).** The
+  `LOSES(requirement)` constructors of `SDEC` (`SD_garbled_lost`,
+  `SD_bad_lost`, `SD_absent_lost_end`, `_good`, `_bad`) are one set for
+  `req` and `opt`, a group absent, with a bad CRC or fields that do not
+  parse; `added` keeps its own, for which absent is silent. A book whose
+  TITL is lost is "Untitled" (the contents panel's word for a label with
+  none), whose AUTH is lost has no author, whose BOOK is lost has ids 0
+  in the record and the ids of its key in the library. **The key wins**
+  (`_read_book`, `_keyed_book` in `src/libstore.bats`): a record found
+  under `library/book/<id>` is the book `<id>` whatever ids it holds, and
+  its save writes the key's ids. Such a save (`_repaired`) writes the
+  library's image whole, every group, and keeps the bytes the record had
+  under `library/damaged/<id>/<crc>`, in the same transaction. Research
+  (on #510): SQLite's `.recover` keeps what it cannot place in a
+  `lost_and_found` table and calls the result a salvage, and Calibre
+  rebuilds a lost `metadata.db` from the book folders, so the record
+  is salvaged and the book files stay the source of truth (stage 2c, below,
+  reads the title and author from the file again).
+  `tests/codec` and `e2e/library-records.spec.js` lose each of AUTH, BOOK
+  and TITL, absent and damaged.
+* **What a record lost and the book's file can say is read again from
+  the file (stage 2c).** As a book is reopened from storage (`Reopen` in
+  `_opf_store`, `src/import.bats`), where its OPF is parsed anyway,
+  `lib_rebuild` (`src/library.bats`) takes from it what a field holds only
+  as a placeholder: the title "Untitled", the author "Unknown", a series
+  with no name or no position, no direction of the text, no file size. A
+  field holding any other value is never changed (the file is the source
+  of what a record lost, not of what it holds), and what the reader made
+  (place, shelf, collections, finished, minutes, order, notes) is never
+  read from a file. Not rebuilt: the cover, the progress weights (the
+  reader works them out as the chapters are laid out), the accessibility
+  summary. A rebuild that changes something saves the library at once (the
+  record is repaired and the old bytes kept); one that changes nothing
+  writes nothing. `e2e/old-library.spec.js` removes a real book's title
+  and author groups and opens it.
+* **The version before (stage 2d).** `library/previous/<id>` holds a
+  book's record as it was before a save, and `library/stamp/<id>` when
+  the record was last written (4 bytes, seconds since 2025; read once at
+  the library's load into memory, `_stamps` in `src/libstore.bats`). A
+  save keeps the record it replaces as the previous version only when
+  that record was last written 60 seconds ago or more (an unknown stamp
+  counts as old) and decodes whole, and writes the stamp on every save,
+  in one batch with the record: KOReader's rule (its `.old` is not
+  rotated until 60 seconds old, so a crash loop cannot overwrite the good
+  copy with a bad one), on the age of the file replaced, so saves a few
+  seconds apart never rotate and a bug that damages a record at each save
+  leaves the version from before the first. A book whose record is broken
+  beyond recovery (`UnusableDamaged`, the framing) and that has a
+  previous version is read from it (`_recover`, a `LossyBook`); the save
+  of a book whose stored record is not whole writes the library's image
+  as a new record and keeps the bytes under `library/damaged` (it used to
+  be refused; `NotQuire` and `Newer` still are). Emptying the Trash
+  deletes the record, its previous version and its stamp together. The
+  stamp is a key of its own, not a group: a group would be a field of
+  every image and record, and it is the library's bookkeeping, not the
+  book's. Not done: salvaging the chunks before a cut in a record's
+  framing, and offering the sync file or Auto Backup copy for a record
+  whose reader state is lost (a notice action: #507's).
+* By the principle for any record that does not decode cleanly (the user's
+  rule for #510): recover fanatically; if a bug in Quire damages a record
+  the reader must still read the book. In order: (1) usable with
+  defaults or substitutes (a lost or absent group, a tag twice, a bad
+  CRC, and, from the next stage, a lost required group); (2) said, once,
+  in the notice (#507: Copy details with the record's id and what was
+  lost); (3) the old bytes kept under `library/damaged/<id>/<crc>` when a
+  save repairs it; (4) `Unusable` only for what cannot be read as a
+  record at all (`NotQuire`) or is a newer Quire's (`Newer`, not
+  damaged). A bug that leaves a record unusable is fixed by widening the
+  recovery, not by setting the record aside.
+* Tests: `tests/codec` (the chunks in the opposite order, a group twice
+  either way), `e2e/library-records.spec.js` (every rotation, the
+  reverse and seeded shuffles open as the same book and are not written
+  by opening; a group twice; an unknown chunk twice).
 
 **A group added later is not loss when it is absent** (#497).
 A group is one of three modes in `scripts/record_tables.py`: `req`
@@ -1444,6 +1671,34 @@ group (`record_write` has `ab_nil()`), so the first save of an old
 record writes the groups it lacked; opening writes nothing and keeps no
 copy (`e2e/library-records.spec.js`, "written before ... existed").
 
+**The rule cannot be forgotten, and every table that shipped opens**
+(#515). A group of a record is added only as `added`, never `req` or
+`opt` (those are the first table's twelve groups and the index's two),
+and a group added is named in `RELEASES` in `scripts/record_tables.py`
+with its commit. `tests/static/groups.py` (in `tests/static/run.sh`'s
+`checkers`) fails a group of the other modes after the first table, a
+group not in `RELEASES`, and a change that does not add the library of
+the table before it: `e2e/old-library.spec.js` has one library for each
+table that shipped (`SHAPES`: the first table, then each prefix of
+`RELEASES`; the real build's library cut of the groups a build before it
+did not write, which is byte for byte what that build wrote, since a
+chunk's CRC covers its own tag and data), and each opens with every
+book, nothing said, nothing to set aside, no record changed or copied on
+open, and a save writes the current groups. The QLB1 to QLB6 formats of
+the old whole-library record are in `e2e/library-records.spec.js`. The
+Settings row "Set aside unreadable records" is absent for every record
+that reads (even with loss), in each of those specs.
+The flake of the set aside spec (#515) was the specs', not the app's:
+on the android project the app syncs as it opens (Auto Backup's file is
+merged), and the records it writes (`library/index`, and the books'
+`ORDR` renumbered by the save after a merge once a record is missing)
+land when that sync ends, not when the books show, so they landed over a
+spec's change to the store or after the snapshot it compared with.
+`syncEnded` / `reloadSettled` (`e2e/legacy-library.js`) take
+"sync-state" away before a reload and wait for the sync's end to write
+it (`_end`, after the saves), so a spec changes and snapshots the store
+only when the app has stopped writing it.
+
 **The codec is proven** (`src/bytes.bats`, `crc.bats`, `chunk.bats`,
 `seq.bats`, `fields.bats`, `schema.bats`, `record.bats`; the book's and
 the index's tables are in `scripts/record_tables.py` and
@@ -1457,11 +1712,19 @@ and its result (`DECODES(sp, kind, bs, res)`, built of `CK`, `SEQ`,
 `CKENC`, `CHAINS`, `SENC`), and the laws are lemmas the compiler checks,
 so a codec that is not the inverse of itself does not type-check:
 
-* `decodes_encodes`: if the bytes decode to a record x, encoding x gives
-  exactly those bytes (so a record is never altered by being read and
-  saved: no padding is accepted, no unknown chunk is lost);
-* `encodes_decodes`: what is encoded decodes to what was encoded;
+* `encodes_decodes`: what is encoded decodes to what was encoded, as
+  exactly that record (no padding is accepted, no kept chunk is lost:
+  `tests/static/reject/codec-drops-unknown-chunk`);
 * `decodes_functional`: bytes decode to one result;
+* a record read and saved is never changed in meaning: whatever the
+  chunks' order or repeats were, `record_write` of the very values a
+  read gave (`vals`, `extras`) is `ENCODES` of the same record, and
+  `encodes_decodes` makes that decode to `rr_ok` of it, so
+  decode(encode(decode(x))) = decode(x) on the value. The first law of
+  an earlier version, `decodes_encodes` (the bytes decode to x, so
+  encoding x gives the same bytes), no longer holds and is gone: out of
+  order bytes decode to x and are written in ascending order (#510,
+  below);
 * `record_read` is total: it answers every list of bytes with a result
   and its `DECODES` proof, and `record_write` returns the `ENCODES`
   proof of the bytes it made. The CRC's tables are `CRCP`, a relation
@@ -1748,9 +2011,14 @@ read of storage changed: each still folds, as #174 says.
   made beside it could not be seen while the read keeps failing.
 * **Records that cannot be used are set aside, not replaced** (the
   follow-up of #374). A library whose read worked can still hold a book's
-  record, or the collections', that is damaged or not Quire's: it is shown
-  nowhere and never written over, so the book cannot be imported again and
-  no collection can be made. Settings shows a row then (`settings-aside`,
+  record, or the collections', that is not Quire's or whose framing is broken (cut short, a length past
+  the end, no end chunk; every other damage is used, #510, and a book with
+  a version before it is read from it, 2d) is shown nowhere and not
+  written over by a read; the collections' record, and a book's of a newer
+  Quire or not Quire's, are never written over, so no collection can be made
+  while the collections' is one of them, and a book of those cannot be
+  imported again (a book whose framing is broken can: its import writes the
+  library's image over the record, the bytes kept, 2d). Settings shows a row then (`settings-aside`,
   `lib_aside_show`: "Set aside unreadable records",
   `settings-set-aside`), and only then. Pressing it
   (`lib_aside_run`, `lib_set_aside`) reads the library again and, for each
@@ -1897,6 +2165,29 @@ group that is absent from a record written before it existed is not loss, #497).
 sync file holds a book's series (it is the book's own, read from its file, so a
 second device or a restore shows what the file says). `e2e/series.spec.js`,
 `e2e/series-books.js` and `e2e/library-records.spec.js` test it.
+
+## The sizes a book's CSS gives (#431, stage 1)
+
+`src/css_size.bats` reads a book's `font-size` rules as the format alone
+(nothing of it reaches the page yet; stages 2 and 3 of #431 measure a book's
+dominant size and apply the proportions). Only `font-size` is read: rules
+selected by element names, classes, ids and descendant chains of them
+(`sheet_rules_read`, at most 4096 rules, each with its selector's span in the
+sheet, specificity and order), an inline `style` and `<font size>`
+(`declarations_size_read`, `font_size_attribute_read`), in px, pt, pc, in, cm,
+mm, em, ex, rem, % and keywords; `calc()`, `clamp()`, `var()`, `vw`, a
+negative size and `!important` are `SizeIgnored` with their reason, and a
+selector with a combinator, pseudo, attribute or `*` is skipped and counted.
+Every answer is a `datavtype` matched with `case+` (`size_read`,
+`selector_read`, `sheet_read`). What the types prove: a size is at most a
+thousand pixels or times (`size_declared`), a computed one is a pixel to a
+thousand of them (`size_computed`), a proportion to the dominant size is from
+10 to 60 twentieths (`proportion`, so `font-size:1px` and `font-size:400%` are
+held to half and three times, as Readium clamps), a rule's selector lies inside
+its sheet, and its order is below the most. What is tested, not proved
+(`tests/css-size/run.sh`, a CI step beside the codec's, on bytes, with a fuzz):
+that the grammar read is CSS's. The `rem` trick of the fixtures is on `html`
+(`e2e/size-books.js`).
 
 ## What allocates is linear
 
@@ -2098,6 +2389,33 @@ got here" (or Readium LCP) in place of Get and the licence is never
 fetched; an entry that also has an EPUB is got as ever
 (`e2e/drm-catalogue.spec.js`).
 
+**Copy details and Report on every read failure (#507).** A failure
+whose banner is about stored data or a book that could not be read
+offers Copy details and a Report link, as `notice_unexpected` does, and
+keeps the details for About's Copy last error details. The details are
+data built in one place (`_report_make` in `src/notice.bats`): Quire's
+version, the platform, the failure's name (`_failure_name`, a total
+match), a chapter's number or the length of a file's name, a line saying
+what the details hold ("no book text, titles or passwords") so the
+reader sees it before sending (Firefox's about:support and Signal's
+debug log both say what they hold, and hold none of the user's content),
+and, for a failure of records, how many the last read could not use and a
+line for each of the first 16 (`record_note`: the record's id, which is
+the hash of a file and not a title, why it cannot be used, its size and
+its first 12 bytes, which are the format's magic, kind and versions, as
+a crash report keeps a file's header and not its content). The library's
+read notes them (`libstore_read`) and the failure that says so takes
+them. Which failures have details is `detail_source_of`, a total match
+(`FromFailureAlone`, `FromRecordNotes`, `NothingToReport`, the last for a
+platform's refusal of a copy, a selection, a rotation lock, a grant or a
+narration, which leaves the details of the failure before it in
+place), so a failure added without saying does not type-check
+(`tests/static/reject/notice-without-details`). A later field (the groups
+lost, each one's CRC: #510) is one more field of `record_note` and one
+more line of `_put_note`. `e2e/notice-details.spec.js` checks each kind
+of record, annotations and settings: the buttons, the fields, no book
+text, and About.
+
 ## Every outcome is said, and the unexpected as such
 
 After #334, where a Google error that ended the consent screen reached
@@ -2222,6 +2540,23 @@ more than line positions change in it (bats-lang/bats#243):
   container's padding box than that. A full screen's rows and notes
   are cards inset 8 / 16 px (`spacing_rules`), a panel opened as a dialog
   16 px, a dialog 24 px. #332 is to prove the insets statically.
+* Only the spacing forms write a gap, padding or margin, and only
+  `scrolls`, `scrolling`, `clips` and `capped` write an overflow or a
+  max-height (#500): those properties are not in `lay`'s `prop` (they are
+  `spacing_prop`, which only the forms take), so `lay(sheet, Gap(), "10px")`
+  does not type-check (`tests/static/reject/lay-writes-gap`, `-padding`,
+  `-overflow`, `-max-height`). A value is a step of the scale (`SpaceNone`
+  to `SpaceExtraLarge`: `spaced`, `spaced_pair`), or a form named for what
+  it is: a safe-area inset (`spaced_safe`, `reserve_safe`), a margin pulled
+  out (`pulled`), automatic (`auto_margin`, `centred`), the book's em
+  (`prose_margin`), room kept for something drawn in the padding
+  (`reserve`: a chevron, a page number, an outline's indent, the Undo
+  toast), the reader's own variables (`page_padding`, `safe_area_margin`).
+  Values that were off the scale moved to the nearest step (2 to 4, 6 to
+  8, 10 to 12, 14 to 16), a few pixels. `offScale` in `e2e/controls-shown.js`
+  holds every visible element's gaps to the scale on every screen the walk
+  reaches. The sheet's budget is 64000 bytes (it was 60000): the costs the
+  forms declare are upper bounds, and the sheet stays under 65536.
 * The page's width and height are a whole number of pixels (`page_extent`,
   indexed by whether it is whole; `page_width_rule` and `page_height_rule`
   (`src/page_size.bats`, a module of its own so its fixtures check in a
@@ -2361,6 +2696,14 @@ deleted when the Undo offer is made final (#396 moves them to the Trash).
   Trash holds something. Nothing is purged by itself: that would be an
   irreversible action the reader did not take. A book in the Trash has
   Restore first in its menu.
+  Restore all books (`trash-restore-all`, quire#494; Windows' Recycle Bin
+  has "Restore all items" beside its empty button, Drive and Gmail only
+  select-all then restore) comes before Empty Trash, plain since nothing is
+  lost: `lib_restore_all` puts every book of the Trash on the shelf, as a
+  single Restore does, and returns the Trashed books' shelves, so the offer
+  `BooksRestored` (Undo) puts exactly those books back in the Trash
+  (`lib_untrash_all`) and its end lets them go (`lib_shelved_free`). It
+  says "books": the dictionaries in the Trash have their own Restore.
 
 What deletes is private to the module that owns it: deleting a book
 and emptying the Trash (`src/library.bats`), and dropping an
@@ -2399,8 +2742,10 @@ saved this session (`src/storage.bats`: its save checks
 `storage_savable`), and an unread book's annotations cannot be made;
 the banner says so. The library is read as its records are (below): one
 that could not be read at all is not saved this session and books are not
-added to it, and the screen says why and offers what fits (#374, below); a book's record that is damaged, newer or not Quire's is
-shown nowhere, said once and never written over. A backup that could not
+added to it, and the screen says why and offers what fits (#374, below); a book's record that is newer or not Quire's is
+shown nowhere, said once and never written over; one that lost a group, or
+that is under other ids than its key, is used, and one broken in its framing
+is read from the version before it when there is one, else shown nowhere (#510). A backup that could not
 read a book's notes is not made.
 
 The overlays (the menus, book info, the reader's panels and the full
@@ -2453,6 +2798,46 @@ of the app (`ui_link_out_https`, an address dom's `set_url_literal`
 sets) to the home page, privacy policy and terms (no link to the
 source: nothing in the app or its pages points to the repository but
 the GitHub issues the pages give for contact).
+
+Where sync and the backup are (#501): sync is how a new phone gets places,
+shelves and notes, so the library menu has a Sync item (two taps from the
+library, `MenuSync`, opening the Sync screen over the library, whose Escape
+or Back returns to it) and an empty library offers "Sync with another
+device" (`empty-sync`) beside Import and Get free books; the backup stays
+in Settings (three taps), with a line under the first group saying that sync
+keeps places, shelves and notes the same on the devices, that a backup holds
+them in a file, and that neither holds the books' files. By research: Play
+Books syncs through the Google account with no setting to find, Moon+ Reader
+keeps its backup in Settings; a prompt after the first book is not used (a
+nag before the reader has anything to lose). `e2e/settings-screen.spec.js`
+checks both depths and the empty library's offer.
+
+The reading settings' themes are swatches (#501, `theme_swatch_rules`): each
+fixed theme is a button that wears its theme's class (`th-sepia`), so its
+variables are that palette's and its sample "Aa" on its card is the theme's
+own pair, proven in every theme (`S_fg_card`), the chosen one ringed in its
+accent and underlined (`E_accent_card`); its name is its `aria-label`. Auto
+(the clock's) is a word. `looksActionable` (`e2e/controls-shown.js`, in
+`fits`) fails a chevron on something that is not a control, one that is
+not drawn, or one without a control's pointer.
+
+A pushed screen (Settings, Sync, Dictionaries, About: class `info`, opened
+from a row that ends in a chevron) has a top bar, not a Done at its foot
+(#502; Android's settings and Material 3's small top app bar have a
+navigation icon and the title, iOS pushes a screen with a back item and
+keeps Done for a sheet): `ui_screen_bar` makes a Back icon button (48 px,
+named "Back", the `SettingsBack`, `SyncBack`, `DictionariesBack` and
+`AboutBack` controls) and the screen's title, outside what scrolls
+(`.tbar`), so it stays at the top. Back does what Escape does (with a
+service's sign-in step open on Sync it ends the step), and the first focus
+of a screen is its Back. The error banner (z-index over the screens, so its
+Dismiss, Copy details and Report are pressed) sits under the bar while one is
+open (`ui_banner_below_bar`, `data-below`, set where the stack of overlays
+changes, `_open_set` in `src/layer.bats`): over the top of the screen it had
+covered Back (found by sync-dropbox-android.spec on #544). Statistics, Catalogues and Collections are
+centred dialogs and keep their Done (`dismiss_label(DismissScreen)`).
+`e2e/settings-screen.spec.js` checks the four bars, that none has a Done, that
+the bar stays put as the screen scrolls, and that Back closes it.
 
 The home page, privacy policy and terms are plain static HTML in
 `homepage/` (#216), published by `deploy.yml` beside the app at
@@ -2556,6 +2941,14 @@ research (what comparable library apps do) and written here:
   the Catalogues). Every other reason for an empty view is said and offers
   nothing, since importing would not change it. The unreadable library
   (#374) keeps the bar's inert Import and no offer.
+* **The book menu button is one box in both views** (#495): a 48 by 48
+  square, `align-self: center` in the list (the card row stretches its
+  children, which made it as tall as the card) and over the cover's corner
+  in the grid; Material 3's trailing icon button is a 48dp target round a
+  24dp glyph, centred in a one- or two-line list item and in the corner of a
+  media card, never stretched. `cardMoreBoxes` (`e2e/controls-shown.js`)
+  measures it, and `e2e/layout.spec.js` fails if the list's and the grid's
+  boxes differ.
 * **One word for a book's state** (`reading_state`: `StateUnread |
   StateReading | StateFinished`, `_reading_state_of`): the filter and the
   card use it, so the card says Unread and Finished where it said New and
@@ -2592,7 +2985,9 @@ aloud and a drag. A copy of the page is kept in an overlay
 removed, `inert` set, its scroll set: quire's policy, not bridge's),
 again a moment (`COPY_SETTLE_MS`) after the page last changed (a
 chapter shown, laid out anew, an image come in), so a turn only
-scrolls the copy to the place and shows it: on a 300 KB chapter its
+scrolls the copy to the place and shows it (the copy's images share the page's
+blob URLs, which bridge revokes only once no image still loading holds them,
+quire#532, `e2e/progress.spec.js`): on a 300 KB chapter its
 first frame comes in 20 to 30 ms, where making the copy at the turn
 took 110 to 200 (`e2e/page-turn.spec.js` holds it within 30 ms of an
 instant turn's, in the same page). A turn shows only a `fresh_copy`,
@@ -2731,6 +3126,19 @@ a vertical Japanese one, and a left to right one; `vertical.spec.js`
 fails first, naming the cause, where no font has Japanese characters
 (CI installs `fonts-noto-cjk`).
 
+A bookmarked page shows its mark once the bars hide (#388): a ribbon
+(`bookmark-mark`, `.bmk`, clipped by `clip-path`) in the page's top-right
+corner, inside the `--page-top` band, in the accent (proven on the ground as
+text is, `S_accent_bg`), shown by `.chrome-off .bmk-on`; `annot_star`, the one
+place the bookmark's state reaches the screen, matches a `bookmark_state`
+(`Marked | Unmarked`) to set the star and the mark together. Kindle and Kobo
+draw theirs in that corner; with the bars up the star says it. The bottom bar
+has Previous chapter and Next chapter beside the page turns (`chapter-previous`,
+`chapter-next`, `reader_chapter_step`), shown where there is a chapter to go
+to and not in a fixed-layout book (its chapters are its pages), following the
+reading direction as the page turns do (`.bot.rtl` orders): the next chapter is
+two taps from the page, three through Contents. `e2e/page-marks.spec.js`.
+
 A book is set vertically as Readium sets it, from its OPF (the book's
 CSS is dropped): `vertical-rl` when its spine reads right to left and
 its language is Chinese, Japanese or Korean, `vertical-lr` for
@@ -2833,10 +3241,17 @@ numbered g is armed; `_ps_put`, the only code that shows or hides the
 button, shows it exactly in that state. `TIMED`'s constructor is local to
 `_timed_arm`, which arms the timer, so no other code can make one, and a
 proof for one number does not type-check as another's. When the timeout
-runs (10 s, `BACK_SHOWN`) the button goes with its positions, unless a
-later jump has armed a later timeout. It goes sooner when a page is
-turned, the bars are brought up (`_chrome_set`), or a book is opened or
-closed (`reader_stack_clear`).
+runs (10 s, `BACK_SHOWN`) the button goes but the positions are kept
+(`PsKept`, #384: Apple Books reaches "previous location" from a control
+that does not expire, KOReader keeps it until used), unless a later jump
+has armed a later timeout. It goes sooner when a page is turned or the
+bars are brought up (`_chrome_set`), also keeping them; Contents shows
+"Back to <chapter> · page N" (`contents-back`) while a position is kept,
+and pressing it pops it as the button does. Opening or closing a book
+forgets them (`reader_stack_clear`). The first-book hint (#384) says
+both gestures (`gesture`: `TapSides | TapMiddle`, `gesture_hint`), lies
+in the band the text keeps clear of (`hint_band`: `TopBand | BottomBand`,
+no centre case) and is up for 8 s after the bars first hide.
 `tests/static` holds code that must not type-check (a forged `TIMED`,
 another timeout's proof, the button with nothing to offer), and code
 that must (`_back_offer`); CI runs `tests/static/run.sh`.
@@ -2936,6 +3351,41 @@ page, so the paragraph the reader was at stays on the page shown
 whichever way the area changes (`e2e/layout.spec.js`, "the place stays
 when the reading area changes"); where the page breaks fall is the
 layout's, as in Kindle and Books.
+Scrolled, a hand scroll within one screenful is a move too (#485): the
+place is the node now at the top of what is seen (`reader_scrolled`
+clears the node a restore keeps and records the position, when the page
+is not where `_show_page_down` last put it: `_scroll_set`), and a layout
+made anew shows that node at the top, snapping to the old screen's top
+only for the first drawn node to start at or below it (`_show_target`).
+`e2e/stability.spec.js` scrolls a part of a screenful, swaps the window
+twice and expects the same paragraph on top.
+
+## Nothing of one book shows in the next (#435)
+
+`e2e/two-books.spec.js` opens a book that has every per-book feature (Alpha:
+five chapters, a nested contents, a page list, a note, a ruby, a Media Overlays
+narration, left to right, Japanese; bookmarks, a highlight, a search gone to, a
+jump with the back button up, Columns Two, the narration playing) and then one
+that has none (Beta: two chapters, no page list, no ruby, no narration, Hebrew
+read right to left), and checks each of Beta's panels, rows, bars and records
+is Beta's; a vertical book (Gamma) and a fixed-layout one (Delta) are opened
+before Beta to check the writing mode and the page box are not carried. The
+books are in `e2e/two-books-books.js` and checked by epubcheck. Beta is opened
+from the library, from an OPDS catalogue's Get, and after a reload that kept the
+view; Alpha is opened again after Beta; and the records kept for Beta after
+Alpha equal those kept for Beta opened first in a profile of its own (the record
+without its position in the library's order, the reader's settings, the same
+file so the same id; the sync the android project makes as the app opens is
+waited out by `reloadSettled`). It found one leak, fixed: the in-book search
+field kept what was typed in the last book (`_library_shown` makes it afresh,
+`app_book_search`).
+
+By decision, the narration's clip table is not probed (no hook for a test in the
+shipped build; Playwright's guidance is to test what a user sees): the table's
+release is checked by what it is for, Beta offers no narration controls and the
+audio element is paused and holds only a blob URL the app revoked (the page's
+`URL.revokeObjectURL` is noted by the spec). The fixed-layout box and the
+writing mode are checked in the page, not in the cells.
 
 ## Pathological structure (#423)
 
@@ -3009,6 +3459,19 @@ length, in the same page, so a slower machine slows both. What it found:
   keeps no copy made ahead either (`_copy_stale`): the clone of its whole DOM
   was 3 s of script for 30,000 nodes, in which the page did not answer; a
   drag, which does lay a copy, makes one then.
+* **Close does not wait for the layout, and the layout can outlast a check
+  (#522).** Choosing Two on the megabyte word and pressing Escape: the
+  dialog's `data-hide` flips within milliseconds of the key (measured with a
+  MutationObserver and a longtask observer, then with Chrome's CPU throttled
+  25 times: the flip came 6 ms before a single 15.7 s task, the columns' layout,
+  which the click made dirty and Chrome does in the next frame). Playwright's
+  `toBeHidden` needs the page laid out to say so, so on a loaded runner it
+  waited behind that task and failed at 15 s twice (#518, #533). So the
+  app's part is asserted by its attribute (`arrange`), the dialog gone from the
+  screen waits as long as the layout it follows (`slow`), and a test dispatches
+  the click on Two and the Escape in one script, so no frame lies between them,
+  and finds the dialog already hidden. The 15 s is not raised: the hide is
+  checked with no layout in the way.
 * **The anchor is found by search, not by hit test.** `_anchor_now` took the
   element at a point (`elementFromPoint`, then stepping 40 px at a time),
   and then the first of the next 40 nodes to start on the page. A hit test
@@ -3051,9 +3514,30 @@ length, in the same page, so a slower machine slows both. What it found:
   390 px phone went from 17 s (Two) to 1.5 s, and the opening to 1 s. A
   text node over 64 KiB in mixed content breaks its line at each piece (a
   paragraph break appearing in a 64 KiB run is the price; search counts
-  pieces with the same `_text_cut`, so its node numbers agree; a note or
-  highlight stored in a text node of 64 KiB or more may find its offset
-  moved by up to 512 bytes into the next piece). The open budget the spec
+  pieces with the same `_text_cut`, so its node numbers agree). A stored
+  note or highlight in such a text is a piece's content node and a UTF-16
+  offset in that piece's text (bridge's `get_selection_range` gives offsets
+  into the text of the element with the id, which is the piece), and the cut
+  is a function of the text alone, so a place stored by this build is found
+  exactly by it again, after a reload, a restored backup and a sync
+  (`e2e/giant-text-highlights.spec.js`: highlights at the end of a piece, at
+  the start of the next, across a cut and inside a third, paged, scrolled and
+  in two columns, with accents and an emoji in the words; a last test restores
+  places stored by this build and they must paint the same words, so a
+  changed cut fails there). The cut is part of the format of a stored place:
+  changing `_text_cut` moves the places stored in the pieces after the first
+  of a text over 64 KiB (the first starts where the text does) and needs a
+  version of the annotations' record to translate by. A place stored by a
+  build before #423 (pieces cut at a character, not at white space) is read
+  against these pieces and may land up to 512 bytes per piece from where it
+  was made, in the second and later pieces of such a text; no version of the
+  record says which cut a place was stored with. Making places independent
+  of the cut (the pieces as `data-part` parts of one content node, as the
+  digits of vertical text are) was weighed and not taken: one content node
+  per text would make the reading place, a content node and the page that
+  holds it, as coarse as the whole text (a megabyte paragraph one place), and
+  search and read aloud would need the UTF-16 length of the pieces before
+  one for their offsets (#470). The open budget the spec
   asserts (`expectOpenBudget`): the time from the card's tap to the
   chapter's indicator, and from the choice of Two, Scroll or One to its
   page indicator, is at most 3 times Chrome's own time to lay out and

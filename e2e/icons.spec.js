@@ -121,7 +121,7 @@ test('every icon of the library, its search, its menu, Settings and a catalogue 
   await page.keyboard.press('Escape');
   await librarySettings(page);
   await iconsDrawn(page, 'Settings');
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await expect(settingsScreen(page)).toBeHidden();
   // a catalogue browsed: its Back and Close
   await libraryMenu(page);

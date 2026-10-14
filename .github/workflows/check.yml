@@ -29,6 +29,8 @@ jobs:
       # main only; its script is checked here against a stub of Play
       - name: The Play release script
         run: tests/play-release/run.sh
+      - name: The with-env script
+        run: tests/with-env/run.sh
 
   # The app and the PWA, built once: the Android project and the e2e
   # groups take them from here (the quire-android artifact)
@@ -126,6 +128,11 @@ jobs:
       # 32 bits, damage to every byte, fuzz (#354)
       - name: Codec tests
         run: tests/codec/run.sh $HOME/repository
+
+      # The CSS font-size reader, natively: values and units, declaration
+      # blocks, selectors, whole style sheets and fuzz (#431)
+      - name: CSS size tests
+        run: tests/css-size/run.sh $HOME/repository
 
       # Only after everything above passed: a cache holds no failed build
       - name: Save the compiler cache

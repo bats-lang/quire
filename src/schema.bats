@@ -53,10 +53,11 @@ staload "fields.sats"
   | m_opt of ()       (* a damaged one is lost (its defaults stand in); every version of the format writes it *)
   | m_added of ()     (* a damaged one is lost; and a record written before the group was added has none: that is no loss *)
 
-(* MUSTHAVE(mode): a record without the group is not whole *)
-#pub dataprop MUSTHAVE(mode) =
-  | MUSTHAVE_req(m_req())
-  | MUSTHAVE_opt(m_opt())
+(* LOSES(mode): a record without the group, or with it damaged, is read with the group's defaults standing in for it
+   (substitutes, for a group the record needs), and the group is said to be lost (quire#510: a record is used) *)
+#pub dataprop LOSES(mode) =
+  | LOSES_req(m_req())
+  | LOSES_opt(m_opt())
 
 #pub datasort specs =
   | gs_nil of ()
@@ -106,6 +107,295 @@ primplement known_not_notknown {known}{tag}{position} (known_proof, unknown_proo
 #pub prfun anc_not_crit {tag:bytes} (ANC(tag), CRIT(tag)): FALSEP()
 
 primplement anc_not_crit {tag} (ancillary, critical) = (case+ ancillary of ANC_mk() => (case+ critical of CRIT_mk() =/=> ()))
+
+(* differing is symmetric *)
+#pub prfun tagdiff_swap {left_tag,right_tag:bytes} (TAGDIFF(left_tag, right_tag)): TAGDIFF(right_tag, left_tag)
+
+primplement tagdiff_swap {left_tag,right_tag} (different) = (case+ different of TAGDIFF_mk() => TAGDIFF_mk())
+
+(* a tag that is one of the groups' differs from one that none is *)
+#pub prfun known_notknown_diff {known:specs}{tag,other:bytes}{position:nat} (KNOWN(known, tag, position), NOTKNOWN(known, other)): TAGDIFF(other, tag)
+
+prfun _known_notknown_diff {known:specs}{tag,other:bytes}{position:nat} .<position>. (known_proof: KNOWN(known, tag, position), unknown_proof: NOTKNOWN(known, other)): TAGDIFF(other, tag) =
+  case+ known_proof of
+  | KNOWN_here() => (case+ unknown_proof of NOTKNOWN_cons(different, _) => tagdiff_swap(different))
+  | KNOWN_later(known_rest) => (case+ unknown_proof of NOTKNOWN_cons(_, unknown_rest) => _known_notknown_diff(known_rest, unknown_rest))
+
+primplement known_notknown_diff {known}{tag,other}{position} (known_proof, unknown_proof) = _known_notknown_diff(known_proof, unknown_proof)
+
+(* SPECSOK(known): the groups' tags are all different (a group's is none of those after it) *)
+#pub dataprop SPECSOK(specs) =
+  | SPECSOK_nil(gs_nil())
+  | {tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{more:specs}
+    SPECSOK_cons(gs_cons(tag, kinds, requirement, defaults, more)) of (NOTKNOWN(more, tag), SPECSOK(more))
+
+(* TAILOF(known, tail, depth): tail is known with its first depth groups dropped *)
+#pub dataprop TAILOF(specs, specs, int) =
+  | {known:specs} TAILOF_refl(known, known, 0)
+  | {known:specs}{tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{tail:specs}{depth:nat}
+    TAILOF_drop(gs_cons(tag, kinds, requirement, defaults, known), tail, depth+1) of TAILOF(known, tail, depth)
+
+(* what follows the first group of a tail is a tail *)
+#pub prfun tailof_next {known:specs}{tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{more:specs}{depth:nat}
+  (TAILOF(known, gs_cons(tag, kinds, requirement, defaults, more), depth)): TAILOF(known, more, depth+1)
+
+prfun _tailof_next {known:specs}{tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{more:specs}{depth:nat} .<depth>.
+  (tail: TAILOF(known, gs_cons(tag, kinds, requirement, defaults, more), depth)): TAILOF(known, more, depth+1) =
+  case+ tail of
+  | TAILOF_refl() => TAILOF_drop(TAILOF_refl())
+  | TAILOF_drop(prior) => TAILOF_drop(_tailof_next(prior))
+
+primplement tailof_next {known}{tag}{kinds}{requirement}{defaults}{more}{depth} (tail) = _tailof_next(tail)
+
+(* the first group of a tail is known, at the position of its depth *)
+#pub prfun tailof_known {known:specs}{tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{more:specs}{depth:nat}
+  (TAILOF(known, gs_cons(tag, kinds, requirement, defaults, more), depth)): KNOWN(known, tag, depth)
+
+prfun _tailof_known {known:specs}{tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{more:specs}{depth:nat} .<depth>.
+  (tail: TAILOF(known, gs_cons(tag, kinds, requirement, defaults, more), depth)): KNOWN(known, tag, depth) =
+  case+ tail of
+  | TAILOF_refl() => KNOWN_here()
+  | TAILOF_drop(prior) => KNOWN_later(_tailof_known(prior))
+
+primplement tailof_known {known}{tag}{kinds}{requirement}{defaults}{more}{depth} (tail) = _tailof_known(tail)
+
+(* NOTAG(tag, chunks): none of chunks, whole or damaged, has this tag *)
+#pub dataprop NOTAG(bytes, pchunks) =
+  | {tag:bytes} NOTAG_nil(tag, pnil())
+  | {tag,other,data:bytes}{rest:pchunks} NOTAG_good(tag, pgood(other, data, rest)) of (TAGDIFF(other, tag), NOTAG(tag, rest))
+  | {tag,other:bytes}{rest:pchunks} NOTAG_bad(tag, pbad(other, rest)) of (TAGDIFF(other, tag), NOTAG(tag, rest))
+
+(* which chunk of a tag a record is read by: none, the last whole one (its data), or, with none whole, a damaged one *)
+#pub datasort selected =
+  | sel_none of ()
+  | sel_good of (bytes)
+  | sel_bad of ()
+
+(* EXT(tag, chunks, chosen, others, dropped): the chunks of this tag are taken out of chunks, in any place; the last
+   whole one is chosen (else a damaged one, else none), the others stay, in their order, and the tag is among those
+   dropped once for each chunk of it that was not chosen *)
+#pub dataprop EXT(bytes, pchunks, selected, pchunks, lost) =
+  | {tag:bytes} EXT_nil(tag, pnil(), sel_none(), pnil(), lt_nil())
+  | {tag,other,data:bytes}{rest,others:pchunks}{chosen:selected}{dropped:lost}
+    EXT_skip_good(tag, pgood(other, data, rest), chosen, pgood(other, data, others), dropped) of (TAGDIFF(other, tag), EXT(tag, rest, chosen, others, dropped))
+  | {tag,other:bytes}{rest,others:pchunks}{chosen:selected}{dropped:lost}
+    EXT_skip_bad(tag, pbad(other, rest), chosen, pbad(other, others), dropped) of (TAGDIFF(other, tag), EXT(tag, rest, chosen, others, dropped))
+  | {tag,data:bytes}{rest,others:pchunks}{dropped:lost}
+    EXT_good_last(tag, pgood(tag, data, rest), sel_good(data), others, dropped) of EXT(tag, rest, sel_none(), others, dropped)
+  | {tag,data,later:bytes}{rest,others:pchunks}{dropped:lost}
+    EXT_good_shadowed(tag, pgood(tag, data, rest), sel_good(later), others, lt_cons(tag, dropped)) of EXT(tag, rest, sel_good(later), others, dropped)
+  | {tag,data:bytes}{rest,others:pchunks}{dropped:lost}
+    EXT_good_over_bad(tag, pgood(tag, data, rest), sel_good(data), others, lt_cons(tag, dropped)) of EXT(tag, rest, sel_bad(), others, dropped)
+  | {tag:bytes}{rest,others:pchunks}{dropped:lost}
+    EXT_bad_last(tag, pbad(tag, rest), sel_bad(), others, dropped) of EXT(tag, rest, sel_none(), others, dropped)
+  | {tag,later:bytes}{rest,others:pchunks}{dropped:lost}
+    EXT_bad_shadowed(tag, pbad(tag, rest), sel_good(later), others, lt_cons(tag, dropped)) of EXT(tag, rest, sel_good(later), others, dropped)
+  | {tag:bytes}{rest,others:pchunks}{dropped:lost}
+    EXT_bad_over_bad(tag, pbad(tag, rest), sel_bad(), others, lt_cons(tag, dropped)) of EXT(tag, rest, sel_bad(), others, dropped)
+
+#pub dataprop EQEXT(selected, pchunks, lost, selected, pchunks, lost) =
+  | {chosen:selected}{others:pchunks}{dropped:lost} EQEXT_refl(chosen, others, dropped, chosen, others, dropped)
+
+#pub prfun ext_functional {tag:bytes}{chunks:pchunks}{chunk_count:nat}{first_chosen,second_chosen:selected}{first_others,second_others:pchunks}{first_dropped,second_dropped:lost}
+  (PCN(chunk_count, chunks), EXT(tag, chunks, first_chosen, first_others, first_dropped), EXT(tag, chunks, second_chosen, second_others, second_dropped))
+  : EQEXT(first_chosen, first_others, first_dropped, second_chosen, second_others, second_dropped)
+
+prfun _ext_functional {tag:bytes}{chunks:pchunks}{chunk_count:nat}{first_chosen,second_chosen:selected}{first_others,second_others:pchunks}{first_dropped,second_dropped:lost} .<chunk_count>.
+  (count: PCN(chunk_count, chunks), left: EXT(tag, chunks, first_chosen, first_others, first_dropped), right: EXT(tag, chunks, second_chosen, second_others, second_dropped))
+  : EQEXT(first_chosen, first_others, first_dropped, second_chosen, second_others, second_dropped) =
+  case+ left of
+  | EXT_nil() => (case+ right of EXT_nil() => EQEXT_refl())
+  | EXT_skip_good(left_diff, left_rest) =>
+    (case+ right of
+     | EXT_skip_good(_, right_rest) => let
+         prval PCN_good(count1) = count
+         prval EQEXT_refl() = _ext_functional(count1, left_rest, right_rest)
+       in EQEXT_refl() end
+     | EXT_good_last(_) => (case+ left_diff of TAGDIFF_mk() =/=> ())
+     | EXT_good_shadowed(_) => (case+ left_diff of TAGDIFF_mk() =/=> ())
+     | EXT_good_over_bad(_) => (case+ left_diff of TAGDIFF_mk() =/=> ()))
+  | EXT_skip_bad(left_diff, left_rest) =>
+    (case+ right of
+     | EXT_skip_bad(_, right_rest) => let
+         prval PCN_bad(count1) = count
+         prval EQEXT_refl() = _ext_functional(count1, left_rest, right_rest)
+       in EQEXT_refl() end
+     | EXT_bad_last(_) => (case+ left_diff of TAGDIFF_mk() =/=> ())
+     | EXT_bad_shadowed(_) => (case+ left_diff of TAGDIFF_mk() =/=> ())
+     | EXT_bad_over_bad(_) => (case+ left_diff of TAGDIFF_mk() =/=> ()))
+  | EXT_good_last(left_rest) =>
+    (case+ right of
+     | EXT_skip_good(right_diff, _) => (case+ right_diff of TAGDIFF_mk() =/=> ())
+     | EXT_good_last(right_rest) => let
+         prval PCN_good(count1) = count
+         prval EQEXT_refl() = _ext_functional(count1, left_rest, right_rest)
+       in EQEXT_refl() end
+     | EXT_good_shadowed(right_rest) => let
+         prval PCN_good(count1) = count
+       in (case+ _ext_functional(count1, left_rest, right_rest) of EQEXT_refl() =/=> ()) end
+     | EXT_good_over_bad(right_rest) => let
+         prval PCN_good(count1) = count
+       in (case+ _ext_functional(count1, left_rest, right_rest) of EQEXT_refl() =/=> ()) end)
+  | EXT_good_shadowed(left_rest) =>
+    (case+ right of
+     | EXT_skip_good(right_diff, _) => (case+ right_diff of TAGDIFF_mk() =/=> ())
+     | EXT_good_last(right_rest) => let
+         prval PCN_good(count1) = count
+       in (case+ _ext_functional(count1, left_rest, right_rest) of EQEXT_refl() =/=> ()) end
+     | EXT_good_shadowed(right_rest) => let
+         prval PCN_good(count1) = count
+         prval EQEXT_refl() = _ext_functional(count1, left_rest, right_rest)
+       in EQEXT_refl() end
+     | EXT_good_over_bad(right_rest) => let
+         prval PCN_good(count1) = count
+       in (case+ _ext_functional(count1, left_rest, right_rest) of EQEXT_refl() =/=> ()) end)
+  | EXT_good_over_bad(left_rest) =>
+    (case+ right of
+     | EXT_skip_good(right_diff, _) => (case+ right_diff of TAGDIFF_mk() =/=> ())
+     | EXT_good_last(right_rest) => let
+         prval PCN_good(count1) = count
+       in (case+ _ext_functional(count1, left_rest, right_rest) of EQEXT_refl() =/=> ()) end
+     | EXT_good_shadowed(right_rest) => let
+         prval PCN_good(count1) = count
+       in (case+ _ext_functional(count1, left_rest, right_rest) of EQEXT_refl() =/=> ()) end
+     | EXT_good_over_bad(right_rest) => let
+         prval PCN_good(count1) = count
+         prval EQEXT_refl() = _ext_functional(count1, left_rest, right_rest)
+       in EQEXT_refl() end)
+  | EXT_bad_last(left_rest) =>
+    (case+ right of
+     | EXT_skip_bad(right_diff, _) => (case+ right_diff of TAGDIFF_mk() =/=> ())
+     | EXT_bad_last(right_rest) => let
+         prval PCN_bad(count1) = count
+         prval EQEXT_refl() = _ext_functional(count1, left_rest, right_rest)
+       in EQEXT_refl() end
+     | EXT_bad_shadowed(right_rest) => let
+         prval PCN_bad(count1) = count
+       in (case+ _ext_functional(count1, left_rest, right_rest) of EQEXT_refl() =/=> ()) end
+     | EXT_bad_over_bad(right_rest) => let
+         prval PCN_bad(count1) = count
+       in (case+ _ext_functional(count1, left_rest, right_rest) of EQEXT_refl() =/=> ()) end)
+  | EXT_bad_shadowed(left_rest) =>
+    (case+ right of
+     | EXT_skip_bad(right_diff, _) => (case+ right_diff of TAGDIFF_mk() =/=> ())
+     | EXT_bad_last(right_rest) => let
+         prval PCN_bad(count1) = count
+       in (case+ _ext_functional(count1, left_rest, right_rest) of EQEXT_refl() =/=> ()) end
+     | EXT_bad_shadowed(right_rest) => let
+         prval PCN_bad(count1) = count
+         prval EQEXT_refl() = _ext_functional(count1, left_rest, right_rest)
+       in EQEXT_refl() end
+     | EXT_bad_over_bad(right_rest) => let
+         prval PCN_bad(count1) = count
+       in (case+ _ext_functional(count1, left_rest, right_rest) of EQEXT_refl() =/=> ()) end)
+  | EXT_bad_over_bad(left_rest) =>
+    (case+ right of
+     | EXT_skip_bad(right_diff, _) => (case+ right_diff of TAGDIFF_mk() =/=> ())
+     | EXT_bad_last(right_rest) => let
+         prval PCN_bad(count1) = count
+       in (case+ _ext_functional(count1, left_rest, right_rest) of EQEXT_refl() =/=> ()) end
+     | EXT_bad_shadowed(right_rest) => let
+         prval PCN_bad(count1) = count
+       in (case+ _ext_functional(count1, left_rest, right_rest) of EQEXT_refl() =/=> ()) end
+     | EXT_bad_over_bad(right_rest) => let
+         prval PCN_bad(count1) = count
+         prval EQEXT_refl() = _ext_functional(count1, left_rest, right_rest)
+       in EQEXT_refl() end)
+
+primplement ext_functional {tag}{chunks}{chunk_count}{first_chosen,second_chosen}{first_others,second_others}{first_dropped,second_dropped} (count, left, right) = _ext_functional(count, left, right)
+
+(* a list with no chunk of the tag gives nothing, and keeps every chunk *)
+#pub prfun notag_ext {tag:bytes}{chunks:pchunks}{chunk_count:nat} (PCN(chunk_count, chunks), NOTAG(tag, chunks)): EXT(tag, chunks, sel_none(), chunks, lt_nil())
+
+prfun _notag_ext {tag:bytes}{chunks:pchunks}{chunk_count:nat} .<chunk_count>. (count: PCN(chunk_count, chunks), absent: NOTAG(tag, chunks)): EXT(tag, chunks, sel_none(), chunks, lt_nil()) =
+  case+ absent of
+  | NOTAG_nil() => EXT_nil()
+  | NOTAG_good(different, rest) => let
+      prval PCN_good(count1) = count
+    in EXT_skip_good(different, _notag_ext(count1, rest)) end
+  | NOTAG_bad(different, rest) => let
+      prval PCN_bad(count1) = count
+    in EXT_skip_bad(different, _notag_ext(count1, rest)) end
+
+primplement notag_ext {tag}{chunks}{chunk_count} (count, absent) = _notag_ext(count, absent)
+
+(* LOSTCAT(first, second, both, first_n): both is first (first_n tags) and then second *)
+#pub dataprop LOSTCAT(lost, lost, lost, int) =
+  | {second:lost} LOSTCAT_nil(lt_nil(), second, second, 0)
+  | {tag:bytes}{first,second,both:lost}{first_n:nat} LOSTCAT_cons(lt_cons(tag, first), second, lt_cons(tag, both), first_n+1) of LOSTCAT(first, second, both, first_n)
+
+#pub dataprop EQLOST(lost, lost) =
+  | {tags:lost} EQLOST_refl(tags, tags)
+
+#pub prfun lostcat_functional {first,second,left_both,right_both:lost}{left_n,right_n:nat} (LOSTCAT(first, second, left_both, left_n), LOSTCAT(first, second, right_both, right_n)): EQLOST(left_both, right_both)
+
+prfun _lostcat_functional {first,second,left_both,right_both:lost}{left_n,right_n:nat} .<left_n>. (left: LOSTCAT(first, second, left_both, left_n), right: LOSTCAT(first, second, right_both, right_n)): EQLOST(left_both, right_both) =
+  case+ left of
+  | LOSTCAT_nil() => (case+ right of LOSTCAT_nil() => EQLOST_refl())
+  | LOSTCAT_cons(left_rest) =>
+    (case+ right of
+     | LOSTCAT_cons(right_rest) => let
+         prval EQLOST_refl() = _lostcat_functional(left_rest, right_rest)
+       in EQLOST_refl() end)
+
+primplement lostcat_functional {first,second,left_both,right_both}{left_n,right_n} (left, right) = _lostcat_functional(left, right)
+
+(* CANON(group_specs, spec_n, chunks, canonical, dropped): the chunks of each group of group_specs (spec_n of them) are
+   taken out of chunks, in any place, and put in the order of the groups, each tag once (EXT); what is left follows.
+   The tags dropped are those of the chunks not chosen. A record is read from its canonical chunks *)
+#pub dataprop CANON(specs, int, pchunks, pchunks, lost) =
+  | {chunks:pchunks} CAN_nil(gs_nil(), 0, chunks, chunks, lt_nil())
+  | {group_tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{more:specs}{spec_n:nat}{chunks,others,canonical:pchunks}{other_count,first_n:nat}{first,second,dropped:lost}
+    CAN_none(gs_cons(group_tag, kinds, requirement, defaults, more), spec_n+1, chunks, canonical, dropped)
+    of (EXT(group_tag, chunks, sel_none(), others, first), PCN(other_count, others), CANON(more, spec_n, others, canonical, second), LOSTCAT(first, second, dropped, first_n))
+  | {group_tag,data:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{more:specs}{spec_n:nat}{chunks,others,canonical:pchunks}{other_count,first_n:nat}{first,second,dropped:lost}
+    CAN_good(gs_cons(group_tag, kinds, requirement, defaults, more), spec_n+1, chunks, pgood(group_tag, data, canonical), dropped)
+    of (EXT(group_tag, chunks, sel_good(data), others, first), PCN(other_count, others), CANON(more, spec_n, others, canonical, second), LOSTCAT(first, second, dropped, first_n))
+  | {group_tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{more:specs}{spec_n:nat}{chunks,others,canonical:pchunks}{other_count,first_n:nat}{first,second,dropped:lost}
+    CAN_bad(gs_cons(group_tag, kinds, requirement, defaults, more), spec_n+1, chunks, pbad(group_tag, canonical), dropped)
+    of (EXT(group_tag, chunks, sel_bad(), others, first), PCN(other_count, others), CANON(more, spec_n, others, canonical, second), LOSTCAT(first, second, dropped, first_n))
+
+#pub dataprop EQCAN(pchunks, lost, pchunks, lost) =
+  | {canonical:pchunks}{dropped:lost} EQCAN_refl(canonical, dropped, canonical, dropped)
+
+#pub prfun canon_functional {group_specs:specs}{spec_n:nat}{chunks:pchunks}{chunk_count:nat}{left_canonical,right_canonical:pchunks}{left_dropped,right_dropped:lost}
+  (PCN(chunk_count, chunks), CANON(group_specs, spec_n, chunks, left_canonical, left_dropped), CANON(group_specs, spec_n, chunks, right_canonical, right_dropped))
+  : EQCAN(left_canonical, left_dropped, right_canonical, right_dropped)
+
+prfun _canon_functional {group_specs:specs}{spec_n:nat}{chunks:pchunks}{chunk_count:nat}{left_canonical,right_canonical:pchunks}{left_dropped,right_dropped:lost} .<spec_n>.
+  (count: PCN(chunk_count, chunks), left: CANON(group_specs, spec_n, chunks, left_canonical, left_dropped), right: CANON(group_specs, spec_n, chunks, right_canonical, right_dropped))
+  : EQCAN(left_canonical, left_dropped, right_canonical, right_dropped) =
+  case+ left of
+  | CAN_nil() => (case+ right of CAN_nil() => EQCAN_refl())
+  | CAN_none(left_ext, left_count, left_rest, left_cat) =>
+    (case+ right of
+     | CAN_none(right_ext, _, right_rest, right_cat) => let
+         prval EQEXT_refl() = ext_functional(count, left_ext, right_ext)
+         prval EQCAN_refl() = _canon_functional(left_count, left_rest, right_rest)
+         prval EQLOST_refl() = lostcat_functional(left_cat, right_cat)
+       in EQCAN_refl() end
+     | CAN_good(right_ext, _, _, _) => (case+ ext_functional(count, left_ext, right_ext) of EQEXT_refl() =/=> ())
+     | CAN_bad(right_ext, _, _, _) => (case+ ext_functional(count, left_ext, right_ext) of EQEXT_refl() =/=> ()))
+  | CAN_good(left_ext, left_count, left_rest, left_cat) =>
+    (case+ right of
+     | CAN_none(right_ext, _, _, _) => (case+ ext_functional(count, left_ext, right_ext) of EQEXT_refl() =/=> ())
+     | CAN_good(right_ext, _, right_rest, right_cat) => let
+         prval EQEXT_refl() = ext_functional(count, left_ext, right_ext)
+         prval EQCAN_refl() = _canon_functional(left_count, left_rest, right_rest)
+         prval EQLOST_refl() = lostcat_functional(left_cat, right_cat)
+       in EQCAN_refl() end
+     | CAN_bad(right_ext, _, _, _) => (case+ ext_functional(count, left_ext, right_ext) of EQEXT_refl() =/=> ()))
+  | CAN_bad(left_ext, left_count, left_rest, left_cat) =>
+    (case+ right of
+     | CAN_none(right_ext, _, _, _) => (case+ ext_functional(count, left_ext, right_ext) of EQEXT_refl() =/=> ())
+     | CAN_good(right_ext, _, _, _) => (case+ ext_functional(count, left_ext, right_ext) of EQEXT_refl() =/=> ())
+     | CAN_bad(right_ext, _, right_rest, right_cat) => let
+         prval EQEXT_refl() = ext_functional(count, left_ext, right_ext)
+         prval EQCAN_refl() = _canon_functional(left_count, left_rest, right_rest)
+         prval EQLOST_refl() = lostcat_functional(left_cat, right_cat)
+       in EQCAN_refl() end)
+
+primplement canon_functional {group_specs}{spec_n}{chunks}{chunk_count}{left_canonical,right_canonical}{left_dropped,right_dropped} (count, left, right) = _canon_functional(count, left, right)
 
 (* PREPV(field_values, rest_result, whole_result): whole_result is rest_result with the values of a group in front *)
 #pub dataprop PREPV(fvals, sdres, sdres) =
@@ -194,7 +484,9 @@ primplement falsep_eqsd {left_result,right_result} (falsity) = case+ falsity of 
 #pub dataprop XDEC(specs, pchunks, sdres) =
   | {known:specs} XD_nil(known, pnil(), sd_ok(gv_nil(), ex_nil(), ab_nil()))
   | {known:specs}{tag,data:bytes}{rest:pchunks}{rest_result,whole_result:sdres}
-    XD_anc(known, pgood(tag, data, rest), whole_result) of (ANC(tag), XDEC(known, rest, rest_result), PREPX(tag, data, rest_result, whole_result))
+    XD_anc(known, pgood(tag, data, rest), whole_result) of (ANC(tag), NOTKNOWN(known, tag), XDEC(known, rest, rest_result), PREPX(tag, data, rest_result, whole_result))
+  | {known:specs}{tag,data:bytes}{rest:pchunks}{position:nat}
+    XD_anc_known(known, pgood(tag, data, rest), sd_fail(cause_damaged())) of (ANC(tag), KNOWN(known, tag, position))
   | {known:specs}{tag:bytes}{rest:pchunks}{rest_result,whole_result:sdres}
     XD_anc_lost(known, pbad(tag, rest), whole_result) of (ANC(tag), XDEC(known, rest, rest_result), PREPT(tag, rest_result, whole_result))
   | {known:specs}{tag,data:bytes}{rest:pchunks}
@@ -210,12 +502,19 @@ prfun _xdec_functional {known:specs}{chunks:pchunks}{chunk_count:nat}{left_resul
   (count: PCN(chunk_count, chunks), left: XDEC(known, chunks, left_result), right: XDEC(known, chunks, right_result)): EQSD(left_result, right_result) =
   case+ left of
   | XD_nil() => (case+ right of XD_nil() => EQSD_refl())
-  | XD_anc(left_anc, left_rest, left_prepend) =>
+  | XD_anc(left_anc, left_notknown, left_rest, left_prepend) =>
     (case+ right of
-     | XD_anc(_, right_rest, right_prepend) => let
+     | XD_anc(_, _, right_rest, right_prepend) => let
          prval PCN_good(count1) = count
          prval EQSD_refl() = _xdec_functional(count1, left_rest, right_rest)
        in prepx_functional(left_prepend, right_prepend) end
+     | XD_anc_known(_, right_known) => falsep_eqsd(known_not_notknown(right_known, left_notknown))
+     | XD_newer(right_crit, _) => falsep_eqsd(anc_not_crit(left_anc, right_crit))
+     | XD_known(right_crit, _) => falsep_eqsd(anc_not_crit(left_anc, right_crit)))
+  | XD_anc_known(left_anc, left_known) =>
+    (case+ right of
+     | XD_anc(_, right_notknown, _, _) => falsep_eqsd(known_not_notknown(left_known, right_notknown))
+     | XD_anc_known(_, _) => EQSD_refl()
      | XD_newer(right_crit, _) => falsep_eqsd(anc_not_crit(left_anc, right_crit))
      | XD_known(right_crit, _) => falsep_eqsd(anc_not_crit(left_anc, right_crit)))
   | XD_anc_lost(left_anc, left_rest, left_prepend) =>
@@ -227,12 +526,14 @@ prfun _xdec_functional {known:specs}{chunks:pchunks}{chunk_count:nat}{left_resul
      | XD_crit_bad(right_crit) => falsep_eqsd(anc_not_crit(left_anc, right_crit)))
   | XD_newer(left_crit, left_notknown) =>
     (case+ right of
-     | XD_anc(right_anc, _, _) => falsep_eqsd(anc_not_crit(right_anc, left_crit))
+     | XD_anc(right_anc, _, _, _) => falsep_eqsd(anc_not_crit(right_anc, left_crit))
+     | XD_anc_known(right_anc, _) => falsep_eqsd(anc_not_crit(right_anc, left_crit))
      | XD_newer(_, _) => EQSD_refl()
      | XD_known(_, right_known) => falsep_eqsd(known_not_notknown(right_known, left_notknown)))
   | XD_known(left_crit, left_known) =>
     (case+ right of
-     | XD_anc(right_anc, _, _) => falsep_eqsd(anc_not_crit(right_anc, left_crit))
+     | XD_anc(right_anc, _, _, _) => falsep_eqsd(anc_not_crit(right_anc, left_crit))
+     | XD_anc_known(right_anc, _) => falsep_eqsd(anc_not_crit(right_anc, left_crit))
      | XD_newer(_, right_notknown) => falsep_eqsd(known_not_notknown(left_known, right_notknown))
      | XD_known(_, _) => EQSD_refl())
   | XD_crit_bad(left_crit) =>
@@ -266,32 +567,28 @@ primplement specn_functional {group_specs}{first_n,second_n} (first, second) = _
   | {known,more:specs}{spec_n:nat}{group_tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{data:bytes}{data_len:nat}{rest:pchunks}{field_values:fvals}{rest_result,whole_result:sdres}
     SD_present(known, gs_cons(group_tag, kinds, requirement, defaults, more), spec_n+1, pgood(group_tag, data, rest), whole_result)
     of (LEN(data, data_len), FDEC(kinds, data, fd_ok(field_values)), SDEC(known, more, spec_n, rest, rest_result), PREPV(field_values, rest_result, whole_result))
-  | {known,more:specs}{spec_n:pos}{group_tag:bytes}{kinds:layout}{defaults:fvals}{data:bytes}{data_len:nat}{rest:pchunks}
-    SD_garbled_req(known, gs_cons(group_tag, kinds, m_req(), defaults, more), spec_n, pgood(group_tag, data, rest), sd_fail(cause_damaged()))
-    of (LEN(data, data_len), FDEC(kinds, data, fd_bad()))
-  | {known,more:specs}{spec_n:nat}{group_tag:bytes}{kinds:layout}{defaults:fvals}{data:bytes}{data_len:nat}{rest:pchunks}{rest_result,whole_result:sdres}
-    SD_garbled_opt(known, gs_cons(group_tag, kinds, m_opt(), defaults, more), spec_n+1, pgood(group_tag, data, rest), whole_result)
-    of (LEN(data, data_len), FDEC(kinds, data, fd_bad()), SDEC(known, more, spec_n, rest, rest_result), PREPL(defaults, group_tag, rest_result, whole_result))
+  | {known,more:specs}{spec_n:nat}{group_tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{data:bytes}{data_len:nat}{rest:pchunks}{rest_result,whole_result:sdres}
+    SD_garbled_lost(known, gs_cons(group_tag, kinds, requirement, defaults, more), spec_n+1, pgood(group_tag, data, rest), whole_result)
+    of (LOSES(requirement), LEN(data, data_len), FDEC(kinds, data, fd_bad()), SDEC(known, more, spec_n, rest, rest_result), PREPL(defaults, group_tag, rest_result, whole_result))
   | {known,more:specs}{spec_n:nat}{group_tag:bytes}{kinds:layout}{defaults:fvals}{data:bytes}{data_len:nat}{rest:pchunks}{rest_result,whole_result:sdres}
     SD_garbled_added(known, gs_cons(group_tag, kinds, m_added(), defaults, more), spec_n+1, pgood(group_tag, data, rest), whole_result)
     of (LEN(data, data_len), FDEC(kinds, data, fd_bad()), SDEC(known, more, spec_n, rest, rest_result), PREPL(defaults, group_tag, rest_result, whole_result))
-  | {known,more:specs}{spec_n:pos}{group_tag:bytes}{kinds:layout}{defaults:fvals}{rest:pchunks}
-    SD_bad_req(known, gs_cons(group_tag, kinds, m_req(), defaults, more), spec_n, pbad(group_tag, rest), sd_fail(cause_damaged()))
-  | {known,more:specs}{spec_n:nat}{group_tag:bytes}{kinds:layout}{defaults:fvals}{rest:pchunks}{rest_result,whole_result:sdres}
-    SD_bad_opt(known, gs_cons(group_tag, kinds, m_opt(), defaults, more), spec_n+1, pbad(group_tag, rest), whole_result)
-    of (SDEC(known, more, spec_n, rest, rest_result), PREPL(defaults, group_tag, rest_result, whole_result))
+  | {known,more:specs}{spec_n:nat}{group_tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{rest:pchunks}{rest_result,whole_result:sdres}
+    SD_bad_lost(known, gs_cons(group_tag, kinds, requirement, defaults, more), spec_n+1, pbad(group_tag, rest), whole_result)
+    of (LOSES(requirement), SDEC(known, more, spec_n, rest, rest_result), PREPL(defaults, group_tag, rest_result, whole_result))
   | {known,more:specs}{spec_n:nat}{group_tag:bytes}{kinds:layout}{defaults:fvals}{rest:pchunks}{rest_result,whole_result:sdres}
     SD_bad_added(known, gs_cons(group_tag, kinds, m_added(), defaults, more), spec_n+1, pbad(group_tag, rest), whole_result)
     of (SDEC(known, more, spec_n, rest, rest_result), PREPL(defaults, group_tag, rest_result, whole_result))
-  | {known,more:specs}{spec_n:pos}{group_tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}
-    SD_missing_end(known, gs_cons(group_tag, kinds, requirement, defaults, more), spec_n, pnil(), sd_fail(cause_damaged()))
-    of MUSTHAVE(requirement)
-  | {known,more:specs}{spec_n:pos}{group_tag,tag,data:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{rest:pchunks}
-    SD_missing_good(known, gs_cons(group_tag, kinds, requirement, defaults, more), spec_n, pgood(tag, data, rest), sd_fail(cause_damaged()))
-    of (MUSTHAVE(requirement), TAGDIFF(tag, group_tag))
-  | {known,more:specs}{spec_n:pos}{group_tag,tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{rest:pchunks}
-    SD_missing_bad(known, gs_cons(group_tag, kinds, requirement, defaults, more), spec_n, pbad(tag, rest), sd_fail(cause_damaged()))
-    of (MUSTHAVE(requirement), TAGDIFF(tag, group_tag))
+  (* a group the record needs, or that every version has written, is not in it: it is lost, its defaults stand in, and it is said *)
+  | {known,more:specs}{spec_n:nat}{group_tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{rest_result,whole_result:sdres}
+    SD_absent_lost_end(known, gs_cons(group_tag, kinds, requirement, defaults, more), spec_n+1, pnil(), whole_result)
+    of (LOSES(requirement), SDEC(known, more, spec_n, pnil(), rest_result), PREPL(defaults, group_tag, rest_result, whole_result))
+  | {known,more:specs}{spec_n:nat}{group_tag,tag,data:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{rest:pchunks}{rest_result,whole_result:sdres}
+    SD_absent_lost_good(known, gs_cons(group_tag, kinds, requirement, defaults, more), spec_n+1, pgood(tag, data, rest), whole_result)
+    of (LOSES(requirement), TAGDIFF(tag, group_tag), SDEC(known, more, spec_n, pgood(tag, data, rest), rest_result), PREPL(defaults, group_tag, rest_result, whole_result))
+  | {known,more:specs}{spec_n:nat}{group_tag,tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{rest:pchunks}{rest_result,whole_result:sdres}
+    SD_absent_lost_bad(known, gs_cons(group_tag, kinds, requirement, defaults, more), spec_n+1, pbad(tag, rest), whole_result)
+    of (LOSES(requirement), TAGDIFF(tag, group_tag), SDEC(known, more, spec_n, pbad(tag, rest), rest_result), PREPL(defaults, group_tag, rest_result, whole_result))
   (* a group added to the format after the record was written is not in it: its defaults stand in, and it is not lost *)
   | {known,more:specs}{spec_n:nat}{group_tag:bytes}{kinds:layout}{defaults:fvals}{rest_result,whole_result:sdres}
     SD_added_end(known, gs_cons(group_tag, kinds, m_added(), defaults, more), spec_n+1, pnil(), whole_result)
@@ -303,21 +600,11 @@ primplement specn_functional {group_specs}{first_n,second_n} (first, second) = _
     SD_added_bad(known, gs_cons(group_tag, kinds, m_added(), defaults, more), spec_n+1, pbad(tag, rest), whole_result)
     of (TAGDIFF(tag, group_tag), SDEC(known, more, spec_n, pbad(tag, rest), rest_result), PREPA(defaults, group_tag, rest_result, whole_result))
 
-(* a group the record needs is not an added one *)
-prfn _musthave_not_added (needed: MUSTHAVE(m_added())): FALSEP() =
+(* a group that is lost is not an added one *)
+prfn _loses_not_added (needed: LOSES(m_added())): FALSEP() =
   case+ needed of
-  | MUSTHAVE_req() =/=> ()
-  | MUSTHAVE_opt() =/=> ()
-
-(* a bad chunk is never read whole: a later group or what follows the groups loses or refuses it *)
-prfun _sdec_bad_not_ok {known,group_specs:specs}{spec_n:nat}{tag:bytes}{rest:pchunks}{group_values:gvals}{kept:extras}{missing:absent} .<spec_n>.
-  (reading: SDEC(known, group_specs, spec_n, pbad(tag, rest), sd_ok(group_values, kept, missing))): FALSEP() =
-  case+ reading of
-  | SD_nil(after) => (case+ after of
-                      | XD_anc_lost(_, _, prepend) => (case+ prepend of PREPT_ok() =/=> () | PREPT_loss() =/=> () | PREPT_fail() =/=> ()))
-  | SD_bad_opt(_, prepend) => (case+ prepend of PREPL_ok() =/=> () | PREPL_loss() =/=> () | PREPL_fail() =/=> ())
-  | SD_bad_added(_, prepend) => (case+ prepend of PREPL_ok() =/=> () | PREPL_loss() =/=> () | PREPL_fail() =/=> ())
-  | SD_added_bad(_, sub, PREPA_ok()) => _sdec_bad_not_ok(sub)
+  | LOSES_req() =/=> ()
+  | LOSES_opt() =/=> ()
 
 #pub prfun sdec_functional {known,group_specs:specs}{spec_n:nat}{chunks:pchunks}{chunk_count:nat}{left_result,right_result:sdres}
   (PCN(chunk_count, chunks), SDEC(known, group_specs, spec_n, chunks, left_result), SDEC(known, group_specs, spec_n, chunks, right_result)): EQSD(left_result, right_result)
@@ -334,89 +621,91 @@ prfun _sdec_functional {known,group_specs:specs}{spec_n:nat}{chunks:pchunks}{chu
          prval EQFD_refl() = fdec_functional(left_length, left_field, right_field)
          prval EQSD_refl() = _sdec_functional(count1, left_rest, right_rest)
        in prepv_functional(left_prepend, right_prepend) end
-     | SD_garbled_req(right_length, right_field) => let prval EQI_refl() = len_functional(left_length, right_length) in (case+ fdec_functional(left_length, left_field, right_field) of EQFD_refl() =/=> ()) end
-     | SD_garbled_opt(right_length, right_field, _, _) => let prval EQI_refl() = len_functional(left_length, right_length) in (case+ fdec_functional(left_length, left_field, right_field) of EQFD_refl() =/=> ()) end
+     | SD_garbled_lost(_, right_length, right_field, _, _) => let prval EQI_refl() = len_functional(left_length, right_length) in (case+ fdec_functional(left_length, left_field, right_field) of EQFD_refl() =/=> ()) end
      | SD_garbled_added(right_length, right_field, _, _) => let prval EQI_refl() = len_functional(left_length, right_length) in (case+ fdec_functional(left_length, left_field, right_field) of EQFD_refl() =/=> ()) end
-     | SD_missing_good(_, right_diff) => (case+ right_diff of TAGDIFF_mk() =/=> ())
+     | SD_absent_lost_good(_, right_diff, _, _) => (case+ right_diff of TAGDIFF_mk() =/=> ())
      | SD_added_good(right_diff, _, _) => (case+ right_diff of TAGDIFF_mk() =/=> ()))
-  | SD_garbled_req(left_length, left_field) =>
+  | SD_garbled_lost(left_loses, left_length, left_field, left_rest, left_prepend) =>
     (case+ right of
      | SD_present(right_length, right_field, _, _) => let prval EQI_refl() = len_functional(left_length, right_length) in (case+ fdec_functional(left_length, left_field, right_field) of EQFD_refl() =/=> ()) end
-     | SD_garbled_req(_, _) => EQSD_refl()
-     | SD_missing_good(_, right_diff) => (case+ right_diff of TAGDIFF_mk() =/=> ()))
-  | SD_garbled_opt(left_length, left_field, left_rest, left_prepend) =>
-    (case+ right of
-     | SD_present(right_length, right_field, _, _) => let prval EQI_refl() = len_functional(left_length, right_length) in (case+ fdec_functional(left_length, left_field, right_field) of EQFD_refl() =/=> ()) end
-     | SD_garbled_opt(_, _, right_rest, right_prepend) => let
+     | SD_garbled_lost(_, _, _, right_rest, right_prepend) => let
          prval PCN_good(count1) = count
          prval EQSD_refl() = _sdec_functional(count1, left_rest, right_rest)
        in prepl_functional(left_prepend, right_prepend) end
-     | SD_missing_good(_, right_diff) => (case+ right_diff of TAGDIFF_mk() =/=> ()))
+     | SD_garbled_added(_, _, _, _) => falsep_eqsd(_loses_not_added(left_loses))
+     | SD_absent_lost_good(_, right_diff, _, _) => (case+ right_diff of TAGDIFF_mk() =/=> ())
+     | SD_added_good(right_diff, _, _) => (case+ right_diff of TAGDIFF_mk() =/=> ()))
   | SD_garbled_added(left_length, left_field, left_rest, left_prepend) =>
     (case+ right of
      | SD_present(right_length, right_field, _, _) => let prval EQI_refl() = len_functional(left_length, right_length) in (case+ fdec_functional(left_length, left_field, right_field) of EQFD_refl() =/=> ()) end
+     | SD_garbled_lost(right_loses, _, _, _, _) => falsep_eqsd(_loses_not_added(right_loses))
      | SD_garbled_added(_, _, right_rest, right_prepend) => let
          prval PCN_good(count1) = count
          prval EQSD_refl() = _sdec_functional(count1, left_rest, right_rest)
        in prepl_functional(left_prepend, right_prepend) end
-     | SD_missing_good(_, right_diff) => (case+ right_diff of TAGDIFF_mk() =/=> ())
+     | SD_absent_lost_good(right_loses, _, _, _) => falsep_eqsd(_loses_not_added(right_loses))
      | SD_added_good(right_diff, _, _) => (case+ right_diff of TAGDIFF_mk() =/=> ()))
-  | SD_bad_req() =>
+  | SD_bad_lost(left_loses, left_rest, left_prepend) =>
     (case+ right of
-     | SD_bad_req() => EQSD_refl()
-     | SD_missing_bad(_, right_diff) => (case+ right_diff of TAGDIFF_mk() =/=> ()))
-  | SD_bad_opt(left_rest, left_prepend) =>
-    (case+ right of
-     | SD_bad_opt(right_rest, right_prepend) => let
+     | SD_bad_lost(_, right_rest, right_prepend) => let
          prval PCN_bad(count1) = count
          prval EQSD_refl() = _sdec_functional(count1, left_rest, right_rest)
        in prepl_functional(left_prepend, right_prepend) end
-     | SD_missing_bad(_, right_diff) => (case+ right_diff of TAGDIFF_mk() =/=> ()))
+     | SD_bad_added(_, _) => falsep_eqsd(_loses_not_added(left_loses))
+     | SD_absent_lost_bad(_, right_diff, _, _) => (case+ right_diff of TAGDIFF_mk() =/=> ())
+     | SD_added_bad(right_diff, _, _) => (case+ right_diff of TAGDIFF_mk() =/=> ()))
   | SD_bad_added(left_rest, left_prepend) =>
     (case+ right of
+     | SD_bad_lost(right_loses, _, _) => falsep_eqsd(_loses_not_added(right_loses))
      | SD_bad_added(right_rest, right_prepend) => let
          prval PCN_bad(count1) = count
          prval EQSD_refl() = _sdec_functional(count1, left_rest, right_rest)
        in prepl_functional(left_prepend, right_prepend) end
-     | SD_missing_bad(_, right_diff) => (case+ right_diff of TAGDIFF_mk() =/=> ())
+     | SD_absent_lost_bad(right_loses, _, _, _) => falsep_eqsd(_loses_not_added(right_loses))
      | SD_added_bad(right_diff, _, _) => (case+ right_diff of TAGDIFF_mk() =/=> ()))
-  | SD_missing_end(left_must) =>
+  | SD_absent_lost_end(left_loses, left_rest, left_prepend) =>
     (case+ right of
-     | SD_missing_end(_) => EQSD_refl()
-     | SD_added_end(_, _) => falsep_eqsd(_musthave_not_added(left_must)))
-  | SD_missing_good(left_must, left_diff) =>
+     | SD_absent_lost_end(_, right_rest, right_prepend) => let
+         prval EQSD_refl() = _sdec_functional(count, left_rest, right_rest)
+       in prepl_functional(left_prepend, right_prepend) end
+     | SD_added_end(_, _) => falsep_eqsd(_loses_not_added(left_loses)))
+  | SD_absent_lost_good(left_loses, left_diff, left_rest, left_prepend) =>
     (case+ right of
      | SD_present(_, _, _, _) => (case+ left_diff of TAGDIFF_mk() =/=> ())
-     | SD_garbled_req(_, _) => (case+ left_diff of TAGDIFF_mk() =/=> ())
-     | SD_garbled_opt(_, _, _, _) => (case+ left_diff of TAGDIFF_mk() =/=> ())
+     | SD_garbled_lost(_, _, _, _, _) => (case+ left_diff of TAGDIFF_mk() =/=> ())
      | SD_garbled_added(_, _, _, _) => (case+ left_diff of TAGDIFF_mk() =/=> ())
-     | SD_missing_good(_, _) => EQSD_refl()
-     | SD_added_good(_, _, _) => falsep_eqsd(_musthave_not_added(left_must)))
-  | SD_missing_bad(left_must, left_diff) =>
+     | SD_absent_lost_good(_, _, right_rest, right_prepend) => let
+         prval EQSD_refl() = _sdec_functional(count, left_rest, right_rest)
+       in prepl_functional(left_prepend, right_prepend) end
+     | SD_added_good(_, _, _) => falsep_eqsd(_loses_not_added(left_loses)))
+  | SD_absent_lost_bad(left_loses, left_diff, left_rest, left_prepend) =>
     (case+ right of
-     | SD_bad_req() => (case+ left_diff of TAGDIFF_mk() =/=> ())
-     | SD_bad_opt(_, _) => (case+ left_diff of TAGDIFF_mk() =/=> ())
+     | SD_bad_lost(_, _, _) => (case+ left_diff of TAGDIFF_mk() =/=> ())
      | SD_bad_added(_, _) => (case+ left_diff of TAGDIFF_mk() =/=> ())
-     | SD_missing_bad(_, _) => EQSD_refl()
-     | SD_added_bad(_, _, _) => falsep_eqsd(_musthave_not_added(left_must)))
+     | SD_absent_lost_bad(_, _, right_rest, right_prepend) => let
+         prval EQSD_refl() = _sdec_functional(count, left_rest, right_rest)
+       in prepl_functional(left_prepend, right_prepend) end
+     | SD_added_bad(_, _, _) => falsep_eqsd(_loses_not_added(left_loses)))
   | SD_added_end(left_rest, left_prepend) =>
     (case+ right of
-     | SD_missing_end(right_must) => falsep_eqsd(_musthave_not_added(right_must))
+     | SD_absent_lost_end(right_loses, _, _) => falsep_eqsd(_loses_not_added(right_loses))
      | SD_added_end(right_rest, right_prepend) => let
          prval EQSD_refl() = _sdec_functional(count, left_rest, right_rest)
        in prepa_functional(left_prepend, right_prepend) end)
   | SD_added_good(left_diff, left_rest, left_prepend) =>
     (case+ right of
      | SD_present(_, _, _, _) => (case+ left_diff of TAGDIFF_mk() =/=> ())
+     | SD_garbled_lost(_, _, _, _, _) => (case+ left_diff of TAGDIFF_mk() =/=> ())
      | SD_garbled_added(_, _, _, _) => (case+ left_diff of TAGDIFF_mk() =/=> ())
-     | SD_missing_good(right_must, _) => falsep_eqsd(_musthave_not_added(right_must))
+     | SD_absent_lost_good(right_loses, _, _, _) => falsep_eqsd(_loses_not_added(right_loses))
      | SD_added_good(_, right_rest, right_prepend) => let
          prval EQSD_refl() = _sdec_functional(count, left_rest, right_rest)
        in prepa_functional(left_prepend, right_prepend) end)
   | SD_added_bad(left_diff, left_rest, left_prepend) =>
     (case+ right of
+     | SD_bad_lost(_, _, _) => (case+ left_diff of TAGDIFF_mk() =/=> ())
      | SD_bad_added(_, _) => (case+ left_diff of TAGDIFF_mk() =/=> ())
-     | SD_missing_bad(right_must, _) => falsep_eqsd(_musthave_not_added(right_must))
+     | SD_absent_lost_bad(right_loses, _, _, _) => falsep_eqsd(_loses_not_added(right_loses))
      | SD_added_bad(_, right_rest, right_prepend) => let
          prval EQSD_refl() = _sdec_functional(count, left_rest, right_rest)
        in prepa_functional(left_prepend, right_prepend) end)
@@ -424,75 +713,44 @@ prfun _sdec_functional {known,group_specs:specs}{spec_n:nat}{chunks:pchunks}{chu
 primplement sdec_functional {known,group_specs}{spec_n}{chunks}{chunk_count}{left_result,right_result} (count, left, right) = _sdec_functional(count, left, right)
 
 
-(* XENC(kept, chunks): chunks are the chunks kept in kept, written back *)
-#pub dataprop XENC(extras, pchunks) =
-  | XENC_nil(ex_nil(), pnil())
-  | {tag,data:bytes}{kept:extras}{rest:pchunks}
-    XENC_cons(ex_cons(tag, data, kept), pgood(tag, data, rest)) of (ANC(tag), XENC(kept, rest))
+(* XENC(known, kept, chunks): chunks are the chunks kept in kept, written back; the tag of none is a group's *)
+#pub dataprop XENC(specs, extras, pchunks) =
+  | {known:specs} XENC_nil(known, ex_nil(), pnil())
+  | {known:specs}{tag,data:bytes}{kept:extras}{rest:pchunks}
+    XENC_cons(known, ex_cons(tag, data, kept), pgood(tag, data, rest)) of (ANC(tag), NOTKNOWN(known, tag), XENC(known, kept, rest))
 
-(* SENC(group_specs, spec_n, group_values, kept, missing, chunks): chunks are the chunks of the groups of specs
-   (spec_n of them) holding group_values, then those kept in kept; a group in missing is not written, and holds its defaults *)
-#pub dataprop SENC(specs, int, gvals, extras, absent, pchunks) =
-  | {kept:extras}{chunks:pchunks} SENC_nil(gs_nil(), 0, gv_nil(), kept, ab_nil(), chunks) of XENC(kept, chunks)
-  | {group_tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{more:specs}{spec_n:nat}{field_values:fvals}{group_values:gvals}{kept:extras}{missing:absent}{data:bytes}{data_len:nat}{rest:pchunks}
-    SENC_cons(gs_cons(group_tag, kinds, requirement, defaults, more), spec_n+1, gv_cons(field_values, group_values), kept, missing, pgood(group_tag, data, rest))
-    of (LEN(data, data_len), FENC(kinds, field_values, data), SENC(more, spec_n, group_values, kept, missing, rest))
-  | {group_tag:bytes}{kinds:layout}{defaults:fvals}{more:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}
-    SENC_absent_end(gs_cons(group_tag, kinds, m_added(), defaults, more), spec_n+1, gv_cons(defaults, group_values), kept, ab_cons(group_tag, missing), pnil())
-    of SENC(more, spec_n, group_values, kept, missing, pnil())
-  | {group_tag,tag,data:bytes}{kinds:layout}{defaults:fvals}{more:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}{rest:pchunks}
-    SENC_absent_good(gs_cons(group_tag, kinds, m_added(), defaults, more), spec_n+1, gv_cons(defaults, group_values), kept, ab_cons(group_tag, missing), pgood(tag, data, rest))
-    of (TAGDIFF(tag, group_tag), SENC(more, spec_n, group_values, kept, missing, pgood(tag, data, rest)))
+(* SENC(known, group_specs, spec_n, group_values, kept, missing, chunks): chunks are the chunks of the groups of specs
+   (spec_n of them, the last of known) holding group_values, then those kept in kept; a group in missing is not written,
+   and holds its defaults *)
+#pub dataprop SENC(specs, specs, int, gvals, extras, absent, pchunks) =
+  | {known:specs}{kept:extras}{chunks:pchunks} SENC_nil(known, gs_nil(), 0, gv_nil(), kept, ab_nil(), chunks) of XENC(known, kept, chunks)
+  | {known:specs}{group_tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{more:specs}{spec_n:nat}{field_values:fvals}{group_values:gvals}{kept:extras}{missing:absent}{data:bytes}{data_len:nat}{rest:pchunks}
+    SENC_cons(known, gs_cons(group_tag, kinds, requirement, defaults, more), spec_n+1, gv_cons(field_values, group_values), kept, missing, pgood(group_tag, data, rest))
+    of (LEN(data, data_len), FENC(kinds, field_values, data), SENC(known, more, spec_n, group_values, kept, missing, rest))
+  | {known:specs}{group_tag:bytes}{kinds:layout}{defaults:fvals}{more:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}
+    SENC_absent_end(known, gs_cons(group_tag, kinds, m_added(), defaults, more), spec_n+1, gv_cons(defaults, group_values), kept, ab_cons(group_tag, missing), pnil())
+    of SENC(known, more, spec_n, group_values, kept, missing, pnil())
+  | {known:specs}{group_tag,tag,data:bytes}{kinds:layout}{defaults:fvals}{more:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}{rest:pchunks}
+    SENC_absent_good(known, gs_cons(group_tag, kinds, m_added(), defaults, more), spec_n+1, gv_cons(defaults, group_values), kept, ab_cons(group_tag, missing), pgood(tag, data, rest))
+    of (TAGDIFF(tag, group_tag), SENC(known, more, spec_n, group_values, kept, missing, pgood(tag, data, rest)))
 
-#pub prfun xenc_xdec {known:specs}{kept:extras}{chunks:pchunks}{chunk_count:nat} (PCN(chunk_count, chunks), XENC(kept, chunks))
+#pub prfun xenc_xdec {known:specs}{kept:extras}{chunks:pchunks}{chunk_count:nat} (PCN(chunk_count, chunks), XENC(known, kept, chunks))
   : XDEC(known, chunks, sd_ok(gv_nil(), kept, ab_nil()))
 
-prfun _xenc_xdec {known:specs}{kept:extras}{chunks:pchunks}{chunk_count:nat} .<chunk_count>. (count: PCN(chunk_count, chunks), encoding: XENC(kept, chunks))
+prfun _xenc_xdec {known:specs}{kept:extras}{chunks:pchunks}{chunk_count:nat} .<chunk_count>. (count: PCN(chunk_count, chunks), encoding: XENC(known, kept, chunks))
   : XDEC(known, chunks, sd_ok(gv_nil(), kept, ab_nil())) =
   case+ encoding of
   | XENC_nil() => XD_nil()
-  | XENC_cons(ancillary, rest) => let
+  | XENC_cons(ancillary, unknown, rest) => let
       prval PCN_good(count1) = count
-    in XD_anc(ancillary, _xenc_xdec(count1, rest), PREPX_ok()) end
+    in XD_anc(ancillary, unknown, _xenc_xdec(count1, rest), PREPX_ok()) end
 
 primplement xenc_xdec {known}{kept}{chunks}{chunk_count} (count, encoding) = _xenc_xdec(count, encoding)
 
-(* what is read after the groups of an ok reading holds no group values and no absent group *)
-#pub dataprop EQNIL(gvals, absent) =
-  | EQNIL_refl(gv_nil(), ab_nil())
-
-#pub prfun xdec_ok_nil {known:specs}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat} (PCN(chunk_count, chunks), XDEC(known, chunks, sd_ok(group_values, kept, missing)))
-  : EQNIL(group_values, missing)
-
-prfun _xdec_ok_nil {known:specs}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat} .<chunk_count>. (count: PCN(chunk_count, chunks), decoding: XDEC(known, chunks, sd_ok(group_values, kept, missing)))
-  : EQNIL(group_values, missing) =
-  case+ decoding of
-  | XD_nil() => EQNIL_refl()
-  | XD_anc(_, rest, PREPX_ok()) => let
-      prval PCN_good(count1) = count
-    in _xdec_ok_nil(count1, rest) end
-  | XD_anc_lost(_, _, pp) => (case+ pp of PREPT_ok() =/=> () | PREPT_loss() =/=> () | PREPT_fail() =/=> ())
-
-primplement xdec_ok_nil {known}{group_values}{kept}{missing}{chunks}{chunk_count} (count, decoding) = _xdec_ok_nil(count, decoding)
-
-#pub prfun xdec_xenc {known:specs}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat} (PCN(chunk_count, chunks), XDEC(known, chunks, sd_ok(group_values, kept, missing)))
-  : XENC(kept, chunks)
-
-prfun _xdec_xenc {known:specs}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat} .<chunk_count>. (count: PCN(chunk_count, chunks), decoding: XDEC(known, chunks, sd_ok(group_values, kept, missing)))
-  : XENC(kept, chunks) =
-  case+ decoding of
-  | XD_nil() => XENC_nil()
-  | XD_anc(ancillary, rest, PREPX_ok()) => let
-      prval PCN_good(count1) = count
-    in XENC_cons(ancillary, _xdec_xenc(count1, rest)) end
-  | XD_anc_lost(_, _, prepend) => (case+ prepend of PREPT_ok() =/=> () | PREPT_loss() =/=> () | PREPT_fail() =/=> ())
-
-primplement xdec_xenc {known}{group_values}{kept}{missing}{chunks}{chunk_count} (count, decoding) = _xdec_xenc(count, decoding)
-
-#pub prfun senc_sdec {known,group_specs:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat} (PCN(chunk_count, chunks), SENC(group_specs, spec_n, group_values, kept, missing, chunks))
+#pub prfun senc_sdec {known,group_specs:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat} (PCN(chunk_count, chunks), SENC(known, group_specs, spec_n, group_values, kept, missing, chunks))
   : SDEC(known, group_specs, spec_n, chunks, sd_ok(group_values, kept, missing))
 
-prfun _senc_sdec {known,group_specs:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat} .<chunk_count, spec_n>. (count: PCN(chunk_count, chunks), encoding: SENC(group_specs, spec_n, group_values, kept, missing, chunks))
+prfun _senc_sdec {known,group_specs:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat} .<chunk_count, spec_n>. (count: PCN(chunk_count, chunks), encoding: SENC(known, group_specs, spec_n, group_values, kept, missing, chunks))
   : SDEC(known, group_specs, spec_n, chunks, sd_ok(group_values, kept, missing)) =
   case+ encoding of
   | SENC_nil(extras_encoding) => SD_nil(xenc_xdec(count, extras_encoding))
@@ -504,25 +762,68 @@ prfun _senc_sdec {known,group_specs:specs}{spec_n:nat}{group_values:gvals}{kept:
 
 primplement senc_sdec {known,group_specs}{spec_n}{group_values}{kept}{missing}{chunks}{chunk_count} (count, encoding) = _senc_sdec(count, encoding)
 
-#pub prfun sdec_senc {known,group_specs:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat} (PCN(chunk_count, chunks), SDEC(known, group_specs, spec_n, chunks, sd_ok(group_values, kept, missing)))
-  : SENC(group_specs, spec_n, group_values, kept, missing, chunks)
+(* a group's tag is none of the kept chunks' *)
+#pub prfun xenc_notag {known:specs}{kept:extras}{chunks:pchunks}{chunk_count:nat}{tag:bytes}{position:nat} (PCN(chunk_count, chunks), KNOWN(known, tag, position), XENC(known, kept, chunks)): NOTAG(tag, chunks)
 
-prfun _sdec_senc {known,group_specs:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat} .<chunk_count, spec_n>. (count: PCN(chunk_count, chunks), decoding: SDEC(known, group_specs, spec_n, chunks, sd_ok(group_values, kept, missing)))
-  : SENC(group_specs, spec_n, group_values, kept, missing, chunks) =
-  case+ decoding of
-  | SD_nil(extras_decoding) => (case+ xdec_ok_nil(count, extras_decoding) of EQNIL_refl() => SENC_nil(xdec_xenc(count, extras_decoding)))
-  | SD_present(length_proof, field_decoding, rest, PREPV_ok()) => let
+prfun _xenc_notag {known:specs}{kept:extras}{chunks:pchunks}{chunk_count:nat}{tag:bytes}{position:nat} .<chunk_count>.
+  (count: PCN(chunk_count, chunks), known_proof: KNOWN(known, tag, position), encoding: XENC(known, kept, chunks)): NOTAG(tag, chunks) =
+  case+ encoding of
+  | XENC_nil() => NOTAG_nil()
+  | XENC_cons(_, unknown, rest) => let
       prval PCN_good(count1) = count
-    in SENC_cons(length_proof, fdec_fenc(length_proof, field_decoding), _sdec_senc(count1, rest)) end
-  | SD_garbled_opt(_, _, _, prepend) => (case+ prepend of PREPL_ok() =/=> () | PREPL_loss() =/=> () | PREPL_fail() =/=> ())
-  | SD_garbled_added(_, _, _, prepend) => (case+ prepend of PREPL_ok() =/=> () | PREPL_loss() =/=> () | PREPL_fail() =/=> ())
-  | SD_bad_opt(_, prepend) => (case+ prepend of PREPL_ok() =/=> () | PREPL_loss() =/=> () | PREPL_fail() =/=> ())
-  | SD_bad_added(_, prepend) => (case+ prepend of PREPL_ok() =/=> () | PREPL_loss() =/=> () | PREPL_fail() =/=> ())
-  | SD_added_end(rest, PREPA_ok()) => SENC_absent_end(_sdec_senc(count, rest))
-  | SD_added_good(different, rest, PREPA_ok()) => SENC_absent_good(different, _sdec_senc(count, rest))
-  | SD_added_bad(_, rest, PREPA_ok()) => (case+ _sdec_bad_not_ok(rest) of FALSEP_mk() =/=> ())
+    in NOTAG_good(known_notknown_diff(known_proof, unknown), _xenc_notag(count1, known_proof, rest)) end
 
-primplement sdec_senc {known,group_specs}{spec_n}{group_values}{kept}{missing}{chunks}{chunk_count} (count, decoding) = _sdec_senc(count, decoding)
+primplement xenc_notag {known}{kept}{chunks}{chunk_count}{tag}{position} (count, known_proof, encoding) = _xenc_notag(count, known_proof, encoding)
+
+(* and none of the chunks written for the groups after it is its *)
+#pub prfun senc_notag {known,group_specs:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat}{tag:bytes}{position:nat}
+  (PCN(chunk_count, chunks), KNOWN(known, tag, position), NOTKNOWN(group_specs, tag), SENC(known, group_specs, spec_n, group_values, kept, missing, chunks)): NOTAG(tag, chunks)
+
+prfun _senc_notag {known,group_specs:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat}{tag:bytes}{position:nat} .<spec_n>.
+  (count: PCN(chunk_count, chunks), known_proof: KNOWN(known, tag, position), unknown: NOTKNOWN(group_specs, tag), encoding: SENC(known, group_specs, spec_n, group_values, kept, missing, chunks)): NOTAG(tag, chunks) =
+  case+ encoding of
+  | SENC_nil(extras_encoding) => xenc_notag(count, known_proof, extras_encoding)
+  | SENC_cons(_, _, rest) => let
+      prval NOTKNOWN_cons(different, unknown_rest) = unknown
+      prval PCN_good(count1) = count
+    in NOTAG_good(different, _senc_notag(count1, known_proof, unknown_rest, rest)) end
+  | SENC_absent_end(rest) => let
+      prval NOTKNOWN_cons(_, unknown_rest) = unknown
+    in _senc_notag(count, known_proof, unknown_rest, rest) end
+  | SENC_absent_good(_, rest) => let
+      prval NOTKNOWN_cons(_, unknown_rest) = unknown
+    in _senc_notag(count, known_proof, unknown_rest, rest) end
+
+primplement senc_notag {known,group_specs}{spec_n}{group_values}{kept}{missing}{chunks}{chunk_count}{tag}{position} (count, known_proof, unknown, encoding) = _senc_notag(count, known_proof, unknown, encoding)
+
+(* the chunks written are their own canonical chunks: reading them takes each group's chunk where it stands, and drops none *)
+#pub prfun senc_canon {known,group_specs:specs}{spec_n:nat}{depth:nat}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat}
+  (PCN(chunk_count, chunks), TAILOF(known, group_specs, depth), SPECSOK(group_specs), SENC(known, group_specs, spec_n, group_values, kept, missing, chunks))
+  : CANON(group_specs, spec_n, chunks, chunks, lt_nil())
+
+prfun _senc_canon {known,group_specs:specs}{spec_n:nat}{depth:nat}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat} .<spec_n>.
+  (count: PCN(chunk_count, chunks), tail: TAILOF(known, group_specs, depth), specs_ok: SPECSOK(group_specs), encoding: SENC(known, group_specs, spec_n, group_values, kept, missing, chunks))
+  : CANON(group_specs, spec_n, chunks, chunks, lt_nil()) =
+  case+ encoding of
+  | SENC_nil(_) => CAN_nil()
+  | SENC_cons(_, _, rest) => let
+      prval SPECSOK_cons(unknown_after, specs_ok_rest) = specs_ok
+      prval PCN_good(count1) = count
+      prval absent = senc_notag(count1, tailof_known(tail), unknown_after, rest)
+      prval canon = _senc_canon(count1, tailof_next(tail), specs_ok_rest, rest)
+    in CAN_good(EXT_good_last(notag_ext(count1, absent)), count1, canon, LOSTCAT_nil()) end
+  | SENC_absent_end(rest) => let
+      prval SPECSOK_cons(unknown_after, specs_ok_rest) = specs_ok
+      prval absent = senc_notag(count, tailof_known(tail), unknown_after, rest)
+      prval canon = _senc_canon(count, tailof_next(tail), specs_ok_rest, rest)
+    in CAN_none(notag_ext(count, absent), count, canon, LOSTCAT_nil()) end
+  | SENC_absent_good(_, rest) => let
+      prval SPECSOK_cons(unknown_after, specs_ok_rest) = specs_ok
+      prval absent = senc_notag(count, tailof_known(tail), unknown_after, rest)
+      prval canon = _senc_canon(count, tailof_next(tail), specs_ok_rest, rest)
+    in CAN_none(notag_ext(count, absent), count, canon, LOSTCAT_nil()) end
+
+primplement senc_canon {known,group_specs}{spec_n}{depth}{group_values}{kept}{missing}{chunks}{chunk_count} (count, tail, specs_ok, encoding) = _senc_canon(count, tail, specs_ok, encoding)
 
 
 (* The groups of a record, at run time, group_count of them: each one's tag, the
@@ -535,7 +836,7 @@ primplement sdec_senc {known,group_specs}{spec_n}{group_values}{kept}{missing}{c
 #pub datavtype specsv(specs, int) =
   | SPV_nil(gs_nil(), 0)
   | {group_tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{more:specs}{group_count,field_count:nat | field_count < 1000}
-    SPV_cons(gs_cons(group_tag, kinds, requirement, defaults, more), group_count+1) of (TAGNOT(group_tag) | blist(group_tag, 4), layoutv(kinds, field_count), modev(requirement), fvalsv(kinds, defaults, field_count), specsv(more, group_count))
+    SPV_cons(gs_cons(group_tag, kinds, requirement, defaults, more), group_count+1) of (TAGNOT(group_tag), NOTKNOWN(more, group_tag) | blist(group_tag, 4), layoutv(kinds, field_count), modev(requirement), fvalsv(kinds, defaults, field_count), specsv(more, group_count))
 
 #pub fun specsv_free {group_specs:specs}{group_count:nat} (specs: specsv(group_specs, group_count)): void
 
@@ -543,7 +844,7 @@ implement specsv_free {group_specs}{group_count} (specs) = let
   fun free_specs {group_specs:specs}{group_count:nat} .<group_count>. (specs: specsv(group_specs, group_count)): void =
     case+ specs of
     | ~SPV_nil() => ()
-    | ~SPV_cons(_ | tag, layout, _, default, more) => let
+    | ~SPV_cons(_, _ | tag, layout, _, default, more) => let
         val () = blist_free(tag)
         val () = layoutv_free(layout)
         val () = fvalsv_free(default)
@@ -556,8 +857,8 @@ implement specsv_copy {group_specs}{group_count} (specs) = let
   fun copy_specs {group_specs:specs}{group_count:nat} .<group_count>. (specs: !specsv(group_specs, group_count)): specsv(group_specs, group_count) =
     case+ specs of
     | SPV_nil() => SPV_nil()
-    | SPV_cons(tag_proof | tag, layout, mode, default, more) =>
-      SPV_cons(tag_proof | blist_copy(tag), layoutv_copy(layout), mode, fvalsv_copy(default), copy_specs(more))
+    | SPV_cons(tag_proof, unknown_proof | tag, layout, mode, default, more) =>
+      SPV_cons(tag_proof, unknown_proof | blist_copy(tag), layoutv_copy(layout), mode, fvalsv_copy(default), copy_specs(more))
 in copy_specs(specs) end
 
 (* How many groups the specs hold, as a proof *)
@@ -567,10 +868,22 @@ implement specsv_specn {group_specs}{group_count} (specs) = let
   fun count_specs {group_specs:specs}{group_count:nat} .<group_count>. (specs: !specsv(group_specs, group_count)): (SPECN(group_specs, group_count) | void) =
     case+ specs of
     | SPV_nil() => (SPECN_nil() | ())
-    | SPV_cons(_ | _, _, _, _, more) => let
+    | SPV_cons(_, _ | _, _, _, _, more) => let
         val (more_count | ()) = count_specs(more)
       in (SPECN_cons(more_count) | ()) end
 in count_specs(specs) end
+
+(* The groups' tags are all different, as a proof *)
+#pub fun specsv_ok {group_specs:specs}{group_count:nat} (specs: !specsv(group_specs, group_count)): (SPECSOK(group_specs) | void)
+
+implement specsv_ok {group_specs}{group_count} (specs) = let
+  fun check_specs {group_specs:specs}{group_count:nat} .<group_count>. (specs: !specsv(group_specs, group_count)): (SPECSOK(group_specs) | void) =
+    case+ specs of
+    | SPV_nil() => (SPECSOK_nil() | ())
+    | SPV_cons(_, unknown | _, _, _, _, more) => let
+        val (more_ok | ()) = check_specs(more)
+      in (SPECSOK_cons(unknown, more_ok) | ()) end
+in check_specs(specs) end
 
 (* The values of the groups, at run time *)
 #pub datavtype gvalsv(specs, gvals, int) =
@@ -588,18 +901,18 @@ implement gvalsv_free {group_specs}{group_values}{group_count} (group_values) = 
 in free_group_values(group_values) end
 
 (* The chunks kept to be written back, at run time *)
-#pub datavtype extrasv(extras, int) =
-  | EXV_nil(ex_nil(), 0)
-  | {tag,data:bytes}{kept:extras}{data_len,extras_count:nat | data_len < 1048576}
-    EXV_cons(ex_cons(tag, data, kept), extras_count+1) of (ANC(tag) | blist(tag, 4), blist(data, data_len), extrasv(kept, extras_count))
+#pub datavtype extrasv(specs, extras, int) =
+  | {known:specs} EXV_nil(known, ex_nil(), 0)
+  | {known:specs}{tag,data:bytes}{kept:extras}{data_len,extras_count:nat | data_len < 1048576}
+    EXV_cons(known, ex_cons(tag, data, kept), extras_count+1) of (ANC(tag), NOTKNOWN(known, tag) | blist(tag, 4), blist(data, data_len), extrasv(known, kept, extras_count))
 
-#pub fun extrasv_free {kept:extras}{extras_count:nat} (extras: extrasv(kept, extras_count)): void
+#pub fun extrasv_free {known:specs}{kept:extras}{extras_count:nat} (extras: extrasv(known, kept, extras_count)): void
 
-implement extrasv_free {kept}{extras_count} (extras) = let
-  fun free_extras {kept:extras}{extras_count:nat} .<extras_count>. (extras: extrasv(kept, extras_count)): void =
+implement extrasv_free {known}{kept}{extras_count} (extras) = let
+  fun free_extras {known:specs}{kept:extras}{extras_count:nat} .<extras_count>. (extras: extrasv(known, kept, extras_count)): void =
     case+ extras of
     | ~EXV_nil() => ()
-    | ~EXV_cons(_ | tag, data, more) => let
+    | ~EXV_cons(_, _ | tag, data, more) => let
         val () = blist_free(tag)
         val () = blist_free(data)
       in free_extras(more) end
@@ -642,33 +955,13 @@ in free_absent(absent) end
   | CausNewer(cause_newer())
 
 (* What reading the groups of a record comes to *)
-#pub datavtype schemaread(sdres, specs) =
-  | {group_specs:specs}{group_values:gvals}{kept:extras}{missing:absent}{spec_count,values_count,extras_count:nat}
-    SDR_ok(sd_ok(group_values, kept, missing), group_specs) of (gvalsv(group_specs, group_values, values_count), extrasv(kept, extras_count), absentv(missing, group_specs, spec_count))
-  | {group_specs:specs}{group_values:gvals}{kept:extras}{lost_tags:lost}{missing:absent}{spec_count,values_count,extras_count,lost_count:nat}
-    SDR_loss(sd_loss(group_values, kept, lost_tags, missing), group_specs) of (gvalsv(group_specs, group_values, values_count), extrasv(kept, extras_count), lostv(lost_tags, lost_count), absentv(missing, group_specs, spec_count))
-  | {group_specs:specs}{reason:cause} SDR_fail(sd_fail(reason), group_specs) of causev(reason)
+#pub datavtype schemaread(specs, sdres, specs) =
+  | {known,group_specs:specs}{group_values:gvals}{kept:extras}{missing:absent}{spec_count,values_count,extras_count:nat}
+    SDR_ok(known, sd_ok(group_values, kept, missing), group_specs) of (gvalsv(group_specs, group_values, values_count), extrasv(known, kept, extras_count), absentv(missing, group_specs, spec_count))
+  | {known,group_specs:specs}{group_values:gvals}{kept:extras}{lost_tags:lost}{missing:absent}{spec_count,values_count,extras_count,lost_count:nat}
+    SDR_loss(known, sd_loss(group_values, kept, lost_tags, missing), group_specs) of (gvalsv(group_specs, group_values, values_count), extrasv(known, kept, extras_count), lostv(lost_tags, lost_count), absentv(missing, group_specs, spec_count))
+  | {known,group_specs:specs}{reason:cause} SDR_fail(known, sd_fail(reason), group_specs) of causev(reason)
 
-
-#pub prfun xenc_allgood {kept:extras}{chunks:pchunks}{chunk_count:nat} (PCN(chunk_count, chunks), XENC(kept, chunks)): ALLGOOD(chunk_count, chunks)
-
-prfun _xenc_allgood {kept:extras}{chunks:pchunks}{chunk_count:nat} .<chunk_count>. (count: PCN(chunk_count, chunks), encoding: XENC(kept, chunks)): ALLGOOD(chunk_count, chunks) =
-  case+ encoding of
-  | XENC_nil() => (case+ count of PCN_nil() => ALLGOOD_nil())
-  | XENC_cons(_, rest) => (case+ count of PCN_good(count1) => ALLGOOD_cons(_xenc_allgood(count1, rest)))
-
-primplement xenc_allgood {kept}{chunks}{chunk_count} (count, encoding) = _xenc_allgood(count, encoding)
-
-#pub prfun senc_allgood {group_specs:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat} (PCN(chunk_count, chunks), SENC(group_specs, spec_n, group_values, kept, missing, chunks)): ALLGOOD(chunk_count, chunks)
-
-prfun _senc_allgood {group_specs:specs}{spec_n:nat}{group_values:gvals}{kept:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat} .<chunk_count, spec_n>. (count: PCN(chunk_count, chunks), encoding: SENC(group_specs, spec_n, group_values, kept, missing, chunks)): ALLGOOD(chunk_count, chunks) =
-  case+ encoding of
-  | SENC_nil(xe) => xenc_allgood(count, xe)
-  | SENC_cons(_, _, rest) => (case+ count of PCN_good(count1) => ALLGOOD_cons(_senc_allgood(count1, rest)))
-  | SENC_absent_end(rest) => _senc_allgood(count, rest)
-  | SENC_absent_good(_, rest) => _senc_allgood(count, rest)
-
-primplement senc_allgood {group_specs}{spec_n}{group_values}{kept}{missing}{chunks}{chunk_count} (count, encoding) = _senc_allgood(count, encoding)
 
 datavtype tagcmp(bytes, bytes) =
   | {left_tag,right_tag:bytes} TagSame(left_tag, right_tag) of (EQB(left_tag, right_tag) | )
@@ -696,7 +989,7 @@ fn _known_find {known:specs}{tag:bytes}{known_count:nat} (tag: !blist(tag, 4), k
   fun find_tag {known:specs}{tag:bytes}{known_count:nat} .<known_count>. (tag: !blist(tag, 4), known: !specsv(known, known_count)): knownres(known, tag) =
     case+ known of
     | SPV_nil() => KnownNo(NOTKNOWN_nil() | )
-    | SPV_cons(_ | group_tag, _, _, _, more) =>
+    | SPV_cons(_, _ | group_tag, _, _, _, more) =>
       (case+ _tag_compare(group_tag, tag) of
        | ~TagSame(EQB_refl() | ) => KnownYes(KNOWN_here() | )
        | ~TagDiff(different | ) =>
@@ -715,29 +1008,140 @@ fn _tag_class {tag:bytes} (tag: !blist(tag, 4)): tagclass(tag) =
   | blist_cons(first_letter, blist_cons(_, blist_cons(_, blist_cons(_, blist_nil())))) =>
     if first_letter >= 97 then IsAnc(ANC_mk() | ) else IsCrit(CRIT_mk() | )
 
+(* The tags dropped, one list and then the other *)
+fun _lostv_cat {first,second:lost}{first_n,second_n:nat} .<first_n>. (first: lostv(first, first_n), second: lostv(second, second_n))
+  : [both:lost][both_n:nat] (LOSTCAT(first, second, both, first_n) | lostv(both, both_n)) =
+  case+ first of
+  | ~LTV_nil() => (LOSTCAT_nil() | second)
+  | ~LTV_cons(tag, more) => let
+      val (rest | joined) = _lostv_cat(more, second)
+    in (LOSTCAT_cons(rest) | LTV_cons(tag, joined)) end
+
+#pub fun lostv_cat {first,second:lost}{first_n,second_n:nat} (first: lostv(first, first_n), second: lostv(second, second_n))
+  : [both:lost][both_n:nat] (LOSTCAT(first, second, both, first_n) | lostv(both, both_n))
+
+implement lostv_cat {first,second}{first_n,second_n} (first, second) = _lostv_cat(first, second)
+
+(* The chunk of a tag a record is read by, at run time *)
+datavtype chosenv(selected) =
+  | CH_none(sel_none())
+  | {data:bytes}{data_size:nat | data_size < 1048576} CH_good(sel_good(data)) of blist(data, data_size)
+  | CH_bad(sel_bad())
+
+(* What taking the chunks of a tag out of a list leaves *)
+datavtype extraction(bytes, pchunks) =
+  | {tag:bytes}{chunks:pchunks}{chosen:selected}{others:pchunks}{dropped:lost}{other_count,dropped_count:nat}
+    EXTRACTED(tag, chunks) of (EXT(tag, chunks, chosen, others, dropped), PCN(other_count, others) | chosenv(chosen), chunklist(others, other_count), lostv(dropped, dropped_count))
+
+(* Taking the chunks of a tag out of a list: the last whole one is chosen (else a damaged one), and the others of its tag are dropped *)
+fun ext_read {tag:bytes}{chunks:pchunks}{chunk_count:nat} .<chunk_count>.
+  (count: PCN(chunk_count, chunks), tag: !blist(tag, 4), chunk_list: chunklist(chunks, chunk_count)): extraction(tag, chunks) =
+  case+ chunk_list of
+  | ~CL_nil() => EXTRACTED(EXT_nil(), PCN_nil() | CH_none(), CL_nil(), LTV_nil())
+  | ~CL_good(not_end | other, data, rest) => let
+      prval PCN_good(count1) = count
+      val found = ext_read(count1, tag, rest)
+    in
+      case+ _tag_compare(other, tag) of
+      | ~TagDiff(different | ) =>
+        (case+ found of
+         | ~EXTRACTED(sub, others_count | chosen, others, dropped) =>
+           EXTRACTED(EXT_skip_good(different, sub), PCN_good(others_count) | chosen, CL_good(not_end | other, data, others), dropped))
+      | ~TagSame(EQB_refl() | ) => let
+          val () = blist_free(other)
+        in
+          case+ found of
+          | ~EXTRACTED(sub, others_count | chosen, others, dropped) =>
+            (case+ chosen of
+             | ~CH_none() => EXTRACTED(EXT_good_last(sub), others_count | CH_good(data), others, dropped)
+             | ~CH_good(later) => let
+                 val () = blist_free(data)
+               in EXTRACTED(EXT_good_shadowed(sub), others_count | CH_good(later), others, LTV_cons(blist_copy(tag), dropped)) end
+             | ~CH_bad() => EXTRACTED(EXT_good_over_bad(sub), others_count | CH_good(data), others, LTV_cons(blist_copy(tag), dropped)))
+        end
+    end
+  | ~CL_bad(other, rest) => let
+      prval PCN_bad(count1) = count
+      val found = ext_read(count1, tag, rest)
+    in
+      case+ _tag_compare(other, tag) of
+      | ~TagDiff(different | ) =>
+        (case+ found of
+         | ~EXTRACTED(sub, others_count | chosen, others, dropped) =>
+           EXTRACTED(EXT_skip_bad(different, sub), PCN_bad(others_count) | chosen, CL_bad(other, others), dropped))
+      | ~TagSame(EQB_refl() | ) => let
+          val () = blist_free(other)
+        in
+          case+ found of
+          | ~EXTRACTED(sub, others_count | chosen, others, dropped) =>
+            (case+ chosen of
+             | ~CH_none() => EXTRACTED(EXT_bad_last(sub), others_count | CH_bad(), others, dropped)
+             | ~CH_good(later) => EXTRACTED(EXT_bad_shadowed(sub), others_count | CH_good(later), others, LTV_cons(blist_copy(tag), dropped))
+             | ~CH_bad() => EXTRACTED(EXT_bad_over_bad(sub), others_count | CH_bad(), others, LTV_cons(blist_copy(tag), dropped)))
+        end
+    end
+
+(* Putting the chunks of a record in the order of its groups, each tag once, wherever they stood; what is left follows *)
+fun _canon_read {rest_specs:specs}{spec_n:nat}{chunks:pchunks}{chunk_count:nat} .<spec_n>.
+  (count: PCN(chunk_count, chunks), specs: !specsv(rest_specs, spec_n), chunk_list: chunklist(chunks, chunk_count))
+  : [canonical:pchunks][dropped:lost][canonical_count,dropped_count:nat]
+    (CANON(rest_specs, spec_n, chunks, canonical, dropped), PCN(canonical_count, canonical) | chunklist(canonical, canonical_count), lostv(dropped, dropped_count)) =
+  case+ specs of
+  | SPV_nil() => (CAN_nil(), count | chunk_list, LTV_nil())
+  | SPV_cons(not_end, _ | group_tag, _, _, _, more) => let
+      val found = ext_read(count, group_tag, chunk_list)
+    in
+      case+ found of
+      | ~EXTRACTED(extraction, others_count | chosen, others, first) => let
+          val (canon, canonical_count | canonical, second) = _canon_read(others_count, more, others)
+          val (joined | dropped) = _lostv_cat(first, second)
+        in
+          case+ chosen of
+          | ~CH_none() => (CAN_none(extraction, others_count, canon, joined), canonical_count | canonical, dropped)
+          | ~CH_good(data) =>
+            (CAN_good(extraction, others_count, canon, joined), PCN_good(canonical_count) | CL_good(not_end | blist_copy(group_tag), data, canonical), dropped)
+          | ~CH_bad() =>
+            (CAN_bad(extraction, others_count, canon, joined), PCN_bad(canonical_count) | CL_bad(blist_copy(group_tag), canonical), dropped)
+        end
+    end
+
+#pub fun canon_read {rest_specs:specs}{spec_n:nat}{chunks:pchunks}{chunk_count:nat}
+  (count: PCN(chunk_count, chunks), specs: !specsv(rest_specs, spec_n), chunk_list: chunklist(chunks, chunk_count))
+  : [canonical:pchunks][dropped:lost][canonical_count,dropped_count:nat]
+    (CANON(rest_specs, spec_n, chunks, canonical, dropped), PCN(canonical_count, canonical) | chunklist(canonical, canonical_count), lostv(dropped, dropped_count))
+
+implement canon_read {rest_specs}{spec_n}{chunks}{chunk_count} (count, specs, chunk_list) = _canon_read(count, specs, chunk_list)
+
 (* Reading what follows the known groups *)
 fun xdec_read {known:specs}{known_count:nat}{chunks:pchunks}{chunk_count:nat} .<chunk_count>.
   (count: PCN(chunk_count, chunks), known: !specsv(known, known_count), chunk_list: chunklist(chunks, chunk_count))
-  : [result:sdres] (XDEC(known, chunks, result) | schemaread(result, gs_nil())) =
+  : [result:sdres] (XDEC(known, chunks, result) | schemaread(known, result, gs_nil())) =
   case+ chunk_list of
   | ~CL_nil() => (XD_nil() | SDR_ok(GVV_nil(), EXV_nil(), ABV_nil()))
   | ~CL_good(_ | tag, data, rest) => let
       prval PCN_good(count1) = count
     in
       case+ _tag_class(tag) of
-      | ~IsAnc(ancillary | ) => let
-          val (sub | rest_read) = xdec_read(count1, known, rest)
-        in
-          case+ rest_read of
-          | ~SDR_ok(~GVV_nil(), extras, ~ABV_nil()) =>
-            (XD_anc(ancillary, sub, PREPX_ok()) | SDR_ok(GVV_nil(), EXV_cons(ancillary | tag, data, extras), ABV_nil()))
-          | ~SDR_loss(~GVV_nil(), extras, lost, ~ABV_nil()) =>
-            (XD_anc(ancillary, sub, PREPX_loss()) | SDR_loss(GVV_nil(), EXV_cons(ancillary | tag, data, extras), lost, ABV_nil()))
-          | ~SDR_fail(reason) => let
-              val () = blist_free(tag)
-              val () = blist_free(data)
-            in (XD_anc(ancillary, sub, PREPX_fail()) | SDR_fail(reason)) end
-        end
+      | ~IsAnc(ancillary | ) =>
+        (case+ _known_find(tag, known) of
+         | ~KnownYes(known_proof | ) => let
+             val () = chunklist_free(rest)
+             val () = blist_free(tag)
+             val () = blist_free(data)
+           in (XD_anc_known(ancillary, known_proof) | SDR_fail(CausDamaged())) end
+         | ~KnownNo(unknown_proof | ) => let
+             val (sub | rest_read) = xdec_read(count1, known, rest)
+           in
+             case+ rest_read of
+             | ~SDR_ok(~GVV_nil(), extras, ~ABV_nil()) =>
+               (XD_anc(ancillary, unknown_proof, sub, PREPX_ok()) | SDR_ok(GVV_nil(), EXV_cons(ancillary, unknown_proof | tag, data, extras), ABV_nil()))
+             | ~SDR_loss(~GVV_nil(), extras, lost, ~ABV_nil()) =>
+               (XD_anc(ancillary, unknown_proof, sub, PREPX_loss()) | SDR_loss(GVV_nil(), EXV_cons(ancillary, unknown_proof | tag, data, extras), lost, ABV_nil()))
+             | ~SDR_fail(reason) => let
+                 val () = blist_free(tag)
+                 val () = blist_free(data)
+               in (XD_anc(ancillary, unknown_proof, sub, PREPX_fail()) | SDR_fail(reason)) end
+           end)
       | ~IsCrit(critical | ) => let
           val () = chunklist_free(rest)
           val found = _known_find(tag, known)
@@ -773,9 +1177,9 @@ fun xdec_read {known:specs}{known_count:nat}{chunks:pchunks}{chunk_count:nat} .<
 
 
 (* The result of reading the groups after one that the record did not hold: its defaults in front, its tag among the absent *)
-fn _absent_wrap {more:specs}{group_tag:bytes}{kinds:layout}{defaults:fvals}{field_count:nat | field_count < 1000}{rest_result:sdres}
-  (group_tag: !blist(group_tag, 4), default: !fvalsv(kinds, defaults, field_count), rest_read: schemaread(rest_result, more))
-  : [whole_result:sdres] (PREPA(defaults, group_tag, rest_result, whole_result) | schemaread(whole_result, gs_cons(group_tag, kinds, m_added(), defaults, more))) =
+fn _absent_wrap {known,more:specs}{group_tag:bytes}{kinds:layout}{defaults:fvals}{field_count:nat | field_count < 1000}{rest_result:sdres}
+  (group_tag: !blist(group_tag, 4), default: !fvalsv(kinds, defaults, field_count), rest_read: schemaread(known, rest_result, more))
+  : [whole_result:sdres] (PREPA(defaults, group_tag, rest_result, whole_result) | schemaread(known, whole_result, gs_cons(group_tag, kinds, m_added(), defaults, more))) =
   case+ rest_read of
   | ~SDR_ok(later_values, later_extras, later_absent) =>
     (PREPA_ok() | SDR_ok(GVV_cons(fvalsv_copy(default), later_values), later_extras, ABV_gap(blist_copy(group_tag), later_absent)))
@@ -783,20 +1187,37 @@ fn _absent_wrap {more:specs}{group_tag:bytes}{kinds:layout}{defaults:fvals}{fiel
     (PREPA_loss() | SDR_loss(GVV_cons(fvalsv_copy(default), later_values), later_extras, lost, ABV_gap(blist_copy(group_tag), later_absent)))
   | ~SDR_fail(reason) => (PREPA_fail() | SDR_fail(reason))
 
+(* The result of reading the groups after one that was lost: its defaults in front, its tag among those lost *)
+fn _lost_wrap {known,more:specs}{group_tag:bytes}{kinds:layout}{requirement:mode}{defaults:fvals}{field_count:nat | field_count < 1000}{rest_result:sdres}
+  (mode: modev(requirement), group_tag: !blist(group_tag, 4), default: !fvalsv(kinds, defaults, field_count), rest_read: schemaread(known, rest_result, more))
+  : [whole_result:sdres] (PREPL(defaults, group_tag, rest_result, whole_result) | schemaread(known, whole_result, gs_cons(group_tag, kinds, requirement, defaults, more))) =
+  case+ rest_read of
+  | ~SDR_ok(later_values, later_extras, later_absent) =>
+    (PREPL_ok() | SDR_loss(GVV_cons(fvalsv_copy(default), later_values), later_extras, LTV_cons(blist_copy(group_tag), LTV_nil()), ABV_skip(later_absent)))
+  | ~SDR_loss(later_values, later_extras, lost, later_absent) =>
+    (PREPL_loss() | SDR_loss(GVV_cons(fvalsv_copy(default), later_values), later_extras, LTV_cons(blist_copy(group_tag), lost), ABV_skip(later_absent)))
+  | ~SDR_fail(reason) => (PREPL_fail() | SDR_fail(reason))
+
 (* Reading the groups of a record, then what follows them *)
 fun sdec_read {known,group_specs:specs}{known_count,spec_count:nat}{chunks:pchunks}{chunk_count:nat} .<chunk_count, spec_count>.
   (count: PCN(chunk_count, chunks), known: !specsv(known, known_count), specs: !specsv(group_specs, spec_count), chunk_list: chunklist(chunks, chunk_count))
-  : [result:sdres] (SDEC(known, group_specs, spec_count, chunks, result) | schemaread(result, group_specs)) =
+  : [result:sdres] (SDEC(known, group_specs, spec_count, chunks, result) | schemaread(known, result, group_specs)) =
   case+ specs of
   | SPV_nil() => let
       val (sub | fields_result) = xdec_read(count, known, chunk_list)
     in (SD_nil(sub) | fields_result) end
-  | SPV_cons(_ | group_tag, layout, mode, default, more) =>
+  | SPV_cons(_, _ | group_tag, layout, mode, default, more) =>
     (case+ chunk_list of
      | ~CL_nil() =>
        (case+ mode of
-        | ModeReq() => (SD_missing_end(MUSTHAVE_req()) | SDR_fail(CausDamaged()))
-        | ModeOpt() => (SD_missing_end(MUSTHAVE_opt()) | SDR_fail(CausDamaged()))
+        | ModeReq() => let
+            val (sub | rest_read) = sdec_read(count, known, more, CL_nil())
+            val (prepend | whole) = _lost_wrap(mode, group_tag, default, rest_read)
+          in (SD_absent_lost_end(LOSES_req(), sub, prepend) | whole) end
+        | ModeOpt() => let
+            val (sub | rest_read) = sdec_read(count, known, more, CL_nil())
+            val (prepend | whole) = _lost_wrap(mode, group_tag, default, rest_read)
+          in (SD_absent_lost_end(LOSES_opt(), sub, prepend) | whole) end
         | ModeAdded() => let
             val (sub | rest_read) = sdec_read(count, known, more, CL_nil())
             val (prepend | whole) = _absent_wrap(group_tag, default, rest_read)
@@ -808,15 +1229,13 @@ fun sdec_read {known,group_specs:specs}{known_count,spec_count:nat}{chunks:pchun
          | ~TagDiff(different | ) =>
            (case+ mode of
             | ModeReq() => let
-                val () = blist_free(tag)
-                val () = blist_free(data)
-                val () = chunklist_free(rest)
-              in (SD_missing_good(MUSTHAVE_req(), different) | SDR_fail(CausDamaged())) end
+                val (sub | rest_read) = sdec_read(count, known, more, CL_good(tag_proof | tag, data, rest))
+                val (prepend | whole) = _lost_wrap(mode, group_tag, default, rest_read)
+              in (SD_absent_lost_good(LOSES_req(), different, sub, prepend) | whole) end
             | ModeOpt() => let
-                val () = blist_free(tag)
-                val () = blist_free(data)
-                val () = chunklist_free(rest)
-              in (SD_missing_good(MUSTHAVE_opt(), different) | SDR_fail(CausDamaged())) end
+                val (sub | rest_read) = sdec_read(count, known, more, CL_good(tag_proof | tag, data, rest))
+                val (prepend | whole) = _lost_wrap(mode, group_tag, default, rest_read)
+              in (SD_absent_lost_good(LOSES_opt(), different, sub, prepend) | whole) end
             | ModeAdded() => let
                 val (sub | rest_read) = sdec_read(count, known, more, CL_good(tag_proof | tag, data, rest))
                 val (prepend | whole) = _absent_wrap(group_tag, default, rest_read)
@@ -837,31 +1256,18 @@ fun sdec_read {known,group_specs:specs}{known_count,spec_count:nat}{chunks:pchun
                end
              | ~FDR_bad() =>
                (case+ mode of
-                | ModeReq() => let val () = chunklist_free(rest) in (SD_garbled_req(len, field_proof) | SDR_fail(CausDamaged())) end
+                | ModeReq() => let
+                    val (sub | rest_read) = sdec_read(count1, known, more, rest)
+                    val (prepend | whole) = _lost_wrap(mode, group_tag, default, rest_read)
+                  in (SD_garbled_lost(LOSES_req(), len, field_proof, sub, prepend) | whole) end
                 | ModeOpt() => let
                     val (sub | rest_read) = sdec_read(count1, known, more, rest)
-                  in
-                    case+ rest_read of
-                    | ~SDR_ok(later_values, later_extras, later_absent) =>
-                      (SD_garbled_opt(len, field_proof, sub, PREPL_ok())
-                       | SDR_loss(GVV_cons(fvalsv_copy(default), later_values), later_extras, LTV_cons(blist_copy(group_tag), LTV_nil()), ABV_skip(later_absent)))
-                    | ~SDR_loss(later_values, later_extras, lost, later_absent) =>
-                      (SD_garbled_opt(len, field_proof, sub, PREPL_loss())
-                       | SDR_loss(GVV_cons(fvalsv_copy(default), later_values), later_extras, LTV_cons(blist_copy(group_tag), lost), ABV_skip(later_absent)))
-                    | ~SDR_fail(reason) => (SD_garbled_opt(len, field_proof, sub, PREPL_fail()) | SDR_fail(reason))
-                  end
+                    val (prepend | whole) = _lost_wrap(mode, group_tag, default, rest_read)
+                  in (SD_garbled_lost(LOSES_opt(), len, field_proof, sub, prepend) | whole) end
                 | ModeAdded() => let
                     val (sub | rest_read) = sdec_read(count1, known, more, rest)
-                  in
-                    case+ rest_read of
-                    | ~SDR_ok(later_values, later_extras, later_absent) =>
-                      (SD_garbled_added(len, field_proof, sub, PREPL_ok())
-                       | SDR_loss(GVV_cons(fvalsv_copy(default), later_values), later_extras, LTV_cons(blist_copy(group_tag), LTV_nil()), ABV_skip(later_absent)))
-                    | ~SDR_loss(later_values, later_extras, lost, later_absent) =>
-                      (SD_garbled_added(len, field_proof, sub, PREPL_loss())
-                       | SDR_loss(GVV_cons(fvalsv_copy(default), later_values), later_extras, LTV_cons(blist_copy(group_tag), lost), ABV_skip(later_absent)))
-                    | ~SDR_fail(reason) => (SD_garbled_added(len, field_proof, sub, PREPL_fail()) | SDR_fail(reason))
-                  end)
+                    val (prepend | whole) = _lost_wrap(mode, group_tag, default, rest_read)
+                  in (SD_garbled_added(len, field_proof, sub, prepend) | whole) end)
            end
        end
      | ~CL_bad(tag, rest) => let
@@ -871,13 +1277,13 @@ fun sdec_read {known,group_specs:specs}{known_count,spec_count:nat}{chunks:pchun
          | ~TagDiff(different | ) =>
            (case+ mode of
             | ModeReq() => let
-                val () = blist_free(tag)
-                val () = chunklist_free(rest)
-              in (SD_missing_bad(MUSTHAVE_req(), different) | SDR_fail(CausDamaged())) end
+                val (sub | rest_read) = sdec_read(count, known, more, CL_bad(tag, rest))
+                val (prepend | whole) = _lost_wrap(mode, group_tag, default, rest_read)
+              in (SD_absent_lost_bad(LOSES_req(), different, sub, prepend) | whole) end
             | ModeOpt() => let
-                val () = blist_free(tag)
-                val () = chunklist_free(rest)
-              in (SD_missing_bad(MUSTHAVE_opt(), different) | SDR_fail(CausDamaged())) end
+                val (sub | rest_read) = sdec_read(count, known, more, CL_bad(tag, rest))
+                val (prepend | whole) = _lost_wrap(mode, group_tag, default, rest_read)
+              in (SD_absent_lost_bad(LOSES_opt(), different, sub, prepend) | whole) end
             | ModeAdded() => let
                 val (sub | rest_read) = sdec_read(count, known, more, CL_bad(tag, rest))
                 val (prepend | whole) = _absent_wrap(group_tag, default, rest_read)
@@ -886,31 +1292,18 @@ fun sdec_read {known,group_specs:specs}{known_count,spec_count:nat}{chunks:pchun
              val () = blist_free(tag)
            in
              case+ mode of
-             | ModeReq() => let val () = chunklist_free(rest) in (SD_bad_req() | SDR_fail(CausDamaged())) end
+             | ModeReq() => let
+                 val (sub | rest_read) = sdec_read(count1, known, more, rest)
+                 val (prepend | whole) = _lost_wrap(mode, group_tag, default, rest_read)
+               in (SD_bad_lost(LOSES_req(), sub, prepend) | whole) end
              | ModeOpt() => let
                  val (sub | rest_read) = sdec_read(count1, known, more, rest)
-               in
-                 case+ rest_read of
-                 | ~SDR_ok(later_values, later_extras, later_absent) =>
-                   (SD_bad_opt(sub, PREPL_ok())
-                    | SDR_loss(GVV_cons(fvalsv_copy(default), later_values), later_extras, LTV_cons(blist_copy(group_tag), LTV_nil()), ABV_skip(later_absent)))
-                 | ~SDR_loss(later_values, later_extras, lost, later_absent) =>
-                   (SD_bad_opt(sub, PREPL_loss())
-                    | SDR_loss(GVV_cons(fvalsv_copy(default), later_values), later_extras, LTV_cons(blist_copy(group_tag), lost), ABV_skip(later_absent)))
-                 | ~SDR_fail(reason) => (SD_bad_opt(sub, PREPL_fail()) | SDR_fail(reason))
-               end
+                 val (prepend | whole) = _lost_wrap(mode, group_tag, default, rest_read)
+               in (SD_bad_lost(LOSES_opt(), sub, prepend) | whole) end
              | ModeAdded() => let
                  val (sub | rest_read) = sdec_read(count1, known, more, rest)
-               in
-                 case+ rest_read of
-                 | ~SDR_ok(later_values, later_extras, later_absent) =>
-                   (SD_bad_added(sub, PREPL_ok())
-                    | SDR_loss(GVV_cons(fvalsv_copy(default), later_values), later_extras, LTV_cons(blist_copy(group_tag), LTV_nil()), ABV_skip(later_absent)))
-                 | ~SDR_loss(later_values, later_extras, lost, later_absent) =>
-                   (SD_bad_added(sub, PREPL_loss())
-                    | SDR_loss(GVV_cons(fvalsv_copy(default), later_values), later_extras, LTV_cons(blist_copy(group_tag), lost), ABV_skip(later_absent)))
-                 | ~SDR_fail(reason) => (SD_bad_added(sub, PREPL_fail()) | SDR_fail(reason))
-               end
+                 val (prepend | whole) = _lost_wrap(mode, group_tag, default, rest_read)
+               in (SD_bad_added(sub, prepend) | whole) end
            end
        end)
 
@@ -919,32 +1312,32 @@ prfn _anc_tagnot {tag:bytes} (ancillary: ANC(tag)): TAGNOT(tag) =
   case+ ancillary of ANC_mk() => TAGNOT_mk()
 
 (* The chunks that hold the kept chunks, with the proof *)
-fun _extras_write {kept:extras}{extras_count:nat} .<extras_count>. (extras: !extrasv(kept, extras_count))
-  : [chunks:pchunks][chunk_count:nat] (XENC(kept, chunks), ALLGOOD(chunk_count, chunks), PCN(chunk_count, chunks) | chunklist(chunks, chunk_count)) =
+fun _extras_write {known:specs}{kept:extras}{extras_count:nat} .<extras_count>. (extras: !extrasv(known, kept, extras_count))
+  : [chunks:pchunks][chunk_count:nat] (XENC(known, kept, chunks), ALLGOOD(chunk_count, chunks), PCN(chunk_count, chunks) | chunklist(chunks, chunk_count)) =
   case+ extras of
   | EXV_nil() => (XENC_nil(), ALLGOOD_nil(), PCN_nil() | CL_nil())
-  | EXV_cons(ancillary | tag, data, more) => let
+  | EXV_cons(ancillary, unknown | tag, data, more) => let
       val (encoding, good, count | rest) = _extras_write(more)
     in
-      (XENC_cons(ancillary, encoding), ALLGOOD_cons(good), PCN_good(count)
+      (XENC_cons(ancillary, unknown, encoding), ALLGOOD_cons(good), PCN_good(count)
        | CL_good(_anc_tagnot(ancillary) | blist_copy(tag), blist_copy(data), rest))
     end
 
 (* The chunks of a record's groups and kept chunks, with the proof *)
 #pub fun schema_write {group_specs:specs}{group_values:gvals}{kept:extras}{spec_count,values_count,extras_count:nat}
-  (specs: !specsv(group_specs, spec_count), group_values: !gvalsv(group_specs, group_values, values_count), extras: !extrasv(kept, extras_count))
-  : [chunks:pchunks][chunk_count:nat] (SENC(group_specs, spec_count, group_values, kept, ab_nil(), chunks), ALLGOOD(chunk_count, chunks), PCN(chunk_count, chunks) | chunklist(chunks, chunk_count))
+  (specs: !specsv(group_specs, spec_count), group_values: !gvalsv(group_specs, group_values, values_count), extras: !extrasv(group_specs, kept, extras_count))
+  : [chunks:pchunks][chunk_count:nat] (SENC(group_specs, group_specs, spec_count, group_values, kept, ab_nil(), chunks), ALLGOOD(chunk_count, chunks), PCN(chunk_count, chunks) | chunklist(chunks, chunk_count))
 
 implement schema_write {group_specs}{group_values}{kept}{spec_count,values_count,extras_count} (specs, group_values, extras) = let
-  fun write_groups {group_specs:specs}{group_values:gvals}{kept:extras}{spec_count,values_count,extras_count:nat} .<spec_count>.
-    (specs: !specsv(group_specs, spec_count), group_values: !gvalsv(group_specs, group_values, values_count), extras: !extrasv(kept, extras_count))
-    : [chunks:pchunks][chunk_count:nat] (SENC(group_specs, spec_count, group_values, kept, ab_nil(), chunks), ALLGOOD(chunk_count, chunks), PCN(chunk_count, chunks) | chunklist(chunks, chunk_count)) =
+  fun write_groups {known,group_specs:specs}{group_values:gvals}{kept:extras}{spec_count,values_count,extras_count:nat} .<spec_count>.
+    (specs: !specsv(group_specs, spec_count), group_values: !gvalsv(group_specs, group_values, values_count), extras: !extrasv(known, kept, extras_count))
+    : [chunks:pchunks][chunk_count:nat] (SENC(known, group_specs, spec_count, group_values, kept, ab_nil(), chunks), ALLGOOD(chunk_count, chunks), PCN(chunk_count, chunks) | chunklist(chunks, chunk_count)) =
     case+ specs of
     | SPV_nil() => let
         prval GVV_nil() = group_values
         val (extras_encoding, good, count | chunk_list) = _extras_write(extras)
       in (SENC_nil(extras_encoding), good, count | chunk_list) end
-    | SPV_cons(tag_proof | group_tag, _, _, _, more) =>
+    | SPV_cons(tag_proof, _ | group_tag, _, _, _, more) =>
       (case+ group_values of
        | GVV_cons(field_values, more_values) => let
            val (field_encoding | data) = fields_write(field_values)
@@ -960,7 +1353,7 @@ in write_groups(specs, group_values, extras) end
 (* Reading the groups of a record, with the proof *)
 #pub fun schema_read {group_specs:specs}{spec_count:nat}{chunks:pchunks}{chunk_count:nat}
   (count: PCN(chunk_count, chunks), specs: !specsv(group_specs, spec_count), chunk_list: chunklist(chunks, chunk_count))
-  : [result:sdres] (SDEC(group_specs, group_specs, spec_count, chunks, result) | schemaread(result, group_specs))
+  : [result:sdres] (SDEC(group_specs, group_specs, spec_count, chunks, result) | schemaread(group_specs, result, group_specs))
 
 implement schema_read {group_specs}{spec_count}{chunks}{chunk_count} (count, specs, chunk_list) = let
   val known = specsv_copy(specs)
