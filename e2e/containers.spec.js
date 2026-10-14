@@ -82,6 +82,7 @@ const opensAndReads = {
   descriptors: 'entries with data descriptors (bit 3)',
   descriptorsBare: 'entries with data descriptors that have no signature',
   extras: 'an archive comment and the timestamp, unix and ZIP64 extra fields',
+  localNameDiffers: 'a local header whose name is not the central directory\'s',
   localExtraDiffers: 'a local header whose extra field is longer than the central directory\'s',
   mimetypeDeflated: 'a mimetype entry that is deflated',
   mimetypeNotFirst: 'a mimetype entry that is not the first',
@@ -123,8 +124,6 @@ test('names flagged UTF-8 and names not flagged but in UTF-8 are both found by t
 });
 
 test('a small archive in ZIP64 form opens (EPUB 3.3 allows ZIP64) and its chapters read', async ({ page }) => {
-  // quire#528: the zip package reads no ZIP64 record, so the book is refused as "not an EPUB"
-  test.fail(true, 'quire#528: ZIP64 archives are refused');
   const errors = await start(page);
   await openContainer(page, 'zip64');
   await expect(page.getByRole('alert')).toBeHidden();
@@ -133,15 +132,18 @@ test('a small archive in ZIP64 form opens (EPUB 3.3 allows ZIP64) and its chapte
 });
 
 test('a chapter whose CRC is not its data\'s is reported as unreadable, and the others read', async ({ page }) => {
-  // quire#529: no CRC is checked, so the damaged chapter is shown as if it were whole
-  test.fail(true, 'quire#529: a CRC is never checked');
   const errors = await start(page);
   await openContainer(page, 'wrongCrc');
   await readRow(page, 0);
   await showChrome(page);
   await control(page, 'Contents').click();
   await rows(page).nth(1).click();
-  await expect(page.getByRole('alert')).toContainText(/Chapter 2 of this book could not be read/);
+  const banner = page.getByRole('alert');
+  await expect(banner).toContainText(/Chapter 2 of this book could not be read/);
+  // the banner stays until it is dismissed, and on a phone it lies over the
+  // rows of the contents: the reader dismisses it before choosing the next chapter
+  await banner.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(banner).toBeHidden();
   await readRow(page, 2);
   expect(errors).toEqual([]);
 });

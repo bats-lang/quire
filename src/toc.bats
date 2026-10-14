@@ -614,6 +614,24 @@ in
   in @(ByPercent(), locator_thousandth(size_before, book_size)) end
 end
 
+(* Where content node node of chapter chapter (from 0), which has total
+   content nodes, is in the open book: the same as toc_place_of in a
+   fixed-layout book (a spine item is a page), else the chapter's start
+   plus the node's share of the chapter's size, as a search hit's place
+   is (#525) *)
+#pub fn toc_place_at (chapter: Int, node: Int, total: Int): @(locator_kind, Int)
+
+implement toc_place_at (chapter, node, total) = let
+  val serial = book_serial()
+in
+  if book_fixed(serial) then @(ByPage(), chapter + 1)
+  else let
+    val @(size_before, chapter_size, book_size) = book_weights(serial, chapter)
+    val within = (if total > 0 then (if node <= 0 then 0 else if node >= total then 1000 else node * 1000 / total) else 0): Int
+    val inside = (if chapter_size < 2000000 then chapter_size * within / 1000 else (chapter_size / 1000) * within): Int
+  in @(ByPercent(), locator_thousandth(size_before + inside, book_size)) end
+end
+
 fn _level_class {level:nat | level <= 3} (level: int level): [class_len:pos | class_len < 256] string class_len =
   if level = 0 then "pi" else if level = 1 then "pi pi1" else if level = 2 then "pi pi2" else "pi pi3"
 

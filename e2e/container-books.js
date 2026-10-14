@@ -61,6 +61,10 @@ export const containerBooks = {
   localExtraDiffers: { valid: true, bytes: archive('Local header longer', entries => entries.map(entry =>
     isMimetype(entry) ? entry : { ...entry, localExtra: Buffer.concat([timestampExtra(), unixExtra(), extraField(0xCAFE, Buffer.alloc(40))]), centralExtra: Buffer.alloc(0) })) },
 
+  /** Local headers that name another file than the central directory's: the central directory's names are the entries' (APPNOTE 4.3.7) */
+  localNameDiffers: { valid: true, bytes: archive('Local names differ', entries => entries.map(entry =>
+    isMimetype(entry) ? entry : { ...entry, localName: `stale/${entry.name.split('/').pop()}` })) },
+
   /** A small archive in ZIP64 form: the ZIP64 end record and its locator, and each entry's sizes in a ZIP64 extra */
   zip64: { valid: true, bytes: archive('ZIP64 form', entries => entries.map(entry => ({ ...entry, zip64: true })), {}, { zip64End: true }) },
 

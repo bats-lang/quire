@@ -547,6 +547,8 @@ fn _library_shown (save_view: bool): void = let
   (* a reload now comes back here *)
   val () = (if save_view then _view_save(~1, 0, 0) else ())
   val () = reader_search_stop()
+  (* what was typed in the book's search is the book's: the next book's field is empty (#435) *)
+  val () = app_book_search()
   val () = reader_stack_clear()
   (* a page turn under way ends with the book *)
   val () = reader_turn_settle()
@@ -2312,6 +2314,7 @@ in ui_focus("contents-close") end
 (* The contents panel, open on its bookmarks tab *)
 fn _bookmarks_open (): void = let
   val () = annot_render_bookmarks()
+  val () = reader_annotation_places()
   val () = ui_attr("contents-tab", ASelected, "false")
   val () = ui_attr("bookmarks-tab", ASelected, "true")
   val () = ui_attr("pages-tab", ASelected, "false")
@@ -2696,6 +2699,7 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
     end)
   val listeners = RCons(listeners, OnEl("annotations-button"), "click", llam(_) => let
       val () = annot_render()
+      val () = reader_annotation_places()
       val () = layer_open(LAnnotations())
     in let val () = ui_focus("annotations-close") in 0 end end)
   val listeners = RCons(listeners, OnEl("annotations-panel"), "click", llam(h) => let

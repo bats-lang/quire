@@ -495,10 +495,51 @@ fn check_crc (): void = let
   val list = blist_of_array(digits, 0, 9)
   val (_ | high, low) = crcfrom(65535, 65535, list)
   val () = blist_free(list)
-  val () = $A.free<byte>(digits)
   (* the CRC-32 of "123456789" is 0xCBF43926 *)
   val () = expect(65535 - high = 52212, "the CRC-32 of 123456789, high half")
-in expect(65535 - low = 14630, "the CRC-32 of 123456789, low half") end
+  val () = expect(65535 - low = 14630, "the CRC-32 of 123456789, low half")
+  (* the same, taken over an array's bytes (crc_of_borrow) *)
+  val @(frozen, borrowed) = $A.freeze<byte>(digits)
+  val @(array_high, array_low) = crc_of_borrow(borrowed, 9)
+  val () = $A.drop<byte>(frozen, borrowed)
+  val () = $A.free<byte>($A.thaw<byte>(frozen))
+  val () = expect(array_high = 52212, "the CRC-32 of 123456789 over an array, high half")
+in expect(array_low = 14630, "the CRC-32 of 123456789 over an array, low half") end
+
+(* crc_of_borrow is the fold crcfrom makes: arrays of every length from 1 to
+   300, with every byte value among them, and one of 4000 bytes *)
+fn check_crc_array_length (length: int): void =
+  if length <= 0 then ()
+  else let
+    val count = g1ofg0(length)
+  in
+    if count <= 0 then ()
+    else if count > 10000 then ()
+    else let
+      val data = $A.alloc<byte>(count)
+      fun fill {l:agz}{n:pos}{i:nat | i <= n} .<n - i>. (data: !$A.arr(byte, l, n), n: int n, i: int i): void =
+        if i >= n then ()
+        else let
+          val () = $A.set<byte>(data, i, $A.int2byte($AR.low_byte((i % 256) * 37 + (n % 256) * 11)))
+        in fill(data, n, i + 1) end
+      val () = fill(data, count, 0)
+      val list = blist_of_array(data, 0, count)
+      val (_ | list_high, list_low) = crcfrom(65535, 65535, list)
+      val () = blist_free(list)
+      val @(frozen, borrowed) = $A.freeze<byte>(data)
+      val @(array_high, array_low) = crc_of_borrow(borrowed, count)
+      val () = $A.drop<byte>(frozen, borrowed)
+      val () = $A.free<byte>($A.thaw<byte>(frozen))
+      val () = expect(array_high = 65535 - list_high && array_low = 65535 - list_low, "crc_of_borrow is the fold of crcfrom")
+    in () end
+  end
+
+fn check_crc_arrays (): void = let
+  fun go {length:nat | length <= 301} .<301 - length>. (length: int length): void =
+    if length > 300 then ()
+    else let val () = check_crc_array_length(length) in go(length + 1) end
+  val () = go(1)
+in check_crc_array_length(4000) end
 
 (* ---------------- the edge of 32 bits ---------------- *)
 
@@ -667,6 +708,7 @@ fn check_fuzz {rounds:nat} (rounds: int rounds): void =
 
 implement main0 () = let
   val () = check_crc()
+  val () = check_crc_arrays()
   val () = check_edges(0)
   val () = check_strings()
   val () = check_damage()

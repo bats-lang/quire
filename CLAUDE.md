@@ -766,6 +766,21 @@ proven, or missing) are kept in the book (`book_spine_set`), so loading
 chapter i only walks to it (`book_chapter_get`); the OPF is not read
 again.
 
+A chapter's data is checked against its CRC-32 (#529): the central
+directory record the index keeps states it (offset 16), `book_entry_sum`
+reads it by the chapter's name offset, and `take_text_sum` (in place of
+`take_text`) computes the CRC-32 of the inflated bytes, before they are
+made UTF-8 (`crc_of_borrow`, `src/crc.bats`: a table made by the proven
+byte step, tested against the proven fold in `tests/codec`, not proved
+equal), and answers no content for a mismatch or an unknown sum, so the
+chapter is `ChapterNotRead` ("Chapter N of this book could not be read")
+and the others read. libzip (`ZIP_ER_CRC`), Python's `zipfile`
+(`BadZipFile: Bad CRC-32`) and Java's `ZipFile` check the same sum at the
+end of the entry. The chapter shown and the facing page of a spread are
+checked; the OPF, the container, images and the chapter reads for
+search, notes and read aloud are not (yet). `e2e/containers.spec.js`
+("a chapter whose CRC is not its data's").
+
 ### Note popups (#414)
 
 A note opens as its text, in one popup (`footnote`): an element's text
@@ -1162,8 +1177,52 @@ audio is: not done). Leaving the chapter removes the element, which stops it.
 * **The package's fonts are the Book font** (`cnt-css-fonts_ot`, `_tt`, `_woff`,
   `_woff2`): the book's CSS is dropped (#411), so which text uses a font is the
   reader's: Font: Book loads the first font of the manifest (`font/otf`, `font/ttf`,
-  `font/woff`, `font/woff2`) for the text. An obfuscated font (`ocf-font_obfuscation`,
-  a should) is not undone: IDPF's obfuscation needs SHA-1, which Quire has no package for.
+  `font/woff`, `font/woff2`) for the text. An obfuscated font is undone (#410, below).
+
+## Obfuscated fonts are undone (#410)
+
+EPUB OCF 3.3 section 4.1.2 requires a reading system with a viewport to undo
+the two font obfuscations, and a reader that skips them falls back to a default
+face without a word. `src/font_obfuscation.bats` undoes both (xor is its own
+inverse, `font_unmask`): IDPF's (`http://www.idpf.org/2008/embedding`: the
+key is the SHA-1 of the package's unique identifier with its white space,
+U+0020, U+0009, U+000D and U+000A, taken out, 20 bytes, xored with the font's
+first 1040 bytes going round; `idpf_key`) and Adobe's
+(`http://ns.adobe.com/pdf/enc#RC`: the 16 bytes of the identifier's UUID, after its
+last colon and without its dashes, xored with the first 1024; `adobe_key`).
+SHA-1 is `src/sha1.bats` (pure Bats, as the sha256 package is written; it is
+used for nothing but this key, and belongs in a package of its own when one is
+made). The unique identifier is the `dc:identifier` the package's
+`unique-identifier` names (`opf_unique_identifier`, copied by `_font_locate`).
+Which algorithm a font has comes from `META-INF/encryption.xml`, read as the font
+is loaded (`_font_cipher_find`): each `EncryptedData`
+(`encrypted_nth`) names a `CipherReference` URI, found with `book_find_relative`
+from the container's root, and it is the font's when its entry is the font's
+(`font_cipher`: `FontNotListed`, `FontObfuscatedIdpf`, `FontObfuscatedAdobe`,
+`FontCipherOther`). The font is unmasked in its piece before its blob URL is made
+(`_font_blob`), every time the book is opened, so a reload works as an import does.
+It degrades where it is (no banner for the book; the text is set in the reader's
+own face, `var(--bookfont,Georgia),serif`): an algorithm Quire has no client for
+(`FontCipherOther`), an identifier that makes no key (an Adobe one that is no UUID,
+none, over 4096 bytes), a font the archive lacks, noise, and one shorter than the masked
+bytes (the browser's decoder refuses it). By research: the OCF specification
+gives both algorithms and requires them of a reading system; Readium's streamer
+(`FontDecoder`), Calibre (`oeb/polish` font deobfuscation) and foliate-js
+(`epub.js` deobfuscators) each undo both the same way, and a resource they cannot
+decode is not drawn, not a failure of the book.
+
+**A font encrypted in an unknown algorithm does not make the book DRM** (#410
+against #427): `_encrypted_data_unknown` (`src/epub_xml.bats`) passes an
+`EncryptedData` whose `CipherReference` is a font file (`.otf`, `.ttf`, `.ttc`,
+`.woff`, `.woff2`) even when its algorithm is none of the two, since the text
+of such a book reads and only the face cannot be had. Anything else under an
+unknown algorithm is refused as before (`e2e/drm.spec.js`), and a namespace of
+ADEPT, LCP or Kobo anywhere in the file still is. `e2e/fonts.spec.js` plays
+`e2e/font-books.js` (checked by epubcheck, the font `e2e/marker-font.ttf` has one
+glyph no system has, U+E000, 1.7 em wide, so the page's face is told by measuring
+it; `create-epub.js` has `obfuscatedFonts`, `identifier` and `manifestOnly`, and
+`obfuscateFont`, written apart from the app's): masked each way, an identifier with
+white space, a reload, no Book chosen, and each degrading case.
 
 ### Settled by research, kept failing (#419)
 
@@ -2049,6 +2108,29 @@ sync file holds a book's series (it is the book's own, read from its file, so a
 second device or a restore shows what the file says). `e2e/series.spec.js`,
 `e2e/series-books.js` and `e2e/library-records.spec.js` test it.
 
+## The sizes a book's CSS gives (#431, stage 1)
+
+`src/css_size.bats` reads a book's `font-size` rules as the format alone
+(nothing of it reaches the page yet; stages 2 and 3 of #431 measure a book's
+dominant size and apply the proportions). Only `font-size` is read: rules
+selected by element names, classes, ids and descendant chains of them
+(`sheet_rules_read`, at most 4096 rules, each with its selector's span in the
+sheet, specificity and order), an inline `style` and `<font size>`
+(`declarations_size_read`, `font_size_attribute_read`), in px, pt, pc, in, cm,
+mm, em, ex, rem, % and keywords; `calc()`, `clamp()`, `var()`, `vw`, a
+negative size and `!important` are `SizeIgnored` with their reason, and a
+selector with a combinator, pseudo, attribute or `*` is skipped and counted.
+Every answer is a `datavtype` matched with `case+` (`size_read`,
+`selector_read`, `sheet_read`). What the types prove: a size is at most a
+thousand pixels or times (`size_declared`), a computed one is a pixel to a
+thousand of them (`size_computed`), a proportion to the dominant size is from
+10 to 60 twentieths (`proportion`, so `font-size:1px` and `font-size:400%` are
+held to half and three times, as Readium clamps), a rule's selector lies inside
+its sheet, and its order is below the most. What is tested, not proved
+(`tests/css-size/run.sh`, a CI step beside the codec's, on bytes, with a fuzz):
+that the grammar read is CSS's. The `rem` trick of the fixtures is on `html`
+(`e2e/size-books.js`).
+
 ## What allocates is linear
 
 wasm has no garbage collector, so outside `$UNSAFE` nothing that
@@ -2845,7 +2927,9 @@ aloud and a drag. A copy of the page is kept in an overlay
 removed, `inert` set, its scroll set: quire's policy, not bridge's),
 again a moment (`COPY_SETTLE_MS`) after the page last changed (a
 chapter shown, laid out anew, an image come in), so a turn only
-scrolls the copy to the place and shows it: on a 300 KB chapter its
+scrolls the copy to the place and shows it (the copy's images share the page's
+blob URLs, which bridge revokes only once no image still loading holds them,
+quire#532, `e2e/progress.spec.js`): on a 300 KB chapter its
 first frame comes in 20 to 30 ms, where making the copy at the turn
 took 110 to 200 (`e2e/page-turn.spec.js` holds it within 30 ms of an
 instant turn's, in the same page). A turn shows only a `fresh_copy`,
@@ -3209,6 +3293,41 @@ page, so the paragraph the reader was at stays on the page shown
 whichever way the area changes (`e2e/layout.spec.js`, "the place stays
 when the reading area changes"); where the page breaks fall is the
 layout's, as in Kindle and Books.
+Scrolled, a hand scroll within one screenful is a move too (#485): the
+place is the node now at the top of what is seen (`reader_scrolled`
+clears the node a restore keeps and records the position, when the page
+is not where `_show_page_down` last put it: `_scroll_set`), and a layout
+made anew shows that node at the top, snapping to the old screen's top
+only for the first drawn node to start at or below it (`_show_target`).
+`e2e/stability.spec.js` scrolls a part of a screenful, swaps the window
+twice and expects the same paragraph on top.
+
+## Nothing of one book shows in the next (#435)
+
+`e2e/two-books.spec.js` opens a book that has every per-book feature (Alpha:
+five chapters, a nested contents, a page list, a note, a ruby, a Media Overlays
+narration, left to right, Japanese; bookmarks, a highlight, a search gone to, a
+jump with the back button up, Columns Two, the narration playing) and then one
+that has none (Beta: two chapters, no page list, no ruby, no narration, Hebrew
+read right to left), and checks each of Beta's panels, rows, bars and records
+is Beta's; a vertical book (Gamma) and a fixed-layout one (Delta) are opened
+before Beta to check the writing mode and the page box are not carried. The
+books are in `e2e/two-books-books.js` and checked by epubcheck. Beta is opened
+from the library, from an OPDS catalogue's Get, and after a reload that kept the
+view; Alpha is opened again after Beta; and the records kept for Beta after
+Alpha equal those kept for Beta opened first in a profile of its own (the record
+without its position in the library's order, the reader's settings, the same
+file so the same id; the sync the android project makes as the app opens is
+waited out by `reloadSettled`). It found one leak, fixed: the in-book search
+field kept what was typed in the last book (`_library_shown` makes it afresh,
+`app_book_search`).
+
+By decision, the narration's clip table is not probed (no hook for a test in the
+shipped build; Playwright's guidance is to test what a user sees): the table's
+release is checked by what it is for, Beta offers no narration controls and the
+audio element is paused and holds only a blob URL the app revoked (the page's
+`URL.revokeObjectURL` is noted by the spec). The fixed-layout box and the
+writing mode are checked in the page, not in the cells.
 
 ## Pathological structure (#423)
 
@@ -3337,9 +3456,30 @@ length, in the same page, so a slower machine slows both. What it found:
   390 px phone went from 17 s (Two) to 1.5 s, and the opening to 1 s. A
   text node over 64 KiB in mixed content breaks its line at each piece (a
   paragraph break appearing in a 64 KiB run is the price; search counts
-  pieces with the same `_text_cut`, so its node numbers agree; a note or
-  highlight stored in a text node of 64 KiB or more may find its offset
-  moved by up to 512 bytes into the next piece). The open budget the spec
+  pieces with the same `_text_cut`, so its node numbers agree). A stored
+  note or highlight in such a text is a piece's content node and a UTF-16
+  offset in that piece's text (bridge's `get_selection_range` gives offsets
+  into the text of the element with the id, which is the piece), and the cut
+  is a function of the text alone, so a place stored by this build is found
+  exactly by it again, after a reload, a restored backup and a sync
+  (`e2e/giant-text-highlights.spec.js`: highlights at the end of a piece, at
+  the start of the next, across a cut and inside a third, paged, scrolled and
+  in two columns, with accents and an emoji in the words; a last test restores
+  places stored by this build and they must paint the same words, so a
+  changed cut fails there). The cut is part of the format of a stored place:
+  changing `_text_cut` moves the places stored in the pieces after the first
+  of a text over 64 KiB (the first starts where the text does) and needs a
+  version of the annotations' record to translate by. A place stored by a
+  build before #423 (pieces cut at a character, not at white space) is read
+  against these pieces and may land up to 512 bytes per piece from where it
+  was made, in the second and later pieces of such a text; no version of the
+  record says which cut a place was stored with. Making places independent
+  of the cut (the pieces as `data-part` parts of one content node, as the
+  digits of vertical text are) was weighed and not taken: one content node
+  per text would make the reading place, a content node and the page that
+  holds it, as coarse as the whole text (a megabyte paragraph one place), and
+  search and read aloud would need the UTF-16 length of the pieces before
+  one for their offsets (#470). The open budget the spec
   asserts (`expectOpenBudget`): the time from the card's tap to the
   chapter's indicator, and from the choice of Two, Scroll or One to its
   page indicator, is at most 3 times Chrome's own time to lay out and
