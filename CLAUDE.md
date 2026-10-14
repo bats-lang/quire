@@ -168,13 +168,16 @@ check` before it pushes, so a push that does not type-check never
 reaches CI (#350's first push failed on a comparison and a free that
 `bats check` rejects in a few minutes; CI took 15 to learn it). Setup is
 what `.github/actions/setup-bats` does: ATS2 (`patsopt` from the
-tarball it names), `lld`, the compiler built from the commit in
+tarball it names: the gmp build, whose constraint solver computes in
+infinite precision, with libgmp-dev; the -int build's solver computes in
+C `int` and accepts false statements, #594, so a check made with it
+proves less than CI's), `lld`, the compiler built from the commit in
 `.github/bats-version` (its `bootstrap/c`, `make release/bats`), and a
 clone of bats-lang/repository-prototype; then `bats check --repository
 <the clone>`, or with `BATS_REPOSITORY=<the clone>` in the environment
 and no flag (the flag wins). Nothing is written first: bats writes the
-version's facts from HEAD (above). A check takes 6 to 10 minutes on a
-cold build: run it in the background and wait for it, never push on the
+version's facts from HEAD (above). A check takes 10 to 15 minutes on a
+cold build (6 to 10 with the -int build, before the solver moved): run it in the background and wait for it, never push on the
 hope that it passes. Two bats in one checkout take turns (bats holds a
 lock on `bats.toml` and says it waits). Two checkouts or worktrees take
 turns by bats's machine-wide slots (bats-lang/bats#252), which are opt-in:
