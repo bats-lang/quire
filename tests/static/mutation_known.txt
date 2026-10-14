@@ -1,0 +1,2 @@
+# file lemma reason: lemmas whose mutants are accepted, explained (mutation_check.py --known)
+src/bytes.bats falsep_eqb from FALSEP(), which has no constructor, every statement is true: the mutants are equivalent

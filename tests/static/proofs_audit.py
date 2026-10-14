@@ -63,7 +63,8 @@ def strip(text):
             j = i + 1
             while j < len(text) and text[j] != '"':
                 j += 2 if text[j] == '\\' else 1
-            out.append('""' + '\n' * text[i:j].count('\n'))
+            seg = text[i:j + 1]
+            out.append(''.join(c if c == '\n' else ' ' for c in seg))
             i = j + 1
         else:
             out.append(text[i])

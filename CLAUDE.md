@@ -1716,6 +1716,35 @@ then proved. No proof here has one (integers are built from bytes,
 fails the checkers on a literal of 2 to the 29 or more in `src/`, apart
 from a run-time value marked `(* wide *)`.
 
+A context can be contradictory with no large literal at all (#594): a
+proof with nested divisions (`h/256 + 256*(l mod 256)`, two deep) made
+the solver's elimination overflow, its context contradictory, and the
+compiler accepted a false statement (`ROTR(16, h, l, l, h+1)`). So a
+lemma that does not prove what it says type-checks with every checker
+green. The rules for a proof's arithmetic:
+
+* **Digit form.** A statement is made of steps that divide (or take
+  `mod`) by a constant of at most 16 at a time, with every coefficient at
+  most 2 to the 16, a number built a digit at a time (`b + 256 * m`, as
+  `LE` and `STEP1` are), never a closed form with nested `/` or `mod`, a
+  product of two variables, or a coefficient that elimination can grow.
+  `tests/static/proofs_audit.py` lists the places that are not (report
+  only, a human reads each).
+* **A false variant of every lemma.** Each lemma (`prfun`, `prfn`, a
+  `primplement` of a `#pub prfun`) has its false variant rejected:
+  `tests/static/mutation_check.py` makes one (a numeric index plus one, a
+  guard's `==` shifted by one, a byte string consed with a byte) with the
+  lemma's own body and the compiler must reject it; an accepted mutant is
+  a vacuous proof (or a mutation that is true) and is filed as its own p2
+  issue with the minimal case. A new lemma comes with its false variant as
+  a reject fixture (`tests/static/reject/`) when no mutation reaches it.
+  The research is on #594 (Certora's and Frama-C's `assert false` probe,
+  Dafny's `--warn-contradictory-assumptions`, MutDafny).
+* **No `[a | prop]` as the result of a `prfn`.** An existential return
+  `[a | prop]` of a `prfn` silently dropped the proposition (#594), so a
+  `prfn` returns a dataprop (an `EQI`, a `LEN`) or the proposition is
+  stated by a `prfun`; a guard `[p] void` is checked by its mutant.
+
 **The only way to change a record** is `libstore_save_book` and
 `libstore_save_index` (`idb_update`, bridge: one transaction in which a
 key is read, the closure decides from what it read, and the answer is

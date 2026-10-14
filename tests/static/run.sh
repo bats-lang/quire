@@ -68,7 +68,7 @@ named() { # member -> 0 when it is to run
 selected="$*"
 for member in $selected; do
   case $member in
-    check|checkers) ;;
+    check|checkers|mutation) ;;
     accept/*|reject/*) [ -d "$ROOT/tests/static/$member" ] || { echo "no fixture $member"; exit 2; } ;;
     *) echo "not a member: $member"; exit 2 ;;
   esac
@@ -94,7 +94,7 @@ app="$TMP/app"
 # src/version.bats) from git: it reads the checkout's repository
 GIT_DIR=$(git -C "$ROOT" rev-parse --absolute-git-dir)
 export GIT_DIR
-if named check || [ -n "$fixtures" ]; then
+if named check || named mutation || [ -n "$fixtures" ]; then
   mkdir -p "$app"
   (cd "$ROOT" && tar cf - --exclude=./node_modules --exclude=./dist \
     --exclude=./build --exclude=./test-results --exclude=./.git .) | (cd "$app" && tar xf -)
@@ -242,4 +242,14 @@ for member in $fixtures; do
   rm -rf "$app/build"
   cp -a "$TMP/build-checked" "$app/build"
 done
+# Every lemma of the arithmetic modules has its false variant rejected
+# (mutation_check.py, quire#594): a mutant the compiler accepts is a lemma
+# whose context is contradictory. Runs in the checked copy after the
+# fixtures (it leaves its build changed) and puts each module back.
+if named mutation; then
+  if (cd "$app" && BATS_CHECK="bats check --repository $repository" python3 "$ROOT/tests/static/mutation_check.py" \
+        --run "$app" --known "$ROOT/tests/static/mutation_known.txt" \
+        src/bytes.bats src/crc.bats src/fields.bats) > "$TMP/mutation.log" 2>&1; then echo "ok   mutation: $(tail -1 "$TMP/mutation.log")"
+  else echo "FAIL mutation:"; cat "$TMP/mutation.log"; fail=1; fi
+fi
 exit $fail

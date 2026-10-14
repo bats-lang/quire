@@ -61,7 +61,7 @@ def specs():
 def static_members():
     """Everything the static tests run: the app's check, the checkers,
     and each fixture."""
-    found = ['check', 'checkers']
+    found = ['check', 'checkers', 'mutation']
     for verdict in ('accept', 'reject'):
         directory = os.path.join(ROOT, 'tests', 'static', verdict)
         found += sorted(f'{verdict}/{name}' for name in os.listdir(directory)

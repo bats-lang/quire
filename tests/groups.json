@@ -175,7 +175,8 @@
       "accept/try-again-transient",
       "reject/clip-past-end",
       "reject/aloud-placement-unmatched",
-      "reject/fixed-box-zoom-zero"
+      "reject/fixed-box-zoom-zero",
+      "mutation"
     ]
   }
 }
