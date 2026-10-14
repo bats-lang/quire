@@ -13,6 +13,7 @@ static quantifiers `{..}` of everything else) and reports, with a severity:
   HIGH    nested         two or more `/` or `mod` in one line
   HIGH    var-divisor    `/` or `mod` by something that is not a literal
   HIGH    nonlinear      a product of two terms neither of which is a literal
+  MEDIUM  const-coeff    a product by a NAMED_CONSTANT: linear, its value is the coefficient
   HIGH    wide-literal   a literal or product of literals of over 2^28 (2^28 itself is MEDIUM, edge-2^28)
   MEDIUM  wide-coeff     a literal or product of literals of 2^16 to 2^28
   MEDIUM  wide-divisor   `/` or `mod` by a literal over 16 (the rule is 16 at a time)
@@ -134,7 +135,11 @@ def analyse(line):
     for m in re.finditer(r'(?<![(*])\*(?![*)])', line):
         left, right = operand_before(line, m.start()), operand_after(line, m.end())
         if left and right and not is_literal(left) and not is_literal(right):
-            found.append(('HIGH', 'nonlinear', f'{left} * {right}'))
+            if re.fullmatch(r'[A-Z][A-Z0-9_]*', left) or re.fullmatch(r'[A-Z][A-Z0-9_]*', right):
+                # a named constant: linear, but its value is the coefficient
+                found.append(('MEDIUM', 'const-coeff', f'{left} * {right}'))
+            else:
+                found.append(('HIGH', 'nonlinear', f'{left} * {right}'))
     # a chain of literal factors multiplies: 256 * 256 * x
     for m in re.finditer(r'(?:(?:0x[0-9a-fA-F]+|\d+)\s*\*\s*)+(?:0x[0-9a-fA-F]+|\d+)', line):
         product = 1
