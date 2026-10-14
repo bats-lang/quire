@@ -55,6 +55,7 @@
       "library-records.spec.js",
       "old-library.spec.js",
       "library.spec.js",
+      "publisher-sizes.spec.js",
       "search.spec.js",
       "sync-idempotent.spec.js",
       "vertical.spec.js"

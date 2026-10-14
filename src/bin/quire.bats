@@ -1097,6 +1097,8 @@ in if _in_reader() then reader_relayout() else () end
 fn _settings_apply (): void = let
   val () = set_sliders()
   val () = _settings_changed()
+  (* the book's sizes, given to the page as its chapter is loaded, may be others now *)
+  val () = (if _in_reader() then reader_sizes_reload() else ())
   val () = screen_controls_apply()
 in aloud_choices_show() end
 
@@ -1976,6 +1978,13 @@ fn _typography_chosen (control: typography_control): bool =
         | ImagesDimmed() => set_dim_set(ImagesAsTheyAre())
         | ImagesAsTheyAre() => set_dim_set(ImagesDimmed()))
     in true end
+  (* the sizes are given to the page as a chapter is loaded, so it is shown again *)
+  | PublisherSizesSwitch() => let
+      val () = (case+ set_sizes_get() of
+        | SizesInProportion() => set_sizes_set(SizesAsPublished())
+        | SizesAsPublished() => set_sizes_set(SizesInProportion()))
+      val () = (if _in_reader() then reader_sizes_reload() else ())
+    in true end
   | TapsSides() => let val () = set_taps_set(SideZones()) in true end
   | TapsForward() => let val () = set_taps_set(ForwardZones()) in true end
   | TapsOneHand() => let val () = set_taps_set(OneHandZones()) in true end
@@ -2020,6 +2029,11 @@ fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 10) = let
         in 0 end)
   val listeners = RCons(listeners, OnEl("size-row"), "input", llam(h) => let
       val () = set_size_set(_clamp(_input_number(h), 12, 32))
+      (* the publisher's own sizes are against the reader's size as the root,
+         so they are given to the page again (quire#431) *)
+      val () = (case+ set_sizes_get() of
+        | SizesAsPublished() => if _in_reader() then reader_sizes_reload() else ()
+        | SizesInProportion() => ())
     in let val () = _settings_changed() in 0 end end)
   val listeners = RCons(listeners, OnEl("line-height-row"), "input", llam(h) => let
       val () = set_lh_set(_clamp(_input_number(h), 12, 24))

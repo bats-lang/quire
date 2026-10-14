@@ -213,6 +213,85 @@ fn spans_check {n:pos}{count:nat} (spans: span_list(n, count), wanted: int, what
   in length(spans) end, wanted, what)
 in span_list_free(spans) end
 
+(* The map of the chapter doc under sheet, sizes against base *)
+fn map_run {n,m:pos | n <= 1048576; m <= 1048576} (doc: string(n), sheet: string(m), initial: size_computed, base: size_computed): [c:nat] size_map(c) = let
+  val n = g1u2i(string1_length(doc))
+  val m = g1u2i(string1_length(sheet))
+  val doc_array = text_array(doc, n)
+  val @(doc_frozen, doc_view) = $A.freeze<byte>(doc_array)
+  val nodes = $X.parse_document(doc_view, n)
+  val sheet_array = text_array(sheet, m)
+  val @(sheet_frozen, sheet_view) = $A.freeze<byte>(sheet_array)
+  val ~SheetRead(_, _, rules) = sheet_rules_read(sheet_view, m)
+  val map = chapter_size_map(doc_view, nodes, sheet_view, rules, initial, base)
+  val () = css_rules_free(rules)
+  val () = $A.drop<byte>(sheet_frozen, sheet_view)
+  val () = $A.free<byte>($A.thaw<byte>(sheet_frozen))
+  val () = $X.free_nodes(nodes)
+  val () = $A.drop<byte>(doc_frozen, doc_view)
+  val () = $A.free<byte>($A.thaw<byte>(doc_frozen))
+in map end
+
+(* The step of the n-th entry of the map, -1 when it has fewer *)
+fun step_nth {c:nat} .<c>. (map: !size_map(c), n: int): int =
+  case+ map of
+  | MapNil() => ~1
+  | MapCons(_, step, rest) => if n <= 0 then step else step_nth(rest, n - 1)
+
+fn check_map (): void = let
+  (* book A against its dominant 16px: html is not made, p is the base,
+     h1 and small are what they are against it *)
+  val map = map_run(
+    "<html><body><h1>Title</h1><p>Body <small>tiny</small></p><div>loose</div></body></html>",
+    "html{font-size:62.5%} p{font-size:1.6rem} h1{font-size:2em} small{font-size:.8em}", 16000, 16000)
+  val () = expect_int(size_map_count(map), 4, "map A: entries")
+  val () = expect_int(step_nth(map, 0), 25, "map A: h1 is 2em of the body's 10px, 1.25 of 16px")
+  val () = expect_int(step_nth(map, 1), 20, "map A: p is the base")
+  val () = expect_int(step_nth(map, 2), 16, "map A: small is .8 of p")
+  val () = expect_int(step_nth(map, 3), 13, "map A: a div is shown at the body's 10px")
+  val () = size_map_free(map)
+
+  (* a book that sets nothing maps nothing *)
+  val map = map_run("<html><body><h1>Title</h1><p>Text <em>here</em></p></body></html>", " ", 16000, 16000)
+  val () = expect_int(size_map_count(map), 0, "map: nothing set")
+  val () = size_map_free(map)
+
+  (* book B against its dominant 12px (9pt) *)
+  val map = map_run(
+    "<body><h1>T</h1><h2>S</h2><p class=\"lead\">L</p><p>Body</p><p style=\"font-size:8px\">c</p></body>",
+    "p{font-size:9pt} h1{font-size:18pt} h2{font-size:13.5pt} .lead{font-size:11.25pt}", 16000, 12000)
+  val () = expect_int(step_nth(map, 0), 40, "map B: h1 is twice")
+  val () = expect_int(step_nth(map, 1), 30, "map B: h2 is 1.5")
+  val () = expect_int(step_nth(map, 2), 25, "map B: the lead is 1.25")
+  val () = expect_int(step_nth(map, 3), 20, "map B: p is the base")
+  val () = expect_int(step_nth(map, 4), 13, "map B: the caption, 8px of 12px")
+  val () = size_map_free(map)
+
+  (* the floor and the ceiling *)
+  val map = map_run("<p style=\"font-size:1px\">a</p><p style=\"font-size:400%\">b</p>", " ", 16000, 16000)
+  val () = expect_int(step_nth(map, 0), 10, "map: the floor, half")
+  val () = expect_int(step_nth(map, 1), 60, "map: the ceiling, three times")
+  val () = size_map_free(map)
+
+  (* respecting the publisher's sizes: the root is the reader's, 24px, and
+     the sizes are against it; an absolute size stays absolute *)
+  val map = map_run(
+    "<html><body><p>a</p><h1>b</h1><p class=\"c\">c</p></body></html>",
+    "html{font-size:62.5%} p{font-size:1.6rem} h1{font-size:18pt} .c{font-size:12px}", 24000, 24000)
+  val () = expect_int(step_nth(map, 0), 20, "respect: 1.6rem of 62.5% of the root is the root")
+  val () = expect_int(step_nth(map, 1), 20, "respect: 18pt is 24px, the root")
+  val () = expect_int(step_nth(map, 2), 10, "respect: 12px is half of 24px")
+  val () = size_map_free(map)
+
+  (* a map is taken in the document's order *)
+  val map = map_run("<p style=\"font-size:20px\">a</p><p style=\"font-size:8px\">b</p>", " ", 16000, 16000)
+  val @(first, map) = size_map_take(map, 0)
+  val () = expect_int(first, 0, "take: before the first")
+  val @(second, map) = size_map_take(map, 1)
+  val () = expect_int(second, 25, "take: the first element's name is at 1")
+  val () = size_map_free(map)
+in () end
+
 fn check_sources (): void = let
   val doc = "<html><head><link rel=\"stylesheet\" href=\"a.css\"/><link rel=\"alternate stylesheet\" href=\"b.css\"/><link rel=\"stylesheet\" media=\"print\" href=\"c.css\"/><link rel=\"stylesheet\" media=\"screen\" href=\"d.css\"/><link rel=\"icon\" href=\"e.png\"/><link rel=\"stylesheet\"/><style>p{}</style><style>h1{}</style></head><body><p>x</p></body></html>"
   val n = g1u2i(string1_length(doc))
@@ -309,6 +388,7 @@ implement main0 () = let
   val () = check_tally()
   val () = check_most_sizes()
   val () = check_sources()
+  val () = check_map()
   val () = fuzz(5000)
 in
   if !_failures = 0 then println! ("all ok")

@@ -7,6 +7,7 @@
 
 staload "ui.sats"
 staload "style.sats"
+staload "size_rules.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload "version.sats"
 
@@ -923,6 +924,10 @@ fn _settings (): void = let
   (* a book's images dimmed in the dark themes *)
   val () = _switch_row("typography-look", "dim-row", "dim-images-switch", "dim-images-track",
     "dim-images-knob", "dim-images-about", "Dim images in the dark themes", "Softens a book's pictures in the dark themes")
+  (* a book's sizes in proportion to the text size, or as its publisher set them (quire#431) *)
+  val () = _switch_row("typography-look", "publisher-sizes-row", "publisher-sizes-switch", "publisher-sizes-track",
+    "publisher-sizes-knob", "publisher-sizes-about", "Respect the publisher's sizes",
+    "Off, your text size is the book's text size and its other sizes follow in proportion. On, the book keeps the sizes its publisher chose")
   (* Page: pages turned across, or the chapter scrolled down *)
   val () = ui_el("typography-page", "layout-row", TDiv, "srow")
   val () = ui_el("layout-row", "layout-label", TSpan, "slabel")
@@ -1131,6 +1136,9 @@ implement app_build () = let
   val () = ui_add("bats-root", "style-sheet", TStyle)
   val @(css, css_len) = app_style()
   val () = ui_text_buf("style-sheet", css, css_len)
+  val () = ui_add("bats-root", "style-sizes", TStyle)
+  val @(sizes_css, sizes_css_len) = size_style()
+  val () = ui_text_buf("style-sizes", sizes_css, sizes_css_len)
   val () = ui_add("bats-root", "style-type", TStyle)
   val () = ui_add("bats-root", "style-fonts", TStyle)
   (* for a moment, as fonts arrive: reader.bats's _tcy_refit *)
