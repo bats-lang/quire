@@ -46,6 +46,12 @@ stay short within a few lines.
 ## Priorities
 
 * **p0:** first, before anything else.
+* **CI first:** CI issues, especially flaky tests, outrank feature work: a
+  session fixes them first; a flake is a bug with a root cause.
+* **Order:** CI issues (flakiness first), then correctness work, then
+  feature work. Correctness work is anything where, assuming the code is
+  already correct, the only difference is added tests or proofs (missing
+  proofs, missing coverage).
 * **p1:** next.
 * **p2:** known issues the Android release is held for. Work sessions
   address them.
