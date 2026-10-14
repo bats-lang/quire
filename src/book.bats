@@ -808,24 +808,30 @@ fn _sum_free (sum: entry_sum): void =
   | ~SumUnknown() => ()
   | ~SumKnown(_, _) => ()
 
-(* Whether the CRC-32 of bytes[0, n) is the sum, which it consumes *)
-fn _sum_matches {lb:agz}{n:pos} (bytes: !$A.borrow(byte, lb, n), n: int n, sum: entry_sum): bool =
+(* Whether the CRC-32 of bytes[0, n) is the sum, which it consumes. The
+   array is a barr borrowed with its cells in the type, so the CRC read is
+   crc_of_cborrow's proved one *)
+fn _sum_matches {lb:agz}{n:pos}{cs:$A.cells}
+  (cells_len: $A.CLEN(cs, n) | bytes: !$A.cborrow(lb, n, cs), n: int n, sum: entry_sum): bool =
   case+ sum of
   | ~SumUnknown() => false
   | ~SumKnown(want_high, want_low) => let
-      val @(sum_high, sum_low) = crc_of_borrow(bytes, n)
+      val (_, _ | @(sum_high, sum_low)) = crc_of_cborrow(cells_len | bytes, n)
     in sum_high = want_high && sum_low = want_low end
 
 implement take_text_sum (inflated, sum) =
   case+ take_decompressed(inflated) of
   | ~NoContentBytes() => let val () = _sum_free(sum) in NoContentBytes() end
   | ~ContentBytes(owner, piece, size) => let
-      val @(frozen, bytes) = $A.freeze<byte>(piece)
-      val matches = _sum_matches(bytes, size, sum)
-      val () = $A.drop<byte>(frozen, bytes)
+      (* the piece is lent as a barr and given back to its arena below *)
+      val (cells_len, lent | lent_bytes) = $A.barr_of_arrx(piece)
+      val @(frozen, bytes) = $A.barr_freeze(lent_bytes)
+      val matches = _sum_matches(cells_len | bytes, size, sum)
+      val () = $A.cborrow_drop(frozen, bytes)
+      val piece = $A.barr_to_arrx(lent | $A.barr_thaw(frozen))
     in
-      if matches then _text_of_content(owner, $A.thaw<byte>(frozen), size)
-      else let val () = piece_free(owner, $A.thaw<byte>(frozen)) in NoContentBytes() end
+      if matches then _text_of_content(owner, piece, size)
+      else let val () = piece_free(owner, piece) in NoContentBytes() end
     end
 
 implement lookup_content (found) =
