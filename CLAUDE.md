@@ -3586,7 +3586,9 @@ a page that does not answer within 5 s, and every page of a test 15 s
 before its timeout, is captured: the frames `Debugger.pause` stops in
 (wasm ones by function and byte offset), a CPU profile when nothing
 pauses, which commands the renderer still answers, and the renderers'
-CPU time over 1 s. The capture is `stall-capture-<n>.json` in the test's
+CPU time over 1 s, each renderer's threads by state and kernel wait
+(`/proc`, #575: a renderer that answers nothing and burns nothing is
+waiting outside script) and the machine's load and free memory. The capture is `stall-capture-<n>.json` in the test's
 output (CI's `e2e-stall-captures-<group>` artifact), attached to the test, and
 summed up on stderr. `e2e/stall-capture.spec.js` checks it on pages that
 loop forever in script and in wasm.
