@@ -14,11 +14,11 @@ export const headingBooks = {
       `<aside epub:type="footnote" id="n1"><p>A footnote's text.</p></aside>\n` +
       `<p>${filler}</p>` }] } },
 
-  /** The same headings with the book's own sizes in style attributes and in a rule */
+  /** The same headings with the book's own sizes in style attributes and in a rule: 54, 42 and 36px over a body of 30px (#431: kept in proportion to the text) */
   inlineSizes: { valid: true, opts: {
     title: 'Headings with sizes', author: 'Sizes', toc: [{ label: 'Headings', href: 'chapter1.xhtml' }],
-    rawChapters: [{ head: '<style>h1{font-size:9px}h2{font-size:9px}</style>', body:
-      '<h1 style="font-size:9px">Heading one</h1>\n<h2 style="font-size:9px">Heading two</h2>\n<h3 style="font-size:9px">Heading three</h3>\n' +
+    rawChapters: [{ head: '<style>h1{font-size:54px}h2{font-size:42px}</style>', body:
+      '<h1 style="font-size:54px">Heading one</h1>\n<h2 style="font-size:42px">Heading two</h2>\n<h3 style="font-size:36px">Heading three</h3>\n' +
       `<p style="font-size:30px">Body text. ${filler}</p>` }] } },
 
   /** A heading that is one long word, at the largest size on a narrow window */

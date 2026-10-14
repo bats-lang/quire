@@ -228,9 +228,11 @@ test('a stylesheet and a style of one chapter do not size another\'s text', asyn
   await goToEntry(page, 'Styled two');
   await expect(chapterTitle(page)).toHaveText('Styled two');
   const two = await sizes();
-  // the book's CSS is not applied (#411): both chapters' text is the reader's size,
-  // and chapter 1's 72px and 60px reach neither chapter
-  expect(one.big).toBe(one.plain);
+  // the book's colours are not applied (#411), and its sizes are in proportion to the text
+  // (#431): chapter 1's own 60px reaches the text as the largest size, three times the
+  // reader's (the 400% rule is held), and neither it nor chapter 1's 72px reaches chapter 2,
+  // whose big paragraph has no size rule and is the reader's size
+  expect(parseFloat(one.big)).toBe(3 * parseFloat(one.plain));
   expect(two.big).toBe(two.plain);
   expect(two.plain).toBe(one.plain);
   expect(one.colour && two.colour).toBe(true);
