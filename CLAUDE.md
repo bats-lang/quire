@@ -814,7 +814,10 @@ codec; a caller that knows what the cells hold has it from
   step is linear in xor (`step1_xor`, `stepn_xor`, by cases on the
   parities of the three low halves, the polynomial xored into none or two
   of the three); a register whose low byte is zero shifts without the
-  polynomial (`shift8`, eight `step_even`); every register has a next one
+  polynomial (`shift8`, from `shift4` and `shift2` by `stepn_append`, each
+  statement in digits so no index nests a division: eight chained
+  `step_even` with `high/256` in their indices did not finish under the
+  infinite-precision solver, quire#594); every register has a next one
   (`stepn_exists`, with `xor_exists`), so the step of the whole is
   compared with the table's entry and the pure shift;
 * the loop (`crc_of_cborrow`): the invariant is `HOLDS` of the bytes read
@@ -824,7 +827,7 @@ codec; a caller that knows what the cells hold has it from
 
 `tests/codec` still runs it on the check value of "123456789" and arrays
 of every length 1 to 300 and 4000 against the fold, as a check of the boundaries, not as the proof
-(`tests/static/accept/crc-*` and `reject/crc-*`: a table entry of another
+(`tests/static/accept/crc-*` and `reject/crc-*`: a shift of 8 bits whose low half is off, a table entry of another
 byte, the step by another byte's entry, a high half not shifted, a loop
 step of another byte, the register not complemented and a cell read for
 another all fail to type-check).
