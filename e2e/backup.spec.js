@@ -38,6 +38,15 @@ async function factoryReset(page) {
   await expect(cards(page)).toHaveCount(0);
 }
 
+// The theme is Auto until a reader chooses one, and Auto is the night theme
+// from 22:00 to 07:00 by the clock (#570): a test that reads the ground
+// before and after something that takes a while (a restore) must not cross
+// that hour on the runner's clock, so every test here starts at noon, the clock then running on.
+test.beforeEach(async ({ context }) => {
+  await context.clock.install({ time: new Date('2026-06-01T12:00:00Z') });
+  await context.clock.resume();
+});
+
 test('a backup holds the settings, the books, their places and annotations', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, { title: 'Backed "Up"', author: 'Keeper', rawChapters: chapters(2) });
