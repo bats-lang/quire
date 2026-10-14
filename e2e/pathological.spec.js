@@ -20,7 +20,7 @@
 import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, indicator, bookPage, dialog, openReadingSettings, readingSettings,
-  selectionButton, marks, epubFile, importFiles, toLibrary, control, clickControl, cards, card,
+  selectionButton, marks, epubFile, importFiles, toLibrary, control, clickControl, cards, card, bareFrameMs,
 } from './helpers.js';
 import { pageMargins } from './page-margins.js';
 import {
@@ -75,33 +75,6 @@ async function arrange(page, mode) {
   await slow(readingSettings(page)).toBeHidden();
   await expect.poll(() => indicator(page).textContent()).toMatch(mode === 'scrolled' ? /% of chapter/ : mode === 'columns' ? /pages 1–2 of/ : / page 1 of/);
   return Date.now() - started;
-}
-
-/** Chrome's own time, in this window and arrangement, to lay out and draw
-    the page's DOM: a copy of it, with the page's styles (the stylesheet
-    applies to a copy as to the page), put beside the page, laid out, drawn
-    for two frames, and removed. A hosted runner that is slow is slow for
-    the copy too, so what the app takes is held to a multiple of it */
-async function bareFrameMs(page) {
-  return page.evaluate(async () => {
-    const doc = document.querySelector('[role=document][aria-label=Page]');
-    const frame = () => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
-    const copy = doc.cloneNode(true);
-    for (const attribute of ['id', 'role', 'aria-label', 'tabindex', 'data-gesture-region']) copy.removeAttribute(attribute);
-    for (const element of copy.querySelectorAll('[id]')) element.removeAttribute('id');
-    const box = doc.getBoundingClientRect();
-    copy.setAttribute('inert', '');
-    copy.style.cssText = `position:fixed;left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px;max-width:none;max-height:none;margin:0;z-index:-1;pointer-events:none`;
-    await frame();
-    const started = performance.now();
-    doc.parentElement.append(copy);
-    copy.getBoundingClientRect();
-    await frame();
-    const took = performance.now() - started;
-    copy.remove();
-    await frame();
-    return took;
-  });
 }
 
 /** The open budget: what the app takes to show a chapter, or to change
