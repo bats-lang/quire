@@ -6,7 +6,7 @@
 
 import { test, expect } from './fixtures.js';
 import {
-  epubFile, importFiles, openBook, placeChanged, toLibrary, reload, bookPage, place, chapters, openReadingSettings, readingSettings, fixedLayoutBook, readFixed, fixedPlace, japaneseChapters,
+  epubFile, importFiles, openBook, card, placeChanged, toLibrary, reload, bookPage, place, chapters, openReadingSettings, readingSettings, fixedLayoutBook, readFixed, fixedPlace, japaneseChapters,
 } from './helpers.js';
 import { launch, relaunch, chapterShown, nextChapter } from './relaunch.js';
 import { legacyLibrary, store, put, forgetRecords } from './legacy-library.js';
@@ -184,6 +184,34 @@ test('scrolled, a hand scroll within one screenful is the place a window swap ke
   await swapWindow(page, { width: size.height, height: size.width });
   await expect.poll(() => topParagraph(page)).toBe(top);
   await swapWindow(page, size);
+  await expect.poll(() => topParagraph(page)).toBe(top);
+});
+
+// the same hand scroll, and the book closed and opened again: the place kept
+// is the paragraph at the top, whichever phone or desktop shape (#485)
+test('scrolled, a hand scroll within one screenful is the place the book opens at again', async ({ page }) => {
+  await page.clock.install();
+  await page.goto('/');
+  await importFiles(page, [epubFile(paged)], 1);
+  await openBook(page, paged.title);
+  await change(page, 'Page', sheet => group(sheet, 'Layout', 'Scroll'));
+  await bookPage(page).evaluate(doc => { doc.scrollTop = doc.clientHeight; });
+  await page.waitForTimeout(1500);
+  const first = await topParagraph(page);
+  await bookPage(page).evaluate(doc => {
+    const start = doc.scrollTop;
+    const firstTop = () => { const c = doc.getBoundingClientRect(); for (const e of doc.querySelectorAll('p')) { const r = e.getClientRects()[0]; if (r && r.top >= c.top - 2 && r.top < c.bottom) return e; } return null; };
+    const was = firstTop();
+    while (doc.scrollTop - start < doc.clientHeight * 0.45 && firstTop() === was) doc.scrollTop += 10;
+  });
+  await page.waitForTimeout(1500);
+  const top = await topParagraph(page);
+  expect(top).toBeTruthy();
+  expect(top).not.toBe(first);
+  await toLibrary(page);
+  // openBook waits for a page count, which a scrolled chapter does not show
+  await card(page, paged.title).click();
+  await expect(bookPage(page)).toBeVisible();
   await expect.poll(() => topParagraph(page)).toBe(top);
 });
 
