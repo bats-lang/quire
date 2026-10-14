@@ -64,7 +64,7 @@ test('small, sub, sup, a caption and a footnote are smaller than the text and sc
   expect(errors).toEqual([]);
 });
 
-test('headings keep their hierarchy when the book gives them sizes of its own', async ({ page }) => {
+test('headings keep the hierarchy the book gives them in its own sizes, in proportion to the text', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, headingBooks.inlineSizes.opts);
   const h1 = await px(page, 'h1'), h2 = await px(page, 'h2'), h3 = await px(page, 'h3');
@@ -72,7 +72,11 @@ test('headings keep their hierarchy when the book gives them sizes of its own', 
   expect(h1).toBeGreaterThan(h2);
   expect(h2).toBeGreaterThan(h3);
   expect(h3).toBeGreaterThan(text);
-  // and the body's own 30px is not applied
+  // the book's 54, 42 and 36px over its 30px body keep their proportion to
+  // the text (#431), and the body's own 30px is not applied
+  expect(h1 / text).toBeCloseTo(54 / 30, 1);
+  expect(h2 / text).toBeCloseTo(42 / 30, 1);
+  expect(h3 / text).toBeCloseTo(36 / 30, 1);
   expect(text).toBeLessThan(30);
   expect(errors).toEqual([]);
 });
