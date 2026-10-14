@@ -49,6 +49,7 @@ import {
   chapterTitle, expectBannerSaysWhatToDo, toLibrary,
 } from './helpers.js';
 import { containerBooks } from './container-books.js';
+import { coveredByBanner } from './controls-shown.js';
 
 const contents = page => dialog(page, 'Contents');
 const rows = page => contents(page).getByRole('tabpanel', { name: 'Contents' }).getByRole('button');
@@ -140,11 +141,17 @@ test('a chapter whose CRC is not its data\'s is reported as unreadable, and the 
   await rows(page).nth(1).click();
   const banner = page.getByRole('alert');
   await expect(banner).toContainText(/Chapter 2 of this book could not be read/);
-  // the banner stays until it is dismissed, and on a phone it lies over the
-  // rows of the contents: the reader dismisses it before choosing the next chapter
-  await banner.getByRole('button', { name: 'Dismiss' }).click();
-  await expect(banner).toBeHidden();
+  // the banner stays until it is dismissed; the contents are over it (a
+  // modal layer is over the status, #556), so no row is under it and the
+  // next chapter is chosen with the banner still up
+  await showChrome(page);
+  await control(page, 'Contents').click();
+  await expect(contents(page)).toBeVisible();
+  expect(await coveredByBanner(page), 'rows of the contents under the banner').toEqual([]);
+  await page.keyboard.press('Escape');
+  await expect(contents(page)).toBeHidden();
   await readRow(page, 2);
+  await expect(banner).toBeVisible();
   expect(errors).toEqual([]);
 });
 
