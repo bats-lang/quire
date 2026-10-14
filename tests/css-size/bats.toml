@@ -6,3 +6,4 @@ unsafe = false
 [dependencies]
 "array" = ""
 "arith" = ""
+"xml-tree" = ""
