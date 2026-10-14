@@ -125,7 +125,6 @@ export const mathBooks = {
 
   /** A math element with a broken tree (a fraction of one child, a root of three), valid XML, not valid MathML */
   'malformed': {
-    valid: false, errors: ['RSC-005'],
     ...one('Malformed Math',
       '<h1>Malformed Math</h1>\n' +
       '<p>malformed-before The paragraph before the malformed equations.</p>\n' +
@@ -134,6 +133,8 @@ export const mathBooks = {
       `<p>malformed-unknown An unknown: <math ${MATHML}><mi>q</mi><mfoo><mn>5</mn></mfoo></math> ends here.</p>\n` +
       `<p>malformed-good Good: <math ${MATHML}><mn>7</mn><mo>+</mo><mn>8</mn></math> ends here.</p>\n` +
       '<p>malformed-after The paragraph after the malformed equations.</p>', {}, { properties: 'mathml' }),
+    // after the spread: `one` makes a valid book, and this one is invalid only as intended
+    valid: false, errors: ['RSC-005'],
   },
 
   // ---- equations as pictures ----
