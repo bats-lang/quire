@@ -29,7 +29,7 @@
  * summed up on stderr.
  */
 
-import { writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
 const PROBE_EVERY_MS = 2000;
@@ -124,6 +124,35 @@ function profileSummary(profile) {
   };
 }
 
+/**
+ * What each thread of a process is doing, from /proc (Linux): its name,
+ * state (R running, S sleeping, D waiting on the disk) and the kernel
+ * function it waits in, counted. A renderer that answers nothing and uses
+ * no CPU is waiting for something outside script (#575): this says what.
+ */
+function threadStates(pid) {
+  try {
+    const counts = new Map();
+    for (const thread of readdirSync(`/proc/${pid}/task`)) {
+      const read = (file) => { try { return readFileSync(`/proc/${pid}/task/${thread}/${file}`, 'utf8').trim(); } catch (error) { return '?'; } };
+      const stat = read('stat');
+      const state = stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
+      const key = `${read('comm')} ${state} ${read('wchan')}`;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return [...counts].map(([thread, count]) => `${count} x ${thread}`);
+  } catch (error) {
+    return [String(error && error.message || error)];
+  }
+}
+
+/** The machine's load and free memory when a page stalls: a starved machine is not the page's fault. */
+function machineState() {
+  const text = (file) => { try { return readFileSync(file, 'utf8'); } catch (error) { return ''; } };
+  const free = /MemAvailable:\s+(\d+) kB/.exec(text('/proc/meminfo'));
+  return { loadAverage: text('/proc/loadavg').trim(), memoryAvailableMiB: free ? Math.round(+free[1] / 1024) : null };
+}
+
 /** Each renderer process's CPU time (s) over `ms`, from the browser's own session. */
 async function rendererCpu(browser, ms) {
   let session;
@@ -194,6 +223,8 @@ async function captureArmed(page, armed, reason, browser) {
     }
   }
   result.rendererCpu = await cpu;
+  if (Array.isArray(result.rendererCpu)) for (const process of result.rendererCpu) process.threads = threadStates(process.pid);
+  result.machine = machineState();
   result.verdict = verdict(result);
   return result;
 }
@@ -223,7 +254,9 @@ export function summary(result) {
   }
   if (Array.isArray(result.rendererCpu)) {
     lines.push(`  renderer CPU over 1 s: ${result.rendererCpu.map((process) => `${process.pid} ${process.cpuSeconds}s`).join(', ')}`);
+    for (const process of result.rendererCpu) if (process.threads) lines.push(`  renderer ${process.pid} threads: ${process.threads.join('; ')}`);
   }
+  if (result.machine) lines.push(`  machine: load ${result.machine.loadAverage}, ${result.machine.memoryAvailableMiB} MiB available`);
   return lines.join('\n');
 }
 

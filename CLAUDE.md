@@ -46,6 +46,12 @@ stay short within a few lines.
 ## Priorities
 
 * **p0:** first, before anything else.
+* **CI first:** CI issues, especially flaky tests, outrank feature work: a
+  session fixes them first; a flake is a bug with a root cause.
+* **Order:** CI issues (flakiness first), then correctness work, then
+  feature work. Correctness work is anything where, assuming the code is
+  already correct, the only difference is added tests or proofs (missing
+  proofs, missing coverage).
 * **p1:** next.
 * **p2:** known issues the Android release is held for. Work sessions
   address them.
@@ -2193,6 +2199,64 @@ reaches the page yet (stage 3).
   temporary attribute and is not a permanent e2e: nothing of it is visible
   until stage 3, which tests it by what the page shows.
 
+### A book's sizes reach the page (#431, stage 3)
+
+A reflowed chapter's elements that its publisher gave a size carry a
+`data-fs` (`_size_mark` in `src/reader.bats`): the element's size against a
+base, in twentieths from 10 to 60 (`proportion`, so half to three times,
+as Readium clamps), and the stylesheet `style-sizes` (`src/size_rules.bats`,
+a sheet of its own, 51 rules proven to fit its budget, each one a
+selector of 19 bytes and a value of 30) gives it
+`font-size: calc(var(--reading-size) * step / 20)`, where `--reading-size`
+is the Size setting (written by `_apply_type`). The map of a chapter's
+elements and steps is made as the chapter is loaded (`_sizes_load` after
+`_overlay_load`, in `_chapter_open`: `publisher_sizes_load`, which reads the
+chapter and its sheets again, like the measure does) and taken a name at a
+time by the render (`publisher_sizes_begin`, `publisher_sizes_step`,
+`publisher_sizes_end`: an element is known by where its name is in the
+document, and the render asks in the document's order). A fixed-layout
+page is not restyled, and a chapter's load that cannot make its map shows
+the chapter without sizes.
+
+* **In proportion (the default).** The steps are against the book's
+  dominant size (`publisher_dominant_size`), the cascade starting from the
+  browser's 16px, so the body text of every book is the Size setting
+  and a book's headings, small print, captions, notes and lead
+  paragraph keep their proportion to it (a book that sets no size has
+  no `data-fs`, and its headings are Quire's own, as before). An element is
+  marked when it was given a size or its size differs from the one it is
+  shown in (`html` and `body` are not made as elements, so a size they give
+  is given to their children: the rem trick's 62.5%).
+* **Respect the publisher's sizes** (`publisher_sizes`, `SizesInProportion |
+  SizesAsPublished`; the Look tab's switch, `publisher-sizes-switch`; the
+  device's own, kept in the "S2" record after "F" as "P" and a byte, in the
+  backup as `publisherSizes`, reset with the settings and brought back by their
+  Undo). The cascade then starts from the Size setting as the root and the
+  steps are against it: the publisher's sizes as a browser would draw them
+  with that root, an absolute size absolute (B's 9pt is 12px) and a
+  relative one relative (A's 1.6rem is the setting). Because an absolute size is
+  against the setting, the map depends on it: the chapter is shown again (at its
+  place, `reader_sizes_reload`) when the switch turns, when the Size moves
+  while it is on, and when the settings are reset or put back. A step is a
+  twentieth of the base, so a size is within 2.5% of the publisher's, and
+  one under half or over three times the Size is held there (12px at a
+  Size of 32).
+* By research (on the issue): Calibre rescales to a base font size
+  that is the most common size in the document; KOReader's two switches
+  (Embedded Style, Ignore publisher font sizes) are on or off and its
+  tracker records that ignoring sizes also drops the engine's heading
+  sizes (koreader#13295); Readium CSS keeps relative publisher sizes
+  scaled from the user's size and leaves absolute units as they are.
+* Tested: `tests/css-size` (the map: A's and B's books, the floor and the
+  ceiling, respecting) and `e2e/publisher-sizes.spec.js` (the books of
+  `e2e/size-books.js`: the body text at the setting in each at 12, 20
+  and 32, the ratios 2, 1.5, 0.8 and 1.25 in both, a size on body, on a div,
+  by html and rem and by calc(), a title page of headings, the floor and
+  ceiling, only the size read, a linked sheet, and the switch on, kept,
+  backed up, reset and undone). `e2e/publisher.spec.js`'s sizes test now expects the
+  point size inline to keep its proportion (it expected every size equal while the book's
+  sizes were dropped); the `!important` sizes are still not read.
+
 ## What allocates is linear
 
 wasm has no garbage collector, so outside `$UNSAFE` nothing that
@@ -3652,7 +3716,9 @@ a page that does not answer within 5 s, and every page of a test 15 s
 before its timeout, is captured: the frames `Debugger.pause` stops in
 (wasm ones by function and byte offset), a CPU profile when nothing
 pauses, which commands the renderer still answers, and the renderers'
-CPU time over 1 s. The capture is `stall-capture-<n>.json` in the test's
+CPU time over 1 s, each renderer's threads by state and kernel wait
+(`/proc`, #575: a renderer that answers nothing and burns nothing is
+waiting outside script) and the machine's load and free memory. The capture is `stall-capture-<n>.json` in the test's
 output (CI's `e2e-stall-captures-<group>` artifact), attached to the test, and
 summed up on stderr. `e2e/stall-capture.spec.js` checks it on pages that
 loop forever in script and in wasm.
