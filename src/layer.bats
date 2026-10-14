@@ -133,6 +133,7 @@ fn _modality_show {count:nat} (overlays: !layers(count)): void = let
     | ~NoPanel() => false
     | ~PanelOnTop(top) => (case+ _scrim_of(top) of Veils() => true | Clear() => false)): bool
   val () = ui_show("panel-scrim", veiled)
+  val () = ui_banner_under_veil(veiled)
   val () = ui_inert("reader", blocked)
 in
   if blocked then let
@@ -171,7 +172,9 @@ fun _menu_open {count:nat} .<count>. (overlays: !layers(count)): bool =
 fn _open_set {count:nat} (overlays: layers(count)): void = let
   val () = _modality_show(overlays)
   val () = ui_banner_below_bar(_screen_open(overlays))
-  val () = ui_banner_under_menu(_menu_open(overlays))
+  val menu = _menu_open(overlays)
+  val () = ui_banner_under_menu(menu)
+  val () = ui_undo_under_menu(menu)
   val any = (case+ overlays of LNil() => NotShown() | LCons(_, _, _) => Shown()): shown
   val () = _open_put(overlays)
 in back_overlays_set(any) end

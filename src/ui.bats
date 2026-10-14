@@ -943,6 +943,18 @@ implement ui_banner_below_bar (below) = _set_attr("error-banner", $D.Data("below
 
 implement ui_banner_under_menu (under) = _set_attr("error-banner", $D.Data("menu"), (if under then "1" else "0"): [value_len:pos | value_len < 256] string value_len)
 
+(* Whether a reader panel's veil is up (#556, #538): the banner is under it,
+   and whether a library menu is up, the Undo toast is. Both are said by the
+   layer module as the overlays change, as attributes of the element they
+   place, so the stylesheet asks no :has() of #bats-root (#423) *)
+#pub fn ui_banner_under_veil (under: bool): void
+
+implement ui_banner_under_veil (under) = _set_attr("error-banner", $D.Data("veil"), (if under then "1" else "0"): [value_len:pos | value_len < 256] string value_len)
+
+#pub fn ui_undo_under_menu (under: bool): void
+
+implement ui_undo_under_menu (under) = _set_attr("undo-toast", $D.Data("menu"), (if under then "1" else "0"): [value_len:pos | value_len < 256] string value_len)
+
 (* A pushed screen's top bar (quire#502; Android's settings and Material
    3's small top app bar: a navigation icon and the title; iOS pushes a
    screen with a back item, and keeps Done for a sheet): a Back icon

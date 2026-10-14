@@ -2003,7 +2003,7 @@ read of storage changed: each still folds, as #174 says.
   banner wraps its buttons under its message on a narrow window instead
   of squeezing Report. Over the reader it is fixed at the top while the
   reader's bars are away, and under the top bar while they are up
-  (`#bats-root:has(.rv:not(.chrome-off)) .banner`: the bar's safe inset,
+  (`.banner.under-bars`: the bar's safe inset,
   44px control and 2px, and 8px), as material.io's, Flutter's and
   Zeta's banners sit under the app bar and none draws over it;
   `e2e/storage.spec.js` raises one over the reader with its bars up and
@@ -2013,7 +2013,16 @@ read of storage changed: each still folds, as #174 says.
   over the banner (#507): while a library menu is open the Undo toast is
   drawn under its veil, and while a veiled reader panel is open (Contents,
   highlights) the banner is under the scrim; both are still up, and back
-  when the layer closes (an Undo offer lasts until dismissed, #364). A
+  when the layer closes (an Undo offer lasts until dismissed, #364). The
+  layer module says it as attributes of the element it places, as it opens
+  and closes (`_open_set`, `_modality_show` in `src/layer.bats`:
+  `data-menu` on `undo-toast`, `ui_undo_under_menu`, and `data-veil` on
+  `error-banner`, `ui_banner_under_veil`; `data-menu` on the banner is the
+  same for #507), and the rules are `#undo-toast[data-menu='1']` and
+  `#error-banner[data-veil='1']`: the first version of #556 asked
+  `#bats-root:has(...)` of both, which `tests/static/has_root.py` (#538)
+  rejects, since a `:has()` on the root that holds the chapter is
+  re-evaluated over all of it (#423). A
   panel with no veil and the screens leave them where they are (a screen
   offers an Undo of its own). `coveredByBanner` also checks every control
   of an open menu, panel, sheet or dialog, and `toastClear` every control
@@ -3433,6 +3442,10 @@ length, in the same page, so a slower machine slows both. What it found:
   `src/notice.bats`: `BannerAtTop`, `BannerInLibrary`, `BannerUnderBars`,
   set by `_library_shown`, `_show_reader`, `_chrome_set`, `_chrome_set_off`),
   and the stylesheet keys on `.banner.in-library` and `.banner.under-bars`.
+  Every later state of the same kind is an attribute set by the layer
+  (`data-below`, `data-menu`, `data-veil`), never a `:has()` on the root:
+  `tests/static/has_root.py` fails one (#538; #556's two rules were found
+  by it when its queue run met them).
   The two remaining `:has()` rules have small subjects (a button, a
   settings row). A key on the 5 MB chapter went from 206 to 276 ms to 21 to
   31 ms of script. What is left of a turn on a chapter of thousands of
