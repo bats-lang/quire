@@ -510,6 +510,17 @@ export async function coveredByBanner(page, header = '#library-bar') {
         if (covered(control)) bad.push(`${named(control)} is under the banner`);
       }
     }
+    // a menu or a panel opened while the banner is up: none of its controls
+    // is under it (#556: the Contents rows and the library menu's items were)
+    for (const layer of document.querySelectorAll('.menu, .panel, .sheet, .mbox')) {
+      if (!shown(layer)) continue;
+      for (const control of layer.querySelectorAll(controls)) {
+        if (!shown(control)) continue;
+        const box = control.getBoundingClientRect();
+        if (box.width <= 1 && box.height <= 1) continue;
+        if (covered(control)) bad.push(`${named(control)} is under the banner`);
+      }
+    }
     // the library scrolls: the offer is looked at where a reader who
     // scrolls to it finds it (on a short window, at 48px a control, it is
     // below the fold)

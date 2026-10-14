@@ -9,7 +9,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn shell_rules {left:nat | left >= 9103} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9103] sheet(after, false, false)
+#pub fn shell_rules {left:nat | left >= 9443} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9443] sheet(after, false, false)
 
 (* The library page, from body on *)
 fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1919] sheet(after, false, false) = let
@@ -104,7 +104,7 @@ fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false,
 in sheet end
 
 (* The fields and banners, from .btn input[type=file] on *)
-fn shell_rules_fields_and_banners {left:nat | left >= 1860} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1860] sheet(after, false, false) = let
+fn shell_rules_fields_and_banners {left:nat | left >= 2200} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2200] sheet(after, false, false) = let
   val sheet = rule(sheet, ".btn input[type=file],.ibtn input[type=file]")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Top(), "0")
@@ -200,6 +200,22 @@ fn shell_rules_fields_and_banners {left:nat | left >= 1860} (sheet: sheet(left, 
      that holds the chapter (#538) *)
   val sheet = rule(sheet, ".banner.in-library[data-menu='1']")
   val sheet = lay(sheet, ZIndex(), "1")
+  val sheet = close(sheet)
+  (* A modal layer is over the status, as an Android dialog or drawer is
+     over its activity's Snackbar (#556): the Undo toast and the banner
+     stay up, under the layer's veil, and are back, still up, when it
+     closes, so they never sit over a menu item or a Contents row the
+     reader means to press. The library's menus take the toast (the
+     banner is already under them, above); the reader's veiled panels
+     (Contents, highlights, ...) take the banner. A panel with no veil (a
+     note, a word looked up) is not modal and leaves both where they are,
+     and so do the screens (Settings...), which offer an Undo of their
+     own (#380) *)
+  val sheet = rule(sheet, "#bats-root:has(:is(#library-menu,#card-menu,#collections-menu):not([data-hide='1'])) .toast")
+  val sheet = lay(sheet, ZIndex(), "19")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, "#bats-root:has(#panel-scrim:not([data-hide='1'])) .banner")
+  val sheet = lay(sheet, ZIndex(), "10")
   val sheet = close(sheet)
   (* While the reader's bars are up the banner sits under the top bar
      (#374): the bar is the top app bar, and Material 3 puts a banner

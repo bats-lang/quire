@@ -11,6 +11,17 @@ on:
   # request opened with GITHUB_TOKEN starts no workflow by itself
   workflow_dispatch:
 
+# A push to a pull request cancels the run for its earlier head (#586): the
+# queue's jobs are not left behind jobs for stale heads. Only a pull_request
+# run is ever cancelled. Each group is keyed on its event, and a merge_group,
+# push or dispatch run on the commit's own sha, which no other run shares, so
+# a queue entry's run is never cancelled and never cancels another. A
+# cancelled run's `check` belongs to the old head; the required status of
+# the new head is its own run's.
+concurrency:
+  group: check-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # The groups the tests run in, side by side (tests/groups.json): every
   # e2e spec and every static test in exactly one, or this fails
