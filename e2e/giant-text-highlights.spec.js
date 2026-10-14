@@ -265,3 +265,60 @@ test('places stored by the build that made the cuts paint the same words now', a
   expect(errors).toEqual([]);
 });
 
+
+// A blank text of 64 KiB or more between the page's blocks makes no element,
+// but takes the numbers its pieces would (render's _skip_spans), and search and
+// read aloud count them by _skip_count, where a text that is shown is cut by
+// _text_cut (#568). The two rules differ (65533 against 65535 or a break at
+// white space), so what follows such a text is numbered right only while render,
+// search and read aloud take the same count. These lengths are on both sides of
+// where the two rules count different numbers of pieces (131068 and 131070
+// spaces): the paragraph after the gap is found by search, marked on the right
+// word, highlighted, and painted on the right word after the chapter is shown again.
+for (const spaces of [65536, 131068, 131070, 196600]) {
+  test(`the paragraph after a blank text of ${spaces} bytes is searched, highlighted and painted on its own words`, async ({ page }) => {
+    const errors = await start(page);
+    const gapBook = {
+      title: 'Blank Gap', author: 'Cuts', storeChapters: false,
+      rawChapters: [{ body: `<p>Before the gap.</p>${' '.repeat(spaces)}<p>After the gap: zebra quartz.</p>` }],
+      toc: [{ label: 'Chapter 1', href: 'chapter1.xhtml' }],
+    };
+    await importFiles(page, [epubFile(gapBook)], 1);
+    await openBook(page, 'Blank Gap');
+    await page.keyboard.press('/');
+    const box = searchPanel(page).getByRole('searchbox', { name: 'Search in book' });
+    await expect(box).toBeFocused();
+    await box.fill('zebra');
+    await expect(searchPanel(page).getByRole('status')).toHaveText('1 result');
+    await searchPanel(page).getByRole('region', { name: 'Results' }).getByRole('button').first().click();
+    await expect(searchPanel(page)).toBeHidden();
+    // the search's own mark is on the word searched for
+    await expect.poll(async () => (await marks(page)).text).toBe('zebra');
+    await searchBar(page).getByRole('button', { name: 'Close search' }).click();
+    await expect(searchBar(page)).toBeHidden();
+    await expect.poll(async () => (await marks(page)).size).toBe(0);
+    const quote = await page.evaluate(() => {
+      const owner = [...document.querySelectorAll('[role=document][aria-label=Page] p')].find(p => p.textContent.includes('zebra'));
+      const walker = document.createTreeWalker(owner, NodeFilter.SHOW_TEXT);
+      let found = null;
+      for (let t = walker.nextNode(); t && !found; t = walker.nextNode()) if (t.data.includes('quartz')) found = t;
+      const at = found.data.indexOf('quartz');
+      const range = document.createRange();
+      range.setStart(found, at);
+      range.setEnd(found, at + 'quartz'.length);
+      getSelection().removeAllRanges();
+      getSelection().addRange(range);
+      return range.toString();
+    });
+    expect(quote).toBe('quartz');
+    await expect(selectionButton(page, 'Highlight')).toBeVisible();
+    await selectionButton(page, 'Highlight').click();
+    await expect.poll(async () => (await marks(page)).size).toBe(1);
+    await expectPainted(page, ['quartz']);
+    await toLibrary(page);
+    await reload(page);
+    await openBook(page, 'Blank Gap');
+    await expectPainted(page, ['quartz']);
+    expect(errors).toEqual([]);
+  });
+}
