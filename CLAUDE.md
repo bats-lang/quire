@@ -831,6 +831,17 @@ the system's while a panel is open. `gen-pwa test` serves the app at a port
 the kernel picks, and a bare `npx playwright test` at `QUIRE_PORT`
 (`playwright.config.js`), so two runs of the suite from two checkouts
 do not serve each other's build.
+Split screen and foldables (#412): `e2e/layout.spec.js` lays the library and
+the reader out in a split-screen half (412x450) through `fits`, keeps the
+place from full to half and back, and from a Pixel Fold folded (411x797) to
+unfolded (841x701) with Auto (one page: a spread wants a landscape window of
+60em), Two (a spread) and One. The fold is not read, by research (comment on
+#412): Chrome's viewport segments are listed from Chrome 138 and nothing says
+WebView has them, Android advises splitting only in book posture and avoiding
+text on a fully occluded fold (dual-screen devices), and today's single-screen
+foldables have a flat fold, so an unfolded screen is a larger window whose
+two columns meet at the middle. The system font scale and display size are
+not tested yet: desktop Chromium cannot play the WebView's text zoom.
 ### Where a book opens the first time (#409)
 A book never read opens where it says reading starts, as Apple Books
 opens at the bodymatter landmark (and as the EPUB 3.3 landmarks section,
