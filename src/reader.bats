@@ -2119,7 +2119,7 @@ fun _break_back {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n; tex
    (a run with no white space, a megabyte of one word) the longest prefix
    that ends before a UTF-8 character's start, so no character is split:
    65535 when the data is not UTF-8 there *)
-fn _text_cut {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n; text_len >= 65536}
+fn _cut_size {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n; text_len >= 65536}
   (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len): [cut:int | 65000 <= cut; cut <= 65535] int cut = let
   val back = _break_back(data, offset, text_len, 65534, 65022)
 in
@@ -2129,6 +2129,43 @@ in
   else if _utf8_start(data, offset + 65533) then 65533
   else 65535
 end
+
+(* CUT(offset, text_len, cut): the first piece of the text of text_len
+   bytes at offset is cut bytes long. It is the only rule that cuts a
+   text (#568): render, search and read aloud number a text's pieces by
+   it, so they cannot disagree. Its constructor is local to _text_cut,
+   so nothing else can make one, and a step of any other length (the
+   65533 that _skip_spans took) has no proof *)
+local
+dataprop CUT_(int, int, int) = {offset,text_len,cut:int} CutOf(offset, text_len, cut) of ()
+in
+stadef CUT = CUT_
+
+fn _text_cut {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n; text_len >= 65536}
+  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len)
+  : [cut:int | 65000 <= cut; cut <= 65535] (CUT(offset, text_len, cut) | int cut) = let
+  val cut = _cut_size(data, offset, text_len)
+in (CutOf() | cut) end
+end
+
+(* PIECES(offset, text_len, count): the text of text_len bytes at offset
+   is count pieces, each cut off by _text_cut and the last under 64 KiB.
+   Every walk of a chapter's text (_text_spans, _scan_text, _runs_text,
+   _text_pieces) returns one, so none steps by another rule *)
+dataprop PIECES(int, int, int) =
+  | {offset,text_len:int | text_len < 65536} PiecesLast(offset, text_len, 1) of ()
+  | {offset,text_len,cut,count:int | text_len >= 65536}
+    PiecesMore(offset, text_len, count + 1) of (CUT(offset, text_len, cut), PIECES(offset + cut, text_len - cut, count))
+
+(* How many pieces a text is: the one count render, search and read aloud
+   all take (_text_count, _skip_spans) *)
+fun _text_pieces {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n} .<text_len>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len): [count:pos] (PIECES(offset, text_len, count) | int count) =
+  if text_len < 65536 then (PiecesLast() | 1)
+  else let
+    val (cut_proof | cut) = _text_cut(data, offset, text_len)
+    val (rest | count) = _text_pieces(data, offset + cut, text_len - cut)
+  in (PiecesMore(cut_proof, rest) | count + 1) end
 
 (* A content node's attribute name: data[offset, offset + value_len) *)
 fn _node_attr {doc_location,l:agz}{n:pos}{node:nat}{offset,value_len:nat | offset + value_len <= n; value_len < 65536}
@@ -2297,19 +2334,28 @@ fn _text_into {doc_location,l:agz}{n:pos}{node:nat}{offset,text_len:nat | offset
    at 390 px: 17 s a frame; the same text as blocks of 64 KiB: 1 s), so no
    run is longer than one piece (#423) *)
 fun _text_spans {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n} .<text_len>.
-  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), parent: int parent, offset: int offset, text_len: int text_len, split: bool): void = let
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), parent: int parent, offset: int offset, text_len: int text_len, split: bool)
+  : [count:pos] (PIECES(offset, text_len, count) | int count) = let
   val node = _next_content_node()
   val () = _add_node(doc, parent, node, $D.Span)
 in
   if text_len < 65536 then let
     val () = (if split then _node_attr_literal(doc, node, $D.Class, "run") else ())
-  in _text_into(doc, node, data, offset, text_len) end
+    val () = _text_into(doc, node, data, offset, text_len)
+  in (PiecesLast() | 1) end
   else let
-    val cut = _text_cut(data, offset, text_len)
+    val (cut_proof | cut) = _text_cut(data, offset, text_len)
     val () = _node_attr_literal(doc, node, $D.Class, "run")
     val () = _text_into(doc, node, data, offset, cut)
-  in _text_spans(doc, data, parent, offset + cut, text_len - cut, true) end
+    val (rest | count) = _text_spans(doc, data, parent, offset + cut, text_len - cut, true)
+  in (PiecesMore(cut_proof, rest) | count + 1) end
 end
+
+(* A text shown as its pieces *)
+fn _text_shown {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n}
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), parent: int parent, offset: int offset, text_len: int text_len): void = let
+  val (_ | _) = _text_spans(doc, data, parent, offset, text_len, false)
+in () end
 
 (* Whether data[offset + i, offset + text_len) is all white space *)
 fun _blank {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n}{i:nat | i <= text_len} .<text_len - i>.
@@ -2318,10 +2364,17 @@ fun _blank {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n}{i:nat | 
   else if byte2int0($A.read<byte>(data, offset + i)) > 32 then false
   else _blank(data, offset, text_len, i + 1)
 
-(* The numbers _text_spans would give text of text_len bytes, taken *)
-fun _skip_spans {text_len:nat} .<text_len>. (offset: int, text_len: int text_len): void = let
-  val _ = _next_content_node()
-in if text_len < 65536 then () else _skip_spans(offset, text_len - 65533) end
+(* Takes count numbers *)
+fun _take_nodes {count:nat} .<count>. (count: int count): void =
+  if count <= 0 then () else let val _ = _next_content_node() in _take_nodes(count - 1) end
+
+(* The numbers _text_spans would give text of text_len bytes, taken: as
+   many as _text_pieces counts (it stepped by 65533 here and by _text_cut
+   there, so a text of 131069 or 131070 spaces was numbered two ways, #568) *)
+fn _skip_spans {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len): void = let
+  val (_ | count) = _text_pieces(data, offset, text_len)
+in _take_nodes(count) end
 
 (* The tag an XHTML element is shown as: itself when it is one quire
    shows, a span for a, b, i, u and s, and a div for anything else *)
@@ -3285,11 +3338,11 @@ and _render_node
          makes no element: it would be a line of its own; inside a math
          element the text of a token is the token's, any other is not shown *)
       val () = (if !_math_inside > 0 then let
-          val () = _skip_spans(offset, text_len)
+          val () = _skip_spans(data, offset, text_len)
         in (if !_math_inside = 2 then (if parent >= 0 then (if text_len > 0 then (if text_len < 65536 then _node_text(doc, parent, data, offset, text_len) else ()) else ()) else ()) else ()) end
-        else if parent < 0 then (if _blank(data, offset, text_len, 0) then _skip_spans(offset, text_len)
-          else _text_spans(doc, data, parent, offset, text_len, false))
-        else _text_spans(doc, data, parent, offset, text_len, false))
+        else if parent < 0 then (if _blank(data, offset, text_len, 0) then _skip_spans(data, offset, text_len)
+          else _text_shown(doc, data, parent, offset, text_len))
+        else _text_shown(doc, data, parent, offset, text_len))
     in found end
   | $X.xml_element(name_offset, name_len, attrs, children) => let
     var _tag_head = @[char][4]('h', 'e', 'a', 'd')
@@ -3338,7 +3391,9 @@ and _render_node
       val () = (case+ find_attr(data, attrs, _attr_alt, 3) of
         | ~xspan_at(alt_start, alt_len) =>
           if alt_len < 65536 then _node_attr(doc, content_node, $D.Alt, data, alt_start, alt_len)
-          else _node_attr(doc, content_node, $D.Alt, data, alt_start, _text_cut(data, alt_start, alt_len))
+          else let
+            val (_ | cut) = _text_cut(data, alt_start, alt_len)
+          in _node_attr(doc, content_node, $D.Alt, data, alt_start, cut) end
         | ~xspan_none() => _node_attr_literal(doc, content_node, $D.Alt, "image")): void
       var _attr_src = @[char][3]('s', 'r', 'c')
     in
@@ -5594,27 +5649,23 @@ fn _scan_piece {data_location,query_location:agz}{data_size:pos}{offset,piece_le
    from a content node: their hits, and the next node's number *)
 fun _scan_text {data_location,query_location:agz}{data_size:pos}{offset,text_len:nat | offset + text_len <= data_size}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<text_len>.
   (data: !$A.borrow(byte, data_location, data_size), offset: int offset, text_len: int text_len, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
-   chapter: Int, node: Nat, found: hits(hit_count), hit_count: int hit_count): [new_count:nat | new_count <= HIT_MAX] @(Nat, hits(new_count), int new_count) =
+   chapter: Int, node: Nat, found: hits(hit_count), hit_count: int hit_count)
+  : [count:pos][new_count:nat | new_count <= HIT_MAX] (PIECES(offset, text_len, count) | @(Nat, hits(new_count), int new_count)) =
   if text_len < 65536 then let
     val @(found_after, new_count) = _scan_piece(data, offset, text_len, query, query_len, chapter, node, found, hit_count)
-  in @(node + 1, found_after, new_count) end
+  in (PiecesLast() | @(node + 1, found_after, new_count)) end
   else let
-    val cut = _text_cut(data, offset, text_len)
+    val (cut_proof | cut) = _text_cut(data, offset, text_len)
     val @(found_after, new_count) = _scan_piece(data, offset, cut, query, query_len, chapter, node, found, hit_count)
-  in _scan_text(data, offset + cut, text_len - cut, query, query_len, chapter, node + 1, found_after, new_count) end
+    val (rest | next) = _scan_text(data, offset + cut, text_len - cut, query, query_len, chapter, node + 1, found_after, new_count)
+  in (PiecesMore(cut_proof, rest) | next) end
 
 (* The numbers _scan_text takes for text data[offset, offset + text_len),
    as _text_spans makes its pieces, with nothing searched *)
-fun _text_count {data_location:agz}{data_size:pos}{offset,text_len:nat | offset + text_len <= data_size} .<text_len>.
-  (data: !$A.borrow(byte, data_location, data_size), offset: int offset, text_len: int text_len, node: Nat): Nat =
-  if text_len < 65536 then node + 1
-  else let
-    val cut = _text_cut(data, offset, text_len)
-  in _text_count(data, offset + cut, text_len - cut, node + 1) end
-
-(* The numbers _skip_spans takes for text_len bytes *)
-fun _skip_count {text_len:nat} .<text_len>. (text_len: int text_len, node: Nat): Nat =
-  if text_len < 65536 then node + 1 else _skip_count(text_len - 65533, node + 1)
+fn _text_count {data_location:agz}{data_size:pos}{offset,text_len:nat | offset + text_len <= data_size}
+  (data: !$A.borrow(byte, data_location, data_size), offset: int offset, text_len: int text_len, node: Nat): Nat = let
+  val (_ | count) = _text_pieces(data, offset, text_len)
+in node + count end
 
 (* Whether an element is shown inside a line, as _tag_of makes it: the
    text on both sides of it is one text to search. A ruby's annotations
@@ -5684,8 +5735,10 @@ and _scan_node {data_location,query_location:agz}{data_size:pos}{tree_size:pos}{
   : [new_count:nat | new_count <= HIT_MAX] @(Nat, hits(new_count), int new_count) =
   case+ node of
   | $X.xml_text(offset, text_len) =>
-    if (if top then _blank(data, offset, text_len, 0) else false) then @(_skip_count(text_len, content_node), found, hit_count)
-    else if searched then _scan_text(data, offset, text_len, query, query_len, chapter, content_node, found, hit_count)
+    if (if top then _blank(data, offset, text_len, 0) else false) then @(_text_count(data, offset, text_len, content_node), found, hit_count)
+    else if searched then let
+      val (_ | result) = _scan_text(data, offset, text_len, query, query_len, chapter, content_node, found, hit_count)
+    in result end
     else @(_text_count(data, offset, text_len, content_node), found, hit_count)
   | $X.xml_element(name_offset, name_len, _, children) => let
     var _tag_head = @[char][4]('h', 'e', 'a', 'd')
@@ -7176,11 +7229,12 @@ fun _text_runs_reverse {n:int}{count,reversed_count:nat} .<count>.
    node's number *)
 fun _runs_text {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n}{count:nat} .<text_len>.
   (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len, block: Nat, node: Nat, found: text_runs(n, count))
-  : [new_count:nat] @(Nat, text_runs(n, new_count)) =
-  if text_len < 65536 then @(node + 1, TextRun(block, node, offset, text_len, found))
+  : [pieces:pos][new_count:nat] (PIECES(offset, text_len, pieces) | @(Nat, text_runs(n, new_count))) =
+  if text_len < 65536 then (PiecesLast() | @(node + 1, TextRun(block, node, offset, text_len, found)))
   else let
-    val cut = _text_cut(data, offset, text_len)
-  in _runs_text(data, offset + cut, text_len - cut, block, node + 1, TextRun(block, node, offset, cut, found)) end
+    val (cut_proof | cut) = _text_cut(data, offset, text_len)
+    val (rest | next) = _runs_text(data, offset + cut, text_len - cut, block, node + 1, TextRun(block, node, offset, cut, found))
+  in (PiecesMore(cut_proof, rest) | next) end
 
 (* A chapter's text read aloud: its nodes walked as _render_nodes shows
    them, numbering the content nodes the same way (as search does: the
@@ -7205,9 +7259,9 @@ and _runs_node {l:agz}{n:pos}{tree_size:pos}{count:nat} .<tree_size, 0>.
   : [new_count:nat] @(Nat, Nat, text_runs(n, new_count)) =
   case+ node of
   | $X.xml_text(offset, text_len) =>
-    if (if top then _blank(data, offset, text_len, 0) else false) then @(_skip_count(text_len, content_node), blocks, found)
+    if (if top then _blank(data, offset, text_len, 0) else false) then @(_text_count(data, offset, text_len, content_node), blocks, found)
     else if (if readable then block >= 0 else false) then let
-      val @(next_node, found_after) = _runs_text(data, offset, text_len, (if block >= 0 then block else 0): Nat, content_node, found)
+      val (_ | @(next_node, found_after)) = _runs_text(data, offset, text_len, (if block >= 0 then block else 0): Nat, content_node, found)
     in @(next_node, blocks, found_after) end
     else @(_text_count(data, offset, text_len, content_node), blocks, found)
   | $X.xml_element(name_offset, name_len, attrs, children) => let
