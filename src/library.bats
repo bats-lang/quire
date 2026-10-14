@@ -3890,7 +3890,10 @@ in $A.set<byte>(buf, start + 1, $A.int2byte(48 + value - (value / 10) * 10)) end
    day_of_era, year_of_era, day_of_year and month_from_march here) *)
 #pub fn date_text {l:agz} (buf: !$A.arr(byte, l, 32), minutes: Int): [text_len:nat | text_len <= 32] int text_len
 
-implement date_text (buf, minutes) = let
+(* The civil date of a count of minutes, in a function of its own: the solver
+   that does infinite-precision arithmetic (GMP) grew past 6 GB on these divisions
+   when they shared a body with the text writing (quire#594) *)
+fn _civil_date (minutes: Int): [month:nat | month < 100][day:nat | day < 100] @(Int, int month, int day) = let
   val days = (if minutes > 0 then minutes / 1440 else 0): [days:nat] int days
   (* days up to year 9999, past which no clock this app runs on goes *)
   val days = (if days > 2932896 then 2932896 else days): [days:nat | days <= 2932896] int days
@@ -3904,9 +3907,13 @@ implement date_text (buf, minutes) = let
   val day = day_of_year - (153 * month_from_march + 2) / 5 + 1
   val month = (if month_from_march < 10 then month_from_march + 3 else month_from_march - 9): Int
   val year = (if month <= 2 then year + 1 else year): Int
-  val year_end = $S.int_to_str(buf, 0, 32, year)
   val month = (if month >= 1 then (if month <= 12 then month else 12) else 1): [month:nat | month < 100] int month
   val day = (if day >= 1 then (if day <= 31 then day else 31) else 1): [day:nat | day < 100] int day
+in @(year, month, day) end
+
+implement date_text (buf, minutes) = let
+  val @(year, month, day) = _civil_date(minutes)
+  val year_end = $S.int_to_str(buf, 0, 32, year)
   val () = $A.set<byte>(buf, year_end, $A.int2byte(45))
   val () = _two_digits(buf, year_end + 1, month)
   val () = $A.set<byte>(buf, year_end + 3, $A.int2byte(45))

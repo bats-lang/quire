@@ -10,18 +10,28 @@ inputs:
 runs:
   using: composite
   steps:
+    # The GMP build of ATS2: its constraint solver does infinite-precision
+    # arithmetic. The -int build computes in C int and accepts false
+    # statements (bats-lang/quire#594), so a proof that passed there proved
+    # nothing; bats installs this build itself since bats#260. A run that
+    # runs away (the solver can, on a proof the other answers at once) is
+    # ended by the caps below, naming its module: they are read by a bats from
+    # bats#263 on, so they act once .github/bats-version has moved there
     - name: Install ATS2
       shell: bash
       run: |
-        curl -sL "https://raw.githubusercontent.com/ats-lang/ats-lang.github.io/master/FROZEN000/ATS-Postiats/ATS2-Postiats-int-0.4.2.tgz" -o /tmp/ats2.tgz
+        sudo apt-get install -y -q libgmp-dev
+        echo "BATS_PATSOPT_TIMEOUT_S=600" >> "$GITHUB_ENV"
+        echo "BATS_PATSOPT_MEM_MB=4096" >> "$GITHUB_ENV"
+        curl -sL "https://raw.githubusercontent.com/ats-lang/ats-lang.github.io/master/FROZEN000/ATS-Postiats/ATS2-Postiats-gmp-0.4.2.tgz" -o /tmp/ats2.tgz
         mkdir -p ~/.ats2
         tar -xzf /tmp/ats2.tgz -C ~/.ats2
-        cd ~/.ats2/ATS2-Postiats-int-0.4.2
+        cd ~/.ats2/ATS2-Postiats-gmp-0.4.2
         make -j$(nproc) -C src/CBOOT patsopt
         mkdir -p bin
         cp src/CBOOT/patsopt bin/patsopt
         mkdir -p ~/.bats
-        ln -sf ~/.ats2/ATS2-Postiats-int-0.4.2 ~/.bats/ats2
+        ln -sf ~/.ats2/ATS2-Postiats-gmp-0.4.2 ~/.bats/ats2
 
     - name: Install WASM tools
       shell: bash
@@ -47,7 +57,7 @@ runs:
       shell: bash
       run: |
         cp -R bats-src/bootstrap/c ~/bats-c
-        make -j$(nproc) -C ~/bats-c PATSHOME=$HOME/.ats2/ATS2-Postiats-int-0.4.2 release/bats
+        make -j$(nproc) -C ~/bats-c PATSHOME=$HOME/.ats2/ATS2-Postiats-gmp-0.4.2 release/bats
         mkdir -p ~/bats-bin
         cp ~/bats-c/release/bats ~/bats-bin/bats
         rm -rf bats-src
