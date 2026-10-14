@@ -770,10 +770,9 @@ A chapter's data is checked against its CRC-32 (#529): the central
 directory record the index keeps states it (offset 16), `book_entry_sum`
 reads it by the chapter's name offset, and `take_text_sum` (in place of
 `take_text`) computes the CRC-32 of the inflated bytes, before they are
-made UTF-8 (`crc_of_borrow`, `src/crc.bats`: a table made by the proven
-byte step, tested against the proven fold in `tests/codec`, not proved
-equal: see "The CRC-32 table method is proved" below for what is proved
-and why this call is not yet that one), and answers no content for a mismatch or an unknown sum, so the
+made UTF-8 (`crc_of_cborrow`, `src/crc.bats`, proved: see "The CRC-32
+table method is proved" below; the piece is lent as a `barr` by array's
+`barr_of_arrx` and given back to its arena by `barr_to_arrx`), and answers no content for a mismatch or an unknown sum, so the
 chapter is `ChapterNotRead` ("Chapter N of this book could not be read")
 and the others read. libzip (`ZIP_ER_CRC`), Python's `zipfile`
 (`BadZipFile: Bad CRC-32`) and Java's `ZipFile` check the same sum at the
@@ -782,7 +781,7 @@ checked; the OPF, the container, images and the chapter reads for
 search, notes and read aloud are not (yet). `e2e/containers.spec.js`
 ("a chapter whose CRC is not its data's").
 
-### The CRC-32 table method is proved (#553), its call site is not yet
+### The CRC-32 table method is proved (#553), and it is the call's
 
 `crc_of_cborrow` (`src/crc.bats`) is `crc_of_borrow`'s table method over
 an array whose cells are in its type (array's `barr`, borrowed as
@@ -818,22 +817,28 @@ codec; a caller that knows what the cells hold has it from
   read through `barr_get`.
 
 `tests/codec` still runs it on the check value of "123456789" and arrays
-of every length 1 to 300 and 4000 against `crc_of_borrow` (the arena
-piece's), as a check of the boundaries, not as the proof
+of every length 1 to 300 and 4000 against the fold, as a check of the boundaries, not as the proof
 (`tests/static/accept/crc-*` and `reject/crc-*`: a table entry of another
 byte, the step by another byte's entry, a high half not shifted, a loop
 step of another byte, the register not complemented and a cell read for
 another all fail to type-check).
 
-What is left: the call (`take_text_sum`, `_sum_matches`) still uses
-`crc_of_borrow`, whose array is a plain `borrow` of an arena piece
-(`arrx(byte, l, n, arena)`) that knows nothing of its cells: array's
-`barr_of_arr` takes only an `arr` (origin null) and `barr_to_arr` gives
-an `arr`, so a piece cannot be lent as a `cborrow` and given back to its
-arena. The proof is therefore owed at the call until array has a `barr`
-of an `arrx` that keeps its origin (a token returned with the `barr`
-and needed to get the `arrx` back); then `crc_of_borrow` is replaced by
-`crc_of_cborrow` and removed.
+The call is that one (`take_text_sum`, `_sum_matches` in `src/book.bats`):
+the inflated piece, an arena's `arrx(byte, l, n, arena)`, is lent as a
+`barr` by array's `barr_of_arrx`, which returns the `arrx_lent(l, n, o)`
+proof that keeps its owner (the arena's count of outstanding pieces does
+not change while it is lent, so the arena cannot be destroyed, and
+`barr_to_arrx` gives it back only as the same piece of the same arena);
+the barr is frozen, `crc_of_cborrow` reads it, it is thawed and given back
+before the piece is freed or made text. What the proof says of the call is
+that the sum compared is the CRC-32 of a list of bytes the cells hold;
+the cells are those of `barr_of_arrx`, so nothing relates them to what the
+decompressor wrote into the piece (that is outside quire's types, as the
+platform's atoms are). `crc_of_borrow` and its helpers are gone;
+`tests/codec` checks `crc_of_cborrow` against the proven fold on the check
+value of "123456789" and arrays of every length 1 to 300 and 4000.
+Needs array with `barr_of_arrx` (bats-lang/array, not yet published when
+this was written).
 
 ### Note popups (#414)
 
