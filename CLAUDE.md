@@ -3797,11 +3797,12 @@ length, in the same page, so a slower machine slows both. What it found:
   read aloud each decode the chapter from the compressed entry on their own
   (separate pieces, so separate existential cells `cs`), and nothing in the
   types says that inflate, the CRC check and `_text_of_content` give the same
-  bytes each time: that is a fact about a function of the entry's bytes that
-  the compiler cannot be told without a trusted primitive, which quire does
-  not have, so #568's second blocker stays tested and trusted
-  (`e2e/giant-text-highlights.spec.js`, `e2e/pathological.spec.js`,
-  `e2e/search.spec.js`). **Trusted** (array's, tested there): the unsafe
+  bytes each time: that needs inflate (the zip package) and the text
+  conversion (`src/text_encoding.bats`) as proved relations of their input
+  cells, with functional lemmas, which they are not yet. The proof is owed
+  (#608; no trusted primitive is needed or allowed), and until it is proved
+  it is tested (`e2e/giant-text-highlights.spec.js`,
+  `e2e/pathological.spec.js`, `e2e/search.spec.js`). **Trusted** (array's, tested there): the unsafe
   core of `barr_of_arrx`, `cborrow_view` (an identity on the pointer) and
   `cborrow_get` (reads the byte it says). The functional lemmas and the
   relations are audited by the mutation check (`mutation_check.py`, GMP):
