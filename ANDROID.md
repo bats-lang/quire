@@ -109,12 +109,12 @@ production, and every push to main that passes the whole check gets
 there by itself (#308): the `check` workflow's `play-internal` job,
 after the e2e groups and the Android build and smoke test pass, sends
 that run's `release-aab` to the internal track as a completed release
-(`scripts/play-release.sh`, the Play Developer API's edits). Play names
+(pwa's `play-release.yml`, which makes the Play Developer API's edits). Play names
 the release by its versionName, the commit's version; its notes are the
 commit's subject (cut to Play's 500 characters). An edit is committed
 with `ERROR_IF_IN_REVIEW`, so a change in review is never cancelled by
 it; that release fails instead, and the next push to main tries again.
-`tests/play-release/run.sh` checks the script against a stub of Play.
+pwa's `tests/play-release/run.sh` checks the script against a stub of Play.
 
 The job signs in by Workload Identity Federation, so no key is stored:
 GitHub's OIDC token is exchanged for a token of the service account
@@ -124,7 +124,7 @@ GitHub's OIDC token is exchanged for a token of the service account
 push to main of bats-lang/quire (`assertion.repository ==
 'bats-lang/quire' && assertion.ref == 'refs/heads/main' &&
 assertion.event_name == 'push'`). Its name and the account's address are
-public, committed in `scripts/play-release.env`.
+public, committed as the `with:` inputs of `check.yml`'s `play-internal` job.
 
 Then:
 

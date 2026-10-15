@@ -270,9 +270,8 @@ from a machine-specific env file that is not in the repo (say
 exported) and `exec`s the command exactly as given, so its arguments and
 exit status are the command's own: `scripts/with-env ~/quire.env bats
 check`, `scripts/with-env ~/quire.env ./dist/debug/gen-pwa test --
-<spec>`. `tests/with-env/run.sh` tests it (a step of check.yml, like
-`tests/play-release/run.sh`; `tests/groups.json` holds only the e2e and
-static groups).
+<spec>`. `tests/with-env/run.sh` tests it (a step of check.yml; `tests/groups.json`
+holds only the e2e and static groups).
 
 `BATS_CACHE_DIR=<dir>` keeps patsopt's C in that directory, keyed by
 what patsopt reads (the toolchain, its arguments and every file a
@@ -343,15 +342,18 @@ project carries the version and its code.
 ## Main goes to Play's internal testing (#308)
 
 Every push to main that passes the whole check is released to Google
-Play's internal testing track by `check.yml`'s `play-internal` job
-(`scripts/play-release.sh`, tested against a stub of Play by
-`tests/play-release/run.sh` in the `plan` job): the run's own
-`release-aab`, the commit's subject as its notes, committed with
-`ERROR_IF_IN_REVIEW`. It signs in by Workload Identity Federation
-(`scripts/play-release.env`, public names), whose provider admits only a
-push to main of this repository, so no key exists and no other run can
-release. Production is a promotion in the Play Console; ANDROID.md says
-how.
+Play's internal testing track by `check.yml`'s `play-internal` job, which
+calls pwa's reusable workflow `play-release.yml` by commit (bats-lang/pwa#90,
+pwa#101; the script, its stub of Play and its test live there, moved by
+quire#623, and this repository keeps none): the run's own `release-aab`,
+the commit's first line as its notes, committed with `ERROR_IF_IN_REVIEW`.
+The caller passes the same commit twice, as `uses:` and as `pwa-ref` (a
+reusable workflow cannot read the commit it was called at), and its public
+names (package, Workload Identity provider, service account) as `with:`
+inputs in `check.yml`. It signs in by Workload Identity Federation, whose
+provider admits only a push to main of this repository, so no key exists
+and no other run can release. Production is a promotion in the Play
+Console; ANDROID.md says how.
 
 ## To do: book memory in a rolling window of page arenas
 
