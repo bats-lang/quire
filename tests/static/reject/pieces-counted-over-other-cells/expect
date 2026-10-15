@@ -1,0 +1,3 @@
+function _static_other_cells
+line 4
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Evar(cs(_)); S2Evar(other(_))))
