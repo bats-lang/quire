@@ -461,6 +461,10 @@ export async function toLibrary(page) {
       await page.getByRole('button', { name: 'Back to library' }).click({ timeout: clickMs });
       break;
     } catch (failure) {
+      // a click that timed out may have been made all the same: the events
+      // it sent are answered when the task the page was in has ended, so the
+      // library can be there already (#600)
+      if (await libraryShown(page).isVisible()) break;
       const askedAt = Date.now();
       await bareFrameMs(page);
       layoutMs = Math.max(layoutMs, Date.now() - askedAt);
@@ -470,13 +474,43 @@ export async function toLibrary(page) {
   await expect(libraryShown(page)).toBeVisible();
 }
 
+/** Puts away what a click that timed out may have left in the page (#600).
+    A locator's click puts Playwright's hit target interceptor in the page
+    (the injected script's `_hitTargetInterceptor`, a capture listener on the
+    window) and takes it away when the click is done. A click that times out
+    while the page is in a task of seconds (the columns of a long chapter)
+    can have its setup run after the page answers, with nobody to stop it,
+    and then it stops every pointer event that is not on its element
+    (`stopImmediatePropagation`, from the first one on: its verdict is
+    made once), the page's own listeners never seeing them. A raw
+    `page.mouse` tap is such an event, so the bars did not come up. The
+    next action of a locator that completes sets up its own interceptor,
+    replacing the stale one, and stops it: a trial hover on the document is
+    that action, with no effect on the page. */
+export async function releaseClick(page, timeout = 2000) {
+  // a trial hover that times out in a task of seconds can leave its own
+  // interceptor behind in the same way, so it is made again until one
+  // completes (the one that completes puts its own in place and stops it)
+  for (let tries = 1; ; tries++) {
+    try {
+      await page.locator('html').hover({ trial: true, timeout });
+      return;
+    } catch (failure) {
+      if (tries >= 5) throw failure;
+    }
+  }
+}
+
 /** Opens the reader's bars when they are hidden */
 export async function showChrome(page) {
   const prev = control(page, 'Previous page');
   // a tap while text is selected only ends the selection (quire#428), so
   // the tap is made again when the bars did not come up
   for (let tap = 0; tap < 2 && !(await prev.isVisible()); tap++) {
-    const box = await bookPage(page).boundingBox();
+    // a book page that is not there (a click that timed out was made, and
+    // the library is shown) is no page to tap: the wait is the click's
+    const box = await bookPage(page).boundingBox({ timeout: 2000 });
+    await releaseClick(page);
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     await page.waitForTimeout(150);
     // a tap between the zones on a highlight selects it, with its toolbar
