@@ -240,7 +240,8 @@ test('a record a newer Quire wrote, or one that reads, is not offered to be set 
 // #515: the row is offered for a record that cannot be read as a record at all, and only for one
 for (const [how, spoil] of [
   ['is not Quire\'s (its first four bytes are not QREC)', record => { const bytes = record.slice(); bytes[0] ^= 0x5a; return bytes; }],
-  ['is cut short in its framing', record => record.slice(0, 11)],
+  // cut inside its header, so there is no chunk to keep (a cut after the header keeps the chunks before it and is read as a loss, #614)
+  ['is cut short inside its header', record => record.slice(0, 6)],
 ]) {
   test(`a book record that ${how} is offered to be set aside, its bytes kept, and the other book is untouched (#515)`, async ({ page }) => {
     await startWithLegacy(page, 6);
