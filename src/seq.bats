@@ -22,9 +22,11 @@ staload "chunk.sats"
   | sc_trailing of ()       (* bytes follow the end chunk *)
   | sc_end_data of ()       (* the end chunk holds data *)
 
+(* what reading a record's chunks comes to: all of them up to a whole end chunk, or a cut: the chunks read whole before
+   it (they are intact, each is framed and checked by itself) and why the rest could not be read *)
 #pub datasort seqres =
   | sq_ok of (pchunks)
-  | sq_fail of (seqcause)
+  | sq_cut of (pchunks, seqcause)
 
 #pub dataprop EQSQ(seqres, seqres) =
   | {result:seqres} EQSQ_refl(result, result)
@@ -43,21 +45,21 @@ staload "chunk.sats"
   | {octets:bytes}{check_result:ckres}{result:seqres} SEQ_mk(octets, result) of (CK(octets, check_result), SQC(check_result, result))
 
 and SQC(ckres, seqres) =
-  | SQC_short(ck_trunc(), sq_fail(sc_trunc()))
-  | SQC_big(ck_big(), sq_fail(sc_big()))
+  | SQC_short(ck_trunc(), sq_cut(pnil(), sc_trunc()))
+  | SQC_big(ck_big(), sq_cut(pnil(), sc_big()))
   | SQC_end(ck_ok(IEND, bnil(), bnil()), sq_ok(pnil()))
   | {trailing_byte:int | 0 <= trailing_byte; trailing_byte < 256}{trailing_rest:bytes}
-    SQC_trailing(ck_ok(IEND, bnil(), bcons(trailing_byte, trailing_rest)), sq_fail(sc_trailing()))
+    SQC_trailing(ck_ok(IEND, bnil(), bcons(trailing_byte, trailing_rest)), sq_cut(pnil(), sc_trailing()))
   | {data_byte:int | 0 <= data_byte; data_byte < 256}{data_tail,rest:bytes}
-    SQC_end_data(ck_ok(IEND, bcons(data_byte, data_tail), rest), sq_fail(sc_end_data()))
+    SQC_end_data(ck_ok(IEND, bcons(data_byte, data_tail), rest), sq_cut(pnil(), sc_end_data()))
   | {tag,data,rest:bytes}{chunks:pchunks}
     SQC_good(ck_ok(tag, data, rest), sq_ok(pgood(tag, data, chunks))) of (TAGNOT(tag), SEQ(rest, sq_ok(chunks)))
-  | {tag,data,rest:bytes}{cause:seqcause}
-    SQC_good_fail(ck_ok(tag, data, rest), sq_fail(cause)) of (TAGNOT(tag), SEQ(rest, sq_fail(cause)))
+  | {tag,data,rest:bytes}{chunks:pchunks}{cause:seqcause}
+    SQC_good_fail(ck_ok(tag, data, rest), sq_cut(pgood(tag, data, chunks), cause)) of (TAGNOT(tag), SEQ(rest, sq_cut(chunks, cause)))
   | {tag,data,rest:bytes}{chunks:pchunks}
     SQC_bad(ck_bad(tag, data, rest), sq_ok(pbad(tag, chunks))) of SEQ(rest, sq_ok(chunks))
-  | {tag,data,rest:bytes}{cause:seqcause}
-    SQC_bad_fail(ck_bad(tag, data, rest), sq_fail(cause)) of SEQ(rest, sq_fail(cause))
+  | {tag,data,rest:bytes}{chunks:pchunks}{cause:seqcause}
+    SQC_bad_fail(ck_bad(tag, data, rest), sq_cut(pbad(tag, chunks), cause)) of SEQ(rest, sq_cut(chunks, cause))
 
 
 (* the rest after a chunk is shorter than the whole *)
@@ -216,10 +218,17 @@ implement chunklist_free {chunks}{chunk_count} (chunk_list) = let
     | ~CL_bad(tag, rest) => let val () = blist_free(tag) in free_chunks(rest) end
 in free_chunks(chunk_list) end
 
-(* what reading the chunks of a record comes to *)
+(* why chunks could not be read, at run time *)
+#pub datatype causev(seqcause) =
+  | CV_trunc(sc_trunc())
+  | CV_big(sc_big())
+  | CV_trailing(sc_trailing())
+  | CV_end_data(sc_end_data())
+
+(* what reading the chunks of a record comes to: all of them, or the chunks read before a cut and why it was one *)
 #pub datavtype seqread(seqres) =
   | {chunks:pchunks}{chunk_count:nat} SR_ok(sq_ok(chunks)) of (PCN(chunk_count, chunks) | chunklist(chunks, chunk_count))
-  | {cause:seqcause} SR_fail(sq_fail(cause))
+  | {chunks:pchunks}{cause:seqcause}{chunk_count:nat} SR_cut(sq_cut(chunks, cause)) of (PCN(chunk_count, chunks) | chunklist(chunks, chunk_count), causev(cause))
 
 (* the tag read is the end chunk's, or it is not *)
 datavtype iendcheck(bytes) =
@@ -245,8 +254,8 @@ implement seq_read {octets}{list_len} (list) = let
     val (read_proof | chunk_result) = chunk_read(list)
   in
     case+ chunk_result of
-    | ~CKR_trunc() => (SEQ_mk(read_proof, SQC_short()) | SR_fail())
-    | ~CKR_big() => (SEQ_mk(read_proof, SQC_big()) | SR_fail())
+    | ~CKR_trunc() => (SEQ_mk(read_proof, SQC_short()) | SR_cut(PCN_nil() | CL_nil(), CV_trunc()))
+    | ~CKR_big() => (SEQ_mk(read_proof, SQC_big()) | SR_cut(PCN_nil() | CL_nil(), CV_big()))
     | ~CKR_ok(tag, data, rest) =>
       (case+ _is_end(tag) of
        | ~IsEnd(EQB_refl() | ) =>
@@ -257,21 +266,19 @@ implement seq_read {octets}{list_len} (list) = let
              | ~blist_cons(_, more) => let
                  val () = blist_free(tag)
                  val () = blist_free(more)
-               in (SEQ_mk(read_proof, SQC_trailing()) | SR_fail()) end)
+               in (SEQ_mk(read_proof, SQC_trailing()) | SR_cut(PCN_nil() | CL_nil(), CV_trailing())) end)
           | ~blist_cons(_, more) => let
               val () = blist_free(tag)
               val () = blist_free(more)
               val () = blist_free(rest)
-            in (SEQ_mk(read_proof, SQC_end_data()) | SR_fail()) end)
+            in (SEQ_mk(read_proof, SQC_end_data()) | SR_cut(PCN_nil() | CL_nil(), CV_end_data())) end)
        | ~NotEnd(tag_not_end | ) => let
            val (rest_seq | rest_result) = read_chunks(rest)
          in
            case+ rest_result of
            | ~SR_ok(count | chunk_list) => (SEQ_mk(read_proof, SQC_good(tag_not_end, rest_seq)) | SR_ok(PCN_good(count) | CL_good(tag_not_end | tag, data, chunk_list)))
-           | ~SR_fail() => let
-               val () = blist_free(tag)
-               val () = blist_free(data)
-             in (SEQ_mk(read_proof, SQC_good_fail(tag_not_end, rest_seq)) | SR_fail()) end
+           | ~SR_cut(count | chunk_list, why) =>
+             (SEQ_mk(read_proof, SQC_good_fail(tag_not_end, rest_seq)) | SR_cut(PCN_good(count) | CL_good(tag_not_end | tag, data, chunk_list), why))
          end)
     | ~CKR_bad(tag, data, rest) => let
         val () = blist_free(data)
@@ -279,7 +286,7 @@ implement seq_read {octets}{list_len} (list) = let
       in
         case+ rest_result of
         | ~SR_ok(count | chunk_list) => (SEQ_mk(read_proof, SQC_bad(rest_seq)) | SR_ok(PCN_bad(count) | CL_bad(tag, chunk_list)))
-        | ~SR_fail() => let val () = blist_free(tag) in (SEQ_mk(read_proof, SQC_bad_fail(rest_seq)) | SR_fail()) end
+        | ~SR_cut(count | chunk_list, why) => (SEQ_mk(read_proof, SQC_bad_fail(rest_seq)) | SR_cut(PCN_bad(count) | CL_bad(tag, chunk_list), why))
       end
   end
 in read_chunks(list) end

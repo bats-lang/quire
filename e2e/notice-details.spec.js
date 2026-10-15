@@ -29,8 +29,7 @@ async function startWithRecords(page, damage) {
   await reload(page);
   await expect(cards(page)).toHaveCount(2);
   const stored = await store(page);
-  const record = stored[bookKey(books[0])].slice();
-  damage(record);
+  const record = damage(stored[bookKey(books[0])].slice());
   await put(page, bookKey(books[0]), record);
   await reload(page);
 }
@@ -65,9 +64,10 @@ async function expectDetails(page, contains, inReader = false) {
 const id = `${hex7(books[0].idHigh)}${hex7(books[0].idLow)}`;
 
 for (const [name, damage, failure, fault] of [
-  ['a damaged', record => { record[10] ^= 0x5a; }, 'BooksNotReadCanSetAside', 'damaged'],
-  ['a newer', record => { record[6] = 9; }, 'BooksNotRead', 'written by a newer Quire'],
-  ['a not Quire\'s', record => { record[0] ^= 0x5a; }, 'BooksNotReadCanSetAside', 'not a Quire record'],
+  // cut inside its header there is no chunk to keep (a cut after it is used, with a loss: #614)
+  ['a damaged', record => record.slice(0, 6), 'BooksNotReadCanSetAside', 'damaged'],
+  ['a newer', record => { record[6] = 9; return record; }, 'BooksNotRead', 'written by a newer Quire'],
+  ['a not Quire\'s', record => { record[0] ^= 0x5a; return record; }, 'BooksNotReadCanSetAside', 'not a Quire record'],
 ]) {
   test(`${name} book record is offered with its details: Copy details, Report, and About keeps them`, async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -88,8 +88,7 @@ test('a damaged collections record is offered with its details', async ({ page, 
   await reload(page);
   await expect(cards(page)).toHaveCount(2);
   const stored = await store(page);
-  const record = stored['library/index'].slice();
-  record[10] ^= 0x5a;
+  const record = stored['library/index'].slice(0, 6);
   await put(page, 'library/index', record);
   await reload(page);
   await expectDetails(page, ['Failure: CollectionsNotReadCanSetAside', 'Collections record: damaged, ']);

@@ -1,0 +1,4 @@
+function _static_cut_unmatched
+line 3
+pattern match is nonexhaustive:
+SR_cut(_, _, _)

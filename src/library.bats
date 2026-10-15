@@ -2760,17 +2760,25 @@ fun _adopt_books {stored,parsed:nat | parsed <= LIB_MAX} .<stored>.
     | ~LossyBook(_, _, image) => let
         val @(more, total) = _adopt_image(image, books, parsed)
       in _adopt_books(rest, more, total, unusable, lossy + 1) end
+    | ~EmptiedBook(_, _, image) => let
+        val @(more, total) = _adopt_image(image, books, parsed)
+      in _adopt_books(rest, more, total, unusable, lossy + 1) end
     | ~UnusableBook(_, _, why) => let
         val () = _aside_counted(why)
       in _adopt_books(rest, books, parsed, unusable + 1, lossy) end)
 
-(* The collections read from their record; whether it was damaged or
-   could not be used (no collections, until one is made) *)
-fn _adopt_index (index: stored_index): bool =
+(* How the collections' record was read: as it was, with a loss (they are shown, the lost group's defaults standing in), or not
+   at all (no collections, until one is made) *)
+datatype index_adopted =
+  | IndexAdoptedWhole
+  | IndexAdoptedLossy
+  | IndexAdoptedUnreadable
+
+fn _adopt_index (index: stored_index): index_adopted =
   case+ index of
   | ~IndexNone() => let
       val () = _index_shadow_current()
-    in false end
+    in IndexAdoptedWhole() end
   | ~WholeIndex(image) => let
       val numbers = index_image_numbers(image)
       val () = !_legacy_size := numbers.legacy_size
@@ -2779,7 +2787,7 @@ fn _adopt_index (index: stored_index): bool =
       val () = colls_put(CollCell(collections, count))
       val () = index_image_free(image)
       val () = _index_shadow_current()
-    in false end
+    in IndexAdoptedWhole() end
   | ~LossyIndex(image) => let
       val numbers = index_image_numbers(image)
       val () = !_legacy_size := numbers.legacy_size
@@ -2788,18 +2796,21 @@ fn _adopt_index (index: stored_index): bool =
       val () = colls_put(CollCell(collections, count))
       val () = index_image_free(image)
       val () = _index_shadow_current()
-    in true end
+    in IndexAdoptedLossy() end
   | ~UnusableIndex(why) => let
       val () = _aside_counted(why)
       val () = _index_shadow_current()
-    in true end
+    in IndexAdoptedUnreadable() end
 
 (* What reading the records lost is said once, apart from what is kept *)
-fn _adopt_told (unusable: int, lossy: int, index_damaged: bool): void =
+fn _adopt_told (unusable: int, lossy: int, index: index_adopted): void =
   if unusable > 0 then notice_say(if !_aside_count > 0 then BooksNotReadCanSetAside() else BooksNotRead())
   else if lossy > 0 then notice_say(DetailsDamaged())
-  else if index_damaged then notice_say(if !_aside_count > 0 then CollectionsNotReadCanSetAside() else CollectionsNotRead())
-  else ()
+  else
+    (case+ index of
+     | IndexAdoptedWhole() => ()
+     | IndexAdoptedLossy() => notice_say(DetailsDamaged())
+     | IndexAdoptedUnreadable() => notice_say(if !_aside_count > 0 then CollectionsNotReadCanSetAside() else CollectionsNotRead()))
 
 (* Reads the library: its records, or the old "lib" converted to them. The
    promise resolves with the number of books. *)
@@ -2823,9 +2834,9 @@ fn _load_records (): $P.promise(int, $P.Chained) =
           val () = !_aside_count := 0
           val @(ranked_books, count, unusable, lossy) = _adopt_books(stored, ranked_nil(), 0, 0, 0)
           val books = _ranked_books(ranked_books, books_nil())
-          val index_damaged = _adopt_index(index)
+          val adopted = _adopt_index(index)
           val () = lib_put(LibCell(_sort(books, books_nil(), !_sort_order), count))
-          val () = _adopt_told(unusable, lossy, index_damaged)
+          val () = _adopt_told(unusable, lossy, adopted)
         in $P.ret<int>(count) end
       end)
 
@@ -2899,6 +2910,9 @@ fun _aside_books {count:nat} .<count>. (stored: stored_books(count), done: int):
          val () = book_image_free(image)
        in _aside_books(rest, done) end
      | ~LossyBook(_, _, image) => let
+         val () = book_image_free(image)
+       in _aside_books(rest, done) end
+     | ~EmptiedBook(_, _, image) => let
          val () = book_image_free(image)
        in _aside_books(rest, done) end
      | ~UnusableBook(id_high, id_low, why) => let

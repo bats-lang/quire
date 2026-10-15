@@ -1,0 +1,9 @@
+function _static_cut_read_as_damaged
+line 6
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(FIN); S2Evar(spec_list(_)), S2Evar(format_version(_)), S2Evar(least_version(_)), S2Eapp(S2Ecst(sq_cut); S2Evar(chunks(_)), S2Evar(cause(_))), S2Eapp(S2Ecst(rr_damaged); ))].
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(rr_loss); S2Eapp(S2Ecst(rx_mk); S2Evar(format_version(_)), S2Evar(least_version(_)), S2Evar(vals(_)), S2Evar(kept_extras(_)), S2Evar(missing(_))), S2Eapp(S2Ecst(lt_cut); S2Evar(cause(_)), S2Evar(dropped(_))))
+The needed term is: S2Eapp(S2Ecst(rr_damaged); )
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(FIN); S2Evar(spec_list(_)), S2EVar(_->S2Evar(format_version(_))), S2EVar(_->S2Evar(least_version(_))), S2Eapp(S2Ecst(sq_cut); S2Evar(chunks(_)), S2EVar(_->S2Evar(cause(_)))), S2Eapp(S2Ecst(rr_loss); S2Eapp(S2Ecst(rx_mk); S2EVar(_->S2Evar(format_version(_))), S2EVar(_->S2Evar(least_version(_))), S2Evar(vals(_)), S2Evar(kept_extras(_)), S2Evar(missing(_))), S2Eapp(S2Ecst(lt_cut); S2EVar(_->S2Evar(cause(_))), S2Evar(dropped(_)))))
+The needed term is: S2Eapp(S2Ecst(FIN); S2Evar(spec_list(_)), S2Evar(format_version(_)), S2Evar(least_version(_)), S2Eapp(S2Ecst(sq_cut); S2Evar(chunks(_)), S2Evar(cause(_))), S2Eapp(S2Ecst(rr_damaged); ))

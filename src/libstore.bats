@@ -218,6 +218,7 @@ in () end
   | {contents:bookx} WholeBook of (Int, Int, book_image(contents))
   | {contents:bookx} LossyBook of (Int, Int, book_image(contents))    (* a group that may be lost was: the defaults stand in for it until the book is next saved *)
   | UnusableBook of (Int, Int, unusable)
+  | {contents:bookx} EmptiedBook of (Int, Int, book_image(contents))   (* a record cut in its framing that kept none of the groups it needs (AUTH, BOOK, TITL): read from the version before it when there is one, else as a LossyBook (quire#614). It never leaves libstore_read *)
 
 #pub datavtype stored_books(int) =
   | StoredNone(0) of ()
@@ -242,6 +243,7 @@ implement stored_book_free (book) =
   case+ book of
   | ~WholeBook(_, _, image) => book_image_free(image)
   | ~LossyBook(_, _, image) => book_image_free(image)
+  | ~EmptiedBook(_, _, image) => book_image_free(image)
   | ~UnusableBook(_, _, _) => ()
 
 #pub fun stored_books_free {count:nat} (books: stored_books(count)): void
@@ -451,6 +453,26 @@ fn _keyed_book {contents:bookx} (image: book_image(contents), id_high: Int, id_l
   | ~Keyed(keyed) => let val () = book_image_free(image) in LossyBook(id_high, id_low, keyed) end
   | ~NotKeyed() => let val () = book_image_free(image) in UnusableBook(id_high, id_low, UnusableDamaged()) end
 
+(* Whether the tag is the four bytes *)
+fn _tag_is {tag:bytes} (tag: !blist(tag, 4), first: int, second: int, third: int, fourth: int): bool =
+  case+ tag of
+  | blist_cons(a, blist_cons(b, blist_cons(c, blist_cons(d, blist_nil())))) =>
+    (if a = first then (if b = second then (if c = third then d = fourth else false) else false) else false)
+
+(* What a loss names, for a book's record: a cut, and the groups AUTH, BOOK and TITL *)
+fun _needed_lost {lost_tags:lost}{lost_count:nat} .<lost_count>.
+  (lost: !lostv(lost_tags, lost_count), cut: bool, auth: bool, book: bool, titl: bool): bool =
+  case+ lost of
+  | LTV_nil() => (if cut then (if auth then (if book then titl else false) else false) else false)
+  | LTV_cut(_, more) => _needed_lost(more, true, auth, book, titl)
+  | LTV_cons(tag, more) =>
+    _needed_lost(more, cut, auth || _tag_is(tag, 65, 85, 84, 72), book || _tag_is(tag, 66, 79, 79, 75), titl || _tag_is(tag, 84, 73, 84, 76))
+
+(* A record cut in its framing that kept none of the groups it needs: the cut and AUTH, BOOK and TITL are all lost (quire#614).
+   (A cut record whose kept group's tag was also there twice would count, which a version before it is then read for: harmless) *)
+fn _cut_kept_nothing {lost_tags:lost}{lost_count:nat} (lost: !lostv(lost_tags, lost_count)): bool =
+  _needed_lost(lost, false, false, false, false)
+
 (* A book's record at piece[at, at + len) read *)
 fn _read_book {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
   (piece: !$A.arrx(byte, l, n, owner), at: int at, len: int len, id_high: Int, id_low: Int): stored_book =
@@ -474,12 +496,16 @@ fn _read_book {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
     | ~BR_loss(record, lost) => let
         val image = book_record_image(record)
         val () = book_record_free(record)
+        val emptied = _cut_kept_nothing(lost)
         val () = lostv_free(lost)
         val numbers = book_image_numbers(image)
+        val whole = (if numbers.id_high = id_high then numbers.id_low = id_low else false): bool
       in
-        if numbers.id_high = id_high then
-          (if numbers.id_low = id_low then LossyBook(id_high, id_low, image)
-           else _keyed_book(image, id_high, id_low))
+        if emptied then
+          (case+ _image_keyed(image, id_high, id_low) of
+           | ~Keyed(keyed) => let val () = book_image_free(image) in EmptiedBook(id_high, id_low, keyed) end
+           | ~NotKeyed() => let val () = book_image_free(image) in UnusableBook(id_high, id_low, UnusableDamaged()) end)
+        else if whole then LossyBook(id_high, id_low, image)
         else _keyed_book(image, id_high, id_low)
       end
     | ~BR_notquire() => UnusableBook(id_high, id_low, UnusableNotQuire())
@@ -529,6 +555,9 @@ fun _take_previous {kept:nat} .<kept>. (previous: stored_books(kept), id_high: I
      | ~WholeBook(other_high, other_low, image) => let
          val @(found, others) = _take_previous(rest, id_high, id_low)
        in @(found, StoredSome(WholeBook(other_high, other_low, image), others)) end
+     | ~EmptiedBook(other_high, other_low, image) => let
+         val @(found, others) = _take_previous(rest, id_high, id_low)
+       in @(found, StoredSome(EmptiedBook(other_high, other_low, image), others)) end
      | ~UnusableBook(other_high, other_low, why) => let
          val @(found, others) = _take_previous(rest, id_high, id_low)
        in @(found, StoredSome(UnusableBook(other_high, other_low, why), others)) end)
@@ -554,7 +583,23 @@ fun _recover {count,kept:nat} .<count>. (books: stored_books(count), previous: s
        in @(StoredSome(WholeBook(id_high, id_low, image), recovered), left) end
      | ~LossyBook(id_high, id_low, image) => let
          val @(recovered, left) = _recover(rest, previous)
-       in @(StoredSome(LossyBook(id_high, id_low, image), recovered), left) end)
+       in @(StoredSome(LossyBook(id_high, id_low, image), recovered), left) end
+     | ~EmptiedBook(id_high, id_low, image) => let
+         val @(found, others) = _take_previous(previous, id_high, id_low)
+         val @(recovered, left) = _recover(rest, others)
+       in
+         (case+ found of
+          | ~LossyBook(found_high, found_low, found_image) => let
+              val () = book_image_free(image)
+            in @(StoredSome(LossyBook(found_high, found_low, found_image), recovered), left) end
+          | ~WholeBook(found_high, found_low, found_image) => let
+              val () = book_image_free(image)
+            in @(StoredSome(WholeBook(found_high, found_low, found_image), recovered), left) end
+          | ~EmptiedBook(found_high, found_low, found_image) => let
+              val () = book_image_free(found_image)
+            in @(StoredSome(LossyBook(id_high, id_low, image), recovered), left) end
+          | ~UnusableBook(_, _, _) => @(StoredSome(LossyBook(id_high, id_low, image), recovered), left))
+       end)
 
 (* The byte at piece[at + i] when i is inside the record's len bytes, else 0 *)
 fn _head_byte {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}{i:int}
@@ -590,6 +635,7 @@ fn _book_noted {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
     in UnusableBook(id_high, id_low, why) end
   | ~WholeBook(id_high, id_low, image) => WholeBook(id_high, id_low, image)
   | ~LossyBook(id_high, id_low, image) => LossyBook(id_high, id_low, image)
+  | ~EmptiedBook(id_high, id_low, image) => EmptiedBook(id_high, id_low, image)
 
 fn _index_noted {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
   (piece: !$A.arrx(byte, l, n, owner), at: int at, len: int len, index: stored_index): stored_index =
@@ -638,6 +684,7 @@ fun _read_entries {l:agz}{owner:addr}{n:nat}{at:nat | at <= n}{count,kept:nat | 
             val kept = (case+ _read_book(piece, value_at, value_len, id_high, id_low) of
               | ~WholeBook(found_high, found_low, image) => StoredSome(LossyBook(found_high, found_low, image), previous)
               | ~LossyBook(found_high, found_low, image) => StoredSome(LossyBook(found_high, found_low, image), previous)
+              | ~EmptiedBook(_, _, image) => let val () = book_image_free(image) in previous end
               | ~UnusableBook(_, _, _) => previous): [more:nat] stored_books(more)
           in _read_entries(piece, size, next, index, books, count, kept) end
         (* when a record was last written *)
@@ -1288,6 +1335,11 @@ fn _decide_aside_book (found: $IDB.lookup, id_high: Int, id_low: Int, answer: $P
             val () = $P.resolve<aside_result>(answer, AsideNotNeeded())
           in $IDB.Keep() end
         | ~LossyBook(_, _, image) => let
+            val () = book_image_free(image)
+            val () = $A.free<byte>(previous)
+            val () = $P.resolve<aside_result>(answer, AsideNotNeeded())
+          in $IDB.Keep() end
+        | ~EmptiedBook(_, _, image) => let
             val () = book_image_free(image)
             val () = $A.free<byte>(previous)
             val () = $P.resolve<aside_result>(answer, AsideNotNeeded())

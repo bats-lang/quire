@@ -1,0 +1,3 @@
+function _static_join_forgets_cut
+line 5
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Evar(dropped(_)); S2Eapp(S2Ecst(lt_cut); S2Evar(cause(_)), S2Evar(dropped(_)))))

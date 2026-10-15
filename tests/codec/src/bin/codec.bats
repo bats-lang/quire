@@ -479,6 +479,134 @@ fn check_needed_lost (): void = let
   val () = check_needed_lost_with(false, false, true, true)
 in check_needed_lost_with(true, true, true, true) end
 
+(* ---------------- a record cut in its framing (#614) ---------------- *)
+
+(* The record of image_of(31337, 9, 7, 5) is 339 bytes: the 7 byte header, the chunks, and the end chunk, 12 bytes. A record cut anywhere
+   after its header (bytes missing, a length past the end or over the limit, bytes after the end chunk) keeps the chunks that were whole
+   before the cut, loses the groups after them (their substitutes stand in) and is used: it reads as the record of its whole chunks
+   and the end chunk, with a loss said. *)
+
+(* where the chunk that is cut at length begins: the chunks of the record before it are whole *)
+fun chunk_boundary {l:agz}{n:pos | n <= 1048576}{o:nat | o <= n} .<n - o>.
+  (bytes: !$A.arr(byte, l, n), n: int n, length: int, o: int o): [b:nat | b <= n] int b =
+  if o + 4 >= n then o
+  else let
+    val size = 12 + $AR.low_byte(byte2int0($A.get<byte>(bytes, o))) + 256 * $AR.low_byte(byte2int0($A.get<byte>(bytes, o + 1)))
+  in
+    if o + size <= length then (if o + size <= n then chunk_boundary(bytes, n, length, o + size) else o)
+    else o
+  end
+
+(* the chunks of the record before b, and its end chunk *)
+fn closed_at {l:agz}{n:pos | n == 339}{b:nat | b <= 327} (bytes: !$A.arr(byte, l, n), n: int n, b: int b): [copy_l:agz] $A.arr(byte, copy_l, b + 12) = let
+  val copy = $A.alloc<byte>(b + 12)
+  val at = put_span(bytes, n, copy, b + 12, 0, b, 0)
+  val _ = put_span(bytes, n, copy, b + 12, 327, 339, at)
+in copy end
+
+(* the first length bytes of the record *)
+fn prefix_of {l:agz}{n:pos | n <= 1048576}{length:pos | length <= n} (bytes: !$A.arr(byte, l, n), n: int n, length: int length): [copy_l:agz] $A.arr(byte, copy_l, length) = let
+  val copy = $A.alloc<byte>(length)
+  val _ = put_span(bytes, n, copy, length, 0, length, 0)
+in copy end
+
+(* the record with the byte at a place set to a value *)
+fn with_byte {l:agz}{n:pos | n <= 1048576}{at:nat | at < n} (bytes: !$A.arr(byte, l, n), n: int n, at: int at, value: int): [copy_l:agz] $A.arr(byte, copy_l, n) = let
+  val copy = copy_of(bytes, n)
+  val () = $A.set<byte>(copy, at, $A.int2byte($AR.low_byte(value)))
+in copy end
+
+(* the record with bytes after its end chunk *)
+fn with_trailing {l:agz}{n:pos | n <= 1048576 - 4} (bytes: !$A.arr(byte, l, n), n: int n): [copy_l:agz] $A.arr(byte, copy_l, n + 4) = let
+  val copy = $A.alloc<byte>(n + 4)
+  val _ = put_span(bytes, n, copy, n + 4, 0, n, 0)
+  val () = $A.set<byte>(copy, n, $A.int2byte(1))
+  val () = $A.set<byte>(copy, n + 1, $A.int2byte(2))
+  val () = $A.set<byte>(copy, n + 2, $A.int2byte(3))
+  val () = $A.set<byte>(copy, n + 3, $A.int2byte(4))
+in copy end
+
+(* the image a record reads as, with a loss or not, and its bytes as they are written *)
+fn read_as_image {l:agz}{n:pos | n <= 1048576} (bytes: !$A.arr(byte, l, n), n: int n): tested = let
+  val list = blist_of_array(bytes, 0, n)
+  val (_ | read) = book_record_read(list)
+in
+  case+ read of
+  | ~BR_ok(record) => let
+      val image = book_record_image(record)
+      val () = book_record_free(record)
+    in Tested(image) end
+  | ~BR_loss(record, lost) => let
+      val image = book_record_image(record)
+      val () = lostv_free(lost)
+      val () = book_record_free(record)
+    in Tested(image) end
+  | ~BR_notquire() => NoTested()
+  | ~BR_newer() => NoTested()
+  | ~BR_damaged() => NoTested()
+end
+
+(* the cut record is used with a loss said, as the image of the record of its whole chunks and the end chunk, and written whole as that
+   record is *)
+fn check_cut_like {l:agz}{n:pos | n <= 1048576}{closed_l:agz}{closed_n:pos | closed_n <= 1048576}
+  (cut: !$A.arr(byte, l, n), n: int n, closed: !$A.arr(byte, closed_l, closed_n), closed_n: int closed_n, what: string): void =
+  case+ read_as_image(closed, closed_n) of
+  | ~NoTested() => fail("the record of the chunks before the cut is a record")
+  | ~Tested(kept) => let
+      val @(kept_bytes, kept_n) = encode(kept)
+      val @(code, written) = classify_same(cut, n, kept, kept_bytes, kept_n)
+      val () = expect(code = 2, what)
+      val () = expect(written, "a record cut in its framing is written whole")
+      val () = $A.free<byte>(kept_bytes)
+    in book_image_free(kept) end
+
+fn check_cut_at {l:agz}{n:pos | n == 339}{length:nat | 7 <= length; length < n} (bytes: !$A.arr(byte, l, n), n: int n, length: int length): void = let
+  val boundary = chunk_boundary(bytes, n, length, 7)
+in
+  if boundary <= 327 then let
+    val closed = closed_at(bytes, n, boundary)
+    val shortened = prefix_of(bytes, n, length)
+    val () = check_cut_like(shortened, length, closed, boundary + 12, "a record cut short keeps the chunks before the cut and loses the groups after them")
+    val () = $A.free<byte>(shortened)
+  in $A.free<byte>(closed) end
+  else fail("a cut inside the chunks")
+end
+
+fun check_cuts {l:agz}{n:pos | n == 339}{length:nat | length <= n} .<n - length>. (bytes: !$A.arr(byte, l, n), n: int n, length: int length): void =
+  if length >= n then ()
+  else if length < 7 then check_cuts(bytes, n, 7)
+  else let
+    val () = check_cut_at(bytes, n, length)
+  in check_cuts(bytes, n, length + 1) end
+
+fn check_cut (): void =
+  case+ image_of(31337, 9, 7, 5) of
+  | ~NoTested() => ()
+  | ~Tested(image) => let
+      val @(bytes, n) = encode(image)
+      val () = book_image_free(image)
+    in
+      if n = 339 then let
+        (* cut anywhere after the header (the end chunk missing or part of a chunk gone too): the chunks before the cut are kept *)
+        val () = check_cuts(bytes, n, 0)
+        (* a length past the end of the record: the chunk and what follows it are lost (TITL begins at 257) *)
+        val past_end = with_byte(bytes, n, 258, 255)
+        val closed = closed_at(bytes, n, 257)
+        val () = check_cut_like(past_end, n, closed, 269, "a chunk whose length runs past the end of the record is a cut")
+        val () = $A.free<byte>(past_end)
+        (* a length over the limit of a chunk *)
+        val over_limit = with_byte(bytes, n, 260, 127)
+        val () = check_cut_like(over_limit, n, closed, 269, "a chunk whose length is over the limit is a cut")
+        val () = $A.free<byte>(over_limit)
+        val () = $A.free<byte>(closed)
+        (* bytes after the end chunk: every group is read, the extra bytes are said *)
+        val trailing = with_trailing(bytes, n)
+        val () = check_cut_like(trailing, n + 4, bytes, n, "bytes after the end chunk are a cut")
+        val () = $A.free<byte>(trailing)
+      in $A.free<byte>(bytes) end
+      else let val () = fail("a record of the shape these tests rely on") in $A.free<byte>(bytes) end
+    end
+
 (* ---------------- the checksum ---------------- *)
 
 fn check_crc (): void = let
@@ -638,7 +766,8 @@ fn damage_with {image_contents:bookx} (image: book_image(image_contents)): void 
         else let val () = $A.set<byte>(shortened, i, $A.get<byte>(bytes, i)) in copy_prefix(bytes, shortened, i + 1) end
       val () = copy_prefix(bytes, shortened, 0)
       val @(code, _) = classify(shortened, length, original)
-      val () = expect(code >= 3, "a record cut short is not a record")
+      (* cut inside its header it is not a record; cut after, it is used with a loss (#614) *)
+      val () = (if length < 7 then expect(code >= 3, "a record cut inside its header is not a record") else expect(code = 2, "a record cut short is used with a loss"))
       val () = $A.free<byte>(shortened)
     in cut(bytes, n, original, length + 1) end
   val () = cut(bytes, n, image, 0)
@@ -714,6 +843,7 @@ implement main0 () = let
   val () = check_edges(0)
   val () = check_strings()
   val () = check_damage()
+  val () = check_cut()
   val () = check_absent()
   val () = check_any_order()
   val () = check_needed_lost()

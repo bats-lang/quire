@@ -1,0 +1,3 @@
+function _static_lostcat_changes_cause
+line 3
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Evar(first_cause(_)); S2Evar(both_cause(_))))

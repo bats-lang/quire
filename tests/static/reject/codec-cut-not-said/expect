@@ -1,0 +1,9 @@
+function _static_cut_not_said
+line 3
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(JOIN); S2Evar(format_version(_)), S2Evar(least_version(_)), S2Eapp(S2Ecst(lt_cut); S2Evar(cause(_)), S2Evar(more(_))), S2Eapp(S2Ecst(sd_ok); S2Evar(vals(_)), S2Evar(kept_extras(_)), S2Evar(missing(_))), S2Eapp(S2Ecst(rr_ok); S2Eapp(S2Ecst(rx_mk); S2Evar(format_version(_)), S2Evar(least_version(_)), S2Evar(vals(_)), S2Evar(kept_extras(_)), S2Evar(missing(_)))))].
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(lt_nil); )
+The needed term is: S2Eapp(S2Ecst(lt_cut); S2Evar(cause(_)), S2Evar(more(_)))
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(JOIN); S2EVar(_->S2Evar(format_version(_))), S2EVar(_->S2Evar(least_version(_))), S2Eapp(S2Ecst(lt_nil); ), S2Eapp(S2Ecst(sd_ok); S2EVar(_->S2Evar(vals(_))), S2EVar(_->S2Evar(kept_extras(_))), S2EVar(_->S2Evar(missing(_)))), S2Eapp(S2Ecst(rr_ok); S2Eapp(S2Ecst(rx_mk); S2EVar(_->S2Evar(format_version(_))), S2EVar(_->S2Evar(least_version(_))), S2EVar(_->S2Evar(vals(_))), S2EVar(_->S2Evar(kept_extras(_))), S2EVar(_->S2Evar(missing(_))))))
+The needed term is: S2Eapp(S2Ecst(JOIN); S2Evar(format_version(_)), S2Evar(least_version(_)), S2Eapp(S2Ecst(lt_cut); S2Evar(cause(_)), S2Evar(more(_))), S2Eapp(S2Ecst(sd_ok); S2Evar(vals(_)), S2Evar(kept_extras(_)), S2Evar(missing(_))), S2Eapp(S2Ecst(rr_ok); S2Eapp(S2Ecst(rx_mk); S2Evar(format_version(_)), S2Evar(least_version(_)), S2Evar(vals(_)), S2Evar(kept_extras(_)), S2Evar(missing(_)))))
