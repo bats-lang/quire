@@ -748,8 +748,8 @@ test('the library menu is reachable under the banner of records that cannot be u
   await put(page, 'lib', [...legacyLibrary(6, [], [unreadable, { idHigh: 0x2345678, idLow: 0x1bcdef0, title: 'Beta Notes', author: 'Bo Author' }])]);
   await reload(page);
   await expect(cards(page)).toHaveCount(2);
-  const record = (await store(page))[bookKey(unreadable)].slice();
-  record[10] ^= 0x5a;
+  // cut inside its header: no chunk to keep, so the record cannot be used (a cut after it is used, #614)
+  const record = (await store(page))[bookKey(unreadable)].slice(0, 6);
   await put(page, bookKey(unreadable), record);
   await reload(page);
   await expect(page.getByRole('alert')).toContainText('Some books in your library could not be read');
