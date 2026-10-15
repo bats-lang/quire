@@ -58,6 +58,27 @@ stay short within a few lines.
 * **p3:** not held for. A session may file p3 issues but does not work
   on them.
 
+## Pipeline and tooling improvements belong in bats or pwa
+
+Anything a second app would copy is built where the apps share it, and
+quire calls it: the compiler's build, cache and fixture runner, and the
+setup of the toolchain, are bats's (bats-lang/bats); the Android project
+and its release, test running (Playwright, its install and browsers), the
+emulator job and the pages beside the app are pwa's (bats-lang/pwa). Quire's
+own CI holds what is about quire: its specs and fixtures, which job runs
+which (`tests/groups.json`), its books and its proofs. Before a workflow or
+script of quire is changed, ask whether an alarm clock built the same way
+would copy the change; if it would, the change is a ticket in bats or pwa
+first (quire#623 is the list of what already is one), and quire's change is
+only the call.
+
+A stopgap in quire is allowed only when waiting would cost more than the
+move (a flake that removes a merge queue entry each time it happens), and
+then the ticket that moves it is written first, the stopgap says so in its
+comment, and it is deleted when the move lands (quire#635's retries and
+cache, moved by quire#637). A stopgap with no ticket for its move is not a
+fix.
+
 ## CI is pinned
 
 Every input to CI is pinned in the source (#203), so a commit that
@@ -207,6 +228,18 @@ What happened on 2026-10-15, and the rules it gave:
   shards, none over about 25 minutes).
 * Open (#586): the queue's own settings (how many groups build at once, the
   window) and balancing the static groups so that none is the long pole.
+
+### Node's packages (#637)
+
+The two jobs that use Node install it by pwa's `e2e-setup` action
+(`bats-lang/pwa/.github/actions/e2e-setup@<commit>`, called by commit as
+`android.yml` is, bats-lang/pwa#99): exactly `package-lock.json` by `npm ci`,
+retried when the connection to the registry drops (one `ECONNRESET` in an e2e
+job's `npm install` removed a merge queue entry after 35 minutes, #635),
+npm's downloads cached on the lock, the Playwright version checked against
+`playwright-minimum` (1.58), and the browsers in one directory cached on the
+Playwright version. Quire holds no install logic of its own (CLAUDE.md,
+"Pipeline and tooling improvements belong in bats or pwa").
 
 ## Check locally before every push
 
