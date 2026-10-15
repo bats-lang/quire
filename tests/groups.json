@@ -176,7 +176,8 @@
       "reject/page-width-fraction",
       "reject/pieces-cut-by-other-rule",
       "reject/pieces-forged-cut",
-      "reject/sheet-scrolls-over-share"
+      "reject/sheet-scrolls-over-share",
+      "solver"
     ],
     "accepts-data": [
       "accept/codec-absent-added-group",
@@ -195,8 +196,24 @@
       "accept/try-again-transient",
       "reject/clip-past-end",
       "reject/aloud-placement-unmatched",
-      "reject/fixed-box-zoom-zero",
-      "mutation"
+      "reject/fixed-box-zoom-zero"
+    ],
+    "mutation-crc": [
+      "mutation/crc"
+    ],
+    "mutation-codec-bytes": [
+      "mutation/bytes",
+      "mutation/fields",
+      "mutation/seq"
+    ],
+    "mutation-codec-schema": [
+      "mutation/schema",
+      "mutation/chunk"
+    ],
+    "mutation-records": [
+      "mutation/record",
+      "mutation/bookrec",
+      "mutation/indexrec"
     ]
   }
 }

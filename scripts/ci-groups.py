@@ -39,6 +39,13 @@ usage:
                                        static=[...] (the matrices' group
                                        names, as JSON) to $GITHUB_OUTPUT,
                                        or to standard output
+  scripts/ci-groups.py affected <group> <base>
+                                       print `yes` when the group has something to run for
+                                       a change since the git revision <base> (`none`: no
+                                       change to go by), else `no`:
+                                       the groups of mutation members run only the lemmas
+                                       the change can have made vacuous (#594), every other
+                                       group always runs
   scripts/ci-groups.py members <kind> <group>
                                        check, then print that group's
                                        members, one per line (e2e specs
@@ -58,10 +65,16 @@ def specs():
                   if name.endswith('.spec.js'))
 
 
+def mutation_modules():
+    """The proof modules the mutation check covers (tests/static/mutation_modules.txt)."""
+    with open(os.path.join(ROOT, 'tests', 'static', 'mutation_modules.txt')) as modules_file:
+        return modules_file.read().split()
+
+
 def static_members():
     """Everything the static tests run: the app's check, the checkers,
     and each fixture."""
-    found = ['check', 'checkers', 'mutation']
+    found = ['check', 'checkers', 'solver'] + [f'mutation/{os.path.basename(m)[:-5]}' for m in mutation_modules()]
     for verdict in ('accept', 'reject'):
         directory = os.path.join(ROOT, 'tests', 'static', verdict)
         found += sorted(f'{verdict}/{name}' for name in os.listdir(directory)
@@ -161,6 +174,21 @@ def problems(groups):
     return found
 
 
+def affected(members, base):
+    """`yes` when a change since `base` leaves something for these members to run."""
+    if not all(member.startswith('mutation/') for member in members):
+        return 'yes'
+    if base == 'none':
+        return 'no'  # a push, a dispatch: the scheduled run (.github/workflows/mutation.yml) has them
+    sys.path.insert(0, os.path.join(ROOT, 'tests', 'static'))
+    import mutation_check
+    for module in mutation_modules():
+        if f'mutation/{os.path.basename(module)[:-5]}' in members \
+                and mutation_check.select_by_diff(ROOT, base, module) != set():
+            return 'yes'
+    return 'no'
+
+
 def main(arguments):
     with open(os.path.join(ROOT, 'tests', 'groups.json')) as groups_file:
         groups = json.load(groups_file)
@@ -179,6 +207,9 @@ def main(arguments):
         total = len(specs()), len(static_members())
         print(f'{total[0]} specs and {total[1]} static members, each in exactly one group',
               file=sys.stderr)
+        return 0
+    if len(arguments) == 3 and arguments[0] == 'affected' and arguments[1] in groups['static']:
+        print(affected(groups['static'][arguments[1]], arguments[2]))
         return 0
     if len(arguments) == 3 and arguments[0] == 'members' and arguments[1] in groups \
             and arguments[2] in groups[arguments[1]]:

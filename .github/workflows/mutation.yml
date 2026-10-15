@@ -1,0 +1,63 @@
+# Nightly: every lemma of the proof modules has its false variant rejected
+# (tests/static/mutation_check.py, quire#594). A pull request runs only the
+# lemmas its change can have made vacuous (check.yml, the mutation-* groups);
+# what that cannot see (a locked package whose lemmas a proof calls, a
+# compiler or solver move that is not in the diff, a bug of the selection
+# itself) is found here within a day, on main, built from nothing.
+name: mutation
+
+on:
+  schedule:
+    - cron: '41 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      groups: ${{ steps.groups.outputs.groups }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: groups
+        run: |
+          echo "groups=$(scripts/ci-groups.py matrix | sed -n 's/^static=//p' | python3 -c 'import json,sys; print(json.dumps([g for g in json.load(sys.stdin) if g.startswith("mutation-")]))')" >> "$GITHUB_OUTPUT"
+
+  mutation:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.plan.outputs.groups) }}
+    name: mutation (${{ matrix.group }})
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
+      - name: Set up bats
+        uses: ./.github/actions/setup-bats
+        with:
+          commit: ${{ github.sha }}
+      - name: Mutation check
+        env:
+          QUIRE_STATIC_WORK: ${{ runner.temp }}/quire-static
+        run: tests/static/run.sh $HOME/repository $(scripts/ci-groups.py members static ${{ matrix.group }})
+
+  report:
+    needs: mutation
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open an issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Nightly mutation check failed ($(date -u +%F))" \
+            --body "A lemma's false variant was accepted, or the check broke: $RUN (quire#594). Read the ACCEPTED lines."
