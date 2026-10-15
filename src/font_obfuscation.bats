@@ -17,8 +17,8 @@
 #include "share/atspre_staload.hats"
 #use array as A
 #use arith as AR
+#use sha256 as SHA
 
-staload "sha1.sats"
 
 (* How many bytes of the font each algorithm masks *)
 #pub fn idpf_masked_bytes (): int
@@ -61,7 +61,7 @@ in
   if kept <= 0 then let val () = $A.free<byte>(clean) in false end
   else let
     val @(clean_frozen, clean_bytes) = $A.freeze<byte>(clean)
-    val () = sha1_digest(clean_bytes, kept, key)
+    val () = $SHA.sha1_digest(clean_bytes, kept, key)
     val () = $A.drop<byte>(clean_frozen, clean_bytes)
     val () = $A.free<byte>($A.thaw<byte>(clean_frozen))
   in true end
