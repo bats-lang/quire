@@ -18,19 +18,22 @@ inputs:
 runs:
   using: composite
   steps:
-    # The key names everything the compiler's own freshness rules (the
-    # source's SHA-256 for a module's .dats; file times for its C and
-    # objects) do not see: the compiler and ATS2 pins, the lock, the
-    # runner image (its C compiler). The sources are in the key's last
-    # part, so an exact hit is the same sources, and a prefix hit the
-    # newest earlier build under the same toolchain. The commit's facts
+    # A locator, not a guarantee (#622): bats stamps every build/ with what
+    # made it (the bats, patsopt and ATS2, the C compiler, the flags and the
+    # target: build/.bats_stamp, bats-lang/bats#273) and drops a build/ whose
+    # stamp is not the one it would write, so the key no longer names the
+    # compiler pin, the ATS2 pin or the runner image. What is left is what
+    # the stamp does not cover: the packages (the lock, bats.toml) and the
+    # system and architecture the cache was made on. The sources are the
+    # key's last part, so an exact hit is the same sources, and a prefix hit
+    # the newest earlier build of the same packages. The commit's facts
     # (build/src/_bats_facts, which src/version.bats words) are written
     # again per commit and change only their own module.
     - name: Name the cache
       id: key
       shell: bash
       run: |
-        echo "prefix=quire-${{ inputs.name }}-v1-${{ runner.os }}-${{ runner.arch }}-${ImageVersion:-image}-${{ hashFiles('.github/bats-version', '.github/actions/setup-bats/action.yml', 'bats.lock', 'bats.toml') }}-" >> "$GITHUB_OUTPUT"
+        echo "prefix=quire-${{ inputs.name }}-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bats.lock', 'bats.toml') }}-" >> "$GITHUB_OUTPUT"
         echo "sources=${{ hashFiles('src/**') }}" >> "$GITHUB_OUTPUT"
 
     - name: Restore the compiler cache

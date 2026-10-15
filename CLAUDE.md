@@ -103,10 +103,14 @@ commit), and save theirs once the job passed. What was found:
   is mode 2 and 3, build 0 and 1), so there are two caches, `build` and
   `static`. `.bats_cache_id` drops a cache when the compiler's semantics
   change.
-* Staleness. Nothing in `build/` records the compiler, ATS2 or the C
-  compiler, so the key names them: `.github/bats-version`, the ATS2 pin
-  (`setup-bats/action.yml`), `bats.lock`, `bats.toml`, the runner image and
-  architecture. The sources are the key's end, so an exact hit is the same
+* Staleness. A build/ records what made it (#622, bats-lang/bats#273):
+  `build/.bats_stamp` holds the bats's own inputs' digest, patsopt's
+  toolchain, the C compiler's version, the flags and the target, and bats
+  drops a build/ whose stamp is not the one it would write, so the key does
+  not name the compiler pin, the ATS2 pin or the runner image any more (they
+  were `.github/bats-version`, `setup-bats/action.yml` and the image). It
+  names `bats.lock`, `bats.toml`, the system and architecture, which the
+  stamp does not cover. The sources are the key's end, so an exact hit is the same
   sources, and a prefix hit is the incremental build the compiler does on a
   developer's machine: a changed module is re-emitted by its hash (its
   `.dats` is then newer than its C), a changed `.sats` rebuilds every
