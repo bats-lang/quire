@@ -1916,55 +1916,87 @@ in time is split, as `date_text` and `add32_functional` were):
 ### The mutation check in CI (#594)
 
 Measured under the GMP solver on a shared 4-core machine, a whole module is
-8 to 30 minutes, `src/crc.bats` (126 mutants) 52, and the nine proof
-modules (`tests/static/mutation_modules.txt`: bytes, chunk, crc, fields,
-seq, schema, record, bookrec, indexrec; about 460 mutants and 215 lemmas) a
-few hours in all. That cannot be in every pull request's required `check`,
-which is about 15 minutes, so the check is incremental, as the mutation
-tools do it:
+8 to 30 minutes, `src/crc.bats` about an hour. The nine proof modules
+(`tests/static/mutation_modules.txt`: bytes, chunk, crc, fields, seq, schema,
+record, bookrec, indexrec; about 480 mutants over 220 lemmas) are some three
+hours of mutants in all. That cannot be in the required `check` of every
+pull request, and it cannot be a few big jobs either: the first version
+(four groups, one job each, #611's merge queue run 38703942820) took 42, 48,
+71 and 15 minutes for its groups beside a plain group of about 33, and the
+merge queue's 60 minute window removed the entry while the group was still
+passing. A job's time is the app's check (about 11 minutes cold, the queue's
+run is cold) plus its mutants, so the design target is **no mutation job
+over about 25 minutes on an idle pool**, and a job costs 11 minutes before
+it mutates anything: halving a module's mutants halves only the second part.
+From the four measured groups the rate is about 0.43 minutes a mutant for
+crc, 0.22 for bytes, fields and seq, 0.25 for schema and chunk and 0.1 for
+the small record modules, so a job holds 14 minutes of mutants:
 
-* **Per change** (`check.yml`, the groups `mutation-crc`, `mutation-codec-bytes`,
-  `mutation-codec-schema`, `mutation-records`, side by side with the other
-  static groups, so `check` still passes only when every group does):
-  `scripts/ci-groups.py affected <group> <base>` says whether the change
-  since the pull request's base (`HEAD^1` of the merge checkout) leaves
-  anything to run; if not the job ends after its first step (a pull request
-  that touches no proof costs 15 seconds, no compiler, no cache). If so,
-  `QUIRE_MUTATION_BASE` makes `run.sh` pass `--diff` to the checker, which
-  mutates only the lemmas the diff touches (`select_by_diff`), those that
-  mention a name a changed line declares (a lemma whose statement changed,
-  a dataprop), and every lemma of a module whose diff is outside all its
-  lemmas; a comment or blank line selects nothing. A change to the checker
-  or to the ATS2 pin (the solver) selects everything. A push to main and a
+* **Members are parts of a module** (`mutation/crc-part2of5`, `mutation/seq`;
+  the parts are in `tests/static/mutation_modules.txt`, which
+  `scripts/ci-groups.py` and `run.sh` read): `mutation_check.py --shard I/N`
+  takes the I-th of N parts of the lemmas otherwise selected, balanced by
+  their number of mutants (heaviest first to the lightest part, so the parts
+  are disjoint, together every lemma, and the same on every machine;
+  `partition`, unit-tested). Expected minutes per job (11 for the app, plus
+  mutants at the rates above): crc 5 parts of 28 mutants, 23; bytes 2 parts
+  of 44, 21 each, with seq (21 mutants) 26 and with bookrec and indexrec (18)
+  23; schema 2 parts of 50, 24 each; chunk 50, 24; fields and record
+  (49 mutants), 20. Eleven groups, each one job, side by side. A pull
+  request's incremental check restores the app's build, so its jobs are
+  shorter by most of the 11.
+* **A pull request selects by its diff** (`check.yml`: the groups
+  `mutation-*`; `scripts/ci-groups.py affected <group> <base>` says whether
+  the change since the pull request's base, `HEAD^1` of the merge checkout,
+  leaves anything for the group, and a job that has none ends after its first
+  step: a pull request that touches no proof costs 15 seconds a group, no
+  compiler, no cache). If so `QUIRE_MUTATION_BASE` makes `run.sh` pass
+  `--diff` to the checker, which mutates only the lemmas the diff touches
+  (`select_by_diff`), those that mention a name a changed line declares (a
+  lemma whose statement changed, a dataprop), and every lemma of a module
+  whose diff is outside all its lemmas; a comment or blank line selects
+  nothing; the shard is then of the selected lemmas. A push to main and a
   dispatch run none of it.
+* **What selects what.** A change to a proof module selects as above. **A
+  change to the solver, its pin (`setup-bats/action.yml`) or its fixtures
+  (`tests/static/solver/`, `solver.py`), selects everything**, sharded so
+  each job fits. **A change to the checker alone** (`mutation_check.py`,
+  `mutation_test.py`, `mutation_modules.txt`, `mutation_known.txt`,
+  `proofs_audit.py`) **selects a smoke set**, the modules marked `smoke` in
+  `mutation_modules.txt` (bookrec and indexrec, 9 mutants each, 5 to 10
+  minutes beside the app's check), run whole: it shows the checker still
+  runs end to end on the real compiler, and the checker's own unit test
+  (`mutation_test.py`, in `checkers`) tests what it decides. Running every
+  module on the checker's change put #611, which changes no proof, through
+  three hours of jobs and out of the queue; its judgement on the proofs is
+  the nightly's. Groups, workflows and CLAUDE.md select nothing.
 * **Nightly, in full** (`.github/workflows/mutation.yml`, 02:41 UTC and on
-  dispatch, the same four groups side by side on main, built from nothing,
-  an issue opened when one fails): it has what a diff cannot see, a locked
-  package whose lemmas a proof calls (a relock), a compiler move, a bug of
-  the selection. A vacuous lemma that gets in through a relock is found
-  within a day, on main, and is not a red main (the proofs still check; it
-  is the same class as a regression found by the weekly provider checks).
-* **Why not every pull request in full, and why not only nightly.**
-  Stryker's incremental mode stores the previous run and reruns only the
-  mutants whose code or tests changed, and says itself that only mutated
-  and test files are tracked, not dependencies; PIT's incremental analysis
-  keeps a history, reruns what changed, and says that the assumption that a
-  dependency change rarely changes a mutation's status is "currently
-  unproven"; cargo-mutants' `--in-diff` mutates only what overlaps the diff
-  of the branch against the pull request's base, and says it is "not a
-  substitute for a full test run" (an edit in one region can leave another
-  poorly tested). All three are the shape chosen: the diff on the pull
-  request for feedback, a full run on a schedule for the rest. A schedule
-  alone would let a vacuous lemma merge and be found the next morning; a
-  full run per pull request would put 52 minutes beside a 15 minute check
-  for every change. The dependency set here is small and textual (a
-  lemma calls another by name), which is why the name rule can stand in
-  for PIT's dependency analysis. (Sources: stryker-mutator.io/docs/stryker-js/incremental,
+  dispatch, the same groups side by side on main, built from nothing, an
+  issue opened when one fails): it has what a diff cannot see (a locked
+  package whose lemmas a proof calls, a compiler move, a bug of the
+  selection) and every change of the checker. A vacuous lemma that gets in
+  through a relock is found within a day, on main, and is not a red main
+  (the proofs still check).
+* **Why this shape, by research.** Stryker's incremental mode stores the
+  previous run and reruns only the mutants whose code or tests changed, and
+  says itself that only mutated and test files are tracked, not dependencies;
+  PIT's incremental analysis keeps a history, reruns what changed, and says
+  that the assumption that a dependency change rarely changes a mutation's
+  status is "currently unproven"; cargo-mutants' `--in-diff` mutates only
+  what overlaps the diff of the branch against the pull request's base, and
+  says it is "not a substitute for a full test run" (an edit in one region
+  can leave another poorly tested). All three give diff-based feedback and
+  leave the full run to a schedule. A schedule alone would let a vacuous
+  lemma merge and be found the next morning; a full run per pull request
+  would put hours beside a 15 minute check. The dependency set here is
+  small and textual (a lemma calls another by name), which is why the name
+  rule can stand in for PIT's dependency analysis. (Sources:
+  stryker-mutator.io/docs/stryker-js/incremental,
   pitest.org/quickstart/incremental_analysis, mutants.rs/in-diff.html.
   mutmut and Dextool were not read.)
-* The job has `timeout-minutes` 120 (the nightly's 150), with the patsopt
-  caps (`BATS_PATSOPT_TIMEOUT_S`, `BATS_PATSOPT_MEM_MB`, from `setup-bats`)
-  under it, so a runaway proof fails with its module named.
+* The job has `timeout-minutes` 120 (the nightly's 150) as a backstop, with
+  the patsopt caps (`BATS_PATSOPT_TIMEOUT_S`, `BATS_PATSOPT_MEM_MB`, from
+  `setup-bats`) under it, so a runaway proof fails with its module named.
 
 **The only way to change a record** is `libstore_save_book` and
 `libstore_save_index` (`idb_update`, bridge: one transaction in which a
