@@ -127,13 +127,13 @@ jobs:
           path: dist/debug/gen-pwa
           retention-days: 1
 
-      - name: Install Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      # Node's packages, retried and cached, and the Playwright browsers:
+      # pwa's action (quire#637). The WASM smoke tests need no browsers, which
+      # are restored from the cache here
+      - name: Set up Node.js and Playwright
+        uses: bats-lang/pwa/.github/actions/e2e-setup@e2d98d401f06abdccebad8a53f0be1938ab43b8a
         with:
-          node-version: 22
-
-      - name: Install dependencies
-        run: npm install
+          playwright-minimum: "1.58"
 
       - name: Run WASM smoke tests
         run: npx vitest run
@@ -255,16 +255,14 @@ jobs:
       - name: Add the home page
         run: cp -R homepage dist/pwa/homepage
 
-      - name: Install Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      # Node's packages, retried and cached, and the Playwright browsers in
+      # one directory (PLAYWRIGHT_BROWSERS_PATH): pwa's action (quire#637).
+      # 1.58 is the least Playwright the suite may run on (CLAUDE.md, "The e2e
+      # suite needs Playwright 1.58 or later")
+      - name: Set up Node.js and Playwright
+        uses: bats-lang/pwa/.github/actions/e2e-setup@e2d98d401f06abdccebad8a53f0be1938ab43b8a
         with:
-          node-version: 22
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Install Playwright
-        run: npx playwright install chromium
+          playwright-minimum: "1.58"
 
       # A font with Japanese characters: the vertical book's shots are
       # empty boxes without one (quire#359; vertical.spec.js checks it)

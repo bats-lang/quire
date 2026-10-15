@@ -225,6 +225,18 @@ What happened on 2026-10-15, and the rules it gave:
 * Open (#586): the queue's own settings (how many groups build at once, the
   window) and balancing the static groups so that none is the long pole.
 
+### Node's packages (#637)
+
+The two jobs that use Node install it by pwa's `e2e-setup` action
+(`bats-lang/pwa/.github/actions/e2e-setup@<commit>`, called by commit as
+`android.yml` is, bats-lang/pwa#99): exactly `package-lock.json` by `npm ci`,
+retried when the connection to the registry drops (one `ECONNRESET` in an e2e
+job's `npm install` removed a merge queue entry after 35 minutes, #635),
+npm's downloads cached on the lock, the Playwright version checked against
+`playwright-minimum` (1.58), and the browsers in one directory cached on the
+Playwright version. Quire holds no install logic of its own (CLAUDE.md,
+"Pipeline and tooling improvements belong in bats or pwa").
+
 ## Check locally before every push
 
 A session sets up the compiler in its own environment and runs `bats
