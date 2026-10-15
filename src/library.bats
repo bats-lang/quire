@@ -2760,6 +2760,9 @@ fun _adopt_books {stored,parsed:nat | parsed <= LIB_MAX} .<stored>.
     | ~LossyBook(_, _, image) => let
         val @(more, total) = _adopt_image(image, books, parsed)
       in _adopt_books(rest, more, total, unusable, lossy + 1) end
+    | ~EmptiedBook(_, _, image) => let
+        val @(more, total) = _adopt_image(image, books, parsed)
+      in _adopt_books(rest, more, total, unusable, lossy + 1) end
     | ~UnusableBook(_, _, why) => let
         val () = _aside_counted(why)
       in _adopt_books(rest, books, parsed, unusable + 1, lossy) end)
@@ -2907,6 +2910,9 @@ fun _aside_books {count:nat} .<count>. (stored: stored_books(count), done: int):
          val () = book_image_free(image)
        in _aside_books(rest, done) end
      | ~LossyBook(_, _, image) => let
+         val () = book_image_free(image)
+       in _aside_books(rest, done) end
+     | ~EmptiedBook(_, _, image) => let
          val () = book_image_free(image)
        in _aside_books(rest, done) end
      | ~UnusableBook(id_high, id_low, why) => let

@@ -797,6 +797,53 @@ test('a book whose record is broken beyond recovery is read from its previous ve
   await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
 });
 
+test('a record cut right after its header kept nothing, so the book is read from its previous version, said once, and its save keeps the bytes (#614)', async ({ page }) => {
+  await startWithLegacy(page, 6);
+  await expect(cards(page)).toHaveCount(2);
+  // a save makes the previous version: the record as it was, with the place chapter 3, page 7
+  const record = (await store(page))[bookKey(books[0])];
+  await bookMenu(page, 'Alpha Tales');
+  await menuItem(page, 'Hide').click();
+  await expect.poll(async () => (await store(page))[`library/previous/${bookId}`] !== undefined).toBe(true);
+  await openShelf(page, 'Hidden');
+  await bookMenu(page, 'Alpha Tales');
+  await menuItem(page, 'Unhide').click();
+  await expect.poll(async () => same((await store(page))[bookKey(books[0])], record)).toBe(false);
+  // its record is then cut right after the header: no chunk, so none of the groups it needs
+  const cut = (await store(page))[bookKey(books[0])].slice(0, 7);
+  await put(page, bookKey(books[0]), cut);
+  await reloadSettled(page);
+  await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
+  await expect(cards(page)).toHaveCount(2);
+  await expect(alert(page)).toContainText('Some details of your library were damaged');
+  await librarySettings(page);
+  await expect(setAside(page)).toBeHidden();
+  // a save writes the record whole with the previous version's place, and keeps the cut bytes
+  await reload(page);
+  await bookMenu(page, 'Alpha Tales');
+  await menuItem(page, 'Hide').click();
+  await expect.poll(async () => damagedKeys(await store(page), bookId).length).toBe(1);
+  const saved = await store(page);
+  expect(same(saved[damagedKeys(saved, bookId)[0]], cut)).toBe(true);
+  const group = (from, tag) => chunks(from).find(one => one.tag === tag).data;
+  expect(same(group(saved[bookKey(books[0])], 'PLCE'), group(record, 'PLCE'))).toBe(true);
+});
+
+test('a record cut after some of its groups keeps its own groups, though a previous version exists (#614)', async ({ page }) => {
+  await startWithLegacy(page, 6);
+  await expect(cards(page)).toHaveCount(2);
+  const stored = await store(page);
+  const record = stored[bookKey(books[0])];
+  // a version before it that is another book's record (it would show as Gamma Days)
+  await put(page, `library/previous/${bookId}`, stored[bookKey(books[2])]);
+  await put(page, bookKey(books[0]), record.slice(0, startOf(record, 'TITL')));
+  await reloadSettled(page);
+  await expect(card(page, 'Untitled')).toContainText('Ann Writer');
+  await expect(card(page, 'Gamma Days')).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(2);
+  await expect(alert(page)).toContainText('Some details of your library were damaged');
+});
+
 test('emptying the Trash deletes the version before and the time written with the record (#510)', async ({ page }) => {
   await startWithLegacy(page, 6, [books[0], { ...books[1], shelf: 3 }, books[2]]);
   await expect(cards(page)).toHaveCount(2);

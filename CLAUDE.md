@@ -1761,7 +1761,8 @@ order is the writer's, not the format's.
   seconds apart never rotate and a bug that damages a record at each save
   leaves the version from before the first. A book whose record is broken
   beyond recovery (`UnusableDamaged`: cut inside its header, or empty or
-  over `RECORD_MAX`) and that has a
+  over `RECORD_MAX`; or a cut in its chunks that kept none of AUTH, BOOK
+  and TITL, #614) and that has a
   previous version is read from it (`_recover`, a `LossyBook`); the save
   of a book whose stored record is not whole writes the library's image
   as a new record and keeps the bytes under `library/damaged` (it used to
@@ -1865,12 +1866,18 @@ parse leaves, so none claimed.
   count a collections record that lost a group as one that could not be read
   and said "Your collections could not be read, so they are left as they are
   and not shown" while showing them; it answers `index_adopted` now.
-* **A trade-off, kept**: a cut that read no chunk (the bytes end right after
-  the header, the first chunk's length is garbled) is read with every
-  substitute where stage 2d would have read the version before it, which
-  holds the reader's state. The two are not merged; a follow-up could prefer
-  the previous version when a cut kept no chunk, or take its groups for the
-  lost ones.
+* **A cut that kept none of the groups the record needs reads the version
+  before it, when there is one** (stage 2d, as before #614). `_read_book`
+  looks at the loss it got back (`_cut_kept_nothing`): a cut with AUTH,
+  BOOK and TITL (the groups of `m_req`) all lost kept nothing the book is
+  known by, and the book is an `EmptiedBook`, which `_recover` replaces by
+  the previous version (a `LossyBook`) or, with none, keeps as the
+  `LossyBook` the cut record is. A cut that kept at least one of the three
+  keeps its own groups, newer than the previous version, and says the loss.
+  The test is on the tags of the loss list, not a proof: a cut record whose
+  kept group's tag was also there twice would count as having kept
+  nothing, and the version before it is then read for it. The collections'
+  record has no previous version, so it is always read as the cut record.
 * Tested: `tests/codec` (a record cut at every length: the chunks before the
   cut are kept and read as the record of those chunks and the end chunk, a
   length past the end, over the limit, bytes after the end chunk),
