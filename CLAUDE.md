@@ -1863,13 +1863,16 @@ the solver's elimination overflow, its context contradictory, and the
 compiler accepted a false statement (`ROTR(16, h, l, l, h+1)`). It is not
 only nested divisions. `tests/static/solver/` (standalone fixtures, run
 by `tests/static/solver.py` under any patsopt) holds the cases found with
-the `ATS2-Postiats-int-0.4.2` solver CI builds: a context of `h < 65536`,
+the `ATS2-Postiats-int-0.4.2` solver (CI built it until it moved to
+the infinite-precision build, whose own risk is a proof it cannot answer in
+time, not a false one it accepts; the caps of `setup-bats` end that): a context of `h < 65536`,
 `q == h / 256`, `r == q + 256*h` proves `1 == 2`; so does a pair of
 matched copies of arith's `ROTR1` constructor (`rotr1_functional`,
 `shr1_functional` and `add32_functional` proved nothing); a product
 passing 2^32 does (`b < 2^20`, `v == 4096*b`). The infinite-precision
-build rejects all of them. The rules for a proof's arithmetic, until the
-solver is changed:
+build rejects all of them. The rules for a proof's arithmetic, which keep
+true under either (a proof that only the infinite-precision solver can answer
+in time is split, as `date_text` and `add32_functional` were):
 
 * **Keep the magnitudes down, and name the digits.** A statement is made
   of steps that divide (or take `mod`) by a constant of at most 16 at a
@@ -1884,22 +1887,84 @@ solver is changed:
 * **A false variant of every lemma.** Each lemma (`prfun`, `prfn`, a
   `primplement` of a `#pub prfun`) has its false variant rejected:
   `tests/static/mutation_check.py` makes them (a numeric index plus one, a
-  guard's `==` shifted by one, a bound `a < b` made `a + 1 < b`, a byte
-  string consed with a byte, and `[1 == 2] void` in place of a guard) with
-  the lemma's own body, and the compiler must reject each; the
-  `mutation` member of `tests/static/run.sh` runs it on bytes, crc and
-  fields (`--root DIR --run WORK file.bats` for another package, `--ats-home
-  DIR` for another patsopt). An accepted mutant is a vacuous proof (or a
-  mutation that is true: `tests/static/mutation_known.txt`), and is
-  filed as its own p2 issue with the minimal case. A lemma no operator
-  reaches (a `FALSEP`, `EQFD` or tuple result) gets its false variant as a
+  guard's `==` shifted by one, a bound tightened by one, a byte string
+  consed with a byte, an argument of another sort replaced by a fresh
+  variable, each part of a tuple result, and `[1 == 2] void` in place of a
+  guard) with the lemma's own body, and the compiler must reject each
+  (`--root DIR --run WORK file.bats` for another package, `--ats-home DIR`
+  for another patsopt, `--inplace` for a recursive `#pub` lemma, whose
+  declaration and primplement are changed where they stand and whose
+  dependents are checked again: minutes a mutant). An accepted mutant is a
+  vacuous proof (or a mutation that is true: `tests/static/mutation_known.txt`),
+  and is filed as its own p2 issue with the minimal case. A lemma no
+  operator reaches (a `FALSEP`, `EQFD` result) gets its false variant as a
   fixture in `tests/static/solver/reject/`, with its true statement in
-  `accept/`.
+  `accept/`. The checker is itself tested (`tests/static/mutation_test.py`,
+  a step of the `checkers` member: a stand-in compiler that accepts the
+  mutants of a vacuous lemma and rejects those of an honest one, the
+  operators, the in-place edit, the choice by a diff). The solver
+  fixtures run as the `solver` member (122 files, 38 s under the
+  infinite-precision build, all as they should be; the -int build accepts 5
+  of the false ones).
+
 * **No `[a | prop]` as the result of a `prfn`.** The issue found that such
   a return silently dropped the proposition; the guards `[p; q] void`
   and `[p && q] void` of crc and arith were all checked by mutants and are
   not dropped, so the rule is kept for the existential with a variable
   only: return a dataprop (an `EQI`, a `LEN`), or state it with a `prfun`.
+
+### The mutation check in CI (#594)
+
+Measured under the GMP solver on a shared 4-core machine, a whole module is
+8 to 30 minutes, `src/crc.bats` (126 mutants) 52, and the nine proof
+modules (`tests/static/mutation_modules.txt`: bytes, chunk, crc, fields,
+seq, schema, record, bookrec, indexrec; about 460 mutants and 215 lemmas) a
+few hours in all. That cannot be in every pull request's required `check`,
+which is about 15 minutes, so the check is incremental, as the mutation
+tools do it:
+
+* **Per change** (`check.yml`, the groups `mutation-crc`, `mutation-codec-bytes`,
+  `mutation-codec-schema`, `mutation-records`, side by side with the other
+  static groups, so `check` still passes only when every group does):
+  `scripts/ci-groups.py affected <group> <base>` says whether the change
+  since the pull request's base (`HEAD^1` of the merge checkout) leaves
+  anything to run; if not the job ends after its first step (a pull request
+  that touches no proof costs 15 seconds, no compiler, no cache). If so,
+  `QUIRE_MUTATION_BASE` makes `run.sh` pass `--diff` to the checker, which
+  mutates only the lemmas the diff touches (`select_by_diff`), those that
+  mention a name a changed line declares (a lemma whose statement changed,
+  a dataprop), and every lemma of a module whose diff is outside all its
+  lemmas; a comment or blank line selects nothing. A change to the checker
+  or to the ATS2 pin (the solver) selects everything. A push to main and a
+  dispatch run none of it.
+* **Nightly, in full** (`.github/workflows/mutation.yml`, 02:41 UTC and on
+  dispatch, the same four groups side by side on main, built from nothing,
+  an issue opened when one fails): it has what a diff cannot see, a locked
+  package whose lemmas a proof calls (a relock), a compiler move, a bug of
+  the selection. A vacuous lemma that gets in through a relock is found
+  within a day, on main, and is not a red main (the proofs still check; it
+  is the same class as a regression found by the weekly provider checks).
+* **Why not every pull request in full, and why not only nightly.**
+  Stryker's incremental mode stores the previous run and reruns only the
+  mutants whose code or tests changed, and says itself that only mutated
+  and test files are tracked, not dependencies; PIT's incremental analysis
+  keeps a history, reruns what changed, and says that the assumption that a
+  dependency change rarely changes a mutation's status is "currently
+  unproven"; cargo-mutants' `--in-diff` mutates only what overlaps the diff
+  of the branch against the pull request's base, and says it is "not a
+  substitute for a full test run" (an edit in one region can leave another
+  poorly tested). All three are the shape chosen: the diff on the pull
+  request for feedback, a full run on a schedule for the rest. A schedule
+  alone would let a vacuous lemma merge and be found the next morning; a
+  full run per pull request would put 52 minutes beside a 15 minute check
+  for every change. The dependency set here is small and textual (a
+  lemma calls another by name), which is why the name rule can stand in
+  for PIT's dependency analysis. (Sources: stryker-mutator.io/docs/stryker-js/incremental,
+  pitest.org/quickstart/incremental_analysis, mutants.rs/in-diff.html.
+  mutmut and Dextool were not read.)
+* The job has `timeout-minutes` 120 (the nightly's 150), with the patsopt
+  caps (`BATS_PATSOPT_TIMEOUT_S`, `BATS_PATSOPT_MEM_MB`, from `setup-bats`)
+  under it, so a runaway proof fails with its module named.
 
 **The only way to change a record** is `libstore_save_book` and
 `libstore_save_index` (`idb_update`, bridge: one transaction in which a
