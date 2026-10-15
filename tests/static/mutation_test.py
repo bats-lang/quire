@@ -188,11 +188,20 @@ sys.exit(1 if failed else 0)
 
     def test_a_vacuous_lemma_explained_is_known(self):
         with tempfile.NamedTemporaryFile('w', suffix='.txt') as known:
-            known.write('src/m.bats le_trans the mutants are equivalent\n')
+            known.write('src/m.bats | le_trans | * | the mutants are equivalent\n')
             known.flush()
             code, out, _ = self.run_checker(vacuous=['le_trans'], extra=['--known', known.name])
         self.assertEqual(code, 0, out)
         self.assertIn('KNOWN', out)
+
+    def test_known_covers_only_its_operator(self):
+        with tempfile.NamedTemporaryFile('w', suffix='.txt') as known:
+            known.write('src/m.bats | le_trans | arg2+1 | explained\n')
+            known.flush()
+            code, out, _ = self.run_checker(vacuous=['le_trans'], extra=['--known', known.name])
+        self.assertEqual(code, 1, out)
+        self.assertIn('KNOWN', out)
+        self.assertIn('ACCEPTED', out)
 
     def test_a_control_that_fails_is_reported_not_skipped_quietly(self):
         code, out, _ = self.run_checker(broken=['le_twice'])

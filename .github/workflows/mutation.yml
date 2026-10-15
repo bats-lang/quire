@@ -58,6 +58,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh issue create --repo "$GITHUB_REPOSITORY" \
+          gh issue create --repo "$GITHUB_REPOSITORY" --label p2 \
             --title "Nightly mutation check failed ($(date -u +%F))" \
             --body "A lemma's false variant was accepted, or the check broke: $RUN (quire#594). Read the ACCEPTED lines."

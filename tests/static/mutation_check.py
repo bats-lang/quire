@@ -53,8 +53,9 @@ usage:
   --report FILE write the results (one line a mutant) to FILE
   --ats-home DIR  run the compiler with DIR as its ATS home (~/.bats/ats2): another patsopt
                 (the infinite-precision solver) with the same checks
-  --known FILE  lemmas whose accepted mutants are explained (`file lemma reason`): an equivalent
-                mutant, e.g. a lemma proved from FALSEP(), for which every statement is true
+  --known FILE  accepted mutants that are explained (`file | lemma | operator | reason`, operator
+                `*` for all of the lemma's): an equivalent mutant, e.g. a lemma proved from FALSEP(),
+                for which every statement is true. Any other accepted mutant fails the check
 """
 import argparse
 import os
@@ -587,7 +588,7 @@ class Report:
         self.lines.append(line)
 
     def accepted_mutant(self, file, m):
-        reason = self.known.get((file, m.lemma.name))
+        reason = self.known.get((file, m.lemma.name, m.operator)) or self.known.get((file, m.lemma.name, '*'))
         m.status = 'KNOWN' if reason else 'ACCEPTED'
         self.accepted += 0 if reason else 1
         self.add(f'{m.status:9} {file} {m.lemma.name} {m.operator}: {m.statement}' + (f'  ({reason})' if reason else ''))
@@ -662,12 +663,13 @@ def check_file(file, original_lines, lemmas, mutants, work, check_command, do_in
 
 
 def read_known(path):
+    """`file | lemma | operator | reason` lines (operator `*`: every mutant of the lemma)."""
     known = {}
     if path:
         for entry in Path(path).read_text().splitlines():
             if entry.strip() and not entry.startswith('#'):
-                file, lemma, reason = entry.split(None, 2)
-                known[(file, lemma)] = reason
+                file, lemma, operator, reason = [part.strip() for part in entry.split('|', 3)]
+                known[(file, lemma, operator)] = reason
     return known
 
 
