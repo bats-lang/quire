@@ -1,0 +1,9 @@
+src/bytes.bats
+src/chunk.bats
+src/crc.bats
+src/fields.bats
+src/seq.bats
+src/schema.bats
+src/record.bats
+src/bookrec.bats
+src/indexrec.bats
