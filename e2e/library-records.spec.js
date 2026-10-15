@@ -63,6 +63,10 @@ for (let version = 1; version <= 6; version++) {
     await reload(page);
     await expect(cards(page)).toHaveCount(2);
     expect(await titles(page)).toEqual(expect.arrayContaining(['Alpha Tales', 'Gamma Days']));
+    // nothing is said, and nothing is offered to be set aside (#515)
+    await expect(alert(page)).toBeHidden();
+    await librarySettings(page);
+    await expect(setAside(page)).toBeHidden();
   });
 }
 
