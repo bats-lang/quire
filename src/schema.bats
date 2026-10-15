@@ -21,10 +21,13 @@ staload "fields.sats"
   | ex_nil of ()
   | ex_cons of (bytes, bytes, extras)       (* tag, data *)
 
-(* the tags of the chunks that were lost *)
+(* what was lost: the tags of the chunks that were lost, and a cut of the record's framing (its bytes ended before the
+   end chunk, a length ran past its end, bytes followed the end chunk): the cut is its own constructor, with why, and
+   not a tag *)
 #pub datasort lost =
   | lt_nil of ()
   | lt_cons of (bytes, lost)
+  | lt_cut of (seqcause, lost)
 
 (* the tags of the groups the record did not hold: groups added to the format after it was written (m_added),
    whose values are then their defaults. An absent group is not a lost one: nothing of it was ever there *)
@@ -323,6 +326,7 @@ primplement notag_ext {tag}{chunks}{chunk_count} (count, absent) = _notag_ext(co
 #pub dataprop LOSTCAT(lost, lost, lost, int) =
   | {second:lost} LOSTCAT_nil(lt_nil(), second, second, 0)
   | {tag:bytes}{first,second,both:lost}{first_n:nat} LOSTCAT_cons(lt_cons(tag, first), second, lt_cons(tag, both), first_n+1) of LOSTCAT(first, second, both, first_n)
+  | {cause:seqcause}{first,second,both:lost}{first_n:nat} LOSTCAT_cut(lt_cut(cause, first), second, lt_cut(cause, both), first_n+1) of LOSTCAT(first, second, both, first_n)
 
 #pub dataprop EQLOST(lost, lost) =
   | {tags:lost} EQLOST_refl(tags, tags)
@@ -335,6 +339,11 @@ prfun _lostcat_functional {first,second,left_both,right_both:lost}{left_n,right_
   | LOSTCAT_cons(left_rest) =>
     (case+ right of
      | LOSTCAT_cons(right_rest) => let
+         prval EQLOST_refl() = _lostcat_functional(left_rest, right_rest)
+       in EQLOST_refl() end)
+  | LOSTCAT_cut(left_rest) =>
+    (case+ right of
+     | LOSTCAT_cut(right_rest) => let
          prval EQLOST_refl() = _lostcat_functional(left_rest, right_rest)
        in EQLOST_refl() end)
 
@@ -922,6 +931,7 @@ in free_extras(extras) end
 #pub datavtype lostv(lost, int) =
   | LTV_nil(lt_nil(), 0)
   | {tag:bytes}{lost_tags:lost}{lost_count:nat} LTV_cons(lt_cons(tag, lost_tags), lost_count+1) of (blist(tag, 4), lostv(lost_tags, lost_count))
+  | {cause:seqcause}{lost_tags:lost}{lost_count:nat} LTV_cut(lt_cut(cause, lost_tags), lost_count+1) of (causev(cause), lostv(lost_tags, lost_count))
 
 #pub fun lostv_free {lost_tags:lost}{lost_count:nat} (lost: lostv(lost_tags, lost_count)): void
 
@@ -930,6 +940,7 @@ implement lostv_free {lost_tags}{lost_count} (lost) = let
     case+ lost of
     | ~LTV_nil() => ()
     | ~LTV_cons(tag, more) => let val () = blist_free(tag) in free_lost(more) end
+    | ~LTV_cut(_, more) => free_lost(more)
 in free_lost(lost) end
 
 (* The tags of the groups the record did not hold, at run time *)
@@ -1016,6 +1027,9 @@ fun _lostv_cat {first,second:lost}{first_n,second_n:nat} .<first_n>. (first: los
   | ~LTV_cons(tag, more) => let
       val (rest | joined) = _lostv_cat(more, second)
     in (LOSTCAT_cons(rest) | LTV_cons(tag, joined)) end
+  | ~LTV_cut(why, more) => let
+      val (rest | joined) = _lostv_cat(more, second)
+    in (LOSTCAT_cut(rest) | LTV_cut(why, joined)) end
 
 #pub fun lostv_cat {first,second:lost}{first_n,second_n:nat} (first: lostv(first, first_n), second: lostv(second, second_n))
   : [both:lost][both_n:nat] (LOSTCAT(first, second, both, first_n) | lostv(both, both_n))

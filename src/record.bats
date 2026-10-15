@@ -70,6 +70,8 @@ primplement pcn_functional {chunks}{first_count,second_count} (first_count_proof
     JOIN_ok(format_version, least_version, lt_nil(), sd_ok(vals, kept_extras, missing), rr_ok(rx_mk(format_version, least_version, vals, kept_extras, missing)))
   | {format_version,least_version:int}{vals:gvals}{kept_extras:extras}{missing:absent}{tag:bytes}{more:lost}
     JOIN_ok_dropped(format_version, least_version, lt_cons(tag, more), sd_ok(vals, kept_extras, missing), rr_loss(rx_mk(format_version, least_version, vals, kept_extras, missing), lt_cons(tag, more)))
+  | {format_version,least_version:int}{vals:gvals}{kept_extras:extras}{missing:absent}{cause:seqcause}{more:lost}
+    JOIN_ok_cut(format_version, least_version, lt_cut(cause, more), sd_ok(vals, kept_extras, missing), rr_loss(rx_mk(format_version, least_version, vals, kept_extras, missing), lt_cut(cause, more)))
   | {format_version,least_version:int}{vals:gvals}{kept_extras:extras}{missing:absent}{dropped,lost_groups,both:lost}{dropped_n:nat}
     JOIN_loss(format_version, least_version, dropped, sd_loss(vals, kept_extras, lost_groups, missing), rr_loss(rx_mk(format_version, least_version, vals, kept_extras, missing), both))
     of LOSTCAT(dropped, lost_groups, both, dropped_n)
@@ -87,6 +89,7 @@ primplement join_functional {format_version,least_version}{dropped}{result}{firs
   case+ first_join of
   | JOIN_ok() => (case+ second_join of JOIN_ok() => EQRR_refl())
   | JOIN_ok_dropped() => (case+ second_join of JOIN_ok_dropped() => EQRR_refl())
+  | JOIN_ok_cut() => (case+ second_join of JOIN_ok_cut() => EQRR_refl())
   | JOIN_loss(first_cat) =>
     (case+ second_join of
      | JOIN_loss(second_cat) => (case+ lostcat_functional(first_cat, second_cat) of EQLOST_refl() => EQRR_refl()))
@@ -96,20 +99,31 @@ primplement join_functional {format_version,least_version}{dropped}{result}{firs
 (* FIN(spec_list, format_version, least_version, seq_outcome, outcome): the chunks read come to outcome: they are put in
    the order of the groups (each tag once), and those are read *)
 #pub dataprop FIN(specs, int, int, seqres, recres) =
-  | {spec_list:specs}{format_version,least_version:int}{cause:seqcause} FIN_seq(spec_list, format_version, least_version, sq_fail(cause), rr_damaged())
   | {spec_list:specs}{spec_n:nat}{format_version,least_version:int}{chunks,canonical:pchunks}{chunk_count,canonical_count:nat}{dropped:lost}{result:sdres}{outcome:recres}
     FIN_body(spec_list, format_version, least_version, sq_ok(chunks), outcome)
     of (SPECN(spec_list, spec_n), PCN(chunk_count, chunks), CANON(spec_list, spec_n, chunks, canonical, dropped), PCN(canonical_count, canonical),
         SDEC(spec_list, spec_list, spec_n, canonical, result), JOIN(format_version, least_version, dropped, result, outcome))
+  | {spec_list:specs}{spec_n:nat}{format_version,least_version:int}{chunks,canonical:pchunks}{chunk_count,canonical_count:nat}{dropped:lost}{result:sdres}{outcome:recres}{cause:seqcause}
+    FIN_cut(spec_list, format_version, least_version, sq_cut(chunks, cause), outcome)
+    of (SPECN(spec_list, spec_n), PCN(chunk_count, chunks), CANON(spec_list, spec_n, chunks, canonical, dropped), PCN(canonical_count, canonical),
+        SDEC(spec_list, spec_list, spec_n, canonical, result), JOIN(format_version, least_version, lt_cut(cause, dropped), result, outcome))
 
 #pub prfun fin_functional {spec_list:specs}{format_version,least_version:int}{seq_outcome:seqres}{first_outcome,second_outcome:recres} (FIN(spec_list, format_version, least_version, seq_outcome, first_outcome), FIN(spec_list, format_version, least_version, seq_outcome, second_outcome)): EQRR(first_outcome, second_outcome)
 
 primplement fin_functional {spec_list}{format_version,least_version}{seq_outcome}{first_outcome,second_outcome} (first_fin, second_fin) =
   case+ first_fin of
-  | FIN_seq() => (case+ second_fin of FIN_seq() => EQRR_refl())
   | FIN_body(first_specn, first_count, first_canon, first_canonical_count, first_sdec, first_join) =>
     (case+ second_fin of
      | FIN_body(second_specn, second_count, second_canon, second_canonical_count, second_sdec, second_join) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
+         prval EQI_refl() = pcn_functional(first_count, second_count)
+         prval EQCAN_refl() = canon_functional(first_count, first_canon, second_canon)
+         prval EQI_refl() = pcn_functional(first_canonical_count, second_canonical_count)
+         prval EQSD_refl() = sdec_functional(first_canonical_count, first_sdec, second_sdec)
+       in join_functional(first_join, second_join) end)
+  | FIN_cut(first_specn, first_count, first_canon, first_canonical_count, first_sdec, first_join) =>
+    (case+ second_fin of
+     | FIN_cut(second_specn, second_count, second_canon, second_canonical_count, second_sdec, second_join) => let
          prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
          prval EQCAN_refl() = canon_functional(first_count, first_canon, second_canon)
@@ -333,7 +347,30 @@ implement record_read {spec_list}{kind}{spec_count}{octets}{byte_count} (specs, 
                  val (seq_proof | seq_result) = seq_read(body)
                in
                  case+ seq_result of
-                 | ~SR_fail() => (DECODES_body(magic_take, header_take, seq_proof, FIN_seq()) | RR_damaged())
+                 | ~SR_cut(count | chunk_list, why) => let
+                     val (specn | ()) = specsv_specn(specs)
+                     val (canon, canonical_count | canonical, dropped_tags) = canon_read(count, specs, chunk_list)
+                     val (schema_decode | schema_outcome) = schema_read(canonical_count, specs, canonical)
+                     (* the cut is among what was lost, ahead of the tags dropped *)
+                     val dropped = LTV_cut(why, dropped_tags)
+                   in
+                     case+ schema_outcome of
+                     | ~SDR_ok(vals, extras, missing) =>
+                       (DECODES_body(magic_take, header_take, seq_proof, FIN_cut(specn, count, canon, canonical_count, schema_decode, JOIN_ok_cut()))
+                        | RR_loss(format_version, least_version, vals, extras, dropped, missing))
+                     | ~SDR_loss(vals, extras, lost, missing) => let
+                         val (joined | total) = lostv_cat(dropped, lost)
+                       in
+                         (DECODES_body(magic_take, header_take, seq_proof, FIN_cut(specn, count, canon, canonical_count, schema_decode, JOIN_loss(joined)))
+                          | RR_loss(format_version, least_version, vals, extras, total, missing))
+                       end
+                     | ~SDR_fail(CausDamaged()) => let
+                         val () = lostv_free(dropped)
+                       in (DECODES_body(magic_take, header_take, seq_proof, FIN_cut(specn, count, canon, canonical_count, schema_decode, JOIN_damaged())) | RR_damaged()) end
+                     | ~SDR_fail(CausNewer()) => let
+                         val () = lostv_free(dropped)
+                       in (DECODES_body(magic_take, header_take, seq_proof, FIN_cut(specn, count, canon, canonical_count, schema_decode, JOIN_newer())) | RR_newer()) end
+                   end
                  | ~SR_ok(count | chunk_list) => let
                      val (specn | ()) = specsv_specn(specs)
                      val (canon, canonical_count | canonical, dropped) = canon_read(count, specs, chunk_list)
@@ -347,7 +384,10 @@ implement record_read {spec_list}{kind}{spec_count}{octets}{byte_count} (specs, 
                            | RR_ok(format_version, least_version, vals, extras, missing))
                         | ~LTV_cons(tag, more) =>
                           (DECODES_body(magic_take, header_take, seq_proof, FIN_body(specn, count, canon, canonical_count, schema_decode, JOIN_ok_dropped()))
-                           | RR_loss(format_version, least_version, vals, extras, LTV_cons(tag, more), missing)))
+                           | RR_loss(format_version, least_version, vals, extras, LTV_cons(tag, more), missing))
+                        | ~LTV_cut(why, more) =>
+                          (DECODES_body(magic_take, header_take, seq_proof, FIN_body(specn, count, canon, canonical_count, schema_decode, JOIN_ok_cut()))
+                           | RR_loss(format_version, least_version, vals, extras, LTV_cut(why, more), missing)))
                      | ~SDR_loss(vals, extras, lost, missing) => let
                          val (joined | total) = lostv_cat(dropped, lost)
                        in
