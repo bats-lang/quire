@@ -265,14 +265,13 @@ runs `bats check` and `gen-pwa test` with no wrapper of its own.
 
 A shell that reads no profile (an agent's, a CI-like step) gets the same
 from a machine-specific env file that is not in the repo (say
-`~/quire.env`, holding those variables), through `scripts/with-env
-<env-file> <command> [args...]`: it sources the file (every variable
-exported) and `exec`s the command exactly as given, so its arguments and
-exit status are the command's own: `scripts/with-env ~/quire.env bats
-check`, `scripts/with-env ~/quire.env ./dist/debug/gen-pwa test --
-<spec>`. `tests/with-env/run.sh` tests it (a step of check.yml, like
-`tests/play-release/run.sh`; `tests/groups.json` holds only the e2e and
-static groups).
+`~/quire.env`, holding those variables), through bats's `scripts/with-env
+<env-file> <command> [args...]` (bats-lang/bats#277, a script of the bats
+checkout, tested there): it sources the file (every variable exported) and
+`exec`s the command exactly as given, so its arguments and exit status are
+the command's own: `<bats checkout>/scripts/with-env ~/quire.env bats
+check`, `<bats checkout>/scripts/with-env ~/quire.env ./dist/debug/gen-pwa
+test -- <spec>`.
 
 `BATS_CACHE_DIR=<dir>` keeps patsopt's C in that directory, keyed by
 what patsopt reads (the toolchain, its arguments and every file a
