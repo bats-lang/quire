@@ -488,7 +488,17 @@ export async function toLibrary(page) {
     replacing the stale one, and stops it: a trial hover on the document is
     that action, with no effect on the page. */
 export async function releaseClick(page, timeout = 2000) {
-  await page.locator('html').hover({ trial: true, timeout });
+  // a trial hover that times out in a task of seconds can leave its own
+  // interceptor behind in the same way, so it is made again until one
+  // completes (the one that completes puts its own in place and stops it)
+  for (let tries = 1; ; tries++) {
+    try {
+      await page.locator('html').hover({ trial: true, timeout });
+      return;
+    } catch (failure) {
+      if (tries >= 5) throw failure;
+    }
+  }
 }
 
 /** Opens the reader's bars when they are hidden */
