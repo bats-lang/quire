@@ -1670,7 +1670,10 @@ save; a capital one (critical), or a least version over `READER`, makes
 the record `Newer`, and a first four bytes that are not `QREC` make it
 `NotQuire`. What a record is decoded to is one of those five outcomes
 (`recres`: `rr_ok`, `rr_loss`, `rr_notquire`, `rr_newer`, `rr_damaged`);
-a decode never fails to say which.
+a decode never fails to say which. `rr_damaged` is left for a record with
+no chunk to keep: one cut inside its 7-byte header (its versions are not
+there to read) and one of another kind than the reader's; a cut in the
+chunks is a loss (#614, below).
 
 **Chunks are looked up by tag, in any order, a tag twice is a loss that
 is used** (#510). Research (written on the issue): protobuf "parsers must
@@ -1757,7 +1760,8 @@ order is the writer's, not the format's.
   copy with a bad one), on the age of the file replaced, so saves a few
   seconds apart never rotate and a bug that damages a record at each save
   leaves the version from before the first. A book whose record is broken
-  beyond recovery (`UnusableDamaged`, the framing) and that has a
+  beyond recovery (`UnusableDamaged`: cut inside its header, or empty or
+  over `RECORD_MAX`) and that has a
   previous version is read from it (`_recover`, a `LossyBook`); the save
   of a book whose stored record is not whole writes the library's image
   as a new record and keeps the bytes under `library/damaged` (it used to
@@ -1765,8 +1769,9 @@ order is the writer's, not the format's.
   deletes the record, its previous version and its stamp together. The
   stamp is a key of its own, not a group: a group would be a field of
   every image and record, and it is the library's bookkeeping, not the
-  book's. Not done: salvaging the chunks before a cut in a record's
-  framing (#614). A record whose reader state a damage lost needs no
+  book's. A record cut in its framing is no longer one of these (#614,
+  below); `UnusableDamaged` is left for what has no chunk to keep. A
+  record whose reader state a damage lost needs no
   notice action: a lost group reads as a substitute with the stamp 0, so
   the next sync's merge takes the store's (or the Auto Backup file's)
   value, and the save that follows writes every group and keeps the old
@@ -1792,13 +1797,85 @@ order is the writer's, not the format's.
   in the notice (#507: Copy details with the record's id and what was
   lost); (3) the old bytes kept under `library/damaged/<id>/<crc>` when a
   save repairs it; (4) `Unusable` only for what cannot be read as a
-  record at all (`NotQuire`) or is a newer Quire's (`Newer`, not
-  damaged). A bug that leaves a record unusable is fixed by widening the
+  record at all (`NotQuire`), has no chunk and no header to read (cut inside
+  its header) or is a newer Quire's (`Newer`, not damaged). A bug that leaves a record unusable is fixed by widening the
   recovery, not by setting the record aside.
 * Tests: `tests/codec` (the chunks in the opposite order, a group twice
   either way), `e2e/library-records.spec.js` (every rotation, the
   reverse and seeded shuffles open as the same book and are not written
   by opening; a group twice; an unknown chunk twice).
+
+**A record cut in its framing is a loss, and keeps the chunks before the
+cut** (#614, the last place in #510 where a record was set aside instead of
+read). A record whose bytes end before its end chunk, whose chunk has a
+length past the record's end or over the limit, that has bytes after the end
+chunk, or whose end chunk holds data, is not `rr_damaged`: each chunk is
+framed and CRC-checked by itself (PNG's design), so the chunks read whole
+before the cut are intact and are kept. The groups they hold are read, those
+after the cut are lost with their substitutes (stage 2b), and the record is
+`rr_loss`, said once as any loss is, its save writing it whole and keeping the
+old bytes. Research (on #614): SQLite's `.recover` salvages "as many database
+pages as possible" where `.dump` stops at the first damage, and keeps what
+it cannot place; a PNG decoder can "tell the application: this is a broken
+PNG, but here is the data that I've been able to retrieve so far" (a libpng
+maintainer's words; WebKit's reads PNG progressively and keeps the rows
+decoded before a failure); protobuf: nothing found on what a truncated
+parse leaves, so none claimed.
+
+* **The sequence carries what was read** (`src/seq.bats`): `seqres` is
+  `sq_ok(chunks)` or `sq_cut(chunks, cause)`, the cause a `seqcause`
+  (`sc_trunc`, `sc_big`, `sc_trailing`, `sc_end_data`) and the chunks those
+  read whole before the cut, in order (a bad one as `pbad`). The failing
+  constructors of `SQC` say it in their types (`SQC_short` is
+  `sq_cut(pnil(), sc_trunc())`, `SQC_good_fail` is `sq_cut(pgood(tag, data,
+  chunks), cause)` of the rest's cut), so a cut cannot claim a chunk it did
+  not read (`tests/static/reject/codec-cut-claims-unread-chunk`) nor bytes
+  after the end chunk be a record read to its end
+  (`codec-cut-trailing-is-complete`). At run time `seq_read` answers
+  `SR_cut(.. | chunk_list, causev)` with the chunk list kept; a match that
+  leaves the cut out does not type-check (`codec-cut-read-unmatched`).
+* **The cut is named in the loss by a constructor of its own**, not a tag:
+  `lost` is `lt_nil | lt_cons(tag, lost) | lt_cut(seqcause, lost)`, at run
+  time `LTV_cut(causev, ..)`; the cut is put first, ahead of the tags
+  dropped and the groups lost (`LOSTCAT_cut`, `codec-cut-lost-another-cause`;
+  a match on `lostv` must name it, `codec-cut-lost-unmatched`).
+* **What is proved**: `FIN_cut` is `FIN_body` for a cut sequence, with the
+  cut among the dropped (`JOIN(.., lt_cut(cause, dropped), ..)`), so a cut
+  record is read from the chunks before it by the same `CANON` and `SDEC`; its
+  outcome is `JOIN_ok_cut` (every group read: `rr_loss` naming the cut,
+  `codec-cut-not-said`, `codec-cut-read-as-damaged`), `JOIN_loss` (some group
+  lost too, `codec-cut-dropped-from-join`), or `JOIN_newer` when a chunk that
+  must be understood is among those read (a cut does not hide a newer
+  Quire's record) or `JOIN_damaged`. `seq_functional`, `lostcat_functional`,
+  `join_functional` and `fin_functional` have the new cases; `decodes_functional`
+  and `record_read`'s totality follow; `encodes_decodes` and `seq_chains` are
+  about whole sequences and do not change.
+* **A cut that leaves a required group missing**: the key wins (stage 2b). A
+  cut that keeps BOOK keeps its ids, equal to the key's unless the record
+  was under another book's key; a cut before BOOK has ids 0 and takes the
+  key's, repaired at its next save. Title and author come back from the
+  book's file (stage 2c) when it is reopened.
+* **Trailing bytes and an end chunk with data are cuts too**: every chunk
+  is whole and nothing is lost but the trust in the rest. The loss notice
+  ("show as defaults") is then more than the facts need, as it is for a
+  tag twice; the next save writes the record clean.
+* **The collections' record is cut the same way** (`IR_loss`, `LossyIndex`): its
+  collections are shown, and the loss is told with the library's loss notice
+  ("Some details of your library were damaged ..."). `_adopt_index` used to
+  count a collections record that lost a group as one that could not be read
+  and said "Your collections could not be read, so they are left as they are
+  and not shown" while showing them; it answers `index_adopted` now.
+* **A trade-off, kept**: a cut that read no chunk (the bytes end right after
+  the header, the first chunk's length is garbled) is read with every
+  substitute where stage 2d would have read the version before it, which
+  holds the reader's state. The two are not merged; a follow-up could prefer
+  the previous version when a cut kept no chunk, or take its groups for the
+  lost ones.
+* Tested: `tests/codec` (a record cut at every length: the chunks before the
+  cut are kept and read as the record of those chunks and the end chunk, a
+  length past the end, over the limit, bytes after the end chunk),
+  `e2e/library-records.spec.js` (each kind of cut, the collections' record,
+  and a record cut inside its header, which is still set aside).
 
 **A group added later is not loss when it is absent** (#497).
 A group is one of three modes in `scripts/record_tables.py`: `req`
@@ -2310,13 +2387,13 @@ read of storage changed: each still folds, as #174 says.
   made beside it could not be seen while the read keeps failing.
 * **Records that cannot be used are set aside, not replaced** (the
   follow-up of #374). A library whose read worked can still hold a book's
-  record, or the collections', that is not Quire's or whose framing is broken (cut short, a length past
-  the end, no end chunk; every other damage is used, #510, and a book with
-  a version before it is read from it, 2d) is shown nowhere and not
+  record, or the collections', that is not Quire's or has no header to read (cut inside its 7 bytes, empty,
+  over `RECORD_MAX`, or of another kind; a cut in the chunks is used, #614, as is every other damage, #510,
+  and a book with a version before it is read from it, 2d) is shown nowhere and not
   written over by a read; the collections' record, and a book's of a newer
   Quire or not Quire's, are never written over, so no collection can be made
   while the collections' is one of them, and a book of those cannot be
-  imported again (a book whose framing is broken can: its import writes the
+  imported again (a book whose header is broken can: its import writes the
   library's image over the record, the bytes kept, 2d). Settings shows a row then (`settings-aside`,
   `lib_aside_show`: "Set aside unreadable records",
   `settings-set-aside`), and only then. Pressing it
@@ -3162,7 +3239,7 @@ the banner says so. The library is read as its records are (below): one
 that could not be read at all is not saved this session and books are not
 added to it, and the screen says why and offers what fits (#374, below); a book's record that is newer or not Quire's is
 shown nowhere, said once and never written over; one that lost a group, or
-that is under other ids than its key, is used, and one broken in its framing
+that is under other ids than its key, or is cut in its framing (#614), is used, and one with no header to read
 is read from the version before it when there is one, else shown nowhere (#510). A backup that could not
 read a book's notes is not made.
 
