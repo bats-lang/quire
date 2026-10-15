@@ -135,9 +135,14 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+          cache: npm
 
+      # npm ci installs exactly package-lock.json (it fails on a lock that
+      # does not match package.json and never rewrites it), and retries a
+      # dropped connection 5 times, not npm's 2: one ECONNRESET in an e2e
+      # job removed a merge queue entry after 35 minutes (#635)
       - name: Install dependencies
-        run: npm install
+        run: npm ci --fetch-retries=5
 
       - name: Run WASM smoke tests
         run: npx vitest run
@@ -263,9 +268,14 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+          cache: npm
 
+      # npm ci installs exactly package-lock.json (it fails on a lock that
+      # does not match package.json and never rewrites it), and retries a
+      # dropped connection 5 times, not npm's 2: one ECONNRESET in an e2e
+      # job removed a merge queue entry after 35 minutes (#635)
       - name: Install dependencies
-        run: npm install
+        run: npm ci --fetch-retries=5
 
       - name: Install Playwright
         run: npx playwright install chromium

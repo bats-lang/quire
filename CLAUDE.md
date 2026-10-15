@@ -204,6 +204,17 @@ What happened on 2026-10-15, and the rules it gave:
 * Open (#586): the queue's own settings (how many groups build at once, the
   window) and balancing the static groups so that none is the long pole.
 
+### Node's packages (#635)
+
+The e2e jobs install `package-lock.json` with `npm ci --fetch-retries=5`
+(`check.yml`, two jobs), `setup-node` caching npm's downloads (`cache: npm`,
+keyed on the lock). `npm ci` fails on a lock that does not match
+`package.json` and never rewrites it; npm's default is 2 retries (10 to 60 s
+apart), and one `ECONNRESET` in an e2e job's `npm install` removed a merge
+queue entry after 35 minutes (the group ran on for 19 minutes with `check`
+already failed). A hit of the cache has no registry traffic; a miss retries 5
+times. Nothing else of the group is relaxed (`fail-fast` stays off).
+
 ## Check locally before every push
 
 A session sets up the compiler in its own environment and runs `bats
