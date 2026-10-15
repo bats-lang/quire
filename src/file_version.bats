@@ -27,6 +27,7 @@
 staload "book.sats"
 staload "mem.sats"
 staload "library.sats"
+staload "stored_key.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 
 (* The book the tab opened and the file it opened (the halves of the

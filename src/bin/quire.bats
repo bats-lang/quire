@@ -20,6 +20,7 @@ staload "modal.sats"
 staload "undo.sats"
 staload "backup.sats"
 staload "library.sats"
+staload "stored_key.sats"
 staload "paths.sats"
 staload "settings.sats"
 staload "import.sats"
@@ -159,8 +160,20 @@ fn _is {id_len:pos} (clicked: !target, id: string id_len): bool =
   | Target(bytes, n, _) => _bytes_are(bytes, n, 10, id, g1u2i(string1_length(id)), 0)
   | NoTarget() => false
 
-(* The Trash's dictionaries are listed while the Trash is the shelf shown *)
-fn _trash_dictionaries (): void = dict_trash_render(same_shelf(lib_shelf_get(), Trash()))
+(* The Trash's dictionaries are listed while the Trash is the shelf shown,
+   and its heading counts them *)
+fn _trash_dictionaries (): void = let
+  val () = dict_trash_render(same_shelf(lib_shelf_get(), Trash()))
+in lib_trash_head_show() end
+
+(* The dictionary at index of the panel's list removed to the Trash, whose
+   heading counts it at once and again if the Undo toast puts it back
+   (dictionary.bats stands below library.bats and cannot say so itself) *)
+fn _dictionary_removed (index: int): void = let
+  val ended = dict_remove(index)
+  val () = lib_trash_head_show()
+  (* how the offer ended is nothing to free: only the heading is shown again *)
+in $P.finish<settled>(ended, llam(_) => lib_trash_head_show()) end
 
 (* The harm whose button (ui_harm_button) clicked is: its click asks about
    that same harm. The Trash is asked about only while it holds
@@ -1659,19 +1672,20 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
       val () = (if _is(clicked, "trash-restore-all") then _restore_all() else ())
       val () = (case+ _harm_clicked(clicked) of
         | ~Some_vt(the_harm) =>
-          $P.finish<reply>(lib_ask_harm(the_harm, dict_trash_count()), llam(answer) =>
+          $P.finish<reply>(lib_ask_harm(the_harm), llam(answer) =>
             case+ answer of
-            (* the dictionaries in the Trash go with the books, here and
-               nowhere else (tests/static/trash.py) *)
+            (* the dictionaries in the Trash went with the books, in
+               lib_ask_harm (quire#628); here they are no longer shown *)
             | Accepted() => let
-                val () = dict_trash_empty()
                 val () = dict_trash_render(false)
                 val () = _save_render()
               in ui_focus("shelf-back") end
             | Declined() => ())
         | ~None_vt() => ())
       val () = _target_free(clicked)
-    in if restored >= 0 then let val () = dict_trash_restore(restored) in 0 end else 0 end)
+    in if restored >= 0 then let
+         val () = dict_trash_restore(restored)
+       in let val () = lib_trash_head_show() in 0 end end else 0 end)
   (* search *)
   (* the field is made again to be cleared: its events are taken on
      its box *)
@@ -1761,7 +1775,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
       val control = _dictionaries_control(clicked)
       val () = _target_free(clicked)
       val () = (case+ control of
-        | ~$R.none() => (if removed >= 0 then dict_remove(removed) else ())
+        | ~$R.none() => (if removed >= 0 then _dictionary_removed(removed) else ())
         | ~$R.some(DictionariesBack()) => layer_close(LDictionaries())
         (* a screen has no outside to click (#389) *)
         | ~$R.some(DictionariesPanel()) => ())
