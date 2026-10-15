@@ -3853,7 +3853,11 @@ before its timeout, is captured: the frames `Debugger.pause` stops in
 pauses, which commands the renderer still answers, and the renderers'
 CPU time over 1 s, each renderer's threads by state and kernel wait
 (`/proc`, #575: a renderer that answers nothing and burns nothing is
-waiting outside script) and the machine's load and free memory. The capture is `stall-capture-<n>.json` in the test's
+waiting outside script), the renderer's main thread's system call and open
+channels, the same for the browser, GPU and utility processes (#591: a
+renderer waiting on the browser process is told from one waiting for nothing by
+what the browser is doing) and the machine's load, free memory and pressure
+(`/proc/pressure`). The capture is `stall-capture-<n>.json` in the test's
 output (CI's `e2e-stall-captures-<group>` artifact), attached to the test, and
 summed up on stderr. `e2e/stall-capture.spec.js` checks it on pages that
 loop forever in script and in wasm.
