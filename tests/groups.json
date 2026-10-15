@@ -68,6 +68,7 @@
       "publisher-sizes.spec.js",
       "search.spec.js",
       "sync-idempotent.spec.js",
+      "sync-lost-groups.spec.js",
       "vertical.spec.js"
     ],
     "relaunch": [

@@ -1707,8 +1707,24 @@ order is the writer's, not the format's.
   stamp is a key of its own, not a group: a group would be a field of
   every image and record, and it is the library's bookkeeping, not the
   book's. Not done: salvaging the chunks before a cut in a record's
-  framing, and offering the sync file or Auto Backup copy for a record
-  whose reader state is lost (a notice action: #507's).
+  framing (#614). A record whose reader state a damage lost needs no
+  notice action: a lost group reads as a substitute with the stamp 0, so
+  the next sync's merge takes the store's (or the Auto Backup file's)
+  value, and the save that follows writes every group and keeps the old
+  bytes (#615; `e2e/sync-lost-groups.spec.js` plays a book with its place,
+  Hidden shelf, finished mark and a bookmark through WebDAV, Google
+  Drive's app data folder and Auto Backup, with PLCE, SHLF, FNSH and SIZE
+  absent or with a bad CRC, TITL and AUTH absent, and the notes record
+  deleted: 54 tests on desktop and android, and with the store file
+  emptied first the shelf, SIZE and combined cases fail, so the spec
+  measures the restore. Not played: the collections group, Dropbox,
+  Fastmail and Nextcloud, two devices racing, a deleted book record). By
+  research (the issue): Anki's answer to a damaged collection is a
+  one-way sync that takes the whole collection from AnkiWeb, Firefox's a
+  sign-out and sign-in that refills a rebuilt places.sqlite from the
+  server, and Calibre's `restore_database` rebuilds from each book's
+  metadata.opf and loses what the OPF does not hold; each takes the whole
+  database, where Quire's merge takes the lost groups only.
 * By the principle for any record that does not decode cleanly (the user's
   rule for #510): recover fanatically; if a bug in Quire damages a record
   the reader must still read the book. In order: (1) usable with
