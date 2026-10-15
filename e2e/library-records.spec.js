@@ -63,6 +63,10 @@ for (let version = 1; version <= 6; version++) {
     await reload(page);
     await expect(cards(page)).toHaveCount(2);
     expect(await titles(page)).toEqual(expect.arrayContaining(['Alpha Tales', 'Gamma Days']));
+    // nothing is said, and nothing is offered to be set aside (#515)
+    await expect(alert(page)).toBeHidden();
+    await librarySettings(page);
+    await expect(setAside(page)).toBeHidden();
   });
 }
 
@@ -233,6 +237,34 @@ test('a record a newer Quire wrote, or one that reads, is not offered to be set 
   await expect(setAside(page)).toBeHidden();
   expect(same((await store(page))[bookKey(books[0])], newer)).toBe(true);
 });
+
+// #515: the row is offered for a record that cannot be read as a record at all, and only for one
+for (const [how, spoil] of [
+  ['is not Quire\'s (its first four bytes are not QREC)', record => { const bytes = record.slice(); bytes[0] ^= 0x5a; return bytes; }],
+  ['is cut short in its framing', record => record.slice(0, 11)],
+]) {
+  test(`a book record that ${how} is offered to be set aside, its bytes kept, and the other book is untouched (#515)`, async ({ page }) => {
+    await startWithLegacy(page, 6);
+    await expect(cards(page)).toHaveCount(2);
+    const spoiled = spoil((await store(page))[bookKey(books[0])]);
+    await put(page, bookKey(books[0]), spoiled);
+    await reloadSettled(page);
+    await expect(card(page, 'Alpha Tales')).toHaveCount(0);
+    await expect(card(page, 'Gamma Days')).toBeVisible();
+    // snapshot once the sync the app makes as it opens has ended (it renumbers the books' ORDR once a record is missing)
+    const before = await store(page);
+    await librarySettings(page);
+    await expect(setAside(page)).toBeVisible();
+    await setAside(page).click();
+    await expect(setAside(page)).toBeHidden();
+    const after = await store(page);
+    expect(after[bookKey(books[0])]).toBeUndefined();
+    const copies = damagedKeys(after, `${hex7(books[0].idHigh)}${hex7(books[0].idLow)}`);
+    expect(copies).toHaveLength(1);
+    expect(same(after[copies[0]], spoiled)).toBe(true);
+    expect(same(after[bookKey(books[1])], before[bookKey(books[1])])).toBe(true);
+  });
+}
 
 test('a set aside that is aborted midway leaves the old record byte for byte, and can be tried again', async ({ page }) => {
   await startWithLegacy(page, 6);
