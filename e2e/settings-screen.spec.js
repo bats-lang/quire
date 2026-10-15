@@ -217,6 +217,10 @@ test('the daily goal is chosen in Settings, and the statistics panel shows it', 
 });
 
 test('Reset reading settings and Remove all books, from Settings, each with its Undo', async ({ page }) => {
+  // the theme is Auto until a reader chooses one, and Auto is the night theme
+  // from 22:00 to 07:00 by the clock (#570): the ground read as plain must not
+  // be read again after the runner's clock has passed that hour
+  await page.clock.install({ time: new Date('2026-06-01T12:00:00Z') });
   await start(page);
   await importFiles(page, [epubFile({ title: 'Reset Book', author: 'R' })], 1);
   const plain = await bg(page);
