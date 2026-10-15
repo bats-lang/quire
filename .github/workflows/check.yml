@@ -161,6 +161,8 @@ jobs:
   static:
     needs: plan
     runs-on: ubuntu-latest
+    # a mutation group of a change to crc.bats is the longest (CLAUDE.md, #594)
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -171,7 +173,22 @@ jobs:
         with:
           fetch-depth: 2
 
+      # The groups of mutation members (#594) run only the lemmas the pull
+      # request's change can have made vacuous, and nothing when it touches
+      # no proof (the job then ends here); every other group always runs.
+      # The scheduled run (mutation.yml) has all of them.
+      - name: What this group has to run
+        id: scope
+        run: |
+          base=none
+          case "${{ github.event_name }}" in
+            pull_request|merge_group) base=$(git rev-parse HEAD^1) ;;
+          esac
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "run=$(scripts/ci-groups.py affected ${{ matrix.group }} $base)" >> "$GITHUB_OUTPUT"
+
       - name: Set up bats
+        if: steps.scope.outputs.run == 'yes'
         uses: ./.github/actions/setup-bats
         with:
           commit: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -179,7 +196,7 @@ jobs:
       # The app's check is kept in a directory of a fixed name (run.sh
       # checks at the same path in every job, #460)
       - name: Restore the compiler cache
-        if: github.event_name == 'pull_request'
+        if: steps.scope.outputs.run == 'yes' && github.event_name == 'pull_request'
         uses: ./.github/actions/build-cache
         with:
           mode: restore
@@ -187,12 +204,14 @@ jobs:
           path: ${{ runner.temp }}/quire-static/app/build
 
       - name: Static tests
+        if: steps.scope.outputs.run == 'yes'
         env:
           QUIRE_STATIC_WORK: ${{ runner.temp }}/quire-static
+          QUIRE_MUTATION_BASE: ${{ steps.scope.outputs.base != 'none' && steps.scope.outputs.base || '' }}
         run: tests/static/run.sh $HOME/repository $(scripts/ci-groups.py members static ${{ matrix.group }})
 
       - name: Save the compiler cache
-        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        if: steps.scope.outputs.run == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'push')
         uses: ./.github/actions/build-cache
         with:
           mode: save

@@ -1857,6 +1857,147 @@ then proved. No proof here has one (integers are built from bytes,
 fails the checkers on a literal of 2 to the 29 or more in `src/`, apart
 from a run-time value marked `(* wide *)`.
 
+A context can be contradictory with no large literal at all (#594): a
+proof with nested divisions (`h/256 + 256*(l mod 256)`, two deep) made
+the solver's elimination overflow, its context contradictory, and the
+compiler accepted a false statement (`ROTR(16, h, l, l, h+1)`). It is not
+only nested divisions. `tests/static/solver/` (standalone fixtures, run
+by `tests/static/solver.py` under any patsopt) holds the cases found with
+the `ATS2-Postiats-int-0.4.2` solver (CI built it until it moved to
+the infinite-precision build, whose own risk is a proof it cannot answer in
+time, not a false one it accepts; the caps of `setup-bats` end that): a context of `h < 65536`,
+`q == h / 256`, `r == q + 256*h` proves `1 == 2`; so does a pair of
+matched copies of arith's `ROTR1` constructor (`rotr1_functional`,
+`shr1_functional` and `add32_functional` proved nothing); a product
+passing 2^32 does (`b < 2^20`, `v == 4096*b`). The infinite-precision
+build rejects all of them. The rules for a proof's arithmetic, which keep
+true under either (a proof that only the infinite-precision solver can answer
+in time is split, as `date_text` and `add32_functional` were):
+
+* **Keep the magnitudes down, and name the digits.** A statement is made
+  of steps that divide (or take `mod`) by a constant of at most 16 at a
+  time and numbers built a digit at a time (`b + 256 * m`, as `LE` and
+  `STEP1` are), never a closed form with nested `/` or `mod`, a product of
+  two variables, or two equations over the same variables with scales
+  (1024 and 64 in sha256 stage D). Digit form helps and is not a
+  guarantee: the guard is that no bound times a coefficient reaches 2^31
+  after elimination, and that is only known by the next rule.
+  `tests/static/proofs_audit.py` lists the places that are not (report
+  only, a human reads each).
+* **A false variant of every lemma.** Each lemma (`prfun`, `prfn`, a
+  `primplement` of a `#pub prfun`) has its false variant rejected:
+  `tests/static/mutation_check.py` makes them (a numeric index plus one, a
+  guard's `==` shifted by one, a bound tightened by one, a byte string
+  consed with a byte, an argument of another sort replaced by a fresh
+  variable, each part of a tuple result, and `[1 == 2] void` in place of a
+  guard) with the lemma's own body, and the compiler must reject each
+  (`--root DIR --run WORK file.bats` for another package, `--ats-home DIR`
+  for another patsopt, `--inplace` for a recursive `#pub` lemma, whose
+  declaration and primplement are changed where they stand and whose
+  dependents are checked again: minutes a mutant). An accepted mutant is a
+  vacuous proof (or a mutation that is true: `tests/static/mutation_known.txt`),
+  and is filed as its own p2 issue with the minimal case. A lemma no
+  operator reaches (a `FALSEP`, `EQFD` result) gets its false variant as a
+  fixture in `tests/static/solver/reject/`, with its true statement in
+  `accept/`. The checker is itself tested (`tests/static/mutation_test.py`,
+  a step of the `checkers` member: a stand-in compiler that accepts the
+  mutants of a vacuous lemma and rejects those of an honest one, the
+  operators, the in-place edit, the choice by a diff). The solver
+  fixtures run as the `solver` member (122 files, 38 s under the
+  infinite-precision build, all as they should be; the -int build accepts 5
+  of the false ones).
+
+* **No `[a | prop]` as the result of a `prfn`.** The issue found that such
+  a return silently dropped the proposition; the guards `[p; q] void`
+  and `[p && q] void` of crc and arith were all checked by mutants and are
+  not dropped, so the rule is kept for the existential with a variable
+  only: return a dataprop (an `EQI`, a `LEN`), or state it with a `prfun`.
+
+### The mutation check in CI (#594)
+
+Measured under the GMP solver on a shared 4-core machine, a whole module is
+8 to 30 minutes, `src/crc.bats` about an hour. The nine proof modules
+(`tests/static/mutation_modules.txt`: bytes, chunk, crc, fields, seq, schema,
+record, bookrec, indexrec; about 480 mutants over 220 lemmas) are some three
+hours of mutants in all. That cannot be in the required `check` of every
+pull request, and it cannot be a few big jobs either: the first version
+(four groups, one job each, #611's merge queue run 38703942820) took 42, 48,
+71 and 15 minutes for its groups beside a plain group of about 33, and the
+merge queue's 60 minute window removed the entry while the group was still
+passing. A job's time is the app's check (about 11 minutes cold, the queue's
+run is cold) plus its mutants, so the design target is **no mutation job
+over about 25 minutes on an idle pool**, and a job costs 11 minutes before
+it mutates anything: halving a module's mutants halves only the second part.
+From the four measured groups the rate is about 0.43 minutes a mutant for
+crc, 0.22 for bytes, fields and seq, 0.25 for schema and chunk and 0.1 for
+the small record modules, so a job holds 14 minutes of mutants:
+
+* **Members are parts of a module** (`mutation/crc-part2of5`, `mutation/seq`;
+  the parts are in `tests/static/mutation_modules.txt`, which
+  `scripts/ci-groups.py` and `run.sh` read): `mutation_check.py --shard I/N`
+  takes the I-th of N parts of the lemmas otherwise selected, balanced by
+  their number of mutants (heaviest first to the lightest part, so the parts
+  are disjoint, together every lemma, and the same on every machine;
+  `partition`, unit-tested). Expected minutes per job (11 for the app, plus
+  mutants at the rates above): crc 5 parts of 28 mutants, 23; bytes 2 parts
+  of 44, 21 each, with seq (21 mutants) 26 and with bookrec and indexrec (18)
+  23; schema 2 parts of 50, 24 each; chunk 50, 24; fields and record
+  (49 mutants), 20. Eleven groups, each one job, side by side. A pull
+  request's incremental check restores the app's build, so its jobs are
+  shorter by most of the 11.
+* **A pull request selects by its diff** (`check.yml`: the groups
+  `mutation-*`; `scripts/ci-groups.py affected <group> <base>` says whether
+  the change since the pull request's base, `HEAD^1` of the merge checkout,
+  leaves anything for the group, and a job that has none ends after its first
+  step: a pull request that touches no proof costs 15 seconds a group, no
+  compiler, no cache). If so `QUIRE_MUTATION_BASE` makes `run.sh` pass
+  `--diff` to the checker, which mutates only the lemmas the diff touches
+  (`select_by_diff`), those that mention a name a changed line declares (a
+  lemma whose statement changed, a dataprop), and every lemma of a module
+  whose diff is outside all its lemmas; a comment or blank line selects
+  nothing; the shard is then of the selected lemmas. A push to main and a
+  dispatch run none of it.
+* **What selects what.** A change to a proof module selects as above. **A
+  change to the solver, its pin (`setup-bats/action.yml`) or its fixtures
+  (`tests/static/solver/`, `solver.py`), selects everything**, sharded so
+  each job fits. **A change to the checker alone** (`mutation_check.py`,
+  `mutation_test.py`, `mutation_modules.txt`, `mutation_known.txt`,
+  `proofs_audit.py`) **selects a smoke set**, the modules marked `smoke` in
+  `mutation_modules.txt` (bookrec and indexrec, 9 mutants each, 5 to 10
+  minutes beside the app's check), run whole: it shows the checker still
+  runs end to end on the real compiler, and the checker's own unit test
+  (`mutation_test.py`, in `checkers`) tests what it decides. Running every
+  module on the checker's change put #611, which changes no proof, through
+  three hours of jobs and out of the queue; its judgement on the proofs is
+  the nightly's. Groups, workflows and CLAUDE.md select nothing.
+* **Nightly, in full** (`.github/workflows/mutation.yml`, 02:41 UTC and on
+  dispatch, the same groups side by side on main, built from nothing, an
+  issue opened when one fails): it has what a diff cannot see (a locked
+  package whose lemmas a proof calls, a compiler move, a bug of the
+  selection) and every change of the checker. A vacuous lemma that gets in
+  through a relock is found within a day, on main, and is not a red main
+  (the proofs still check).
+* **Why this shape, by research.** Stryker's incremental mode stores the
+  previous run and reruns only the mutants whose code or tests changed, and
+  says itself that only mutated and test files are tracked, not dependencies;
+  PIT's incremental analysis keeps a history, reruns what changed, and says
+  that the assumption that a dependency change rarely changes a mutation's
+  status is "currently unproven"; cargo-mutants' `--in-diff` mutates only
+  what overlaps the diff of the branch against the pull request's base, and
+  says it is "not a substitute for a full test run" (an edit in one region
+  can leave another poorly tested). All three give diff-based feedback and
+  leave the full run to a schedule. A schedule alone would let a vacuous
+  lemma merge and be found the next morning; a full run per pull request
+  would put hours beside a 15 minute check. The dependency set here is
+  small and textual (a lemma calls another by name), which is why the name
+  rule can stand in for PIT's dependency analysis. (Sources:
+  stryker-mutator.io/docs/stryker-js/incremental,
+  pitest.org/quickstart/incremental_analysis, mutants.rs/in-diff.html.
+  mutmut and Dextool were not read.)
+* The job has `timeout-minutes` 120 (the nightly's 150) as a backstop, with
+  the patsopt caps (`BATS_PATSOPT_TIMEOUT_S`, `BATS_PATSOPT_MEM_MB`, from
+  `setup-bats`) under it, so a runaway proof fails with its module named.
+
 **The only way to change a record** is `libstore_save_book` and
 `libstore_save_index` (`idb_update`, bridge: one transaction in which a
 key is read, the closure decides from what it read, and the answer is
@@ -3715,13 +3856,13 @@ length, in the same page, so a slower machine slows both. What it found:
   longer than a piece: the pieces `_text_spans` already cut a text of 64
   KiB or more into (a text op's limit) are class `run`, shown as blocks
   (`.caf .run`), and are cut after the last white space in their last 512
-  bytes (`_text_cut`; a run with no white space is cut at a character, as
+  bytes (`cut_find`, src/cut.bats; a run with no white space is cut at a character, as
   before). Complexity: the frame of a run of n columns was O(n squared)
   and is O(n) in the number of pieces; opening the megabyte word on a
   390 px phone went from 17 s (Two) to 1.5 s, and the opening to 1 s. A
   text node over 64 KiB in mixed content breaks its line at each piece (a
   paragraph break appearing in a 64 KiB run is the price; search counts
-  pieces with the same `_text_cut`, so its node numbers agree). A stored
+  pieces with the same `cut_find`, so its node numbers agree). A stored
   note or highlight in such a text is a piece's content node and a UTF-16
   offset in that piece's text (bridge's `get_selection_range` gives offsets
   into the text of the element with the id, which is the piece), and the cut
@@ -3732,7 +3873,7 @@ length, in the same page, so a slower machine slows both. What it found:
   in two columns, with accents and an emoji in the words; a last test restores
   places stored by this build and they must paint the same words, so a
   changed cut fails there). The cut is part of the format of a stored place:
-  changing `_text_cut` moves the places stored in the pieces after the first
+  changing `cut_find` moves the places stored in the pieces after the first
   of a text over 64 KiB (the first starts where the text does) and needs a
   version of the annotations' record to translate by. A place stored by a
   build before #423 (pieces cut at a character, not at white space) is read
@@ -3754,6 +3895,65 @@ length, in the same page, so a slower machine slows both. What it found:
   layout. Measured (phone, this machine): the megabyte word opens in 1.0
   s against 0.8, Two in 1.5 against 1.8, 10,000 paragraphs open in 2.3
   against 1.7. No timeout was raised to get there.
+* **The cut is a function of the text's cells, proved (#568).** The three
+  walks of a chapter's text (render's `_text_spans`, search's `_scan_text`,
+  read aloud's `_runs_text`, and the blank or math text each skips with
+  `_skip_spans` and `_text_count`) number a text's pieces by one rule,
+  `src/cut.bats`, stated over the cells of the array the text is read from
+  (array's `cborrow`, whose `cborrow_get` gives `NTH(cs, i, v)` with each
+  byte): `BREAKBACK(cs, offset, at, floor, back)` (the cut after the last
+  space, tab or line feed at or before a cell, looking back no further than
+  a floor), `CUTC(cs, offset, text_len, cut)` (the first piece's length:
+  after that white space in the last 512 bytes, else the longest prefix
+  that ends before a UTF-8 character's start) and `PIECES(cs, offset,
+  text_len, count)` (the text is count pieces, each cut off by `CUTC`).
+  Each constructor takes the `NTH` of the cells it was decided from, so
+  none is made over cells other than the ones read
+  (`tests/static/reject/cut-claimed-over-other-cells`,
+  `cut-break-after-a-byte-that-is-not-white`, `cut-break-at-another-cell`,
+  `pieces-counted-over-other-cells`, `pieces-forged-cut`), and each is
+  functional (`breakback_functional`, `cutc_functional`,
+  `pieces_functional`, by induction, with array's `nth_functional`): two
+  cuts, or two counts, of the same cells and offset are equal
+  (`reject/cut-two-lengths-of-the-same-cells`,
+  `pieces-two-counts-of-the-same-cells`, `accept/cut-same-cells-same-count`).
+  `cut_find` and `pieces_find` read the cells and return those proofs; the
+  walkers take `bytes: !cborrow(l, n, cs)` beside the plain `data: !borrow`,
+  and an `<img>`'s over-long alt text is cut by `cut_find` too, so no walk
+  steps by another rule (the 65533 step of #568's first part is gone). A
+  chapter's piece is lent for this at each load (render, facing page,
+  search, the annotations' node count, read aloud): array's `barr_of_arrx`
+  gives the cells and keeps the piece's owner, `barr_freeze` the
+  `cfrozen`/`cborrow`, `cborrow_view` (array 2026.10.15.3267, array#47) the
+  plain borrow of the same bytes that `xhtml_parse`, `_load_images` and the
+  page read through, counted in the freeze so `barr_thaw` is refused while
+  the view is out (`reject/cut-view-out-at-thaw`), and the view is given
+  back, then the cells, before the thaw and `barr_to_arrx`
+  (`accept/cut-found-from-the-cells`). `_utf8_start` no longer calls arith's
+  `band`: a byte starts a character when it is under 128 or at least 192.
+  **Proved**: that the cut, and the count of pieces, that render, search and
+  read aloud take are the one relation of the cells they walk, and that two
+  walks over the same cells, or the same cborrow, cannot get two. **Tested,
+  not proved**: that the three walks read the same bytes. Render, search and
+  read aloud each decode the chapter from the compressed entry on their own
+  (separate pieces, so separate existential cells `cs`), and nothing in the
+  types says that inflate, the CRC check and `_text_of_content` give the same
+  bytes each time: that needs inflate (the zip package) and the text
+  conversion (`src/text_encoding.bats`) as proved relations of their input
+  cells, with functional lemmas, which they are not yet. The proof is owed
+  (#608; no trusted primitive is needed or allowed), and until it is proved
+  it is tested (`e2e/giant-text-highlights.spec.js`,
+  `e2e/pathological.spec.js`, `e2e/search.spec.js`). **Trusted** (array's, tested there): the unsafe
+  core of `barr_of_arrx`, `cborrow_view` (an identity on the pointer) and
+  `cborrow_get` (reads the byte it says). The functional lemmas and the
+  relations are audited by the mutation check (`mutation_check.py`, GMP):
+  every statement of `breakback_functional`, `cutc_functional` and
+  `pieces_functional` made false is rejected; the two lemmas `white_not_white`
+  and `starts_not_continues`, which prove `1 == 0` from a pair that cannot
+  both hold (a byte that is white space and is not; one that starts a
+  character and continues one), are accepted when mutated to any other
+  statement, as every statement is true of an impossible pair, and each of
+  their premises is satisfiable alone. `cut.bats` checks in 2 s.
 * **The spec's long chapters run without Playwright's trace and
   screenshots** (`heavy` in `e2e/pathological.spec.js`): its snapshotter
   walks every node at every action, 2 to 3 s on a chapter of 30,000, which
