@@ -58,6 +58,27 @@ stay short within a few lines.
 * **p3:** not held for. A session may file p3 issues but does not work
   on them.
 
+## Pipeline and tooling improvements belong in bats or pwa
+
+Anything a second app would copy is built where the apps share it, and
+quire calls it: the compiler's build, cache and fixture runner, and the
+setup of the toolchain, are bats's (bats-lang/bats); the Android project
+and its release, test running (Playwright, its install and browsers), the
+emulator job and the pages beside the app are pwa's (bats-lang/pwa). Quire's
+own CI holds what is about quire: its specs and fixtures, which job runs
+which (`tests/groups.json`), its books and its proofs. Before a workflow or
+script of quire is changed, ask whether an alarm clock built the same way
+would copy the change; if it would, the change is a ticket in bats or pwa
+first (quire#623 is the list of what already is one), and quire's change is
+only the call.
+
+A stopgap in quire is allowed only when waiting would cost more than the
+move (a flake that removes a merge queue entry each time it happens), and
+then the ticket that moves it is written first, the stopgap says so in its
+comment, and it is deleted when the move lands (quire#635's retries and
+cache, moved by quire#637). A stopgap with no ticket for its move is not a
+fix.
+
 ## CI is pinned
 
 Every input to CI is pinned in the source (#203), so a commit that
