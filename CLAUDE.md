@@ -1332,9 +1332,9 @@ U+0020, U+0009, U+000D and U+000A, taken out, 20 bytes, xored with the font's
 first 1040 bytes going round; `idpf_key`) and Adobe's
 (`http://ns.adobe.com/pdf/enc#RC`: the 16 bytes of the identifier's UUID, after its
 last colon and without its dashes, xored with the first 1024; `adobe_key`).
-SHA-1 is `src/sha1.bats` (pure Bats, as the sha256 package is written; it is
-used for nothing but this key, and belongs in a package of its own when one is
-made). The unique identifier is the `dc:identifier` the package's
+SHA-1 is the sha256 package's `sha1_digest` (proved against FIPS 180-4's
+relations, sha256#29 and #36, with the standard's vectors tested; quire#562
+moved it there from `src/sha1.bats`). The unique identifier is the `dc:identifier` the package's
 `unique-identifier` names (`opf_unique_identifier`, copied by `_font_locate`).
 Which algorithm a font has comes from `META-INF/encryption.xml`, read as the font
 is loaded (`_font_cipher_find`): each `EncryptedData`
