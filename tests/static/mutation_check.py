@@ -613,8 +613,13 @@ def check_file(file, original_lines, lemmas, mutants, work, check_command, do_in
             report.add(f'SKIPPED  {file} {name}: recursive (--inplace checks the module\'s dependents again for each of its mutants)')
         inplace = []
     controls = [m for m in mutants if m.control]
-    _, _, errs = run_check(work, file, insert(original_lines, controls), check_command)
+    code, log, errs = run_check(work, file, insert(original_lines, controls), check_command)
     classify(controls, errs)
+    if code != 0 and not any(m.status for m in controls):
+        # the module with only its controls does not check, for a reason outside them
+        report.harness += 1
+        report.add(f'HARNESS  {file}: the check fails with the controls only: ' + (log.strip().splitlines() or ['no output'])[-1][:160])
+        return
     usable = {m.lemma for m in controls if not m.status}
     for m in controls:
         if m.status:
