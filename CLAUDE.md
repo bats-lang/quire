@@ -481,12 +481,28 @@ book is: `dict_state`, `Installed | InTrash`, stored in bit 4 of the
 form's byte), offered back by the Undo toast, its files kept. It is out of
 Look up, listed under the books while the Trash is the shelf shown
 (`trash-dictionaries`, `dict_trash_render`) with a Restore, and only Empty
-Trash deletes its files (`dict_trash_empty`, in quire.bats' `_harm_clicked`
-after `lib_ask_harm` resolves Accepted; the dialog says dictionaries go
-too). `tests/static/trash.py` fails any other call: that is a scan of the
-source, not a type, and the proof that only an answered dialog deletes
-them is owed (the dialog is in library.bats, which cannot staload
-dictionary.sats while dictionary.bats uses library's `lib_key`). Drive and
+Trash deletes its files, as it deletes a book's, in the Accepted branch
+of `lib_ask_harm` (`src/library.bats`; the dialog says dictionaries go
+too). `dictionary.bats` exports only data about what the Trash holds:
+`dict_trash_count`, and `dict_trash_take`, which takes the Trash's
+dictionaries out of the list and hands over the storage keys of their
+files (`dict_file_keys`) without deleting any. The function that deletes
+those keys, `_dictionary_files_delete`, has no `#pub` and is called from
+that one branch, so no other module can delete a dictionary's files, and
+the compiler says so (`tests/static/reject/dictionary-files-deleted-elsewhere`;
+the scan `tests/static/trash.py` that stood in for it is gone, #628). That
+is possible because `library.bats` stands above `dictionary.bats`: a staload
+cycle between them is an error of ATS (a looping trace), so `lib_key` is in
+`src/stored_key.bats`, which depends on nothing, and `dictionary.bats`
+cannot tell `library.bats` that the Trash's dictionaries changed. Instead
+the Trash's heading asks (`dict_trash_count`), what changes the Trash's
+dictionaries is followed by `lib_trash_head_show` (quire.bats'
+`_trash_dictionaries`, `_dictionary_removed`, after `dict_trash_restore`),
+and `dict_remove` returns the promise of how its Undo offer settled, so the
+heading is shown again after an Undo too. What the types do not reach:
+`dict_trash_take` itself may be called anywhere and drops the dictionaries
+from the Trash's list, leaving their files; only the deleting of the files
+is confined. Drive and
 Files by Google keep trashed items, which still use storage, until they
 are emptied; the Trash shows counts, not sizes (a dictionary's files are
 on the JS side). The backup lists the
@@ -3094,8 +3110,7 @@ deleted when the Undo offer is made final (#396 moves them to the Trash).
 * The Trash's screen says what it holds (quire#385): under its title a
   line "1 book · 4.0 MB. Kept until you empty the Trash." (the books
   and the dictionaries in it, the books' file sizes; `_trash_head` in
-  `src/library.bats`, `lib_trash_dictionaries_set` from
-  `dict_trash_render`) with Empty Trash beside it, there only while the
+  `src/library.bats`, which asks `dict_trash_count` for the dictionaries) with Empty Trash beside it, there only while the
   Trash holds something. Nothing is purged by itself: that would be an
   irreversible action the reader did not take. A book in the Trash has
   Restore first in its menu.

@@ -43,7 +43,7 @@ staload "modal.sats"
 staload "undo.sats"
 staload "book.sats"
 staload "mem.sats"
-staload "library.sats"
+staload "stored_key.sats"
 staload "jsonio.sats"
 staload "app.sats"
 staload "stardict.sats"
@@ -55,6 +55,9 @@ staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
 (* A write's answer no consumer took: nothing to free *)
 implement $P.dispose<$IDB.stored>(_) = ()
+
+(* How a removal ended, for the caller that waits on it *)
+implement $P.dispose<settled>(_) = ()
 
 (* The most dictionaries kept *)
 #define MOST_DICTIONARIES 64
@@ -373,18 +376,6 @@ in _dicts_free(list) end
 (* The storage key of dictionary id's .idx ('I'), .dict or .dict.dz
    ('D'), .syn ('S') or table ('X') *)
 fn _file_key {letter:nat | letter < 256} (letter: int letter, id: int): [l:agz] $A.arr(byte, l, 15) = lib_key(letter, 0, id)
-
-fn _file_delete {letter:nat | letter < 256} (letter: int letter, id: int): void = let
-  val @(key_frozen, key_bytes) = $A.freeze<byte>(_file_key(letter, id))
-  (* ignored: a delete that fails leaves bytes nothing reads *)
-  val () = $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
-in release_bytes(key_frozen, key_bytes) end
-
-fn _files_delete (id: int): void = let
-  val () = _file_delete(73, id)
-  val () = _file_delete(68, id)
-  val () = _file_delete(83, id)
-in _file_delete(88, id) end
 
 (* The entries of list at out[at, ...): each its number, language,
    form, name's length and name, and types' length and types *)
@@ -1357,7 +1348,9 @@ fun _trash_rows {count:nat}{index:nat} .<count>. (list: !dicts(count), index: in
 val _trash_visible = ref<bool>(false)
 
 (* The Trash's dictionaries shown under the library's books while the
-   Trash is the shelf shown (shown), each with a Restore *)
+   Trash is the shelf shown (shown), each with a Restore. The Trash's
+   heading counts them by asking dict_trash_count (library.bats), so what
+   changes them shows the heading again too *)
 #pub fn dict_trash_render (shown: bool): void
 
 implement dict_trash_render (shown) = let
@@ -1367,8 +1360,7 @@ implement dict_trash_render (shown) = let
   val count = _dicts_count(list)
   val () = _trash_rows(list, 0)
   val () = _trash_put(TrashCell(list))
-  val () = ui_show("trash-dictionaries", shown && count > 0)
-in lib_trash_dictionaries_set(count) end
+in ui_show("trash-dictionaries", shown && count > 0) end
 
 (* The dictionary at index of the Trash's list put back in Look up *)
 #pub fn dict_trash_restore (index: int): void
@@ -1382,27 +1374,39 @@ implement dict_trash_restore (index) = let
   val () = _render()
 in let val () = dict_trash_render(!_trash_visible) in _save() end end
 
-fun _delete_listed {count:nat} .<count>. (list: !dicts(count)): void =
+(* The storage keys of the files of the dictionaries in the Trash, as
+   dict_trash_take hands them over: each dictionary's .idx, .dict, .syn
+   and table (the letters of its files). They are data only: the keys are
+   deleted, if ever, by library.bats, in the Accepted branch of the Empty
+   Trash dialog's answer (quire#628) *)
+#pub datavtype dict_file_keys(int) =
+  | DictFileKeysNil(0) of ()
+  | {count:nat}{key_loc:agz} DictFileKeysCons(count + 1) of ($A.arr(byte, key_loc, 15), dict_file_keys(count))
+
+fun _file_keys_of {count:nat}{keys:nat} .<count>. (list: !dicts(count), found: dict_file_keys(keys)): [total:nat] dict_file_keys(total) =
   case+ list of
-  | DictsNil() => ()
+  | DictsNil() => found
   | @DictsCons(id, _, _, _, _, _, _, rest) => let
-      val () = _files_delete(id)
-      val () = _delete_listed(rest)
+      val found = DictFileKeysCons(_file_key(73, id), found)
+      val found = DictFileKeysCons(_file_key(68, id), found)
+      val found = DictFileKeysCons(_file_key(83, id), found)
+      val found = DictFileKeysCons(_file_key(88, id), found)
+      val all = _file_keys_of(rest, found)
       prval () = fold@(list)
-    in end
+    in all end
 
-(* The Trash's dictionaries deleted, their files with them. Only Empty
-   Trash does this, once its dialog is answered Accepted: it runs in
-   quire.bats' _harm_clicked, after lib_ask_harm's promise resolves
-   Accepted (tests/static/trash.py fails any other call) *)
-#pub fn dict_trash_empty (): void
+(* The Trash's dictionaries taken out of it, and stored so: the keys of
+   their files are what is handed over, for the caller to delete. This
+   deletes no file itself *)
+#pub fn dict_trash_take (): [count:nat] dict_file_keys(count)
 
-implement dict_trash_empty () = let
+implement dict_trash_take () = let
   val+ ~TrashCell(removed) = _trash_take()
-  val () = _delete_listed(removed)
+  val keys = _file_keys_of(removed, DictFileKeysNil())
   val () = _dicts_free(removed)
   val () = _trash_put(TrashCell(DictsNil()))
-in _save() end
+  val () = _save()
+in keys end
 
 (* Dictionary id put back at index *)
 fn _restore (id: int, index: int): void = let
@@ -1417,8 +1421,10 @@ in _save() end
 
 (* Removes the dictionary at index of the panel's list: it moves to the
    Trash at once, files kept, and is offered back by the Undo toast
-   (#396: only Empty Trash deletes its files, as it does a book's) *)
-#pub fn dict_remove (index: int): void
+   (#396: only Empty Trash deletes its files, as it does a book's). The
+   promise says how the offer ended (after an Undo put the dictionary
+   back), for the caller to show the Trash's heading again *)
+#pub fn dict_remove (index: int): $P.promise(settled, $P.Chained)
 
 implement dict_remove (index) = let
   val+ ~DictCell(list, next_id) = _dicts_take()
@@ -1428,7 +1434,7 @@ implement dict_remove (index) = let
   val+ ~TrashCell(pending) = _trash_take()
   val () = _trash_put(TrashCell(_dicts_join(pending, taken)))
 in
-  if id < 0 then ()
+  if id < 0 then $P.ret<settled>(Final())
   else let
     val () = _unload()
     val () = _render()
@@ -1436,11 +1442,11 @@ in
     (* kept as removed at once: nothing else saves it now that the offer's
        end deletes nothing *)
     val () = _save()
-  in $P.finish<settled>(undo_offer(DictionaryRemoved()), llam(how) =>
+  in $P.and_then<settled><settled>(undo_offer(DictionaryRemoved()), llam(how) =>
     case+ how of
-    | Undone() => _restore(id, index)
+    | Undone() => let val () = _restore(id, index) in $P.ret<settled>(Undone()) end
     (* it stays in the Trash, with a Restore there *)
-    | Final() => ()) end
+    | Final() => $P.ret<settled>(Final())) end
 end
 
 (* ============================================================

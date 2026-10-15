@@ -29,6 +29,8 @@ staload "indeximage.sats"
 staload "libstore.sats"
 staload "unreadable.sats"
 staload "paths.sats"
+staload "stored_key.sats"
+staload "dictionary.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 
@@ -229,33 +231,6 @@ implement lib_shelf_get () = !_shelf
 (* ============================================================
    Ids and keys
    ============================================================ *)
-
-fn _hex_digit {value:nat | value < 16} (value: int value): [digit:nat | digit < 256] int digit =
-  if value < 10 then 48 + value else 87 + value
-
-(* The 7 hex digits of half (its low 28 bits) at buf[offset, offset + 7) *)
-fn _put_seven_hex {l:agz}{owner:addr}{n:nat}{offset:nat | offset + 7 <= n}
-  (buf: !$A.arrx(byte, l, n, owner), offset: int offset, half: int): void = let
-  fn digit_at {i:nat | i < 7} (half: int, i: int i): [digit:nat | digit < 256] int digit =
-    _hex_digit($AR.band_g1($AR.low_byte($AR.bsr_int_int(half, 4 * (6 - i))), 15))
-  val () = $A.write_byte(buf, offset, digit_at(half, 0))
-  val () = $A.write_byte(buf, offset + 1, digit_at(half, 1))
-  val () = $A.write_byte(buf, offset + 2, digit_at(half, 2))
-  val () = $A.write_byte(buf, offset + 3, digit_at(half, 3))
-  val () = $A.write_byte(buf, offset + 4, digit_at(half, 4))
-  val () = $A.write_byte(buf, offset + 5, digit_at(half, 5))
-in $A.write_byte(buf, offset + 6, digit_at(half, 6)) end
-
-(* The storage key of a book's file ('b'), cover ('c') or annotations
-   ('a'): the letter and the book's 14 hex digits *)
-#pub fn lib_key {letter:nat | letter < 256} (letter: int letter, id_high: int, id_low: int): [l:agz] $A.arr(byte, l, 15)
-
-implement lib_key (letter, id_high, id_low) = let
-  val key = $A.alloc<byte>(15)
-  val () = $A.write_byte(key, 0, letter)
-  val () = _put_seven_hex(key, 1, id_high)
-  val () = _put_seven_hex(key, 8, id_low)
-in key end
 
 (* The value of hex digit byte_value (0 for any other byte) *)
 fn _hex_value {byte_value:nat | byte_value < 256} (byte_value: int byte_value): [value:nat | value < 16] int value =
@@ -987,19 +962,33 @@ fn _empty_text {l:agz} (buffer: !$A.arr(byte, l, 700), books: Int, dictionaries:
     else _counted(buffer, 700, 0, dictionaries, "dictionary", 10, "dictionaries", 12))
 in _put(buffer, _place(named), " will be deleted for good, with their reading positions, annotations and files. This cannot be undone.", 102) end
 
+(* The files of the Trash's dictionaries deleted, key by key. No #pub: only
+   the Accepted branch of lib_ask_harm, below, can call it, so no other
+   module deletes a dictionary's files, as none deletes a book's
+   (tests/static/reject/dictionary-files-deleted-elsewhere) *)
+fun _dictionary_files_delete {count:nat} .<count>. (keys: dict_file_keys(count)): void =
+  case+ keys of
+  | ~DictFileKeysNil() => ()
+  | ~DictFileKeysCons(key, rest) => let
+      val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
+      (* ignored: a delete that fails leaves bytes nothing reads *)
+      val () = $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
+      val () = release_bytes(key_frozen, key_bytes)
+    in _dictionary_files_delete(rest) end
+
 (* Asks about harm, with the action that does it; if the answer is yes
    (Accepted), it is done. The promise resolves with the answer once
    that is done. HEmptyTrash: every book in the Trash and everything
    stored for it go (and any Undo offer, which could only put back what
    is gone). The question names what goes: how many books, their titles
    (at most 3) and the dictionaries (quire#385) *)
-#pub fn lib_ask_harm (harm: harm_asked, dictionaries: int): $P.promise(reply, $P.Chained)
+#pub fn lib_ask_harm (harm: harm_asked): $P.promise(reply, $P.Chained)
 
-implement lib_ask_harm (harm, dictionaries) =
+implement lib_ask_harm (harm) =
   case+ harm of
   | HEmptyTrash() => let
       val books = _trashed_sum(0, lib_count(), TrashBooks(), 0)
-      val others = g1ofg0(dictionaries)
+      val others = g1ofg0(dict_trash_count())
       val title = $A.alloc<byte>(400)
       val title_len = _empty_title(title, books, others)
       val text = $A.alloc<byte>(700)
@@ -1009,6 +998,9 @@ implement lib_ask_harm (harm, dictionaries) =
       | Accepted() => let
           val () = undo_close()
           val () = _empty_trash(lib_count())
+          (* and the files of the dictionaries in it: this is the one place
+             that deletes them (quire#628) *)
+          val () = _dictionary_files_delete(dict_trash_take())
           (* the records of the books gone are deleted *)
           val () = lib_save()
         in $P.ret<reply>(Accepted()) end
@@ -3734,10 +3726,6 @@ fn _emptiness_offers (reason: emptiness): bool =
   | NothingArchived() => false
   | TrashEmpty() => false
 
-(* How many dictionaries the Trash holds, as dictionary.bats last said:
-   they are in the Trash's count and the question of emptying it *)
-val _trash_dictionaries = ref<int>(0)
-
 (* " · 4.0 MB" at buffer[at, ...): the middle dot between spaces, then
    the size of bytes *)
 fn _trash_size {l:agz}{at:nat | at <= 300} (buffer: !$A.arr(byte, l, 400), at: int at, bytes: Int): [place:nat | place <= 300] int place = let
@@ -3764,7 +3752,7 @@ in _put(buffer, after, ". Kept until you empty the Trash.", 33) end
 fn _trash_head (): void =
   if same_shelf(!_shelf, Trash()) then let
     val books = _trashed_sum(0, lib_count(), TrashBooks(), 0)
-    val listed = g1ofg0(!_trash_dictionaries)
+    val listed = g1ofg0(dict_trash_count())
     val dictionaries = (if listed > 0 then listed else 0)
     val [things:int] held = g1ofg0($AR.add_int_int(books, dictionaries))
   in
@@ -3782,13 +3770,13 @@ fn _trash_head (): void =
   end
   else ui_show("trash-head", false)
 
-(* The dictionaries in the Trash are count (dictionary.bats says it as
-   it shows them), so the Trash's heading counts them *)
-#pub fn lib_trash_dictionaries_set (count: int): void
+(* The Trash's heading shown again: what changes the dictionaries in the
+   Trash (dictionary.bats cannot say so itself: library.bats stands above
+   it) is followed by this, and the heading counts them as dict_trash_count
+   says *)
+#pub fn lib_trash_head_show (): void
 
-implement lib_trash_dictionaries_set (count) = let
-  val () = !_trash_dictionaries := count
-in _trash_head() end
+implement lib_trash_head_show () = _trash_head()
 
 (* The bar's tools (search, sort and view, the filters) and the import
    control that fits: with no book to search, sort or filter, the bar
@@ -3831,7 +3819,7 @@ implement lib_render () = let
   val () = query_put(query)
   val view = _view_of(shown)
   (* a Trash with only dictionaries in it is not said to be empty: they are listed *)
-  val only_dictionaries = same_shelf(shelf, Trash()) && !_trash_dictionaries > 0
+  val only_dictionaries = same_shelf(shelf, Trash()) && dict_trash_count() > 0
   val () = ui_show("library-empty", (case+ view of
     | ViewBooks() => false
     | ViewUnreadable(_) => true

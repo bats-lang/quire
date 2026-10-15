@@ -232,18 +232,6 @@ for d in "$ROOT"/tests/static/notice/reject/*/; do
   elif grep -qF -- "$(cat "$d/expect")" "$TMP/notice-$n.log"; then echo "ok   notice/reject/$n"
   else echo "FAIL notice/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/notice-$n.log"; fail=1; fi
 done
-
-# A dictionary's files are deleted only by Empty Trash (trash.py,
-# quire#396): the app's own, and the checker's fixtures
-if python3 "$ROOT/tests/static/trash.py" "$ROOT/src" > "$TMP/trash.log" 2>&1; then echo "ok   trash: $(tail -1 "$TMP/trash.log")"
-else echo "FAIL trash:"; cat "$TMP/trash.log"; fail=1; fi
-for d in "$ROOT"/tests/static/trash/reject/*/; do
-  [ -d "$d" ] || continue
-  n=$(basename "$d")
-  if python3 "$ROOT/tests/static/trash.py" "$d" > "$TMP/trash-$n.log" 2>&1; then echo "FAIL trash/reject/$n: should be rejected"; fail=1
-  elif grep -qF -- "$(cat "$d/expect")" "$TMP/trash-$n.log"; then echo "ok   trash/reject/$n"
-  else echo "FAIL trash/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/trash-$n.log"; fail=1; fi
-done
 fi
 
 # The solver's own fixtures (solver.py, quire#594): true and false statements

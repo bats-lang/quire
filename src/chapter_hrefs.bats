@@ -23,6 +23,7 @@ staload "epub_xml.sats"
 staload "book.sats"
 staload "mem.sats"
 staload "library.sats"
+staload "stored_key.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 
 (* A record's most bytes: what a read of storage gives whole *)
