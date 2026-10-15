@@ -114,12 +114,18 @@ commit), and save theirs once the job passed. What was found:
   (`actions/cache` saves on success only), so it holds no failed build, and a
   module that failed to emit has an empty `.src` and is never fresh. The
   residual risk is a bug of that incremental logic, so main never restores:
-  a push to main (and the merge queue's run, and a dispatched relock) builds
-  and checks from nothing, then saves for the pull requests (GitHub gives a
-  pull request its base branch's caches, and a pull request's own are
-  readable only by that pull request: same repository, no cross-fork
-  writes). The required check on a pull request is incremental, main's is
-  cold, so a stale hit would show on main at the latest.
+  a push to main (and a dispatched relock, and the nightly run) builds and
+  checks from nothing, then (the push) saves for the pull requests and the
+  queue (GitHub gives a pull request and a merge group its base branch's
+  caches, and a pull request's own are readable only by that pull request:
+  same repository, no cross-fork writes). The required check on a pull
+  request and the merge queue's group is incremental (#586: the queue's group
+  was cold at first, 13 minutes of build before the e2e jobs could start, in
+  a 60-minute window; by decision of 2026-10-15 it restores main's cache,
+  its build job then taking about 3), main's is cold, so a stale hit that
+  passes the queue shows on main at the latest, in the push run that follows
+  the merge (and in the nightly run `check.yml` makes of main from nothing,
+  whose runner image and packages are the day's).
 * Paths. patsopt named C symbols by the absolute path of the files, so a
   cache was valid only at the path it was made at (bats now takes the
   checkout's path out of the C, bats-lang/bats#250). `build` is at the checkout,

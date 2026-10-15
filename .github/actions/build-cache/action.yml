@@ -1,8 +1,9 @@
 name: Compiler cache
 description: >-
-  Restores or saves a bats build/ directory (#460). Restore only on a pull
-  request; main's pushes build cold and only save, so every state of main
-  is checked from nothing and is the base the pull requests start from.
+  Restores or saves a bats build/ directory (#460). Restore on a pull request
+  and on the merge queue's group (#586); main's pushes and the nightly run
+  build cold, and the pushes save, so every state of main is checked from
+  nothing and is the base the pull requests and the queue start from.
   Save runs only after the job's work passed (put it last).
 inputs:
   mode:

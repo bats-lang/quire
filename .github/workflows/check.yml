@@ -10,6 +10,12 @@ on:
   # The relock workflow starts it on its relock/<date> branch: a pull
   # request opened with GITHUB_TOKEN starts no workflow by itself
   workflow_dispatch:
+  # A check of main from nothing every night: the pull requests' and the
+  # queue's runs restore the compiler's cache, and a push to main builds cold,
+  # so this is the check that does not depend on any cache, with the toolchain
+  # (runner image, packages) of the day (#586)
+  schedule:
+    - cron: '47 3 * * *'
 
 # A push to a pull request cancels the run for its earlier head (#586): the
 # queue's jobs are not left behind jobs for stale heads. Only a pull_request
@@ -59,10 +65,11 @@ jobs:
         with:
           commit: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      # A pull request starts from the newest build of the same toolchain
-      # (main's, or its own earlier push's); main builds cold (#460)
+      # A pull request and the merge queue's group start from the newest
+      # build of the same toolchain (main's, or the pull request's own earlier
+      # push); a push to main and the nightly run build cold (#460, #586)
       - name: Restore the compiler cache
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         uses: ./.github/actions/build-cache
         with:
           mode: restore
@@ -196,7 +203,7 @@ jobs:
       # The app's check is kept in a directory of a fixed name (run.sh
       # checks at the same path in every job, #460)
       - name: Restore the compiler cache
-        if: steps.scope.outputs.run == 'yes' && github.event_name == 'pull_request'
+        if: steps.scope.outputs.run == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
         uses: ./.github/actions/build-cache
         with:
           mode: restore
