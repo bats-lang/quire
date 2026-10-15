@@ -13,8 +13,9 @@
 # With members named, it runs only those (CI's static groups, in
 # tests/groups.json, each run by a job of its own): `check` (bats check of
 # the app itself), `checkers` (ids.py, case_plus.py, groups.py, with their
-# fixtures), and fixtures, `accept/<name>` or `reject/<name>`. With none,
-# it runs the checkers and every fixture.
+# fixtures), `solver`, `mutation/<module>`, and fixtures, `accept/<name>` or `reject/<name>`. With none,
+# it runs the checkers and every fixture (the mutation members, which take
+# minutes a module, only when named: mutation/<module>, see below).
 #
 # A fixture knows what proof fails when it is built. A reject fixture's
 # `expect` names the function of its snippet, the line of the snippet
@@ -68,7 +69,8 @@ named() { # member -> 0 when it is to run
 selected="$*"
 for member in $selected; do
   case $member in
-    check|checkers) ;;
+    check|checkers|solver) ;;
+    mutation/*) python3 "$ROOT/tests/static/mutation_check.py" --list --root "$ROOT" --member "$member" >/dev/null 2>&1 || { echo "no proof module $member"; exit 2; } ;;
     accept/*|reject/*) [ -d "$ROOT/tests/static/$member" ] || { echo "no fixture $member"; exit 2; } ;;
     *) echo "not a member: $member"; exit 2 ;;
   esac
@@ -76,6 +78,25 @@ done
 
 # The fixtures to run, as accept/<name> and reject/<name>
 fixtures=""
+# The proof modules to mutate: members mutation/<module> or
+# mutation/<module>-part<i>of<n> (tests/static/mutation_modules.txt)
+mutation_members=""
+for member in $selected; do
+  case $member in mutation/*) mutation_members="$mutation_members $member" ;; esac
+done
+# With QUIRE_MUTATION_BASE (a git revision: CI's pull requests), only the lemmas
+# the change since it can have made vacuous (mutation_check.py --diff); a member
+# with none needs no compiled app
+mutation_diff=""
+[ -z "${QUIRE_MUTATION_BASE:-}" ] || mutation_diff="--diff $QUIRE_MUTATION_BASE"
+mutation_run=""
+for member in $mutation_members; do
+  if python3 "$ROOT/tests/static/mutation_check.py" --list --root "$ROOT" $mutation_diff --member "$member" | grep -q '^control'; then
+    mutation_run="$mutation_run $member"
+  else
+    echo "ok   $member: no lemma to mutate (the change since ${QUIRE_MUTATION_BASE:-the start} touches none, or the part has none)"
+  fi
+done
 for verdict in accept reject; do
   for d in "$ROOT"/tests/static/$verdict/*/; do
     [ -d "$d" ] || continue
@@ -94,7 +115,7 @@ app="$TMP/app"
 # src/version.bats) from git: it reads the checkout's repository
 GIT_DIR=$(git -C "$ROOT" rev-parse --absolute-git-dir)
 export GIT_DIR
-if named check || [ -n "$fixtures" ]; then
+if named check || [ -n "$mutation_run" ] || [ -n "$fixtures" ]; then
   mkdir -p "$app"
   (cd "$ROOT" && tar cf - --exclude=./node_modules --exclude=./dist \
     --exclude=./build --exclude=./test-results --exclude=./.git .) | (cd "$app" && tar xf -)
@@ -123,6 +144,12 @@ for d in "$ROOT"/tests/static/ids/reject/*/; do
   elif grep -qF -- "$(cat "$d/expect")" "$TMP/ids-$n.log"; then echo "ok   ids/reject/$n"
   else echo "FAIL ids/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/ids-$n.log"; fail=1; fi
 done
+
+# The mutation checker, on lemmas whose verdict is known (mutation_test.py,
+# quire#594): the operators, the edit of a recursive lemma, the choice of
+# lemmas by a diff, and that a vacuous lemma is flagged
+if python3 "$ROOT/tests/static/mutation_test.py" > "$TMP/mutation_test.log" 2>&1; then echo "ok   mutation_test: $(tail -1 "$TMP/mutation_test.log")"
+else echo "FAIL mutation_test:"; cat "$TMP/mutation_test.log"; fail=1; fi
 
 # The solver's 32 bits (literals.py) and the library's keys (keys.py)
 if python3 "$ROOT/tests/static/literals.py" "$ROOT/src" > "$TMP/literals.log" 2>&1; then echo "ok   literals: $(tail -1 "$TMP/literals.log")"
@@ -219,6 +246,15 @@ for d in "$ROOT"/tests/static/trash/reject/*/; do
 done
 fi
 
+# The solver's own fixtures (solver.py, quire#594): true and false statements
+# of the shapes the proofs use, run by the patsopt on the machine (CI's is the
+# infinite-precision build; the -int build is known to accept 5 of the false
+# ones), so a move back to a solver that cannot be trusted fails here
+if named solver; then
+  if python3 "$ROOT/tests/static/solver.py" > "$TMP/solver.log" 2>&1; then echo "ok   solver: $(tail -1 "$TMP/solver.log")"
+  else echo "FAIL solver:"; grep -v '^ok' "$TMP/solver.log"; fail=1; fi
+fi
+
 # The fixtures, one after another, each put into the checked copy
 for member in $fixtures; do
   fixture="$ROOT/tests/static/$member"
@@ -253,5 +289,15 @@ for member in $fixtures; do
   cp -p "$ROOT/$file" "$f"
   rm -rf "$app/build"
   cp -a "$TMP/build-checked" "$app/build"
+done
+# Every lemma of the proof modules has its false variant rejected
+# (mutation_check.py, quire#594): a mutant the compiler accepts is a lemma
+# whose context is contradictory. Runs in the checked copy after the
+# fixtures (it leaves its build changed) and puts each module back.
+for member in $mutation_run; do
+  if (cd "$app" && BATS_CHECK="bats check --repository $repository" python3 "$ROOT/tests/static/mutation_check.py" \
+        --run "$app" --root "$ROOT" $mutation_diff --known "$ROOT/tests/static/mutation_known.txt" \
+        --member "$member") > "$TMP/mutation.log" 2>&1; then echo "ok   $member: $(tail -1 "$TMP/mutation.log")"
+  else echo "FAIL $member:"; cat "$TMP/mutation.log"; fail=1; fi
 done
 exit $fail

@@ -184,7 +184,8 @@
       "reject/pieces-counted-over-other-cells",
       "reject/pieces-forged-cut",
       "reject/pieces-two-counts-of-the-same-cells",
-      "reject/sheet-scrolls-over-share"
+      "reject/sheet-scrolls-over-share",
+      "solver"
     ],
     "accepts-data": [
       "accept/codec-absent-added-group",
@@ -204,6 +205,43 @@
       "reject/clip-past-end",
       "reject/aloud-placement-unmatched",
       "reject/fixed-box-zoom-zero"
+    ],
+    "mutation-crc-1": [
+      "mutation/crc-part1of5"
+    ],
+    "mutation-crc-2": [
+      "mutation/crc-part2of5"
+    ],
+    "mutation-crc-3": [
+      "mutation/crc-part3of5"
+    ],
+    "mutation-crc-4": [
+      "mutation/crc-part4of5"
+    ],
+    "mutation-crc-5": [
+      "mutation/crc-part5of5"
+    ],
+    "mutation-bytes-seq": [
+      "mutation/bytes-part1of2",
+      "mutation/seq"
+    ],
+    "mutation-bytes-records": [
+      "mutation/bytes-part2of2",
+      "mutation/bookrec",
+      "mutation/indexrec"
+    ],
+    "mutation-schema-1": [
+      "mutation/schema-part1of2"
+    ],
+    "mutation-schema-2": [
+      "mutation/schema-part2of2"
+    ],
+    "mutation-chunk": [
+      "mutation/chunk"
+    ],
+    "mutation-fields-record": [
+      "mutation/fields",
+      "mutation/record"
     ]
   }
 }

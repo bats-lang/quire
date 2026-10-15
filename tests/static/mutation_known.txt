@@ -1,0 +1,21 @@
+# file | lemma | operator | reason: accepted mutants that are explained (mutation_check.py --known).
+# Anything accepted that is not here fails the check. Found by the audit of 2026-10-15 (quire#594).
+#
+# A lemma proved from FALSEP(), which has no constructor: its premise is never met, so every
+# statement is true and every mutant is equivalent. These are as sound as FALSEP being uninhabited.
+src/bytes.bats | falsep_eqb | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+src/chunk.bats | falsep_eqck | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+src/fields.bats | falsep_eqfd | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+src/schema.bats | falsep_eqsd | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+src/record.bats | falsep_eqrr | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+src/seq.bats | falsep_chains | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+#
+# A true, stronger statement: the shipped bound `rest_size < octets_size` is loose by 11 (the
+# chunk's header is more than the 1 that the mutant removes), so `rest_size + 1 < octets_size`
+# is still true. With a bound that is false (+ 12) every mutant is rejected.
+src/seq.bats | _rest_shorter_ok | bound+1 | a true, stronger bound
+src/seq.bats | _rest_shorter_bad | bound+1 | a true, stronger bound
+#
+# DECODES_magic holds for any kind, so `kind + 1` is as true as `kind`.
+src/record.bats | _not_quire_proof | arg2+1 | DECODES_magic holds for any kind
+src/record.bats | _not_quire_proof | arg1:fresh | DECODES_magic holds for any spec list too (record.bats:127): the magic differs before any spec is read
