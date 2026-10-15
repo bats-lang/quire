@@ -18,3 +18,4 @@ src/seq.bats | _rest_shorter_bad | bound+1 | a true, stronger bound
 #
 # DECODES_magic holds for any kind, so `kind + 1` is as true as `kind`.
 src/record.bats | _not_quire_proof | arg2+1 | DECODES_magic holds for any kind
+src/record.bats | _not_quire_proof | arg1:fresh | DECODES_magic holds for any spec list too (record.bats:127): the magic differs before any spec is read
