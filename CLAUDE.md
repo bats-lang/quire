@@ -46,6 +46,12 @@ stay short within a few lines.
 ## Priorities
 
 * **p0:** first, before anything else.
+* **CI first:** CI issues, especially flaky tests, outrank feature work: a
+  session fixes them first; a flake is a bug with a root cause.
+* **Order:** CI issues (flakiness first), then correctness work, then
+  feature work. Correctness work is anything where, assuming the code is
+  already correct, the only difference is added tests or proofs (missing
+  proofs, missing coverage).
 * **p1:** next.
 * **p2:** known issues the Android release is held for. Work sessions
   address them.
@@ -162,13 +168,16 @@ check` before it pushes, so a push that does not type-check never
 reaches CI (#350's first push failed on a comparison and a free that
 `bats check` rejects in a few minutes; CI took 15 to learn it). Setup is
 what `.github/actions/setup-bats` does: ATS2 (`patsopt` from the
-tarball it names), `lld`, the compiler built from the commit in
+tarball it names: the gmp build, whose constraint solver computes in
+infinite precision, with libgmp-dev; the -int build's solver computes in
+C `int` and accepts false statements, #594, so a check made with it
+proves less than CI's), `lld`, the compiler built from the commit in
 `.github/bats-version` (its `bootstrap/c`, `make release/bats`), and a
 clone of bats-lang/repository-prototype; then `bats check --repository
 <the clone>`, or with `BATS_REPOSITORY=<the clone>` in the environment
 and no flag (the flag wins). Nothing is written first: bats writes the
-version's facts from HEAD (above). A check takes 6 to 10 minutes on a
-cold build: run it in the background and wait for it, never push on the
+version's facts from HEAD (above). A check takes 10 to 15 minutes on a
+cold build (6 to 10 with the -int build, before the solver moved): run it in the background and wait for it, never push on the
 hope that it passes. Two bats in one checkout take turns (bats holds a
 lock on `bats.toml` and says it waits). Two checkouts or worktrees take
 turns by bats's machine-wide slots (bats-lang/bats#252), which are opt-in:
@@ -770,9 +779,9 @@ A chapter's data is checked against its CRC-32 (#529): the central
 directory record the index keeps states it (offset 16), `book_entry_sum`
 reads it by the chapter's name offset, and `take_text_sum` (in place of
 `take_text`) computes the CRC-32 of the inflated bytes, before they are
-made UTF-8 (`crc_of_borrow`, `src/crc.bats`: a table made by the proven
-byte step, tested against the proven fold in `tests/codec`, not proved
-equal), and answers no content for a mismatch or an unknown sum, so the
+made UTF-8 (`crc_of_cborrow`, `src/crc.bats`, proved: see "The CRC-32
+table method is proved" below; the piece is lent as a `barr` by array's
+`barr_of_arrx` and given back to its arena by `barr_to_arrx`), and answers no content for a mismatch or an unknown sum, so the
 chapter is `ChapterNotRead` ("Chapter N of this book could not be read")
 and the others read. libzip (`ZIP_ER_CRC`), Python's `zipfile`
 (`BadZipFile: Bad CRC-32`) and Java's `ZipFile` check the same sum at the
@@ -780,6 +789,80 @@ end of the entry. The chapter shown and the facing page of a spread are
 checked; the OPF, the container, images and the chapter reads for
 search, notes and read aloud are not (yet). `e2e/containers.spec.js`
 ("a chapter whose CRC is not its data's").
+
+### The CRC-32 table method is proved (#553), and it is the call's
+
+`crc_of_cborrow` (`src/crc.bats`) is `crc_of_borrow`'s table method over
+an array whose cells are in its type (array's `barr`, borrowed as
+`cborrow(l, n, cs)`, its `cborrow_get` giving `NTH(cs, i, v)`), and its
+type is the statement: for the cells `cs` (`CLEN(cs, n)` of them, nothing
+else known) the bytes read are a list `octets` that the cells hold
+(`HOLDS(cs, 0, octets, n)`, bytesarr's), and the register after them is
+the proven fold's (`CRCFROM(65535, 65535, octets, 65535 - high, 65535 -
+low)`, the CRC being its complement), so it cannot disagree with the
+codec; a caller that knows what the cells hold has it from
+`holds_functional`. No `praxi`, `assume` or `$UNSAFE`: the compiler checks
+
+* the table: entry i is the register `bstep` makes from zero
+  (`TABLED(cells, count)`, an `ENTRY` of four `NTH`s and the `BSTEP(0, 0,
+  i, ...)` for each i < count, kept as the cells are set, `tabled_set`,
+  by array's `setc_nth_other`; `tabled_get` finds entry k of a full
+  table);
+* the byte step (`bstep_by_table`): `BSTEP(high, low, octet, ...)` is
+  the register shifted right by 8 bits xored with the entry of the byte
+  `(low mod 256) xor octet`. It is built from arith's XOR algebra
+  (`xor_comm`, `xor_assoc`, `xor_half`, `xor_double`, #553), `xor_cat`
+  (the xor of numbers with numbers above them is the xor of both, by
+  induction on the bits, linear in the solver) and `xor_cancel`; the
+  step is linear in xor (`step1_xor`, `stepn_xor`, by cases on the
+  parities of the three low halves, the polynomial xored into none or two
+  of the three); a register whose low byte is zero shifts without the
+  polynomial (`shift8`, from `shift4` and `shift2` by `stepn_append`, each
+  statement in digits so no index nests a division: eight chained
+  `step_even` with `high/256` in their indices did not finish under the
+  infinite-precision solver, quire#594); every register has a next one
+  (`stepn_exists`, with `xor_exists`), so the step of the whole is
+  compared with the table's entry and the pure shift;
+* the loop (`crc_of_cborrow`): the invariant is `HOLDS` of the bytes read
+  so far (`holds_snoc`, by induction on the list) and `CRCFROM` of them
+  (`crcfrom_snoc`), with `table_step` giving each `BSTEP` from the table
+  read through `barr_get`.
+
+`tests/codec` still runs it on the check value of "123456789" and arrays
+of every length 1 to 300 and 4000 against the fold, as a check of the boundaries, not as the proof
+(`tests/static/accept/crc-*` and `reject/crc-*`: a shift of 8 bits whose low half is off, a table entry of another
+byte, the step by another byte's entry, a high half not shifted, a loop
+step of another byte, the register not complemented and a cell read for
+another all fail to type-check).
+
+The call is that one (`take_text_sum`, `_sum_matches` in `src/book.bats`):
+the inflated piece, an arena's `arrx(byte, l, n, arena)`, is lent as a
+`barr` by array's `barr_of_arrx`, which returns the `arrx_lent(l, n, o)`
+proof that keeps its owner (the arena's count of outstanding pieces does
+not change while it is lent, so the arena cannot be destroyed, and
+`barr_to_arrx` gives it back only as the same piece of the same arena);
+the barr is frozen, `crc_of_cborrow` reads it, it is thawed and given back
+before the piece is freed or made text. What the proof says of the call is
+that the sum compared is the CRC-32 of a list of bytes the cells hold;
+the cells are those of `barr_of_arrx`, so nothing relates them to what the
+decompressor wrote into the piece (that is outside quire's types, as the
+platform's atoms are). `crc_of_borrow` and its helpers are gone;
+`tests/codec` checks `crc_of_cborrow` against the proven fold on the check
+value of "123456789" and arrays of every length 1 to 300 and 4000, as a
+check of the boundaries. This needs array 2026.10.14.60158 or later (the
+one `bats.lock` names).
+
+What is proved, then, is that the CRC-32 compared with the entry's sum is
+`crcfrom`'s fold over the bytes the arena piece holds, as the production
+call computes it. What is trusted, not proved: array's one unsafe core
+(`barr_of_arrx` and `barr_to_arrx` are casts that keep the owner,
+`cborrow_get` reads the byte it says, tested in array's
+`tests/dynamic`), arith's C operators behind `xor_g1` and the prelude's
+`/` (tested in arith), the stored sum `book_entry_sum` reads from the
+central directory, and that the fold itself is CRC-32 (its polynomial
+0xEDB88320 and the check value of "123456789", the latter tested in
+`tests/codec`). Nothing in quire uses `praxi`, `assume` or `$UNSAFE` for
+it.
 
 ### Note popups (#414)
 
@@ -1298,6 +1381,64 @@ display equation wider than the column scrolls along it (`math[display=block]`).
 By research: every reader that shows a content document in a browser engine (Thorium,
 Readium Mobile on Android, Calibre's viewer, Foliate) leaves MathML to the engine, and Chromium
 has set MathML Core since 109; Apple Books' WebKit too. Where an engine has no math font the text falls back.
+
+What #408's tests (`e2e/math-native.spec.js`, `math-fallbacks.spec.js`, `math-layout.spec.js`,
+books in `e2e/math-books.js`, each checked by epubcheck) hold, and what they found:
+
+* **A display equation scrolls along its width only.** `math[display=block]` was `overflow: auto`
+  on both axes, and Chromium counts a glyph's font box (ascent and descent) in the scrollable
+  overflow, a few pixels beyond the equation's own box, so a display equation had a vertical
+  scroll of 4px. It is `overflow: auto hidden` with .3em above and below, so what the font
+  box adds is room inside the equation's box and a page boundary neither splits nor clips it.
+* **`dir` is the page's own attribute** (`_math_attrs`): dom's allow-list of MathML attributes
+  has none, MathML Core takes `dir` on any math element, so it is set as an HTML `dir` is
+  (`$D.Dir`): an equation is set left to right even in a Hebrew book (`math` has `direction:
+  ltr`) unless it says `dir="rtl"`.
+* **`alttext` and `altimg` are not shown when MathML is drawn**, by research: EPUB 3.3 and the
+  MathML specification make them the fallback for a system that cannot draw the math (the
+  W3C EPUB group's thread on MathML: "fallback images via the altimg attribute" for the many
+  readers that cannot render it; the DAISY knowledge base: support "depends heavily on the age
+  of the reading system", fallbacks for the old ones); no reading system researched shows the
+  fallback beside a drawn equation, and none documents that it should. The engine draws MathML
+  Core, so the picture would show every equation twice, and the text is the equation's name
+  for assistive technology, which the browser exposes. `altimg` is not an allowed attribute
+  of dom's, so no image is ever made of it.
+* **Unsupported and broken MathML degrades where it stands.** An element dom does not make
+  (`maction`, `annotation-xml`, `mstack`, `mglyph`, ...) makes none and its children go to its
+  parent; a token's text stays. A broken tree (a fraction of one child, an unknown element) is
+  drawn by the browser as it can: the words around it are not lost. (The broken book is not
+  valid MathML, so epubcheck refuses it by `RSC-005`, which its entry lists.)
+* **Accessibility.** Chromium's tree has a `MathMLMath` node for each `math`, and
+  `MathMLFraction`, `MathMLIdentifier`... for its parts (the name CDP gives the role ARIA calls
+  `math`); Quire sets no `role`, `aria-hidden` or `aria-label` on MathML.
+
+## Equations as pictures (#408)
+
+A picture of an equation (a PNG, an inline `<svg>`, an `<img src="x.svg">`) is a picture of
+text. Two decisions, by research (also in the issue):
+
+* **A picture grows with the reader's text size.** Quire drops the book's CSS (#411), so the
+  `em` heights publishers give such pictures are not there, and a picture was always its own
+  pixels. Amazon's guidelines say inline images "should be sized in em units so that they scale
+  in relation to the text around them when users adjust the font size" (quoted by Jutoh's
+  manual; a block picture is sized in px or % there), Readium CSS has no setting that scales
+  pictures (its `invert`, `darken` and `blend` flags only recolour), and a MobileRead report
+  has em-height pictures overlapping text in Readium. So a picture is its own size at the
+  default text size (18px) and is scaled by the reader's size from there (`--image-zoom`, in
+  thousandths, written by `_apply_type` in `src/settings.bats`; CSS `zoom` in `.caf:not(.fixed)
+  img`, a fixed page being fitted by its own box), kept to the column's width and the page's
+  height as before (the height is divided by the zoom, which multiplies lengths). It is the
+  same for any picture, not only equations: Quire cannot tell an equation from a diagram or a
+  photograph, and a photograph is kept to the column anyway.
+* **Black ink on no ground is drawn on paper in the dark themes.** Black on the Dark, Night and
+  Grey grounds was 1.1 to 1.8 to one (WCAG asks 3:1 for graphics). Readium CSS (Thorium) offers
+  the reader an `invert` flag for night mode that inverts every picture; Quire has no setting
+  for it and cannot tell a picture with no ground from one with colours that inversion would
+  ruin (a photograph), so a picture is drawn on white in those themes (`tint`, no new colour
+  role): a picture with a ground of its own covers it, and black ink has 21:1. The cost is a
+  white rectangle behind a transparent picture of white ink, which is rare next to the
+  typeset equation, the diagram and the line drawing; the image dimming setting dims it as
+  it dims every picture.
 
 ## The platform, in Bats
 
@@ -2047,7 +2188,7 @@ read of storage changed: each still folds, as #174 says.
   banner wraps its buttons under its message on a narrow window instead
   of squeezing Report. Over the reader it is fixed at the top while the
   reader's bars are away, and under the top bar while they are up
-  (`#bats-root:has(.rv:not(.chrome-off)) .banner`: the bar's safe inset,
+  (`.banner.under-bars`: the bar's safe inset,
   44px control and 2px, and 8px), as material.io's, Flutter's and
   Zeta's banners sit under the app bar and none draws over it;
   `e2e/storage.spec.js` raises one over the reader with its bars up and
@@ -2057,7 +2198,16 @@ read of storage changed: each still folds, as #174 says.
   over the banner (#507): while a library menu is open the Undo toast is
   drawn under its veil, and while a veiled reader panel is open (Contents,
   highlights) the banner is under the scrim; both are still up, and back
-  when the layer closes (an Undo offer lasts until dismissed, #364). A
+  when the layer closes (an Undo offer lasts until dismissed, #364). The
+  layer module says it as attributes of the element it places, as it opens
+  and closes (`_open_set`, `_modality_show` in `src/layer.bats`:
+  `data-menu` on `undo-toast`, `ui_undo_under_menu`, and `data-veil` on
+  `error-banner`, `ui_banner_under_veil`; `data-menu` on the banner is the
+  same for #507), and the rules are `#undo-toast[data-menu='1']` and
+  `#error-banner[data-veil='1']`: the first version of #556 asked
+  `#bats-root:has(...)` of both, which `tests/static/has_root.py` (#538)
+  rejects, since a `:has()` on the root that holds the chapter is
+  re-evaluated over all of it (#423). A
   panel with no veil and the screens leave them where they are (a screen
   offers an Undo of its own). `coveredByBanner` also checks every control
   of an open menu, panel, sheet or dialog, and `toastClear` every control
@@ -2227,6 +2377,64 @@ reaches the page yet (stage 3).
   16px, 12px and 12px, a plain book 16px) was checked by hand with a
   temporary attribute and is not a permanent e2e: nothing of it is visible
   until stage 3, which tests it by what the page shows.
+
+### A book's sizes reach the page (#431, stage 3)
+
+A reflowed chapter's elements that its publisher gave a size carry a
+`data-fs` (`_size_mark` in `src/reader.bats`): the element's size against a
+base, in twentieths from 10 to 60 (`proportion`, so half to three times,
+as Readium clamps), and the stylesheet `style-sizes` (`src/size_rules.bats`,
+a sheet of its own, 51 rules proven to fit its budget, each one a
+selector of 19 bytes and a value of 30) gives it
+`font-size: calc(var(--reading-size) * step / 20)`, where `--reading-size`
+is the Size setting (written by `_apply_type`). The map of a chapter's
+elements and steps is made as the chapter is loaded (`_sizes_load` after
+`_overlay_load`, in `_chapter_open`: `publisher_sizes_load`, which reads the
+chapter and its sheets again, like the measure does) and taken a name at a
+time by the render (`publisher_sizes_begin`, `publisher_sizes_step`,
+`publisher_sizes_end`: an element is known by where its name is in the
+document, and the render asks in the document's order). A fixed-layout
+page is not restyled, and a chapter's load that cannot make its map shows
+the chapter without sizes.
+
+* **In proportion (the default).** The steps are against the book's
+  dominant size (`publisher_dominant_size`), the cascade starting from the
+  browser's 16px, so the body text of every book is the Size setting
+  and a book's headings, small print, captions, notes and lead
+  paragraph keep their proportion to it (a book that sets no size has
+  no `data-fs`, and its headings are Quire's own, as before). An element is
+  marked when it was given a size or its size differs from the one it is
+  shown in (`html` and `body` are not made as elements, so a size they give
+  is given to their children: the rem trick's 62.5%).
+* **Respect the publisher's sizes** (`publisher_sizes`, `SizesInProportion |
+  SizesAsPublished`; the Look tab's switch, `publisher-sizes-switch`; the
+  device's own, kept in the "S2" record after "F" as "P" and a byte, in the
+  backup as `publisherSizes`, reset with the settings and brought back by their
+  Undo). The cascade then starts from the Size setting as the root and the
+  steps are against it: the publisher's sizes as a browser would draw them
+  with that root, an absolute size absolute (B's 9pt is 12px) and a
+  relative one relative (A's 1.6rem is the setting). Because an absolute size is
+  against the setting, the map depends on it: the chapter is shown again (at its
+  place, `reader_sizes_reload`) when the switch turns, when the Size moves
+  while it is on, and when the settings are reset or put back. A step is a
+  twentieth of the base, so a size is within 2.5% of the publisher's, and
+  one under half or over three times the Size is held there (12px at a
+  Size of 32).
+* By research (on the issue): Calibre rescales to a base font size
+  that is the most common size in the document; KOReader's two switches
+  (Embedded Style, Ignore publisher font sizes) are on or off and its
+  tracker records that ignoring sizes also drops the engine's heading
+  sizes (koreader#13295); Readium CSS keeps relative publisher sizes
+  scaled from the user's size and leaves absolute units as they are.
+* Tested: `tests/css-size` (the map: A's and B's books, the floor and the
+  ceiling, respecting) and `e2e/publisher-sizes.spec.js` (the books of
+  `e2e/size-books.js`: the body text at the setting in each at 12, 20
+  and 32, the ratios 2, 1.5, 0.8 and 1.25 in both, a size on body, on a div,
+  by html and rem and by calc(), a title page of headings, the floor and
+  ceiling, only the size read, a linked sheet, and the switch on, kept,
+  backed up, reset and undone). `e2e/publisher.spec.js`'s sizes test now expects the
+  point size inline to keep its proportion (it expected every size equal while the book's
+  sizes were dropped); the `!important` sizes are still not read.
 
 ## What allocates is linear
 
@@ -3477,6 +3685,10 @@ length, in the same page, so a slower machine slows both. What it found:
   `src/notice.bats`: `BannerAtTop`, `BannerInLibrary`, `BannerUnderBars`,
   set by `_library_shown`, `_show_reader`, `_chrome_set`, `_chrome_set_off`),
   and the stylesheet keys on `.banner.in-library` and `.banner.under-bars`.
+  Every later state of the same kind is an attribute set by the layer
+  (`data-below`, `data-menu`, `data-veil`), never a `:has()` on the root:
+  `tests/static/has_root.py` fails one (#538; #556's two rules were found
+  by it when its queue run met them).
   The two remaining `:has()` rules have small subjects (a button, a
   settings row). A key on the 5 MB chapter went from 206 to 276 ms to 21 to
   31 ms of script. What is left of a turn on a chapter of thousands of
@@ -3683,7 +3895,9 @@ a page that does not answer within 5 s, and every page of a test 15 s
 before its timeout, is captured: the frames `Debugger.pause` stops in
 (wasm ones by function and byte offset), a CPU profile when nothing
 pauses, which commands the renderer still answers, and the renderers'
-CPU time over 1 s. The capture is `stall-capture-<n>.json` in the test's
+CPU time over 1 s, each renderer's threads by state and kernel wait
+(`/proc`, #575: a renderer that answers nothing and burns nothing is
+waiting outside script) and the machine's load and free memory. The capture is `stall-capture-<n>.json` in the test's
 output (CI's `e2e-stall-captures-<group>` artifact), attached to the test, and
 summed up on stderr. `e2e/stall-capture.spec.js` checks it on pages that
 loop forever in script and in wasm.

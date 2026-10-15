@@ -399,14 +399,74 @@ export async function colours(page) {
   });
 }
 
+/** Chrome's own time, in this window and arrangement, to lay out and draw
+    the page's DOM: a copy of it, with the page's styles (the stylesheet
+    applies to a copy as to the page), put beside the page, laid out, drawn
+    for two frames, and removed. A hosted runner that is slow is slow for
+    the copy too, so what the app takes is held to a multiple of it */
+export async function bareFrameMs(page) {
+  return page.evaluate(async () => {
+    const doc = document.querySelector('[role=document][aria-label=Page]');
+    if (!doc) return 0; // no page shown: no layout to wait for
+    const frame = () => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
+    const copy = doc.cloneNode(true);
+    for (const attribute of ['id', 'role', 'aria-label', 'tabindex', 'data-gesture-region']) copy.removeAttribute(attribute);
+    for (const element of copy.querySelectorAll('[id]')) element.removeAttribute('id');
+    const box = doc.getBoundingClientRect();
+    copy.setAttribute('inert', '');
+    copy.style.cssText = `position:fixed;left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px;max-width:none;max-height:none;margin:0;z-index:-1;pointer-events:none`;
+    await frame();
+    const started = performance.now();
+    doc.parentElement.append(copy);
+    copy.getBoundingClientRect();
+    await frame();
+    const took = performance.now() - started;
+    copy.remove();
+    await frame();
+    return took;
+  });
+}
+
 /** Leaves the reader for the library, through its back arrow (in the
     bars, which hide themselves 5 s after they are shown: bringing them
-    up and clicking are tried again together, as clickControl does) */
+    up and clicking are tried again together, as clickControl does).
+
+    The page answers a tap or a click only once the task it is in has
+    ended, and the work a long chapter in columns costs the main thread
+    (the layout, the hit test) is one task of seconds, longer on a loaded
+    runner (#600: a megabyte of one word on a phone left a click of 2 s
+    tried for 20 unanswered). The wait is therefore the page's own time to
+    answer, as #522's `slow` is the layout's: what bringing the bars up
+    took (it has no timeout of its own, so its time is the page's), and,
+    after a click that was not answered, what `bareFrameMs` took (asked
+    behind the task the click waits for, so its time is that task's cost on
+    this runner now). The longest of them is the layout's (`layoutMs`); each
+    click waits three times it and a second (the open budget of
+    e2e/pathological.spec.js), and the tries last 20 s and three times it.
+    A button that is not there is still given up on after 20 s: the
+    layout's time is the page's, not the button's. */
+const BACK_CLICK_MS = 2000;
+const BACK_TRIES_MS = 20000;
+const BACK_LAYOUT_TIMES = 3;
+const BACK_ALLOWANCE_MS = 1000;
 export async function toLibrary(page) {
-  await expect(async () => {
-    await showChrome(page);
-    await page.getByRole('button', { name: 'Back to library' }).click({ timeout: 2000 });
-  }).toPass({ timeout: 20000 });
+  const started = Date.now();
+  let layoutMs = 0;
+  for (;;) {
+    const clickMs = Math.max(BACK_CLICK_MS, BACK_LAYOUT_TIMES * layoutMs + BACK_ALLOWANCE_MS);
+    try {
+      const barsAt = Date.now();
+      await showChrome(page);
+      layoutMs = Math.max(layoutMs, Date.now() - barsAt);
+      await page.getByRole('button', { name: 'Back to library' }).click({ timeout: clickMs });
+      break;
+    } catch (failure) {
+      const askedAt = Date.now();
+      await bareFrameMs(page);
+      layoutMs = Math.max(layoutMs, Date.now() - askedAt);
+      if (Date.now() - started > BACK_TRIES_MS + BACK_LAYOUT_TIMES * layoutMs) throw failure;
+    }
+  }
   await expect(libraryShown(page)).toBeVisible();
 }
 

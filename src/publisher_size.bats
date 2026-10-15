@@ -52,6 +52,16 @@ stadef SAMPLE_MAX = 16
 
 #pub datatype measured = Measured
 
+(* How a chapter's sizes are given to the page: against the book's
+   dominant size (the text of the book is the reader's size, the rest in
+   proportion), or as the publisher set them with the reader's size for the
+   root (an absolute size stays absolute) *)
+#pub datatype sizes_mode = SizesNormalised | SizesRespected
+
+(* What a chapter is read for: to tally its characters (the measure), or to
+   map the sizes of its elements (for the page) *)
+datatype chapter_purpose = Measuring | Sizing
+
 implement $P.dispose<measured>(_) = ()
 
 (* ============================================================
@@ -87,6 +97,75 @@ fn _tally_put (new_cell: tally_cell): void = let
   val () = ref_exch_elt<tally_cell>(_tally, cell)
   val+ ~TallyCell(old) = cell
 in tally_free(old) end
+
+
+(* The map of the sizes of the chapter that is being loaded (chapter_index,
+   generation), waiting for its render *)
+datavtype sizes_pending =
+  | NoSizesPending of ()
+  | {mapped:nat} SizesPending of (int, int, size_map(mapped))
+
+val _pending = ref<sizes_pending>(NoSizesPending())
+
+fn _pending_put (new_cell: sizes_pending): void = let
+  var cell: sizes_pending = new_cell
+  val () = ref_exch_elt<sizes_pending>(_pending, cell)
+in
+  case+ cell of
+  | ~NoSizesPending() => ()
+  | ~SizesPending(_, _, old) => size_map_free(old)
+end
+
+fn _pending_take (): sizes_pending = let
+  var cell: sizes_pending = NoSizesPending()
+  val () = ref_exch_elt<sizes_pending>(_pending, cell)
+in cell end
+
+(* The map of the chapter being rendered *)
+datavtype sizes_active = {mapped:nat} SizesActive of (size_map(mapped))
+
+val _active = ref<sizes_active>(SizesActive(size_map_new()))
+
+fn _active_take (): sizes_active = let
+  var cell: sizes_active = SizesActive(size_map_new())
+  val () = ref_exch_elt<sizes_active>(_active, cell)
+in cell end
+
+fn _active_put (new_cell: sizes_active): void = let
+  var cell: sizes_active = new_cell
+  val () = ref_exch_elt<sizes_active>(_active, cell)
+  val+ ~SizesActive(old) = cell
+in size_map_free(old) end
+
+(* The sizes of chapter chapter_index, loaded for generation, are the page's
+   from here until publisher_sizes_end; none are if they were not loaded *)
+#pub fn publisher_sizes_begin (chapter_index: int, generation: int): void
+
+implement publisher_sizes_begin (chapter_index, generation) =
+  case+ _pending_take() of
+  | ~NoSizesPending() => _active_put(SizesActive(size_map_new()))
+  | ~SizesPending(chapter, loaded, map) =>
+    if chapter = chapter_index then (if loaded = generation then _active_put(SizesActive(map)) else let
+        val () = size_map_free(map)
+      in _active_put(SizesActive(size_map_new())) end)
+    else let
+      val () = size_map_free(map)
+    in _active_put(SizesActive(size_map_new())) end
+
+(* The step (from 10 to 60 twentieths of the base size) of the element whose
+   name is at offset in the chapter being rendered, 0 when the publisher
+   gave it no size. The elements are asked for in the document's order *)
+#pub fn publisher_sizes_step (offset: int): int
+
+implement publisher_sizes_step (offset) = let
+  val+ ~SizesActive(map) = _active_take()
+  val @(step, rest) = size_map_take(map, offset)
+  val () = _active_put(SizesActive(rest))
+in step end
+
+#pub fn publisher_sizes_end (): void
+
+implement publisher_sizes_end () = _active_put(SizesActive(size_map_new()))
 
 (* ============================================================
    Style sheets joined
@@ -239,24 +318,50 @@ fun _entries_read {file_size:pos}{count:nat} .<count>. (serial: int, file_size: 
    One chapter
    ============================================================ *)
 
-(* The chapter's characters, tallied by the size they are set in, under
-   the sheets joined in acc (freed) and the chapter's own style elements *)
-fn _chapter_tallied {l:agz}{n:pos}{sz:nat} (xhtml: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, sz), acc: sheet_acc): void = let
+(* The chapter's elements' sizes, as the purpose says, under the sheets
+   joined in acc (freed) and the chapter's own style elements: the characters
+   tallied by the size they are set in, or the map of the sizes kept for the
+   page *)
+fn _chapter_walked {l:agz}{n:pos}{sz:nat}
+  (purpose: chapter_purpose, mode: sizes_mode, reading_size: int, chapter_index: int, generation: int,
+   xhtml: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, sz), acc: sheet_acc): void = let
   val styles = sheet_style_spans(xhtml, nodes)
   val joined = _append_spans(acc, xhtml, styles)
   val () = span_list_free(styles)
-  val ~TallyCell(tally) = _tally_take()
+  (* the roots of the sizes: where they start, and what they are against *)
+  val initial = (case+ mode of
+    | SizesNormalised() => size_of_int(16000)
+    | SizesRespected() => size_of_int(reading_size * 1000)): size_computed
+  val base = (case+ mode of
+    | SizesNormalised() => size_of_int(!_dominant)
+    | SizesRespected() => size_of_int(reading_size * 1000)): size_computed
 in
-  case+ joined of
-  | ~NoSheets() => _tally_put(TallyCell(chapter_tally_unstyled(xhtml, nodes, tally)))
-  | ~SheetsHeld(owner, held, size) => let
-      val @(frozen, sheet) = $A.freeze<byte>(held)
-      val ~SheetRead(_, _, rules) = sheet_rules_read(sheet, size)
-      val tally = chapter_tally(xhtml, nodes, sheet, rules, tally)
-      val () = css_rules_free(rules)
-      val () = $A.drop<byte>(frozen, sheet)
-      val () = piece_free(owner, $A.thaw<byte>(frozen))
-    in _tally_put(TallyCell(tally)) end
+  case+ purpose of
+  | Measuring() => let
+      val ~TallyCell(tally) = _tally_take()
+    in
+      case+ joined of
+      | ~NoSheets() => _tally_put(TallyCell(chapter_tally_unstyled(xhtml, nodes, tally)))
+      | ~SheetsHeld(owner, held, size) => let
+          val @(frozen, sheet) = $A.freeze<byte>(held)
+          val ~SheetRead(_, _, rules) = sheet_rules_read(sheet, size)
+          val tally = chapter_tally(xhtml, nodes, sheet, rules, tally)
+          val () = css_rules_free(rules)
+          val () = $A.drop<byte>(frozen, sheet)
+          val () = piece_free(owner, $A.thaw<byte>(frozen))
+        in _tally_put(TallyCell(tally)) end
+    end
+  | Sizing() =>
+    (case+ joined of
+     | ~NoSheets() => _pending_put(SizesPending(chapter_index, generation, chapter_size_map_unstyled(xhtml, nodes, initial, base)))
+     | ~SheetsHeld(owner, held, size) => let
+         val @(frozen, sheet) = $A.freeze<byte>(held)
+         val ~SheetRead(_, _, rules) = sheet_rules_read(sheet, size)
+         val map = chapter_size_map(xhtml, nodes, sheet, rules, initial, base)
+         val () = css_rules_free(rules)
+         val () = $A.drop<byte>(frozen, sheet)
+         val () = piece_free(owner, $A.thaw<byte>(frozen))
+       in _pending_put(SizesPending(chapter_index, generation, map)) end)
 end
 
 (* Whether the sheets a chapter links to are in the joined sheets already,
@@ -280,20 +385,34 @@ fn _links_found {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len 
 
 (* Whether a chapter of size bytes is over what the sample may still read
    (only the first reading of a chapter spends it) *)
-fn _over_budget {pass:nat} (links: link_pass(pass), size: int): bool =
-  case+ links of
-  | LinksKnown() => false
-  | LinksUnknown() => size > !_budget
+fn _over_budget {pass:nat} (purpose: chapter_purpose, links: link_pass(pass), size: int): bool =
+  case+ purpose of
+  | Sizing() => false
+  | Measuring() =>
+    (case+ links of
+     | LinksKnown() => false
+     | LinksUnknown() => size > !_budget)
 
-fn _budget_spend {pass:nat} (links: link_pass(pass), size: int): void =
-  case+ links of
-  | LinksKnown() => ()
-  | LinksUnknown() => !_budget := !_budget - size
+fn _budget_spend {pass:nat} (purpose: chapter_purpose, links: link_pass(pass), size: int): void =
+  case+ purpose of
+  | Sizing() => ()
+  | Measuring() =>
+    (case+ links of
+     | LinksKnown() => ()
+     | LinksUnknown() => !_budget := !_budget - size)
+
+(* Whether a measure has been replaced by another (the sizing of a chapter
+   is dropped by the reader, which checks its own generation) *)
+fn _stale (purpose: chapter_purpose, generation: int): bool =
+  case+ purpose of
+  | Sizing() => false
+  | Measuring() => generation <> !_generation
 
 (* Measures chapter chapter_index of book serial *)
 fun _chapter_measure {chapter_index:nat}{pass:nat | pass <= 1} .<pass>.
-  (serial: int, chapter_index: int chapter_index, generation: int, acc: sheet_acc, links: link_pass(pass)): $P.promise(measured, $P.Chained) =
-  if generation <> !_generation then let
+  (purpose: chapter_purpose, mode: sizes_mode, reading_size: int,
+   serial: int, chapter_index: int chapter_index, generation: int, acc: sheet_acc, links: link_pass(pass)): $P.promise(measured, $P.Chained) =
+  if _stale(purpose, generation) then let
     val () = _acc_free(acc)
   in $P.ret<measured>(Measured()) end
   else
@@ -317,29 +436,29 @@ fun _chapter_measure {chapter_index:nat}{pass:nat | pass <= 1} .<pass>.
               case+ take_text_sum(inflated, chapter_sum) of
               | ~NoContentBytes() => let val () = _acc_free(acc) in $P.ret<measured>(Measured()) end
               | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) =>
-                if generation <> !_generation then let
+                if _stale(purpose, generation) then let
                   val () = piece_free(xhtml_owner, xhtml)
                   val () = _acc_free(acc)
                 in $P.ret<measured>(Measured()) end
-                else if _over_budget(links, xhtml_size) then let
+                else if _over_budget(purpose, links, xhtml_size) then let
                   val () = piece_free(xhtml_owner, xhtml)
                   val () = _acc_free(acc)
                 in $P.ret<measured>(Measured()) end
                 else let
-                  val () = _budget_spend(links, xhtml_size)
+                  val () = _budget_spend(purpose, links, xhtml_size)
                   val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
                   val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
                   val search = _links_found(serial, file_size, name_offset, dir_len, xhtml_bytes, xhtml_size, nodes, links)
                 in
                   case+ search of
                   | ~LinksSkipped() => let
-                      val () = _chapter_tallied(xhtml_bytes, nodes, acc)
+                      val () = _chapter_walked(purpose, mode, reading_size, chapter_index, generation, xhtml_bytes, nodes, acc)
                       val () = $X.free_nodes(nodes)
                       val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
                       val () = piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen))
                     in $P.ret<measured>(Measured()) end
                   | ~LinksFound(~LinksNil()) => let
-                      val () = _chapter_tallied(xhtml_bytes, nodes, acc)
+                      val () = _chapter_walked(purpose, mode, reading_size, chapter_index, generation, xhtml_bytes, nodes, acc)
                       val () = $X.free_nodes(nodes)
                       val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
                       val () = piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen))
@@ -350,10 +469,28 @@ fun _chapter_measure {chapter_index:nat}{pass:nat | pass <= 1} .<pass>.
                       val () = piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen))
                     in
                       $P.and_then<sheet_acc><measured>(_entries_read(serial, file_size, _entries_reversed(rest, LinksCons(data_offset, data_size, method, LinksNil())), acc), llam(joined) =>
-                        _chapter_measure(serial, chapter_index, generation, joined, LinksKnown()))
+                        _chapter_measure(purpose, mode, reading_size, serial, chapter_index, generation, joined, LinksKnown()))
                     end
                 end)
           end))
+
+(* Reads chapter chapter_index of book serial for the page, and keeps the map
+   of its elements' sizes for publisher_sizes_begin: against the book's
+   dominant size (reading_size is not used), or as the publisher set them
+   with root reading_size pixels. Nothing is kept when the book has no
+   dominant size measured *)
+#pub fun publisher_sizes_load {chapter_index:nat}
+  (serial: int, chapter_index: int chapter_index, generation: int, mode: sizes_mode, reading_size: int): $P.promise(measured, $P.Chained)
+
+implement publisher_sizes_load (serial, chapter_index, generation, mode, reading_size) = let
+  val () = _pending_put(NoSizesPending())
+in
+  case+ mode of
+  | SizesNormalised() =>
+    if !_dominant <= 0 then $P.ret<measured>(Measured())
+    else _chapter_measure(Sizing(), mode, reading_size, serial, chapter_index, generation, NoSheets(), LinksUnknown())
+  | SizesRespected() => _chapter_measure(Sizing(), mode, reading_size, serial, chapter_index, generation, NoSheets(), LinksUnknown())
+end
 
 (* ============================================================
    The sample
@@ -377,7 +514,7 @@ fun _measure_from {count:nat | count <= SAMPLE_MAX}{k:nat | k <= SAMPLE_MAX} .<S
     val index = g1ofg0(_sampled(k, total))
   in
     if index >= 0 then
-      $P.and_then<measured><measured>(_chapter_measure(serial, index, generation, NoSheets(), LinksUnknown()), llam(_) =>
+      $P.and_then<measured><measured>(_chapter_measure(Measuring(), SizesNormalised(), 0, serial, index, generation, NoSheets(), LinksUnknown()), llam(_) =>
         _measure_from(serial, total, count, k + 1, generation))
     else _measure_from(serial, total, count, k + 1, generation)
   end

@@ -169,6 +169,18 @@ for d in "$ROOT"/tests/static/glyphs/reject/*/; do
   else echo "FAIL glyphs/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/glyphs-$n.log"; fail=1; fi
 done
 
+# No :has() on an ancestor of the chapter (has_root.py, quire#538): the
+# app's own, and the checker's fixtures
+if python3 "$ROOT/tests/static/has_root.py" "$ROOT/src" > "$TMP/has_root.log" 2>&1; then echo "ok   has_root: $(tail -1 "$TMP/has_root.log")"
+else echo "FAIL has_root:"; cat "$TMP/has_root.log"; fail=1; fi
+for d in "$ROOT"/tests/static/has_root/reject/*/; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  if python3 "$ROOT/tests/static/has_root.py" "$d" > "$TMP/has_root-$n.log" 2>&1; then echo "FAIL has_root/reject/$n: should be rejected"; fail=1
+  elif grep -qF -- "$(cat "$d/expect")" "$TMP/has_root-$n.log"; then echo "ok   has_root/reject/$n"
+  else echo "FAIL has_root/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/has_root-$n.log"; fail=1; fi
+done
+
 # A choice of more than three is not cycled by a button (next.py,
 # quire#377): the app's own, and the checker's fixtures
 if python3 "$ROOT/tests/static/next.py" "$ROOT/src" > "$TMP/next.log" 2>&1; then echo "ok   next: $(tail -1 "$TMP/next.log")"

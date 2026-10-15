@@ -334,6 +334,29 @@ fn _fullscreen_code (choice: fullscreen_choice): [code:nat | code <= 1] int code
 fn _fullscreen_of_code (code: int): fullscreen_choice =
   if code = 1 then FullscreenOn() else FullscreenOff()
 
+(* How a book's own sizes reach the page (quire#431): kept in proportion to
+   the reader's text size, whatever size the book set its text in, or as
+   the publisher set them, the reader's size being the root they are
+   relative to ("Respect the publisher's sizes"). The device's own *)
+#pub datatype publisher_sizes = SizesInProportion | SizesAsPublished
+
+fn _sizes_code (choice: publisher_sizes): [code:nat | code <= 1] int code =
+  case+ choice of SizesInProportion() => 0 | SizesAsPublished() => 1
+
+fn _sizes_of_code (code: int): publisher_sizes =
+  if code = 1 then SizesAsPublished() else SizesInProportion()
+
+val _sizes = ref<publisher_sizes>(SizesInProportion())
+
+#pub fn set_sizes_get (): publisher_sizes
+implement set_sizes_get () = !_sizes
+#pub fn set_sizes_set (choice: publisher_sizes): void
+implement set_sizes_set (choice) = !_sizes := choice
+#pub fn sizes_code (choice: publisher_sizes): [code:nat | code <= 1] int code
+implement sizes_code (choice) = _sizes_code(choice)
+#pub fn sizes_of_code (code: int): publisher_sizes
+implement sizes_of_code (code) = _sizes_of_code(code)
+
 val _speech_rate = ref<speech_rate>(RateNormal())
 val _brightness = ref<brightness_choice>(BrightnessSystem())
 val _brightness_level = ref<int>(50)
@@ -670,6 +693,20 @@ fn _fullscreen_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int 
   else if byte2int0($A.get<byte>(record, at)) <> 70 then !_fullscreen := FullscreenOff()
   else !_fullscreen := _fullscreen_of_code(byte2int0($A.get<byte>(record, at + 1)))
 
+(* "P" and the sizes' byte at record[at, at + 2) *)
+fn _sizes_write {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 2 > n then ()
+  else let
+    val () = $A.write_byte(record, at, 80)
+  in $A.write_byte(record, at + 1, _sizes_code(!_sizes)) end
+
+(* The sizes' byte after "P" at record[at]: checked here, once; in
+   proportion when there is none (a record written before it) *)
+fn _sizes_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 2 > n then !_sizes := SizesInProportion()
+  else if byte2int0($A.get<byte>(record, at)) <> 80 then !_sizes := SizesInProportion()
+  else !_sizes := _sizes_of_code(byte2int0($A.get<byte>(record, at + 1)))
+
 (* ============================================================
    Applying
    ============================================================ *)
@@ -692,8 +729,8 @@ fn _put_text {l:agz}{n:pos}{text_len:nat}{position:nat | position + text_len <= 
 fn _margin_px (margin: set_margin): [px:nat | px <= 64] int px =
   if margin = 0 then 8 else if margin = 1 then 16 else if margin = 2 then 24 else if margin = 3 then 40 else 64
 
-fn _put_font {l:agz}{position:nat | position + 34 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, font: set_font)
+fn _put_font {l:agz}{position:nat | position + 34 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, font: set_font)
   : [stop:nat | stop <= position + 34] int stop =
   case+ font of
   | Literata() => _put_text(buf, position, "Literata,Georgia,serif")
@@ -718,18 +755,32 @@ fn _put_hundredths {l:agz}{n:pos}{position:nat | position + 15 <= n}{hundredths:
     : [padded:nat | padded <= position + 3] int padded
 in $S.int_to_str(buf, next, n, hundredths) end
 
-fn _put_align {l:agz}{position:nat | position + 7 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, align: set_align)
+(* thousandths as a decimal at buf[position, stop): 1778 -> "1.778" *)
+fn _put_thousandths {l:agz}{n:pos}{position:nat | position + 25 <= n}{thousandths:nat}
+  (buf: !$A.arr(byte, l, n), position: int position, n: int n, thousandths: int thousandths)
+  : [stop:nat | stop <= position + 25] int stop = let
+  val whole = thousandths / 1000
+  val rest = thousandths - whole * 1000
+  val next = $S.int_to_str(buf, position, n, whole)
+  val next = _put_text(buf, next, ".")
+  val next = (if rest < 100 then _put_text(buf, next, "0") else next)
+    : [padded:nat | padded <= position + 13] int padded
+  val next = (if rest < 10 then _put_text(buf, next, "0") else next)
+    : [padded:nat | padded <= position + 14] int padded
+in $S.int_to_str(buf, next, n, rest) end
+
+fn _put_align {l:agz}{position:nat | position + 7 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, align: set_align)
   : [stop:nat | stop <= position + 7] int stop =
   case+ align of Justified() => _put_text(buf, position, "justify") | Ragged() => _put_text(buf, position, "start")
 
-fn _put_hyphens {l:agz}{position:nat | position + 6 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, hyphens: set_hyph)
+fn _put_hyphens {l:agz}{position:nat | position + 6 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, hyphens: set_hyph)
   : [stop:nat | stop <= position + 6] int stop =
   case+ hyphens of Hyphenated() => _put_text(buf, position, "auto") | NoHyphens() => _put_text(buf, position, "manual")
 
-fn _put_dim_images {l:agz}{position:nat | position + 80 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, dim_images: set_dim)
+fn _put_dim_images {l:agz}{position:nat | position + 80 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, dim_images: set_dim)
   : [stop:nat | stop <= position + 80] int stop =
   case+ dim_images of
   | ImagesDimmed() =>
@@ -743,8 +794,8 @@ fn _put_dim_images {l:agz}{position:nat | position + 80 <= 1024}
    area's sides (style.bats), so two of 50vw would not fit beside a
    cutout, and two of 40vw fit while the sides take under a fifth of
    it; three never fit (#275) *)
-fn _put_columns {l:agz}{position:nat | position + 120 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, columns: set_cols)
+fn _put_columns {l:agz}{position:nat | position + 120 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, columns: set_cols)
   : [stop:nat | stop <= position + 120] int stop =
   case+ columns of
   | TwoColumns() => _put_text(buf, position, ".caf{column-width:40vw}.sprobe{display:block}")
@@ -762,8 +813,8 @@ fn _put_columns {l:agz}{position:nat | position + 120 <= 1024}
    are the page's own (two transparent bands, fixed over them), so a
    tap or a drag there is still the page's. A vertical book and a fixed
    page are never scrolled, and keep their own boxes *)
-fn _put_scrolled {l:agz}{position:nat | position + 440 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, scrolled: set_flow)
+fn _put_scrolled {l:agz}{position:nat | position + 440 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, scrolled: set_flow)
   : [stop:nat | stop <= position + 440] int stop =
   if flow_scrolled(scrolled) then _put_text(buf, position,
     ".caf{overflow:hidden auto;column-width:auto}.sprobe{display:none}.caf:not(.vertical,.vertical-lr,.fixed){padding-block:0;margin-block:var(--page-top) var(--page-bottom)}.caf:not(.vertical,.vertical-lr,.fixed)::before,.caf:not(.vertical,.vertical-lr,.fixed)::after{content:'';position:fixed;left:0;right:0;top:0;height:var(--page-top)}.caf:not(.vertical,.vertical-lr,.fixed)::after{top:auto;bottom:0;height:var(--page-bottom)}")
@@ -771,8 +822,8 @@ fn _put_scrolled {l:agz}{position:nat | position + 440 <= 1024}
 
 (* A ruby's annotations hidden: its rt and rtc (an rp is not shown
    where ruby is, by the browser's own sheet). Layout, not colour *)
-fn _put_ruby {l:agz}{position:nat | position + 30 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, ruby: set_ruby)
+fn _put_ruby {l:agz}{position:nat | position + 30 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, ruby: set_ruby)
   : [stop:nat | stop <= position + 30] int stop =
   case+ ruby of
   | RubyHidden() => _put_text(buf, position, ".caf rt,.caf rtc{display:none}")
@@ -782,28 +833,36 @@ fn _put_ruby {l:agz}{position:nat | position + 30 <= 1024}
 fn _apply_type (): void = let
   val current = !_set
   val ruby = set_ruby_get()
-  val buf = $A.alloc<byte>(1024)
-  val next = _put_text(buf, 0, ".caf{font-size:")
-  val next = $S.int_to_str(buf, next, 1024, current.size)
+  val buf = $A.alloc<byte>(1280)
+  (* the pictures grow with the text: 1 at the default size of 18px, so a
+     picture is its own size there and scales as the size does (reader_rules'
+     `.caf:not(.fixed) img`) *)
+  val next = _put_text(buf, 0, ".caf{--image-zoom:")
+  val next = _put_thousandths(buf, next, 1280, (current.size * 1000) / 18)
+  val next = _put_text(buf, next, ";font-size:")
+  val next = $S.int_to_str(buf, next, 1280, current.size)
+  (* the size the book's sizes (data-fs, style-sizes) are twentieths of *)
+  val next = _put_text(buf, next, "px;--reading-size:")
+  val next = $S.int_to_str(buf, next, 1280, current.size)
   val next = _put_text(buf, next, "px;line-height:")
-  val next = _put_tenths(buf, next, 1024, current.line_height)
+  val next = _put_tenths(buf, next, 1280, current.line_height)
   val next = _put_text(buf, next, ";font-family:")
   val next = _put_font(buf, next, current.font)
   val next = _put_text(buf, next, ";letter-spacing:")
-  val next = _put_hundredths(buf, next, 1024, current.letter_spacing)
+  val next = _put_hundredths(buf, next, 1280, current.letter_spacing)
   val next = _put_text(buf, next, "em;word-spacing:")
-  val next = _put_hundredths(buf, next, 1024, current.word_spacing)
+  val next = _put_hundredths(buf, next, 1280, current.word_spacing)
   val next = _put_text(buf, next, "em}.caf>*{padding-left:")
-  val next = $S.int_to_str(buf, next, 1024, _margin_px(current.margin))
+  val next = $S.int_to_str(buf, next, 1280, _margin_px(current.margin))
   val next = _put_text(buf, next, "px;padding-right:")
-  val next = $S.int_to_str(buf, next, 1024, _margin_px(current.margin))
+  val next = $S.int_to_str(buf, next, 1280, _margin_px(current.margin))
   val next = _put_text(buf, next, "px}.caf p{text-align:")
   val next = _put_align(buf, next, current.align)
   val next = _put_text(buf, next, ";hyphens:")
   val next = _put_hyphens(buf, next, current.hyphens)
   (* logical, so in vertical text it is the space beside a paragraph *)
   val next = _put_text(buf, next, ";margin-block-end:")
-  val next = _put_tenths(buf, next, 1024, current.paragraph_spacing)
+  val next = _put_tenths(buf, next, 1280, current.paragraph_spacing)
   val next = _put_text(buf, next, "em}")
   (* a bright picture glares on the dark theme's ground *)
   val next = _put_dim_images(buf, next, current.dim_images)
@@ -910,6 +969,7 @@ fn _show_controls (): void = let
   val () = _pressed("justify-switch", align_code(current.align) = align_code(Justified()))
   val () = _pressed("hyphenation-switch", hyph_code(current.hyphens) = hyph_code(Hyphenated()))
   val () = _pressed("dim-images-switch", dim_code(current.dim_images) = dim_code(ImagesDimmed()))
+  val () = _pressed("publisher-sizes-switch", _sizes_code(!_sizes) = _sizes_code(SizesAsPublished()))
   val taps = taps_code(current.tap_zones)
   val () = _pressed("taps-sides", taps = taps_code(SideZones()))
   val () = _pressed("taps-forward", taps = taps_code(ForwardZones()))
@@ -945,7 +1005,8 @@ in ui_text_buf("word-value", buf, next) end
    brightness and the rotation lock, a byte each, and the voices kept
    (their count, then each one's code and name, each after its length),
    then "N" (78) and a book narration's speed and skipping, a byte each,
-   then "F" (70) and full screen's byte.
+   then "F" (70) and full screen's byte, then "P" (80) and the byte of
+   whether a book's sizes are the publisher's (quire#431).
    ("S1" was the first 8; a record of "S2" without the last bytes has
    their defaults.) *)
 fn _save (sort: int): void = let
@@ -953,12 +1014,13 @@ fn _save (sort: int): void = let
   val voices = _voices_take()
   val+ @VoicesCell(choices, voice_count) = voices
   val voices_size = _voices_size(choices)
-  val record_size = 24 + voices_size + 3 + 2
+  val record_size = 24 + voices_size + 3 + 2 + 2
   val record = $A.alloc<byte>(record_size)
   val () = _voices_write(choices, record, record_size, 24)
   val () = $A.write_byte(record, 23, voice_count)
   val () = _narration_write(record, record_size, 24 + voices_size)
   val () = _fullscreen_write(record, record_size, 24 + voices_size + 3)
+  val () = _sizes_write(record, record_size, 24 + voices_size + 5)
   prval () = fold@(voices)
   val () = _voices_put(voices)
   val () = $A.write_byte(record, 20, _rate_code(!_speech_rate))
@@ -1211,6 +1273,7 @@ fn _reset (): void = let
   val () = !_brightness_level := 50
   val () = !_rotation := RotationFree()
   val () = !_fullscreen := FullscreenOff()
+  val () = !_sizes := SizesInProportion()
   val () = !_narration_speed := 4
   val () = !_narration_notes := NotesSkipped()
   var aside: voices_cell = _voices_take()
@@ -1232,6 +1295,7 @@ implement set_reset_undoable (how) = let
   val brightness_level_before = !_brightness_level
   val rotation_before = !_rotation
   val fullscreen_before = !_fullscreen
+  val sizes_before = !_sizes
   val speed_before = !_narration_speed
   val notes_before = !_narration_notes
   val () = _reset()
@@ -1247,6 +1311,7 @@ in
         val () = !_brightness_level := brightness_level_before
         val () = !_rotation := rotation_before
         val () = !_fullscreen := fullscreen_before
+        val () = !_sizes := sizes_before
         val () = !_narration_speed := speed_before
         val () = !_narration_notes := notes_before
         var aside: voices_cell = VoicesCell(VoiceChoicesEnd(), 0)
@@ -1367,6 +1432,7 @@ in
         val voices_end = 24 + _voices_size(voices_read)
         val () = _narration_read(record, n, voices_end)
         val () = _fullscreen_read(record, n, voices_end + 3)
+        val () = _sizes_read(record, n, voices_end + 5)
         val () = _voices_put(VoicesCell(voices_read, voices_read_count))
         val () = $A.free<byte>(record)
         val () = !_set := @{ size = size, line_height = line_height, margin = margin, font = font,

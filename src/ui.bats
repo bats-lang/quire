@@ -935,6 +935,26 @@ implement ui_swatch_btn(parent, id, class_name, name) = _control_literal(parent,
 
 implement ui_banner_below_bar (below) = _set_attr("error-banner", $D.Data("below"), (if below then "1" else "0"): [value_len:pos | value_len < 256] string value_len)
 
+(* Whether a menu opened from the library is up (#507, #538): the layer
+   module says it as the menus open and close, so the stylesheet keys the
+   banner's place on this attribute of the banner itself and not on a :has()
+   over #bats-root, which Blink re-evaluates over the whole chapter (#423) *)
+#pub fn ui_banner_under_menu (under: bool): void
+
+implement ui_banner_under_menu (under) = _set_attr("error-banner", $D.Data("menu"), (if under then "1" else "0"): [value_len:pos | value_len < 256] string value_len)
+
+(* Whether a reader panel's veil is up (#556, #538): the banner is under it,
+   and whether a library menu is up, the Undo toast is. Both are said by the
+   layer module as the overlays change, as attributes of the element they
+   place, so the stylesheet asks no :has() of #bats-root (#423) *)
+#pub fn ui_banner_under_veil (under: bool): void
+
+implement ui_banner_under_veil (under) = _set_attr("error-banner", $D.Data("veil"), (if under then "1" else "0"): [value_len:pos | value_len < 256] string value_len)
+
+#pub fn ui_undo_under_menu (under: bool): void
+
+implement ui_undo_under_menu (under) = _set_attr("undo-toast", $D.Data("menu"), (if under then "1" else "0"): [value_len:pos | value_len < 256] string value_len)
+
 (* A pushed screen's top bar (quire#502; Android's settings and Material
    3's small top app bar: a navigation icon and the title; iOS pushes a
    screen with a back item, and keeps Done for a sheet): a Back icon
@@ -2279,6 +2299,7 @@ implement ui_sync_offer_control (bytes, n, at) = _sync_offer_control_from(bytes,
   | RubyShow
   | RubyHide
   | DimImagesSwitch
+  | PublisherSizesSwitch
   | TapsSides
   | TapsForward
   | TapsOneHand
@@ -2314,6 +2335,7 @@ implement typography_control_id (control) =
   | RubyShow() => "ruby-show"
   | RubyHide() => "ruby-hide"
   | DimImagesSwitch() => "dim-images-switch"
+  | PublisherSizesSwitch() => "publisher-sizes-switch"
   | TapsSides() => "taps-sides"
   | TapsForward() => "taps-forward"
   | TapsOneHand() => "taps-one-hand"
@@ -2348,7 +2370,8 @@ fn _typography_control_after (control: typography_control): $R.option(typography
   | HyphenationSwitch() => $R.some(RubyShow())
   | RubyShow() => $R.some(RubyHide())
   | RubyHide() => $R.some(DimImagesSwitch())
-  | DimImagesSwitch() => $R.some(TapsSides())
+  | DimImagesSwitch() => $R.some(PublisherSizesSwitch())
+  | PublisherSizesSwitch() => $R.some(TapsSides())
   | TapsSides() => $R.some(TapsForward())
   | TapsForward() => $R.some(TapsOneHand())
   | TapsOneHand() => $R.some(VolumeKeysTurn())
@@ -2375,7 +2398,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_typography_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(typography_control)
-implement ui_typography_control (bytes, n, at) = _typography_control_from(bytes, n, at, FontLiterata(), 30)
+implement ui_typography_control (bytes, n, at) = _typography_control_from(bytes, n, at, FontLiterata(), 40)
 
 (* The reading settings sheet's tabs (#288), each by its tab's id
    (sheet_tab_control_id); sheet_tab_panel_id is the panel it shows *)

@@ -10,7 +10,7 @@ staload "sheet.sats"
 staload "declarations.sats"
 staload "page_size.sats"
 
-#pub fn reader_rules {left:nat | left >= 14160} (sheet: sheet(left, false, false)): [after:nat | after >= left - 14160] sheet(after, false, false)
+#pub fn reader_rules {left:nat | left >= 14800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 14800] sheet(after, false, false)
 
 (* The bars and title, from .rv on *)
 fn reader_rules_bars_and_title {left:nat | left >= 1730} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1730] sheet(after, false, false) = let
@@ -209,6 +209,18 @@ fn reader_rules_page_indicator_and_footer {left:nat | left >= 2400} (sheet: shee
   val sheet = rule(sheet, ".caf")
   val sheet = lay(sheet, Flex(), "1")
   val sheet = clips(sheet)
+  (* a layer of its own (quire#546): the page's old paint is dropped with
+     the layer's tiles when a layout takes its text away (Auto's two
+     columns at 1024 px, then Scroll). On the page's own tiles Chrome
+     invalidated a line end's rectangle without the last pixel of the
+     glyph's LCD anti-aliasing, and that pixel of the layout before stayed
+     on the screen, until the page was painted whole again (a scroll does
+     not); 3 runs in 100 of relaunch.spec.js on Chrome for Testing 145
+     with LCD text, none in 100 with the layer. will-change:scroll-position
+     is the hint for a box that scrolls, and unlike contain:paint, a
+     transform or a will-change:transform it does not make the page the
+     containing block of the fixed bands in Scroll (_put_scrolled) *)
+  val sheet = lay(sheet, WillChange(), "scroll-position")
   val sheet = lay(sheet, BoxSizing(), "border-box")
   (* the page's width and height, whole pixels: only a page_extent(1) gives their text (page_size.bats) *)
   val () = raw(sheet, page_width_rule(RoundedDown()))
@@ -323,7 +335,7 @@ fn reader_rules_book_text {left:nat | left >= 1298} (sheet: sheet(left, false, f
 in sheet end
 
 (* The vertical fixed and notes, from .caf.rtl on *)
-fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 1602} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1602] sheet(after, false, false) = let
+fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 2242} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2242] sheet(after, false, false) = let
   (* right to left, the page itself: its columns go on to the left, and
      a spread's first page is the right one *)
   val sheet = rule(sheet, ".caf.rtl")
@@ -407,6 +419,23 @@ fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 1602} (sheet: sheet
   val sheet = rule(sheet, ".caf math[display=block]")
   val sheet = scrolling(sheet)
   val sheet = lay(sheet, MaxWidth(), "100%")
+  val sheet = prose_margin(sheet, Padding(), ProseHalf(), ProseNone())
+  val sheet = close(sheet)
+  (* a picture is sized as the text is: the size it has at the default size
+     of the text, scaled by the reader's size (--image-zoom, settings.bats'
+     _apply_type); the room it may take is the page's, so its largest height
+     is divided by the zoom, which multiplies lengths. A fixed page is
+     fitted by its box's own zoom *)
+  val sheet = rule(sheet, ".caf:not(.fixed) img")
+  val sheet = lay(sheet, Zoom(), "var(--image-zoom,1)")
+  val sheet = capped_zoomed(sheet)
+  val sheet = close(sheet)
+  (* a picture of black ink on no ground (a typeset equation, a diagram) is
+     drawn on paper in the themes with a dark ground, where black would be
+     lost; a picture with a ground of its own covers the paper. By research
+     (CLAUDE.md, "Equations as pictures") *)
+  val sheet = rule(sheet, ".th-dark .caf img,.th-night .caf img,.th-grey .caf img")
+  val sheet = tint(sheet, true, 100)
   val sheet = close(sheet)
   (* an audio or video element is played, with the browser's controls: no
      wider than the column; a video no taller than the page, as a picture *)

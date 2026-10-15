@@ -68,8 +68,10 @@ fn _is_name (code: int): bool =
   else if code >= 48 then code <= 57
   else code = 45
 
-(* a size from 1 px to the most *)
-fn _as_size (value: int): size_computed = let
+(* value in thousandths of a pixel, held from a pixel to a thousand *)
+#pub fun size_of_int (value: int): size_computed
+
+implement size_of_int (value) = let
   val indexed = g1ofg0(value)
 in if indexed < 1000 then 1000 else if indexed > 1000000 then 1000000 else indexed end
 
@@ -380,8 +382,65 @@ implement tally_dominant {count} (tally) = let
 in
   case+ tally of
   | TallyNil() => 16000
-  | TallyCons(_, _, _) => _as_size(walk(tally, 0, ~1))
+  | TallyCons(_, _, _) => size_of_int(walk(tally, 0, ~1))
 end
+
+(* ============================================================
+   The map: which elements the publisher gave a size, and how big
+   ============================================================ *)
+
+(* The elements that have a font-size of their own (a rule, an inline
+   style or a size attribute), each by where its name is in the document
+   (a name's offset is the element's alone) and its size in twentieths of
+   the base size, in the document's order *)
+#pub datavtype size_map(count:int) =
+  | MapNil(0) of ()
+  | {count:nat} MapCons(count + 1) of (int, int, size_map(count))
+
+#pub fun size_map_new (): size_map(0)
+
+implement size_map_new () = MapNil()
+
+#pub fun size_map_free {count:nat} (map: size_map(count)): void
+
+implement size_map_free {count} (map) = let
+  fun walk {count:nat} .<count>. (map: size_map(count)): void =
+    case+ map of
+    | ~MapNil() => ()
+    | ~MapCons(_, _, rest) => walk(rest)
+in walk(map) end
+
+fun _map_reversed {a,b:nat} .<a>. (map: size_map(a), onto: size_map(b)): size_map(a + b) =
+  case+ map of
+  | ~MapNil() => onto
+  | ~MapCons(offset, step, rest) => _map_reversed(rest, MapCons(offset, step, onto))
+
+fn _map_added {m:nat} (map: size_map(m), add: bool, offset: int, step: int): [more:nat] size_map(more) =
+  if add then MapCons(offset, step, map) else map
+
+#pub fun size_map_count {count:nat} (map: !size_map(count)): int count
+
+implement size_map_count {count} (map) = let
+  fun walk {count:nat} .<count>. (map: !size_map(count)): int count =
+    case+ map of
+    | MapNil() => 0
+    | MapCons(_, _, rest) => 1 + walk(rest)
+in walk(map) end
+
+(* The step of the element whose name is at offset, 0 when the publisher
+   gave it no size; the entries before it are passed over (the elements
+   are asked for in the document's order), and the one found *)
+#pub fun size_map_take {count:nat} (map: size_map(count), offset: int): [rest:nat] @(int, size_map(rest))
+
+implement size_map_take {count} (map, offset) = let
+  fun walk {count:nat} .<count>. (map: size_map(count), offset: int): [rest:nat] @(int, size_map(rest)) =
+    case+ map of
+    | ~MapNil() => @(0, MapNil())
+    | ~MapCons(each, step, rest) =>
+      if each < offset then walk(rest, offset)
+      else if each = offset then @(step, rest)
+      else @(0, MapCons(each, step, rest))
+in walk(map, offset) end
 
 (* ============================================================
    Counting a chapter's characters by size
@@ -409,6 +468,10 @@ fn _is_uncounted {l:agz}{n:pos}{at,len:nat | at + len <= n}
   else if _is_word(data, at, len, "title", 5) then true
   else if _is_word(data, at, len, "rt", 2) then true
   else _is_word(data, at, len, "rp", 2)
+
+(* What a walk gathers: the characters by size (the measure), or the map of
+   the elements' sizes against a base *)
+#pub datatype walk_goal = GoalTally | GoalSizes
 
 (* The first of three readings that found a size, the others freed *)
 fn _first_found (inline: size_read, rule: size_read, hint: size_read): size_read =
@@ -447,40 +510,68 @@ fn _hint_size {l:agz}{n:pos}{name_at,name_len:nat | name_at + name_len <= n}{cou
 fn _rule_size (best: best_rule): size_read =
   if best.found then SizeFound(best.size) else SizeNone()
 
-fun _walk_nodes {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:nat}{count:nat}{depth:nat}{kinds:nat} .<sz, 1>.
+(* What a walk has gathered so far: the elements above the one looked at, the
+   characters by size and the map of sizes *)
+datavtype walked(n:int, depth:int) =
+  | {depth:nat}{kinds,mapped:nat} Walked(n, depth) of (ancestors(n, depth), size_tally(kinds), size_map(mapped))
+
+fun _walk_nodes {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:nat}{count:nat}{depth:nat} .<sz, 1>.
   (data: !$A.borrow(byte, ld, nd), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count),
-   nodes: !$X.xml_node_list(nd, sz), chain: ancestors(nd, depth), parent: size_computed, root: size_computed, tally: size_tally(kinds))
-  : [more:nat] @(ancestors(nd, depth), size_tally(more)) =
+   nodes: !$X.xml_node_list(nd, sz), state: walked(nd, depth), parent: size_computed, root: size_computed,
+   shown: size_computed, goal: walk_goal, base: size_computed): walked(nd, depth) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val @(chain, tally) = _walk_node(data, sheet, rules, node, chain, parent, root, tally)
-    in _walk_nodes(data, sheet, rules, rest, chain, parent, root, tally) end
-  | $X.xml_nodes_nil() => @(chain, tally)
+      val state = _walk_node(data, sheet, rules, node, state, parent, root, shown, goal, base)
+    in _walk_nodes(data, sheet, rules, rest, state, parent, root, shown, goal, base) end
+  | $X.xml_nodes_nil() => state
 
-and _walk_node {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:pos}{count:nat}{depth:nat}{kinds:nat} .<sz, 0>.
+and _walk_node {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:pos}{count:nat}{depth:nat} .<sz, 0>.
   (data: !$A.borrow(byte, ld, nd), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count),
-   node: !$X.xml_node(nd, sz), chain: ancestors(nd, depth), parent: size_computed, root: size_computed, tally: size_tally(kinds))
-  : [more:nat] @(ancestors(nd, depth), size_tally(more)) =
+   node: !$X.xml_node(nd, sz), state: walked(nd, depth), parent: size_computed, root: size_computed,
+   shown: size_computed, goal: walk_goal, base: size_computed): walked(nd, depth) =
   case+ node of
-  | $X.xml_text(at, len) => let
-      val chars = _count_chars(data, at, at + len, 0)
-      val tally = tally_add(tally, parent, chars)
-    in @(chain, tally) end
+  | $X.xml_text(at, len) =>
+    (case+ goal of
+     | GoalSizes() => state
+     | GoalTally() => let
+         val chars = _count_chars(data, at, at + len, 0)
+         val ~Walked(chain, tally, map) = state
+         val tally = tally_add(tally, parent, chars)
+       in Walked(chain, tally, map) end)
   | $X.xml_element(name_at, name_len, attrs, children) =>
-    if _is_uncounted(data, name_at, name_len) then @(chain, tally)
+    if _is_uncounted(data, name_at, name_len) then state
     else let
+      val ~Walked(chain, tally, map) = state
       val facts = _facts_of(data, name_at, name_len, attrs)
       val best = _best_rule(sheet, rules, data, facts, chain, @{found= false, specificity= 0, order= 0, size= @{basis= BasisPixels(), thousandths= 0}})
       val declared = _first_found(_inline_size(data, attrs), _rule_size(best), _hint_size(data, name_at, name_len, attrs))
-      val computed = (case+ declared of
-        | ~SizeFound(size) => size_resolve(size, parent, root)
-        | ~SizeNone() => parent
-        | ~SizeIgnored(_) => parent): size_computed
+      val @(computed, own) = (case+ declared of
+        | ~SizeFound(size) => @(size_resolve(size, parent, root), true)
+        | ~SizeNone() => @(parent, false)
+        | ~SizeIgnored(_) => @(parent, false)): @(size_computed, bool)
       val below_root = (if _is_word(data, name_at, name_len, "html", 4) then computed else root): size_computed
+      (* html and body are not made as elements: the page is in their place, in
+         the reader's size, so what they give their children is given to the
+         children (an element is mapped when it was given a size, or its size
+         is not the one it is shown in) *)
+      val transparent = (if _is_word(data, name_at, name_len, "html", 4) then true else _is_word(data, name_at, name_len, "body", 4))
+      val step = proportion_of(computed, base)
+      val mapped = (if transparent then false else if own then true else step <> proportion_of(shown, base))
+      val map = _map_added(map, (case+ goal of GoalTally() => false | GoalSizes() => mapped), name_at, step)
+      val below_shown = (if mapped then computed else shown): size_computed
       val chain = AncestorsCons(facts, chain)
-      val @(chain, tally) = _walk_nodes(data, sheet, rules, children, chain, computed, below_root, tally)
+      val ~Walked(chain, tally, map) = _walk_nodes(data, sheet, rules, children, Walked(chain, tally, map), computed, below_root, below_shown, goal, base)
       val+ ~AncestorsCons(_, chain) = chain
-    in @(chain, tally) end
+    in Walked(chain, tally, map) end
+
+(* The walk of a chapter's tree: its chain of ancestors is empty at the
+   end, and the map comes out in the document's order *)
+fn _walked {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:nat}{count:nat}{kinds:nat}
+  (data: !$A.borrow(byte, ld, nd), nodes: !$X.xml_node_list(nd, sz), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count),
+   tally: size_tally(kinds), goal: walk_goal, initial: size_computed, base: size_computed): [more,mapped:nat] @(size_tally(more), size_map(mapped)) = let
+  val ~Walked(chain, tally, map) = _walk_nodes(data, sheet, rules, nodes, Walked(AncestorsNil(), tally, MapNil()), initial, initial, base, goal, base)
+  val+ ~AncestorsNil() = chain
+in @(tally, _map_reversed(map, MapNil())) end
 
 (* The characters of the chapter data[0, nd), its parsed tree nodes, added to
    tally by the size they are set in, sheet being the joined style sheets of
@@ -490,8 +581,8 @@ and _walk_node {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:pos}{count:nat}{depth:nat}{ki
    tally: size_tally(kinds)): [more:nat] size_tally(more)
 
 implement chapter_tally (data, nodes, sheet, rules, tally) = let
-  val @(chain, tally) = _walk_nodes(data, sheet, rules, nodes, AncestorsNil(), 16000, 16000, tally)
-  val+ ~AncestorsNil() = chain
+  val @(tally, map) = _walked(data, nodes, sheet, rules, tally, GoalTally(), 16000, 16000)
+  val () = size_map_free(map)
 in tally end
 
 (* chapter_tally for a chapter with no style sheet *)
@@ -507,6 +598,33 @@ implement chapter_tally_unstyled (data, nodes, tally) = let
   val () = $A.drop<byte>(blank_frozen, blank_bytes)
   val () = $A.free<byte>($A.thaw<byte>(blank_frozen))
 in tally end
+
+(* The map of the elements of the chapter that the publisher gave a size,
+   each size against base (twentieths of it, held from half to three
+   times), the root element's size being initial where nothing says
+   otherwise: the browser's 16px against the book's dominant size, or the
+   reader's own size against itself (respecting the publisher's sizes) *)
+#pub fun chapter_size_map {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:nat}{count:nat}
+  (data: !$A.borrow(byte, ld, nd), nodes: !$X.xml_node_list(nd, sz), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count),
+   initial: size_computed, base: size_computed): [mapped:nat] size_map(mapped)
+
+implement chapter_size_map (data, nodes, sheet, rules, initial, base) = let
+  val @(tally, map) = _walked(data, nodes, sheet, rules, tally_new(), GoalSizes(), initial, base)
+  val () = tally_free(tally)
+in map end
+
+#pub fun chapter_size_map_unstyled {ld:agz}{nd:pos}{sz:nat}
+  (data: !$A.borrow(byte, ld, nd), nodes: !$X.xml_node_list(nd, sz), initial: size_computed, base: size_computed): [mapped:nat] size_map(mapped)
+
+implement chapter_size_map_unstyled (data, nodes, initial, base) = let
+  val blank = $A.alloc<byte>(1)
+  val @(blank_frozen, blank_bytes) = $A.freeze<byte>(blank)
+  val rules = RulesNil(): css_rules(1, 0)
+  val map = chapter_size_map(data, nodes, blank_bytes, rules, initial, base)
+  val () = css_rules_free(rules)
+  val () = $A.drop<byte>(blank_frozen, blank_bytes)
+  val () = $A.free<byte>($A.thaw<byte>(blank_frozen))
+in map end
 
 (* ============================================================
    Finding a chapter's style sheets

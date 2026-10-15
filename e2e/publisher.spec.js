@@ -48,16 +48,21 @@ test('a book\'s pixel, point and !important sizes do not stop the text size sett
   await readBook(page, publisherBooks.styled.opts);
   const sizes = async () => {
     const base = (await styleOf(bookPage(page), ['fontSize'])).fontSize;
-    const out = [base];
-    for (const t of ['Pixel sized', 'Point sized', 'Important inline']) out.push((await styleOf(paragraph(page, t), ['fontSize'])).fontSize);
+    const out = [parseFloat(base)];
+    for (const t of ['Pixel sized', 'Point sized', 'Important inline']) out.push(parseFloat((await styleOf(paragraph(page, t), ['fontSize'])).fontSize));
     return out;
   };
-  const before = await sizes();
-  expect(new Set(before).size).toBe(1);
+  // the size setting is the text's size: the !important sizes are not read (#411), the
+  // point size inline keeps its proportion to the text, 8pt of 16px, in twentieths
+  // (#431: the sizes of a book that are not !important are in proportion)
+  const proportion = 0.65;
+  const expected = base => [base, base, base * proportion, base];
+  const rounded = values => values.map(v => Math.round(v * 100) / 100);
+  await expect.poll(async () => rounded(await sizes())).toEqual(rounded(expected(18)));
   await openReadingSettings(page, 'Look');
   await readingSettings(page).getByRole('slider', { name: 'Size' }).fill('28');
   await page.keyboard.press('Escape');
-  await expect.poll(sizes).toEqual(['28px', '28px', '28px', '28px']);
+  await expect.poll(async () => (await sizes()).map(v => Math.round(v * 100) / 100)).toEqual(expected(28).map(v => Math.round(v * 100) / 100));
   // the heading's 6pt !important is not its size either: larger than the text
   const heading = await bookPage(page).locator('h1').first().evaluate(e => parseFloat(getComputedStyle(e).fontSize));
   expect(heading).toBeGreaterThan(28);

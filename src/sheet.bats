@@ -137,7 +137,7 @@ in Sheet(builder) end
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
   | ColumnFill | ColumnGap | ColumnWidth | BreakAfter | BreakInside | GridTemplate | AspectRatio
-  | Appearance | ContainerType | UserSelect | Transition | Visibility | GridArea | ClipPath
+  | Appearance | ContainerType | UserSelect | Transition | Visibility | GridArea | Zoom | ClipPath | WillChange
   (* the reader's own variables: the page's top and bottom paddings and
      the running footer's place, each given once (reader_rules) *)
   | PageTopVariable | PageBottomVariable | FooterBottomVariable | FooterHeightVariable
@@ -168,7 +168,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | BreakInside() => "break-inside" | Appearance() => "appearance" | ContainerType() => "container-type" | UserSelect() => "user-select"
   | Transition() => "transition" | Visibility() => "visibility"
   | GridTemplate() => "grid-template" | AspectRatio() => "aspect-ratio"
-  | GridArea() => "grid-area" | ClipPath() => "clip-path"
+  | GridArea() => "grid-area" | Zoom() => "zoom" | ClipPath() => "clip-path" | WillChange() => "will-change"
   | PageTopVariable() => "--page-top" | PageBottomVariable() => "--page-bottom"
   | FooterBottomVariable() => "--footer-bottom" | FooterHeightVariable() => "--footer-height"
 
@@ -314,6 +314,15 @@ implement capped (sheet, cap) = let
     | CapContainer() => "100cqh"
     | CapCover() => "300px"): [text_len:pos | text_len <= 51] string text_len)
   val () = raw(sheet, ";")
+in sheet end
+
+(* max-height:calc(<the reading area> / var(--image-zoom,1)); a picture's
+   largest height, divided by its zoom, which multiplies lengths *)
+#pub fn capped_zoomed {left:nat | left >= 96}{media:bool}
+  (sheet: sheet(left, media, true)): [after:nat | after >= left - 96] sheet(after, media, true)
+
+implement capped_zoomed (sheet) = let
+  val () = raw(sheet, "max-height:calc((100dvh - var(--page-top) - var(--page-bottom)) / var(--image-zoom,1));")
 in sheet end
 
 (* prop:<step>; *)
