@@ -70,7 +70,7 @@ selected="$*"
 for member in $selected; do
   case $member in
     check|checkers|solver) ;;
-    mutation/*) grep -qx "src/${member#mutation/}.bats" "$ROOT/tests/static/mutation_modules.txt" || { echo "no proof module $member"; exit 2; } ;;
+    mutation/*) python3 "$ROOT/tests/static/mutation_check.py" --list --root "$ROOT" --member "$member" >/dev/null 2>&1 || { echo "no proof module $member"; exit 2; } ;;
     accept/*|reject/*) [ -d "$ROOT/tests/static/$member" ] || { echo "no fixture $member"; exit 2; } ;;
     *) echo "not a member: $member"; exit 2 ;;
   esac
@@ -78,22 +78,25 @@ done
 
 # The fixtures to run, as accept/<name> and reject/<name>
 fixtures=""
-# The proof modules to mutate: members mutation/<module>
-mutation_files=""
+# The proof modules to mutate: members mutation/<module> or
+# mutation/<module>-part<i>of<n> (tests/static/mutation_modules.txt)
+mutation_members=""
 for member in $selected; do
-  case $member in mutation/*) mutation_files="$mutation_files src/${member#mutation/}.bats" ;; esac
+  case $member in mutation/*) mutation_members="$mutation_members $member" ;; esac
 done
 # With QUIRE_MUTATION_BASE (a git revision: CI's pull requests), only the lemmas
-# the change since it can have made vacuous (mutation_check.py --diff); a run
+# the change since it can have made vacuous (mutation_check.py --diff); a member
 # with none needs no compiled app
 mutation_diff=""
-if [ -n "$mutation_files" ] && [ -n "${QUIRE_MUTATION_BASE:-}" ]; then
-  mutation_diff="--diff $QUIRE_MUTATION_BASE"
-  if ! python3 "$ROOT/tests/static/mutation_check.py" --list --root "$ROOT" $mutation_diff $mutation_files | grep -q '^control'; then
-    echo "ok   mutation: no lemma of$mutation_files is touched by the change since $QUIRE_MUTATION_BASE"
-    mutation_files=""
+[ -z "${QUIRE_MUTATION_BASE:-}" ] || mutation_diff="--diff $QUIRE_MUTATION_BASE"
+mutation_run=""
+for member in $mutation_members; do
+  if python3 "$ROOT/tests/static/mutation_check.py" --list --root "$ROOT" $mutation_diff --member "$member" | grep -q '^control'; then
+    mutation_run="$mutation_run $member"
+  else
+    echo "ok   $member: no lemma to mutate (the change since ${QUIRE_MUTATION_BASE:-the start} touches none, or the part has none)"
   fi
-fi
+done
 for verdict in accept reject; do
   for d in "$ROOT"/tests/static/$verdict/*/; do
     [ -d "$d" ] || continue
@@ -112,7 +115,7 @@ app="$TMP/app"
 # src/version.bats) from git: it reads the checkout's repository
 GIT_DIR=$(git -C "$ROOT" rev-parse --absolute-git-dir)
 export GIT_DIR
-if named check || [ -n "$mutation_files" ] || [ -n "$fixtures" ]; then
+if named check || [ -n "$mutation_run" ] || [ -n "$fixtures" ]; then
   mkdir -p "$app"
   (cd "$ROOT" && tar cf - --exclude=./node_modules --exclude=./dist \
     --exclude=./build --exclude=./test-results --exclude=./.git .) | (cd "$app" && tar xf -)
@@ -291,10 +294,10 @@ done
 # (mutation_check.py, quire#594): a mutant the compiler accepts is a lemma
 # whose context is contradictory. Runs in the checked copy after the
 # fixtures (it leaves its build changed) and puts each module back.
-if [ -n "$mutation_files" ]; then
+for member in $mutation_run; do
   if (cd "$app" && BATS_CHECK="bats check --repository $repository" python3 "$ROOT/tests/static/mutation_check.py" \
         --run "$app" --root "$ROOT" $mutation_diff --known "$ROOT/tests/static/mutation_known.txt" \
-        $mutation_files) > "$TMP/mutation.log" 2>&1; then echo "ok   mutation: $(tail -1 "$TMP/mutation.log")"
-  else echo "FAIL mutation:"; cat "$TMP/mutation.log"; fail=1; fi
-fi
+        --member "$member") > "$TMP/mutation.log" 2>&1; then echo "ok   $member: $(tail -1 "$TMP/mutation.log")"
+  else echo "FAIL $member:"; cat "$TMP/mutation.log"; fail=1; fi
+done
 exit $fail

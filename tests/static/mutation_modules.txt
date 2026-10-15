@@ -1,9 +1,13 @@
-src/bytes.bats
+# module, parts, smoke: the proof modules the mutation check covers (mutation_check.py, quire#594).
+# `parts` is how many members, run side by side, a module is split in (--shard I/N), so that no job is
+# over about 25 minutes on an idle pool (11 for the app's check, the rest the mutants: CLAUDE.md).
+# `smoke` marks the modules a change to the checker alone runs, whole.
+src/bytes.bats 2
 src/chunk.bats
-src/crc.bats
+src/crc.bats 5
 src/fields.bats
 src/seq.bats
-src/schema.bats
+src/schema.bats 2
 src/record.bats
-src/bookrec.bats
-src/indexrec.bats
+src/bookrec.bats 1 smoke
+src/indexrec.bats 1 smoke

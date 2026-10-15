@@ -95,6 +95,43 @@ class Operators(unittest.TestCase):
         self.assertEqual(len(variants), len({v.statement for v in variants}))
 
 
+class Shards(unittest.TestCase):
+    def test_the_parts_partition_the_names(self):
+        weights = [(f'lemma{i}', 1 + (i * 7) % 5) for i in range(23)]
+        for count in (1, 2, 3, 5, 8):
+            parts = mc.partition(weights, count)
+            self.assertEqual(len(parts), count)
+            self.assertEqual(sum(len(p) for p in parts), len(weights))  # no overlap
+            self.assertEqual(set().union(*parts), {n for n, _ in weights})  # everything
+
+    def test_the_parts_are_balanced_by_weight(self):
+        weights = [(f'l{i}', w) for i, w in enumerate([9, 8, 7, 6, 5, 4, 3, 2, 1, 1])]
+        totals = [sum(dict(weights)[n] for n in part) for part in mc.partition(weights, 3)]
+        self.assertLessEqual(max(totals) - min(totals), 9)  # never worse than the heaviest lemma
+        self.assertLessEqual(max(totals), 16)
+
+    def test_the_order_given_does_not_matter(self):
+        weights = [(f'lemma{i}', 1 + i % 4) for i in range(17)]
+        self.assertEqual(mc.partition(weights, 4), mc.partition(list(reversed(weights)), 4))
+
+    def test_a_module_split_in_shards_is_the_module(self):
+        lines = MODULE.split('\n')
+        whole = mc.selected_names('/nonexistent', 'src/m.bats', lines, set(), None, None)
+        parts = [mc.selected_names('/nonexistent', 'src/m.bats', lines, set(), None, (i, 3)) for i in (1, 2, 3)]
+        self.assertEqual(set().union(*parts), whole)
+        self.assertEqual(sum(len(p) for p in parts), len(whole))
+
+    def test_member_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'tests' / 'static').mkdir(parents=True)
+            (Path(tmp) / mc.MODULES_FILE).write_text('# c\nsrc/crc.bats 3\nsrc/seq.bats\nsrc/small.bats 1 smoke\n')
+            self.assertEqual(mc.parse_member(tmp, 'mutation/crc-part2of3'), ('src/crc.bats', 2, 3))
+            self.assertEqual(mc.parse_member(tmp, 'mutation/seq'), ('src/seq.bats', 1, 1))
+            self.assertEqual(mc.read_modules(tmp)[2], ('src/small.bats', 1, True))
+            with self.assertRaises(KeyError):
+                mc.parse_member(tmp, 'mutation/crc-part4of3')
+
+
 class Declarations(unittest.TestCase):
     def lemmas(self, text=MODULE):
         lines = text.split('\n')
@@ -269,6 +306,33 @@ class Selection(unittest.TestCase):
         self.assertEqual(self.select('src/other.bats'), set())
         self.edit('src/m.bats', 'dataprop LE(int, int) =', 'dataprop LE(int, int)  =')
         self.assertEqual(self.select('src/other.bats'), {'uses_le'})
+
+    def test_a_change_of_the_checker_alone_selects_the_smoke_modules_whole(self):
+        (self.root / 'tests' / 'static').mkdir(parents=True)
+        (self.root / mc.MODULES_FILE).write_text('src/m.bats 2\nsrc/other.bats 1 smoke\n')
+        self.git('add', '-A')
+        self.git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'two')
+        (self.root / mc.MODULES_FILE).write_text('src/m.bats 2\nsrc/other.bats 1 smoke\n# x\n')
+        self.assertIsNone(self.select('src/other.bats'))
+        self.assertEqual(self.select('src/m.bats'), set())
+
+    def test_a_proof_and_the_checker_select_both(self):
+        (self.root / 'tests' / 'static').mkdir(parents=True)
+        (self.root / mc.MODULES_FILE).write_text('src/m.bats 2\nsrc/other.bats 1 smoke\n')
+        self.git('add', '-A')
+        self.git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'two')
+        (self.root / mc.MODULES_FILE).write_text('src/m.bats 2\nsrc/other.bats 1 smoke\n# x\n')
+        self.edit('src/m.bats', 'case+ first of LE_refl() => second', 'case+ first of LE_refl() => (second)')
+        self.assertIsNone(self.select('src/other.bats'))
+        self.assertEqual(self.select('src/m.bats'), {'le_trans', 'le_twice'})
+
+    def test_the_solver_fixtures_select_everything(self):
+        (self.root / 'tests' / 'static' / 'solver' / 'reject').mkdir(parents=True)
+        (self.root / 'tests' / 'static' / 'solver' / 'reject' / 'a.dats').write_text('x\n')
+        self.git('add', '-A')
+        self.git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'two')
+        (self.root / 'tests' / 'static' / 'solver' / 'reject' / 'a.dats').write_text('y\n')
+        self.assertIsNone(self.select())
 
     def test_the_solver_pin_selects_everything(self):
         path = self.root / '.github' / 'actions' / 'setup-bats'

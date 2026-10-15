@@ -50,6 +50,12 @@ usage:
   --only NAME   only the lemma NAME (repeatable)
   --diff BASE   only the lemmas the changes since the git revision BASE can have made vacuous
                 (`select_by_diff`): those the diff touches, those that mention a name it declares
+  --shard I/N   only the I-th of N parts of the lemmas otherwise selected (1 <= I <= N), balanced by
+                their number of mutants, heaviest first to the lightest part (`partition`): the parts
+                are disjoint and together are every lemma, the same for the same file, so N jobs
+                side by side run the module in about 1/N of the time plus the app's check
+  --member NAME the module and part a static member names (mutation/crc-part2of5, from
+                tests/static/mutation_modules.txt): --file and --shard in one word
   --report FILE write the results (one line a mutant) to FILE
   --ats-home DIR  run the compiler with DIR as its ATS home (~/.bats/ats2): another patsopt
                 (the infinite-precision solver) with the same checks
@@ -74,10 +80,55 @@ HEADER = re.compile(
     r'^(?P<path>\S+\.bats): \d+\(line=(?P<line>\d+), offs=\d+\) -- '
     r'\d+\(line=\d+, offs=\d+\): error\((?:\d+|parsing|lexing)\): (?P<message>.*)$')
 BATS_ERROR = re.compile(r'^\s*--> (?P<path>\S+):(?P<line>\d+):\d+')
-# what, in a diff, means the proofs' meaning can have changed everywhere: the checker itself
-# and the solver (the ATS2 pin). A compiler or package move is the scheduled run's.
-EVERYTHING_PATHS = (
-    'tests/static/mutation_check.py', 'tests/static/proofs_audit.py', '.github/actions/setup-bats/action.yml')
+# What, in a diff, can have changed the meaning of every proof: the solver (the ATS2 pin and the
+# solver's own fixtures). A compiler or package move is the scheduled run's.
+EVERYTHING_PATHS = ('.github/actions/setup-bats/action.yml', 'tests/static/solver.py')
+EVERYTHING_PREFIXES = ('tests/static/solver/',)
+# A change to the checker and its data selects a smoke set (the modules marked `smoke` in
+# mutation_modules.txt), not every lemma: it is the scheduled run's to run the new checker on all
+CHECKER_PATHS = (
+    'tests/static/mutation_check.py', 'tests/static/mutation_test.py', 'tests/static/mutation_modules.txt',
+    'tests/static/mutation_known.txt', 'tests/static/proofs_audit.py')
+MODULES_FILE = 'tests/static/mutation_modules.txt'
+
+
+def read_modules(root):
+    """[(file, shards, smoke)] from tests/static/mutation_modules.txt: `src/crc.bats 5 smoke`."""
+    path = Path(root) / MODULES_FILE
+    out = []
+    if path.exists():
+        for line in path.read_text().splitlines():
+            fields = line.split()
+            if fields and not fields[0].startswith('#'):
+                out.append((fields[0], int(fields[1]) if len(fields) > 1 else 1, 'smoke' in fields[2:]))
+    return out
+
+
+def member_name(file, shards, index):
+    """The static member (tests/groups.json) of a module's shard: mutation/crc-part2of5."""
+    base = Path(file).stem
+    return f'mutation/{base}' if shards == 1 else f'mutation/{base}-part{index}of{shards}'
+
+
+def parse_member(root, member):
+    """(file, index, count) of a member name `mutation/crc` or `mutation/crc-part2of5`."""
+    for file, shards, _ in read_modules(root):
+        for index in range(1, shards + 1):
+            if member_name(file, shards, index) == member:
+                return file, index, shards
+    raise KeyError(member)
+
+
+def partition(weights, count):
+    """Splits [(name, weight)] into `count` sets of names, balanced by weight: heaviest first, each
+    to the lightest set so far (the lowest number on a tie). Deterministic: the sets partition the
+    names, whatever the order they come in."""
+    sets, totals = [set() for _ in range(count)], [0] * count
+    for name, weight in sorted(weights, key=lambda item: (-item[1], item[0])):
+        lightest = totals.index(min(totals))
+        sets[lightest].add(name)
+        totals[lightest] += weight
+    return sets
 
 
 def balanced(text, start, opening, closing):
@@ -507,9 +558,12 @@ def select_by_diff(root, base, file):
     incremental mode: what is unchanged keeps its earlier result), or when it mentions a name
     a changed line declares (a lemma it calls whose statement changed, a dataprop it uses), or
     when the diff touches the file outside any lemma (a dataprop, a helper: every lemma of
-    the file may depend on it). A diff of the checker or the solver selects everything."""
+    the file may depend on it). A diff of the solver (its pin or fixtures) selects everything; a
+    diff of the checker alone selects the smoke modules whole and nothing else."""
     changed = changed_files(root, base)
-    if any(path in EVERYTHING_PATHS for path in changed):
+    if any(path in EVERYTHING_PATHS or path.startswith(EVERYTHING_PREFIXES) for path in changed):
+        return None
+    if any(path in CHECKER_PATHS for path in changed) and any(m == file and smoke for m, _, smoke in read_modules(root)):
         return None
     modules = [path for path in changed if path.endswith('.bats')]
     names = set()
@@ -538,6 +592,24 @@ def select_by_diff(root, base, file):
             if any(re.search(rf"(?<![\w']){re.escape(n)}(?![\w'])", text) for n in names):
                 selected.add(lemma.name)
     return selected
+
+
+def selected_names(root, file, original_lines, only, base, shard):
+    """The names of the lemmas to mutate: those of `--only`, those the diff since `base` selects,
+    and of those the shard (index, count) the caller is."""
+    lemmas, mutants = build(original_lines, only)
+    weights = {}
+    for m in mutants:
+        weights[m.lemma.name] = weights.get(m.lemma.name, 0) + 1
+    names = [l.name for l in lemmas if l.parts() is not None]
+    if base:
+        wanted = select_by_diff(root, base, file)
+        if wanted is not None:
+            names = [n for n in names if n in wanted]
+    if shard:
+        index, count = shard
+        names = partition([(n, weights.get(n, 1)) for n in names], count)[index - 1]
+    return set(names)
 
 
 # ---- running the compiler
@@ -695,15 +767,21 @@ def main(argv):
     parser.add_argument('--inplace', action='store_true')
     parser.add_argument('--only', action='append', default=[])
     parser.add_argument('--diff', metavar='BASE')
+    parser.add_argument('--shard', metavar='I/N')
+    parser.add_argument('--member', metavar='NAME')
     parser.add_argument('--report')
     parser.add_argument('--ats-home')
     parser.add_argument('--known')
     parser.add_argument('files', nargs='*')
     args = parser.parse_args(argv)
+    root, known = Path(args.root).resolve(), read_known(args.known)
+    shard = tuple(int(n) for n in args.shard.split('/')) if args.shard else None
+    if args.member:
+        file, index, count = parse_member(root, args.member)
+        args.files, shard = [file], (index, count)
     if bool(args.list) == bool(args.run) or not args.files:
         print(__doc__)
         return 2
-    root, known = Path(args.root).resolve(), read_known(args.known)
     if args.ats_home:
         use_ats_home(args.ats_home)
     check_command = os.environ.get('BATS_CHECK', 'bats check')
@@ -713,9 +791,9 @@ def main(argv):
         # the pristine text is the checkout's, not a previous run's
         original = (root / file).read_text() if (root / file).exists() else Path(file).read_text()
         original_lines = original.split('\n')
-        wanted = select_by_diff(root, args.diff, file) if args.diff else None
-        if wanted is not None and not wanted:
-            report.add(f'UNCHANGED {file}: no lemma is touched by the diff')
+        wanted = selected_names(root, file, original_lines, set(args.only), args.diff, shard)
+        if not wanted:
+            report.add(f'UNCHANGED {file}: no lemma to mutate (the diff touches none, or the shard has none)')
             continue
         lemmas, mutants = build(original_lines, set(args.only), wanted)
         if args.list:

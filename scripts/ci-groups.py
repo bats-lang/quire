@@ -65,16 +65,19 @@ def specs():
                   if name.endswith('.spec.js'))
 
 
-def mutation_modules():
-    """The proof modules the mutation check covers (tests/static/mutation_modules.txt)."""
-    with open(os.path.join(ROOT, 'tests', 'static', 'mutation_modules.txt')) as modules_file:
-        return modules_file.read().split()
+def mutation_members():
+    """The mutation members: mutation/<module>, or mutation/<module>-part<i>of<n> for a module
+    split in n parts (tests/static/mutation_modules.txt)."""
+    sys.path.insert(0, os.path.join(ROOT, 'tests', 'static'))
+    import mutation_check
+    return [mutation_check.member_name(file, shards, index)
+            for file, shards, _ in mutation_check.read_modules(ROOT) for index in range(1, shards + 1)]
 
 
 def static_members():
     """Everything the static tests run: the app's check, the checkers,
     and each fixture."""
-    found = ['check', 'checkers', 'solver'] + [f'mutation/{os.path.basename(m)[:-5]}' for m in mutation_modules()]
+    found = ['check', 'checkers', 'solver'] + mutation_members()
     for verdict in ('accept', 'reject'):
         directory = os.path.join(ROOT, 'tests', 'static', verdict)
         found += sorted(f'{verdict}/{name}' for name in os.listdir(directory)
@@ -182,9 +185,10 @@ def affected(members, base):
         return 'no'  # a push, a dispatch: the scheduled run (.github/workflows/mutation.yml) has them
     sys.path.insert(0, os.path.join(ROOT, 'tests', 'static'))
     import mutation_check
-    for module in mutation_modules():
-        if f'mutation/{os.path.basename(module)[:-5]}' in members \
-                and mutation_check.select_by_diff(ROOT, base, module) != set():
+    for member in members:
+        file, index, count = mutation_check.parse_member(ROOT, member)
+        original = open(os.path.join(ROOT, file)).read().split('\n')
+        if mutation_check.selected_names(ROOT, file, original, set(), base, (index, count)):
             return 'yes'
     return 'no'
 
