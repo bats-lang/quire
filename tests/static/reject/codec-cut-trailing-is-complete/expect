@@ -1,0 +1,9 @@
+function _static_trailing_is_complete
+line 3
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(SQC); S2Eapp(S2Ecst(ck_ok); S2Eapp(S2Ecst(bcons); S2Eintinf(73), S2Eapp(S2Ecst(bcons); S2Eintinf(69), S2Eapp(S2Ecst(bcons); S2Eintinf(78), S2Eapp(S2Ecst(bcons); S2Eintinf(68), S2Eapp(S2Ecst(bnil); ))))), S2Eapp(S2Ecst(bnil); ), S2Eapp(S2Ecst(bcons); S2Evar(trailing_byte(_)), S2Evar(trailing_rest(_)))), S2Eapp(S2Ecst(sq_ok); S2Eapp(S2Ecst(pnil); )))].
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(sq_cut); S2Eapp(S2Ecst(pnil); ), S2Eapp(S2Ecst(sc_trailing); ))
+The needed term is: S2Eapp(S2Ecst(sq_ok); S2Eapp(S2Ecst(pnil); ))
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(SQC); S2Eapp(S2Ecst(ck_ok); S2Eapp(S2Ecst(bcons); S2Eintinf(73), S2Eapp(S2Ecst(bcons); S2Eintinf(69), S2Eapp(S2Ecst(bcons); S2Eintinf(78), S2Eapp(S2Ecst(bcons); S2Eintinf(68), S2Eapp(S2Ecst(bnil); ))))), S2Eapp(S2Ecst(bnil); ), S2Eapp(S2Ecst(bcons); S2EVar(_->S2Evar(trailing_byte(_))), S2EVar(_->S2Evar(trailing_rest(_))))), S2Eapp(S2Ecst(sq_cut); S2Eapp(S2Ecst(pnil); ), S2Eapp(S2Ecst(sc_trailing); )))
+The needed term is: S2Eapp(S2Ecst(SQC); S2Eapp(S2Ecst(ck_ok); S2Eapp(S2Ecst(bcons); S2Eintinf(73), S2Eapp(S2Ecst(bcons); S2Eintinf(69), S2Eapp(S2Ecst(bcons); S2Eintinf(78), S2Eapp(S2Ecst(bcons); S2Eintinf(68), S2Eapp(S2Ecst(bnil); ))))), S2Eapp(S2Ecst(bnil); ), S2Eapp(S2Ecst(bcons); S2Evar(trailing_byte(_)), S2Evar(trailing_rest(_)))), S2Eapp(S2Ecst(sq_ok); S2Eapp(S2Ecst(pnil); )))

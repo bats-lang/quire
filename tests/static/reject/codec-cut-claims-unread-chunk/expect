@@ -1,0 +1,12 @@
+function _static_cut_claims_unread_chunk
+line 3
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(SQC); S2Eapp(S2Ecst(ck_trunc); ), S2Eapp(S2Ecst(sq_cut); S2Eapp(S2Ecst(pgood); S2Evar(tag(_)), S2Evar(data(_)), S2Eapp(S2Ecst(pnil); )), S2Eapp(S2Ecst(sc_trunc); )))].
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(pnil); )
+The needed term is: S2Eapp(S2Ecst(pgood); S2Evar(tag(_)), S2Evar(data(_)), S2Eapp(S2Ecst(pnil); ))
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(sq_cut); S2Eapp(S2Ecst(pnil); ), S2Eapp(S2Ecst(sc_trunc); ))
+The needed term is: S2Eapp(S2Ecst(sq_cut); S2Eapp(S2Ecst(pgood); S2Evar(tag(_)), S2Evar(data(_)), S2Eapp(S2Ecst(pnil); )), S2Eapp(S2Ecst(sc_trunc); ))
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(SQC); S2Eapp(S2Ecst(ck_trunc); ), S2Eapp(S2Ecst(sq_cut); S2Eapp(S2Ecst(pnil); ), S2Eapp(S2Ecst(sc_trunc); )))
+The needed term is: S2Eapp(S2Ecst(SQC); S2Eapp(S2Ecst(ck_trunc); ), S2Eapp(S2Ecst(sq_cut); S2Eapp(S2Ecst(pgood); S2Evar(tag(_)), S2Evar(data(_)), S2Eapp(S2Ecst(pnil); )), S2Eapp(S2Ecst(sc_trunc); )))
