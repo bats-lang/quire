@@ -29,7 +29,7 @@
  * summed up on stderr.
  */
 
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
 const PROBE_EVERY_MS = 2000;
@@ -146,11 +146,49 @@ function threadStates(pid) {
   }
 }
 
-/** The machine's load and free memory when a page stalls: a starved machine is not the page's fault. */
+/**
+ * What a process's main thread is blocked in (#591): the system call it
+ * sleeps in and its arguments (`syscall`: for a futex, the address it
+ * waits on, so two processes' threads waiting on one another can be told
+ * from a thread waiting for nothing) and, where the kernel lets this user
+ * read it, its kernel stack. Every thread of the process whose state is
+ * not S or R, or every one that waits in a futex or a poll, is not listed:
+ * only the main thread, which is the one a page's script runs on.
+ */
+function mainThreadWait(pid) {
+  const read = (file) => { try { return readFileSync(`/proc/${pid}/${file}`, 'utf8').trim(); } catch (error) { return `(${error.code || error.message})`; } };
+  return { syscall: read('syscall'), kernelStack: read('stack') };
+}
+
+/**
+ * The open files of a process that are sockets or pipes, counted by kind
+ * (a renderer that waits on a browser process waits on one of its mojo
+ * pipes, a unix socket): with the threads' states, whether the process
+ * waits on another one.
+ */
+function openChannels(pid) {
+  try {
+    const counts = new Map();
+    for (const fd of readdirSync(`/proc/${pid}/fd`)) {
+      let target = '?';
+      try { target = readlinkSync(`/proc/${pid}/fd/${fd}`); } catch (error) { target = '?'; }
+      const kind = target.startsWith('socket:') ? 'socket' : target.startsWith('pipe:') ? 'pipe' : target.startsWith('/') ? 'file' : target.replace(/[:\[].*/, '') || 'other';
+      counts.set(kind, (counts.get(kind) || 0) + 1);
+    }
+    return [...counts].map(([kind, count]) => `${count} x ${kind}`);
+  } catch (error) {
+    return [String(error && error.message || error)];
+  }
+}
+
+/** The machine's load, pressure and free memory when a page stalls: a starved machine is not the page's fault. */
 function machineState() {
   const text = (file) => { try { return readFileSync(file, 'utf8'); } catch (error) { return ''; } };
   const free = /MemAvailable:\s+(\d+) kB/.exec(text('/proc/meminfo'));
-  return { loadAverage: text('/proc/loadavg').trim(), memoryAvailableMiB: free ? Math.round(+free[1] / 1024) : null };
+  // pressure stall information (cpu, io, memory): the share of the last 10 s that tasks waited for the resource
+  const pressure = {};
+  for (const resource of ['cpu', 'io', 'memory']) pressure[resource] = text(`/proc/pressure/${resource}`).trim().split('\n');
+  return { loadAverage: text('/proc/loadavg').trim(), memoryAvailableMiB: free ? Math.round(+free[1] / 1024) : null, pressure };
 }
 
 /** Each renderer process's CPU time (s) over `ms`, from the browser's own session. */
@@ -161,7 +199,10 @@ async function rendererCpu(browser, ms) {
     if (!session) return { error: 'no browser session' };
     const read = async () => {
       const result = await within(session.send('SystemInfo.getProcessInfo'), COMMAND_MS);
-      return result.value ? result.value.processInfo.filter((process) => process.type === 'renderer') : null;
+      // every process of the browser, not only the renderers (#591): a
+      // renderer that waits on the browser process or the GPU process is
+      // told from one that waits for nothing by what those are doing
+      return result.value ? result.value.processInfo : null;
     };
     const before = await read();
     await delay(ms);
@@ -169,7 +210,7 @@ async function rendererCpu(browser, ms) {
     if (!before || !after) return { error: 'SystemInfo.getProcessInfo did not answer' };
     return after.map((process) => {
       const earlier = before.find((other) => other.id === process.id);
-      return { pid: process.id, cpuSeconds: earlier ? +(process.cpuTime - earlier.cpuTime).toFixed(3) : null, overSeconds: ms / 1000 };
+      return { pid: process.id, type: process.type, cpuSeconds: earlier ? +(process.cpuTime - earlier.cpuTime).toFixed(3) : null, overSeconds: ms / 1000 };
     });
   } catch (error) {
     return { error: String(error && error.message || error) };
@@ -222,8 +263,18 @@ async function captureArmed(page, armed, reason, browser) {
       }
     }
   }
-  result.rendererCpu = await cpu;
-  if (Array.isArray(result.rendererCpu)) for (const process of result.rendererCpu) process.threads = threadStates(process.pid);
+  const processes = await cpu;
+  if (Array.isArray(processes)) {
+    for (const process of processes) {
+      process.threads = threadStates(process.pid);
+      process.mainThread = mainThreadWait(process.pid);
+      process.channels = openChannels(process.pid);
+    }
+    result.rendererCpu = processes.filter((process) => process.type === 'renderer');
+    result.otherProcesses = processes.filter((process) => process.type !== 'renderer');
+  } else {
+    result.rendererCpu = processes;
+  }
   result.machine = machineState();
   result.verdict = verdict(result);
   return result;
@@ -254,9 +305,19 @@ export function summary(result) {
   }
   if (Array.isArray(result.rendererCpu)) {
     lines.push(`  renderer CPU over 1 s: ${result.rendererCpu.map((process) => `${process.pid} ${process.cpuSeconds}s`).join(', ')}`);
-    for (const process of result.rendererCpu) if (process.threads) lines.push(`  renderer ${process.pid} threads: ${process.threads.join('; ')}`);
+    for (const process of result.rendererCpu) {
+      if (process.threads) lines.push(`  renderer ${process.pid} threads: ${process.threads.join('; ')}`);
+      if (process.mainThread) lines.push(`  renderer ${process.pid} main thread: syscall ${process.mainThread.syscall}; kernel stack ${process.mainThread.kernelStack.replace(/\s+/g, ' ').slice(0, 300)}`);
+      if (process.channels) lines.push(`  renderer ${process.pid} open: ${process.channels.join(', ')}`);
+    }
   }
-  if (result.machine) lines.push(`  machine: load ${result.machine.loadAverage}, ${result.machine.memoryAvailableMiB} MiB available`);
+  if (Array.isArray(result.otherProcesses)) for (const process of result.otherProcesses) {
+    lines.push(`  ${process.type} ${process.pid}: CPU ${process.cpuSeconds}s over 1 s; threads: ${process.threads.join('; ')}`);
+  }
+  if (result.machine) {
+    lines.push(`  machine: load ${result.machine.loadAverage}, ${result.machine.memoryAvailableMiB} MiB available`);
+    for (const [resource, rows] of Object.entries(result.machine.pressure)) if (rows[0]) lines.push(`  pressure ${resource}: ${rows.join(' | ')}`);
+  }
   return lines.join('\n');
 }
 

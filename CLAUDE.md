@@ -161,6 +161,43 @@ commit), and save theirs once the job passed. What was found:
   from the C), but the static jobs keep their fixed directory, which costs
   nothing.
 
+### The merge queue (#586)
+
+A pull request that enters the queue is tested as a *group*: GitHub builds a
+commit of main plus that pull request (plus the entries ahead of it) and runs
+`check.yml` on it (`merge_group`); the entry merges when the run passes, and
+is **removed when the run has not finished within 60 minutes, even if it
+passes a minute later** (`removed_from_merge_queue` in the pull request's
+timeline; a passing run of a removed entry merges nothing). What a group
+costs on an idle pool (measured, GMP, 2026-10-15): the `build` job 13 minutes
+(the queue's run is cold on purpose, see the compiler's cache above), then the
+e2e jobs 14 to 18, in parallel with the static jobs, of which `static
+(accepts)` is the longest (33 fixtures, 27 minutes with the cache and 39
+without; `accepts-data` 15 to 32, `app` 17 to 33): 40 minutes wall. A pull
+request's own run restores the build cache (the `build` job 3 minutes) and
+still takes 38, because `static (accepts)` is the long pole, not the build.
+
+What happened on 2026-10-15, and the rules it gave:
+
+* Five entries at once (#609, #611, #612, #613, #616) wanted more runners than
+  the pool has, so groups finished after their 60 minutes, and each removal
+  made GitHub rebuild the groups behind it and leave the earlier runs
+  `queued`: six stale runs, each with a dozen jobs, kept the pool full, so the
+  next entries timed out too. Nothing merged for 3.5 hours.
+* **At most two entries in the queue at a time** (at the current settings);
+  the next goes in when one has merged or been removed.
+* **Superseded runs are cancelled**: a queue run that is not the newest of its
+  pull request is stale (GitHub does not cancel it); `qsweep` cancels them
+  (`CANCELLED STALE QUEUE RUN`). Read the pull request's timeline
+  (`added_to_merge_queue`, `removed_from_merge_queue`) for where an entry is:
+  `auto_merge` empty means enqueued or removed, not one or the other.
+* A change that makes its own group longer than about 45 minutes does not
+  wait in the queue's window: it is sharded first (the mutation check, #594:
+  a change to the checker selects a smoke set, a change to the ATS2 pin all
+  shards, none over about 25 minutes).
+* Open (#586): the queue's own settings (how many groups build at once, the
+  window) and balancing the static groups so that none is the long pole.
+
 ## Check locally before every push
 
 A session sets up the compiler in its own environment and runs `bats
@@ -4069,7 +4106,11 @@ before its timeout, is captured: the frames `Debugger.pause` stops in
 pauses, which commands the renderer still answers, and the renderers'
 CPU time over 1 s, each renderer's threads by state and kernel wait
 (`/proc`, #575: a renderer that answers nothing and burns nothing is
-waiting outside script) and the machine's load and free memory. The capture is `stall-capture-<n>.json` in the test's
+waiting outside script), the renderer's main thread's system call and open
+channels, the same for the browser, GPU and utility processes (#591: a
+renderer waiting on the browser process is told from one waiting for nothing by
+what the browser is doing) and the machine's load, free memory and pressure
+(`/proc/pressure`). The capture is `stall-capture-<n>.json` in the test's
 output (CI's `e2e-stall-captures-<group>` artifact), attached to the test, and
 summed up on stderr. `e2e/stall-capture.spec.js` checks it on pages that
 loop forever in script and in wasm.
