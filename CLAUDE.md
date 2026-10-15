@@ -3715,13 +3715,13 @@ length, in the same page, so a slower machine slows both. What it found:
   longer than a piece: the pieces `_text_spans` already cut a text of 64
   KiB or more into (a text op's limit) are class `run`, shown as blocks
   (`.caf .run`), and are cut after the last white space in their last 512
-  bytes (`_text_cut`; a run with no white space is cut at a character, as
+  bytes (`cut_find`, src/cut.bats; a run with no white space is cut at a character, as
   before). Complexity: the frame of a run of n columns was O(n squared)
   and is O(n) in the number of pieces; opening the megabyte word on a
   390 px phone went from 17 s (Two) to 1.5 s, and the opening to 1 s. A
   text node over 64 KiB in mixed content breaks its line at each piece (a
   paragraph break appearing in a 64 KiB run is the price; search counts
-  pieces with the same `_text_cut`, so its node numbers agree). A stored
+  pieces with the same `cut_find`, so its node numbers agree). A stored
   note or highlight in such a text is a piece's content node and a UTF-16
   offset in that piece's text (bridge's `get_selection_range` gives offsets
   into the text of the element with the id, which is the piece), and the cut
@@ -3732,7 +3732,7 @@ length, in the same page, so a slower machine slows both. What it found:
   in two columns, with accents and an emoji in the words; a last test restores
   places stored by this build and they must paint the same words, so a
   changed cut fails there). The cut is part of the format of a stored place:
-  changing `_text_cut` moves the places stored in the pieces after the first
+  changing `cut_find` moves the places stored in the pieces after the first
   of a text over 64 KiB (the first starts where the text does) and needs a
   version of the annotations' record to translate by. A place stored by a
   build before #423 (pieces cut at a character, not at white space) is read
@@ -3754,6 +3754,65 @@ length, in the same page, so a slower machine slows both. What it found:
   layout. Measured (phone, this machine): the megabyte word opens in 1.0
   s against 0.8, Two in 1.5 against 1.8, 10,000 paragraphs open in 2.3
   against 1.7. No timeout was raised to get there.
+* **The cut is a function of the text's cells, proved (#568).** The three
+  walks of a chapter's text (render's `_text_spans`, search's `_scan_text`,
+  read aloud's `_runs_text`, and the blank or math text each skips with
+  `_skip_spans` and `_text_count`) number a text's pieces by one rule,
+  `src/cut.bats`, stated over the cells of the array the text is read from
+  (array's `cborrow`, whose `cborrow_get` gives `NTH(cs, i, v)` with each
+  byte): `BREAKBACK(cs, offset, at, floor, back)` (the cut after the last
+  space, tab or line feed at or before a cell, looking back no further than
+  a floor), `CUTC(cs, offset, text_len, cut)` (the first piece's length:
+  after that white space in the last 512 bytes, else the longest prefix
+  that ends before a UTF-8 character's start) and `PIECES(cs, offset,
+  text_len, count)` (the text is count pieces, each cut off by `CUTC`).
+  Each constructor takes the `NTH` of the cells it was decided from, so
+  none is made over cells other than the ones read
+  (`tests/static/reject/cut-claimed-over-other-cells`,
+  `cut-break-after-a-byte-that-is-not-white`, `cut-break-at-another-cell`,
+  `pieces-counted-over-other-cells`, `pieces-forged-cut`), and each is
+  functional (`breakback_functional`, `cutc_functional`,
+  `pieces_functional`, by induction, with array's `nth_functional`): two
+  cuts, or two counts, of the same cells and offset are equal
+  (`reject/cut-two-lengths-of-the-same-cells`,
+  `pieces-two-counts-of-the-same-cells`, `accept/cut-same-cells-same-count`).
+  `cut_find` and `pieces_find` read the cells and return those proofs; the
+  walkers take `bytes: !cborrow(l, n, cs)` beside the plain `data: !borrow`,
+  and an `<img>`'s over-long alt text is cut by `cut_find` too, so no walk
+  steps by another rule (the 65533 step of #568's first part is gone). A
+  chapter's piece is lent for this at each load (render, facing page,
+  search, the annotations' node count, read aloud): array's `barr_of_arrx`
+  gives the cells and keeps the piece's owner, `barr_freeze` the
+  `cfrozen`/`cborrow`, `cborrow_view` (array 2026.10.15.3267, array#47) the
+  plain borrow of the same bytes that `xhtml_parse`, `_load_images` and the
+  page read through, counted in the freeze so `barr_thaw` is refused while
+  the view is out (`reject/cut-view-out-at-thaw`), and the view is given
+  back, then the cells, before the thaw and `barr_to_arrx`
+  (`accept/cut-found-from-the-cells`). `_utf8_start` no longer calls arith's
+  `band`: a byte starts a character when it is under 128 or at least 192.
+  **Proved**: that the cut, and the count of pieces, that render, search and
+  read aloud take are the one relation of the cells they walk, and that two
+  walks over the same cells, or the same cborrow, cannot get two. **Tested,
+  not proved**: that the three walks read the same bytes. Render, search and
+  read aloud each decode the chapter from the compressed entry on their own
+  (separate pieces, so separate existential cells `cs`), and nothing in the
+  types says that inflate, the CRC check and `_text_of_content` give the same
+  bytes each time: that needs inflate (the zip package) and the text
+  conversion (`src/text_encoding.bats`) as proved relations of their input
+  cells, with functional lemmas, which they are not yet. The proof is owed
+  (#608; no trusted primitive is needed or allowed), and until it is proved
+  it is tested (`e2e/giant-text-highlights.spec.js`,
+  `e2e/pathological.spec.js`, `e2e/search.spec.js`). **Trusted** (array's, tested there): the unsafe
+  core of `barr_of_arrx`, `cborrow_view` (an identity on the pointer) and
+  `cborrow_get` (reads the byte it says). The functional lemmas and the
+  relations are audited by the mutation check (`mutation_check.py`, GMP):
+  every statement of `breakback_functional`, `cutc_functional` and
+  `pieces_functional` made false is rejected; the two lemmas `white_not_white`
+  and `starts_not_continues`, which prove `1 == 0` from a pair that cannot
+  both hold (a byte that is white space and is not; one that starts a
+  character and continues one), are accepted when mutated to any other
+  statement, as every statement is true of an impossible pair, and each of
+  their premises is satisfiable alone. `cut.bats` checks in 2 s.
 * **The spec's long chapters run without Playwright's trace and
   screenshots** (`heavy` in `e2e/pathological.spec.js`): its snapshotter
   walks every node at every action, 2 to 3 s on a chapter of 30,000, which
