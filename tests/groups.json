@@ -90,7 +90,8 @@
     "extras": [
       "epub2.spec.js",
       "epubcheck.spec.js",
-      "settings-screen.spec.js"
+      "settings-screen.spec.js",
+      "raw-mouse.spec.js"
     ],
     "perf": [
       "pathological.spec.js",
