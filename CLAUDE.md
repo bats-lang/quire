@@ -124,12 +124,16 @@ commit), and save theirs once the job passed. What was found:
   is mode 2 and 3, build 0 and 1), so there are two caches, `build` and
   `static`. `.bats_cache_id` drops a cache when the compiler's semantics
   change.
-* Staleness. Nothing in `build/` records the compiler, ATS2 or the C
-  compiler, so the key names them: `.github/bats-version`, the commit of bats's
-  setup action (the ATS2 pin is in it; read from the workflows by
-  `.github/actions/build-cache`, so a workflow edit that leaves the pin
-  alone keeps the cache), `bats.lock`, `bats.toml`, the runner image and
-  architecture. The sources are the key's end, so an exact hit is the same
+* Staleness. A build/ records what made it (#622, bats-lang/bats#273):
+  `build/.bats_stamp` holds the bats's own inputs' digest, patsopt's
+  toolchain, the C compiler's version, the flags and the target, and bats
+  drops a build/ whose stamp is not the one it would write, so the key does
+  not name the compiler pin, the ATS2 pin or the runner image any more (they
+  were `.github/bats-version`, the ATS2 pin and the image). It names
+  `bats.lock`, `bats.toml`, the system and architecture, which the stamp does
+  not cover, and the commit of bats's setup action (ATS2 and the compiler's
+  build are in it; read from the workflows by `.github/actions/build-cache`,
+  so a workflow edit that leaves the pin alone keeps the cache). The sources are the key's end, so an exact hit is the same
   sources, and a prefix hit is the incremental build the compiler does on a
   developer's machine: a changed module is re-emitted by its hash (its
   `.dats` is then newer than its C), a changed `.sats` rebuilds every
@@ -362,15 +366,18 @@ project carries the version and its code.
 ## Main goes to Play's internal testing (#308)
 
 Every push to main that passes the whole check is released to Google
-Play's internal testing track by `check.yml`'s `play-internal` job
-(`scripts/play-release.sh`, tested against a stub of Play by
-`tests/play-release/run.sh` in the `plan` job): the run's own
-`release-aab`, the commit's subject as its notes, committed with
-`ERROR_IF_IN_REVIEW`. It signs in by Workload Identity Federation
-(`scripts/play-release.env`, public names), whose provider admits only a
-push to main of this repository, so no key exists and no other run can
-release. Production is a promotion in the Play Console; ANDROID.md says
-how.
+Play's internal testing track by `check.yml`'s `play-internal` job, which
+calls pwa's reusable workflow `play-release.yml` by commit (bats-lang/pwa#90,
+pwa#101; the script, its stub of Play and its test live there, moved by
+quire#623, and this repository keeps none): the run's own `release-aab`,
+the commit's first line as its notes, committed with `ERROR_IF_IN_REVIEW`.
+The caller passes the same commit twice, as `uses:` and as `pwa-ref` (a
+reusable workflow cannot read the commit it was called at), and its public
+names (package, Workload Identity provider, service account) as `with:`
+inputs in `check.yml`. It signs in by Workload Identity Federation, whose
+provider admits only a push to main of this repository, so no key exists
+and no other run can release. Production is a promotion in the Play
+Console; ANDROID.md says how.
 
 ## To do: book memory in a rolling window of page arenas
 
