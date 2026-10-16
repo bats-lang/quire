@@ -3868,7 +3868,7 @@ events), so it is never made between a move and the press, wheel or release
 that depend on the pointer's place; `tests/static/mouse.py` (in `checkers`) fails a `.mouse` in `e2e/`
 outside that helper, as a member, a bracket key or a destructured key
 (`const {mouse} = page`, renamed or over several lines), and reads the
-source as tokens, so a comment or a string that names it is not a use.
+source as tokens, so a comment or a string that names it is not a use, and a `mouse:` key of an object literal is not one either (`{ mouse: true }`).
 A budget keeps headroom over what a loaded runner has been seen to give
 (a turn's animated time against its instant time was 1.27 times once, on
 CI, against a quarter's slack), and still fails a turn that costs twice

@@ -1,0 +1,1 @@
+a raw pointer event, not through rawMouse: if (a) {} /'/.test(s); page.mouse.click(1, 2);
