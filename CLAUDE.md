@@ -45,18 +45,24 @@ stay short within a few lines.
 
 ## Priorities
 
-* **p0:** first, before anything else.
-* **CI first:** CI issues, especially flaky tests, outrank feature work: a
-  session fixes them first; a flake is a bug with a root cause.
-* **Order:** CI issues (flakiness first), then correctness work, then
-  feature work. Correctness work is anything where, assuming the code is
-  already correct, the only difference is added tests or proofs (missing
-  proofs, missing coverage).
-* **p1:** next.
-* **p2:** known issues the Android release is held for. Work sessions
-  address them.
-* **p3:** not held for. A session may file p3 issues but does not work
-  on them.
+* **p0: CI.** Anything that makes CI run more reliably or faster, not
+  merely something that touches CI: a flake (a bug with a root cause),
+  a pin, a cache, a rebalanced or skipped group, a retry.
+* **p1: correctness.** Anything that guarantees correctness better or
+  solves incorrectness: missing proofs, tests or coverage, wrong
+  behaviour, audit gaps, violations of the safety rules.
+* **p2:** anything that changes quire's user-visible behaviour, or the
+  devex of someone developing a different application in bats. Shell
+  tools count under this rule, since changing them means scripting shell
+  instead of implementing bats.
+* **p3:** anything else; not held for. A session may file p3 issues but
+  does not work on them.
+
+Order: p0 first, then p1, then p2, and within a priority the oldest
+opened ticket first, so none starves. A PR already started finishes
+before a new one is started. Downgrading a ticket to p3 on judgement
+(minor impact, high cost) needs the owner's approval; the tickets that
+are p3 today are approved.
 
 ## Pipeline and tooling improvements belong in bats or pwa
 
@@ -78,6 +84,12 @@ then the ticket that moves it is written first, the stopgap says so in its
 comment, and it is deleted when the move lands (quire#635's retries and
 cache, moved by quire#637). A stopgap with no ticket for its move is not a
 fix.
+
+**We do not write shell scripts (or any non-bats code of our own) unless
+all other avenues are exhausted.** We self-host in bats, implement in
+bats, build tooling in bats; dependencies on other tools are fine; only
+what is impossible in bats (like getting bats to run) is not bats. A PR
+that adds non-bats code of ours names the avenue it exhausted (quire#646).
 
 ## CI is pinned
 
@@ -2102,7 +2114,7 @@ in time is split, as `date_text` and `add32_functional` were):
   declaration and primplement are changed where they stand and whose
   dependents are checked again: minutes a mutant). An accepted mutant is a
   vacuous proof (or a mutation that is true: `tests/static/mutation_known.txt`),
-  and is filed as its own p2 issue with the minimal case. A lemma no
+  and is filed as its own p1 issue with the minimal case. A lemma no
   operator reaches (a `FALSEP`, `EQFD` result) gets its false variant as a
   fixture in `tests/static/solver/reject/`, with its true statement in
   `accept/`. The checker is itself tested (`tests/static/mutation_test.py`,
