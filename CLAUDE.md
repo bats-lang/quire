@@ -222,6 +222,23 @@ without; `accepts-data` 15 to 32, `app` 17 to 33): 40 minutes wall. A pull
 request's own run restores the build cache (the `build` job 3 minutes) and
 still takes 38, because `static (accepts)` is the long pole, not the build.
 
+The static groups were rebalanced from measured times (#618). Measured on the
+cold run of main's push of b88d218 (run 38895874813; `ok accept/<name> (N s)`
+lines of each job's log): every group pays about 8.6 minutes (set-up and the
+app's cold check) and then its members; a reject costs 17 to 29 s (one in
+`sheet-scrolls-over-share` 128 s), an accept 81 to 89 s (`sheet-scrolls-most`
+179 s), `solver` 3.7 minutes and `checkers` 25 s. Members: 64.3 minutes of
+fixtures and 4.1 of `solver` and `checkers`, in three groups: `accepts`
+43.0 minutes wall (34.1 of members), `app` 28.6, `accepts-data` 24.1. The
+same members on a pull request with the build cache (run 38893313385) took
+0.78 of that. Six groups of about 11.4 minutes each (`accepts` 11.3,
+`accepts-reader` 11.3, `rejects` 11.4, `app` 11.2, `accepts-data` 10.9,
+`rest` 12.2 minutes of members, by those cold times) put the cold critical
+path at about 8.6 + 12.2 = 21 minutes, from 43. Six, not five, because the
+issue asks for about 12 minutes of members (five would be 13.7); each group
+costs about 9 minutes of a runner for its check. The new numbers are to be
+read from the first run of this change.
+
 What happened on 2026-10-15, and the rules it gave:
 
 * Five entries at once (#609, #611, #612, #613, #616) wanted more runners than
