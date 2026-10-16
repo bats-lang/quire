@@ -3843,9 +3843,13 @@ itself, which the bars' 5 s timeout can hide on a loaded machine: a
 control is clicked with `clickControl`, which shows the bars and clicks
 together until the click lands. Every raw pointer event of a spec (a
 `page.mouse` click, move, press or wheel) goes through `rawMouse` in
-`e2e/helpers.js`, which calls `releaseClick` first (quire#630: a timed-out
-locator click can leave Playwright's interceptor, which swallows the next raw
-event); `tests/static/mouse.py` (in `checkers`) fails a `.mouse` in `e2e/`
+`e2e/helpers.js`, which calls `releaseClick` first before a click, double click
+or move made with no button held (quire#630: a timed-out locator click can
+leave Playwright's interceptor, which swallows the next raw event).
+`releaseClick` is a trial hover, which moves the pointer to the viewport's
+centre (Playwright 1.58.2 runs the move and only blocks the page from the
+events), so it is never made between a move and the press, wheel or release
+that depend on the pointer's place; `tests/static/mouse.py` (in `checkers`) fails a `.mouse` in `e2e/`
 outside that helper.
 A budget keeps headroom over what a loaded runner has been seen to give
 (a turn's animated time against its instant time was 1.27 times once, on

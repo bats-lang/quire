@@ -502,12 +502,22 @@ export async function releaseClick(page, timeout = 2000) {
 }
 
 /** Every raw pointer event a spec makes (`page.mouse`: a click, a double
-    click, a move, a press, a release, a wheel) goes through here, so each
-    is made after releaseClick (#630). Callers name the action as a string:
-    rawMouse(page, 'click', x, y). The lint in tests/static/mouse.py fails a
-    `.mouse` anywhere in e2e/ outside this file. */
+    click, a move, a press, a release, a wheel) goes through here (#630).
+    Callers name the action as a string: rawMouse(page, 'click', x, y). The
+    lint in tests/static/mouse.py fails a `.mouse` anywhere in e2e/ outside
+    this file.
+
+    releaseClick is a trial hover, and a trial hover MOVES the pointer to the
+    centre of the viewport (Playwright runs the move and only the hit-target
+    interceptor is blocked: measured on 1.58.2). So it is made only before an
+    event that sets the pointer itself (click, dblclick, move) and only while
+    no button is held, never between a move and the press, the wheel or the
+    release that rely on where the pointer is. */
+const buttonHeld = new WeakSet();
 export async function rawMouse(page, action, ...args) {
-  await releaseClick(page);
+  if (['click', 'dblclick', 'move'].includes(action) && !buttonHeld.has(page)) await releaseClick(page);
+  if (action === 'down') buttonHeld.add(page);
+  if (action === 'up') buttonHeld.delete(page);
   return page.mouse[action](...args);
 }
 
