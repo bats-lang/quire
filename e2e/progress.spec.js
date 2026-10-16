@@ -12,6 +12,7 @@ import {
   start, readBook, openBook, card, cards, place, toLibrary, bookMenu, menuItem, dialog, showChrome, titles,
   importFiles, epubFile, rawFile, oneColumn, readFixed, fixedPlace, libraryMenu, importInput,
   librarySettings, settingsButton, restoreInput, exportedBackup, importOffered, emptyTrash,
+  rawMouse,
 } from './helpers.js';
 import { progressBooks } from './progress-books.js';
 
@@ -185,9 +186,9 @@ test('chapters of very unequal length give a percentage that moves with the text
   // chapters it would be the fifth
   await showChrome(page);
   const box = await scrubber(page).boundingBox();
-  await page.mouse.move(box.x + box.width * 0.45, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.up();
+  await rawMouse(page, 'move', box.x + box.width * 0.45, box.y + box.height / 2);
+  await rawMouse(page, 'down');
+  await rawMouse(page, 'up');
   await expect.poll(async () => (await place(page)).ch).toBe(1);
   await page.keyboard.press('t');
   await expect.poll(async () => { const p = await percent(page); return p >= 38 && p <= 50; }).toBe(true);

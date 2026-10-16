@@ -21,6 +21,7 @@ import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, indicator, bookPage, dialog, openReadingSettings, readingSettings,
   selectionButton, marks, epubFile, importFiles, toLibrary, control, clickControl, cards, card, bareFrameMs,
+  rawMouse,
 } from './helpers.js';
 import { pageMargins } from './page-margins.js';
 import {
@@ -230,7 +231,7 @@ async function barsDown(page) {
   const footer = page.locator('#footer');
   if (!(await footer.isVisible())) {
     const box = await bookPage(page).boundingBox();
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await rawMouse(page, 'click', box.x + box.width / 2, box.y + box.height / 2);
   }
   await expect(footer).toBeVisible();
 }

@@ -1,0 +1,1 @@
+await page['mouse'].down();

@@ -9,7 +9,7 @@
 // the theme's text colour in every theme.
 
 import { test, expect } from './fixtures.js';
-import { start, bookPage, place, toLibrary, colours } from './helpers.js';
+import { start, bookPage, place, toLibrary, colours, rawMouse } from './helpers.js';
 import { readMathBook, setSize, sizeRange, chooseTheme, inkIn, turnTo, MATHML_NAMESPACE } from './math-helpers.js';
 
 const THEMES = ['Light', 'Dark', 'Sepia', 'Grey', 'Night'];
@@ -223,8 +223,8 @@ test('a display equation wider than the column scrolls inside itself: the page h
     const r = window.found(doc, 'wide-equation').getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   });
-  await page.mouse.move(at.x, at.y);
-  await page.mouse.wheel(300, 0);
+  await rawMouse(page, 'move', at.x, at.y);
+  await rawMouse(page, 'wheel', 300, 0);
   await expect.poll(() => bookPage(page).evaluate(doc => window.found(doc, 'wide-equation').scrollLeft)).toBeGreaterThan(50);
   // a finger drag along it scrolls it too, as the browser's own gesture: a touch screen's
   if (testInfo.project.use.hasTouch) {

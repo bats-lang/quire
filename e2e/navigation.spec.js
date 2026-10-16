@@ -4,6 +4,7 @@
 import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, visibleText, showChrome, chapterTitle, control, dialog, jumpBack, bookPage,
+  rawMouse,
 } from './helpers.js';
 
 const contents = page => dialog(page, 'Contents');
@@ -141,11 +142,11 @@ test('the scrubber shows where the page is, and dragging it goes there', async (
   // reader, shows the book's too once a sync has listed it there)
   await expect(page.getByRole('toolbar', { name: 'Page controls' }).getByText('0% of book', { exact: true })).toBeVisible();
   const box = await scrubber.boundingBox();
-  await page.mouse.move(box.x + box.width * 0.8, box.y + box.height / 2);
-  await page.mouse.down();
+  await rawMouse(page, 'move', box.x + box.width * 0.8, box.y + box.height / 2);
+  await rawMouse(page, 'down');
   await expect(page.getByRole('tooltip')).toBeVisible();
   await expect(page.getByRole('tooltip')).toContainText('The End');
-  await page.mouse.up();
+  await rawMouse(page, 'up');
   await expect(chapterTitle(page)).toHaveText('The End');
   await showChrome(page);
   const pct = +(await scrubber.getAttribute('aria-valuenow'));

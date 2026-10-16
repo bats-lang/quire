@@ -12,7 +12,7 @@
 // `gen-pwa test` runs alone on one worker before the rest (#499).
 
 import { test, expect } from './fixtures.js';
-import { start, readBook, place, bookPage, chapters, clickControl } from './helpers.js';
+import { start, readBook, place, bookPage, chapters, clickControl, rawMouse } from './helpers.js';
 
 const book = (title, rtl = false) => ({ title, author: 'Turn Tests', rawChapters: chapters(2, 20), rtl });
 
@@ -90,8 +90,8 @@ test.describe('a page turn', () => {
     const { y, left, right } = await sides(page);
     expect(await turn(page, () => page.keyboard.press('ArrowRight'))).toEqual({ laid: true, at: 2 });
     expect(await turn(page, () => page.keyboard.press('ArrowLeft'))).toEqual({ laid: true, at: 1 });
-    expect(await turn(page, () => page.mouse.click(right, y))).toEqual({ laid: true, at: 2 });
-    expect(await turn(page, () => page.mouse.click(left, y))).toEqual({ laid: true, at: 1 });
+    expect(await turn(page, () => rawMouse(page, 'click', right, y))).toEqual({ laid: true, at: 2 });
+    expect(await turn(page, () => rawMouse(page, 'click', left, y))).toEqual({ laid: true, at: 1 });
     expect(await turn(page, () => clickControl(page, 'Next page'))).toEqual({ laid: true, at: 2 });
     expect(await turn(page, () => clickControl(page, 'Previous page'))).toEqual({ laid: true, at: 1 });
   });
@@ -239,8 +239,8 @@ test.describe('with less motion', () => {
     const { y, left, right } = await sides(page);
     expect(await turn(page, () => page.keyboard.press('ArrowRight'))).toEqual({ laid: false, at: 2 });
     expect(await turn(page, () => page.keyboard.press('ArrowLeft'))).toEqual({ laid: false, at: 1 });
-    expect(await turn(page, () => page.mouse.click(right, y))).toEqual({ laid: false, at: 2 });
-    expect(await turn(page, () => page.mouse.click(left, y))).toEqual({ laid: false, at: 1 });
+    expect(await turn(page, () => rawMouse(page, 'click', right, y))).toEqual({ laid: false, at: 2 });
+    expect(await turn(page, () => rawMouse(page, 'click', left, y))).toEqual({ laid: false, at: 1 });
     expect(await turn(page, () => clickControl(page, 'Next page'))).toEqual({ laid: false, at: 2 });
     expect(await turn(page, () => clickControl(page, 'Previous page'))).toEqual({ laid: false, at: 1 });
   });

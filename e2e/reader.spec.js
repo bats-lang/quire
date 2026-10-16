@@ -10,6 +10,7 @@ import {
   showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
   importFiles, indicator, chapterBody, oneColumn, selectText, selectionButton, selectionPick,
   readingSettings, openReadingSettings, expectBarFollows, libraryShown,
+  rawMouse,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -66,15 +67,15 @@ test('tapping the page\'s sides turns it, and its middle shows or hides the bars
   await readBook(page, book('Taps'));
   const box = await bookPage(page).boundingBox();
   const y = box.y + box.height / 2;
-  await page.mouse.click(box.x + box.width - 10, y);
+  await rawMouse(page, 'click', box.x + box.width - 10, y);
   await expect.poll(async () => (await place(page)).p).toBe(2);
   // a page turn hides the bars
   await expect(control(page, 'Previous page')).toBeHidden();
-  await page.mouse.click(box.x + 10, y);
+  await rawMouse(page, 'click', box.x + 10, y);
   await expect.poll(async () => (await place(page)).p).toBe(1);
-  await page.mouse.click(box.x + box.width / 2, y);
+  await rawMouse(page, 'click', box.x + box.width / 2, y);
   await expect(control(page, 'Previous page')).toBeVisible();
-  await page.mouse.click(box.x + box.width / 2, y);
+  await rawMouse(page, 'click', box.x + box.width / 2, y);
   await expect(control(page, 'Previous page')).toBeHidden();
 });
 
@@ -89,11 +90,11 @@ test('the mouse wheel turns pages', async ({ page }) => {
   await start(page);
   await readBook(page, book('Wheel'));
   const box = await bookPage(page).boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, 120);
+  await rawMouse(page, 'move', box.x + box.width / 2, box.y + box.height / 2);
+  await rawMouse(page, 'wheel', 0, 120);
   await expect.poll(async () => (await place(page)).p).toBe(2);
   await page.waitForTimeout(400);
-  await page.mouse.wheel(0, -120);
+  await rawMouse(page, 'wheel', 0, -120);
   await expect.poll(async () => (await place(page)).p).toBe(1);
 });
 
@@ -482,7 +483,7 @@ test('an image is shown full screen from a double tap on it between the sides, o
   expect(await place(page)).toMatchObject({ ch: at.ch, p: at.p });
   // a tap on the page's side still turns it, and opens nothing
   const box = await bookPage(page).boundingBox();
-  await page.mouse.click(box.x + box.width * 0.9, box.y + box.height * 0.7);
+  await rawMouse(page, 'click', box.x + box.width * 0.9, box.y + box.height * 0.7);
   await expect.poll(async () => (await place(page)).p).toBe(at.p + 1);
   await expect(viewer).toBeHidden();
 });
@@ -527,7 +528,7 @@ test('a Hebrew book whose spine does not say reads right to left: its text, its 
   await page.keyboard.press('ArrowLeft');
   await expect.poll(async () => (await place(page)).p).toBe(2);
   const box = await bookPage(page).boundingBox();
-  await page.mouse.click(box.x + 10, box.y + box.height / 2);
+  await rawMouse(page, 'click', box.x + 10, box.y + box.height / 2);
   await expect.poll(async () => (await place(page)).p).toBe(3);
   await page.keyboard.press('ArrowRight');
   await expect.poll(async () => (await place(page)).p).toBe(2);
@@ -670,7 +671,7 @@ test('a tap on the footer\'s readout shows the next one, which is kept, and turn
   // a tap beside it is the page's: in the middle, it brings the bars up
   const title = readout.locator('..').locator('span').first();
   const box = await title.boundingBox();
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await rawMouse(page, 'click', box.x + box.width / 2, box.y + box.height / 2);
   await expect(readout).toBeHidden();
 });
 
@@ -772,7 +773,7 @@ test('taps on the page follow the chosen zones: sides, forward or one hand', asy
   await page.keyboard.press('t');
   const tap = async (fx, fy) => {
     const box = await bookPage(page).boundingBox();
-    await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+    await rawMouse(page, 'click', box.x + box.width * fx, box.y + box.height * fy);
   };
   const turned = async (fx, fy, by) => {
     const before = await place(page);
@@ -837,7 +838,7 @@ test('a book read right to left has its tap zones mirrored, said and drawn', asy
   await expect.poll(() => control(page, 'Previous page').isVisible()).toBe(false);
   const tap = async (fx, fy) => {
     const box = await bookPage(page).boundingBox();
-    await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+    await rawMouse(page, 'click', box.x + box.width * fx, box.y + box.height * fy);
   };
   const turned = async (fx, by) => {
     const before = await place(page);
@@ -1131,10 +1132,10 @@ test('a mouse drag over the page selects text and does not turn it', async ({ pa
   await readBook(page, book('Dragged', 1, 20));
   const box = await bookPage(page).boundingBox();
   const y = box.y + box.height / 3;
-  await page.mouse.move(box.x + box.width / 2 + 100, y);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 - 100, y, { steps: 8 });
-  await page.mouse.up();
+  await rawMouse(page, 'move', box.x + box.width / 2 + 100, y);
+  await rawMouse(page, 'down');
+  await rawMouse(page, 'move', box.x + box.width / 2 - 100, y, { steps: 8 });
+  await rawMouse(page, 'up');
   await page.waitForTimeout(300);
   expect((await place(page)).p).toBe(1);
   expect(await page.evaluate(() => window.getSelection().toString().length)).toBeGreaterThan(0);
