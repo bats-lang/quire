@@ -18,7 +18,7 @@
 // unmarked link is a link.
 
 import { test, expect } from './fixtures.js';
-import { start, readBook, bookPage, dialog, visibleText, place, jumpBack, chapterTitle } from './helpers.js';
+import { start, readBook, bookPage, dialog, visibleText, place, jumpBack, chapterTitle, rawMouse } from './helpers.js';
 import { noteBooks } from './note-books.js';
 
 const note = page => dialog(page, 'Footnote');
@@ -171,7 +171,7 @@ test('a note leaves its reference uncovered: no scrim, and the sheet in the half
       return hit && (el === hit || el.contains(hit)) ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : null;
     });
     if (!at) continue;
-    await page.mouse.click(at.x, at.y);
+    await rawMouse(page, 'click', at.x, at.y);
     await expect(note(page)).toBeVisible();
     await expect(page.locator('#panel-scrim')).toBeHidden();
     const seen = await reference.evaluate(el => {

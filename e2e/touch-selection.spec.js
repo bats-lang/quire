@@ -83,6 +83,7 @@ import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, placeChanged, bookPage, control, showChrome, dialog, selectionButton, marks, oneColumn,
   openReadingSettings, readingSettings,
+  rawMouse,
 } from './helpers.js';
 import { cutOff, insetsShort, labelInName, coveredByBanner } from './controls-shown.js';
 import { selectionBooks } from './selection-books.js';
@@ -244,7 +245,7 @@ async function pressOn(page, testInfo, word) {
     await expect(toolbar(page)).toBeVisible();
     return null;
   }
-  await page.mouse.dblclick(word.x, word.y);
+  await rawMouse(page, 'dblclick', word.x, word.y);
   await expect(toolbar(page)).toBeVisible();
   return null;
 }
@@ -366,7 +367,7 @@ test('a double click on a word selects it, shows the toolbar, and does not turn 
   await open(page, 'prose');
   const before = await place(page);
   const word = await middleWord(page, 150);
-  await page.mouse.dblclick(word.x, word.y);
+  await rawMouse(page, 'dblclick', word.x, word.y);
   await expect.poll(() => selected(page).then(squash)).toBe(word.text);
   await expect(toolbar(page)).toBeVisible();
   await page.waitForTimeout(400);
@@ -462,7 +463,7 @@ test('with the mouse, a shift-click on a later word extends the selection to it,
   const later = (await middleWords(page, anchor.y + 40)).find(w => w.y > anchor.y + 40);
   expect(later, 'a later word to click on').toBeDefined();
   await page.keyboard.down('Shift');
-  await page.mouse.click(later.right - 2, later.y);
+  await rawMouse(page, 'click', later.right - 2, later.y);
   await page.keyboard.up('Shift');
   const text = squash(await selected(page));
   const words = await pageWords(page);
@@ -503,13 +504,13 @@ test('dragging past the page\'s edge does not turn the page while the selection 
     await finger.up(2, anchor.y);
     await finger.off();
   } else {
-    await page.mouse.move(anchor.left + 1, anchor.y);
-    await page.mouse.down();
-    await page.mouse.move(width - 2, height - 2, { steps: 15 });
-    await page.mouse.move(2, anchor.y, { steps: 15 });
+    await rawMouse(page, 'move', anchor.left + 1, anchor.y);
+    await rawMouse(page, 'down');
+    await rawMouse(page, 'move', width - 2, height - 2, { steps: 15 });
+    await rawMouse(page, 'move', 2, anchor.y, { steps: 15 });
     await page.waitForTimeout(600);
     expect(await place(page)).toEqual(before);
-    await page.mouse.up();
+    await rawMouse(page, 'up');
   }
   await page.waitForTimeout(600);
   expect(await place(page), 'the page turned while the selection was dragged to its edge').toEqual(before);
@@ -617,7 +618,7 @@ test('a selection in the footnote popup is the popup\'s: no highlight is offered
     await finger.up(word.x, word.y);
     await finger.off();
   } else {
-    await page.mouse.dblclick(word.x, word.y);
+    await rawMouse(page, 'dblclick', word.x, word.y);
   }
   // the selection is in the popup
   await expect.poll(() => selected(page).then(squash)).toBe('several');
@@ -653,7 +654,7 @@ async function tapAt(page, testInfo, { x, y }) {
     const finger = await fingerOn(page);
     await finger.tap(x, y);
     await finger.off();
-  } else await page.mouse.click(x, y);
+  } else await rawMouse(page, 'click', x, y);
 }
 
 /** The list's one annotation: its quoted text and note, read from the panel */

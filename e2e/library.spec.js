@@ -9,6 +9,7 @@ import {
   librarySettings, settingsButton, settingsScreen, continueReading,
   emptyImportInput, openSortMenu, sortMenu, chooseInSortMenu, sortMenuChecked,
   openShelf, shelfTitle, shelfBack, emptyTrash, emptyTrashDialog,
+  rawMouse,
 } from './helpers.js';
 
 const empty = /Import an EPUB file/;
@@ -558,7 +559,7 @@ test('the book menu and the library menu close without doing anything', async ({
   await expect(page.getByRole('menu')).toBeHidden();
   await bookMenu(page, 'Left Alone');
   // a click outside the menu
-  await page.mouse.click(5, 5);
+  await rawMouse(page, 'click', 5, 5);
   await expect(page.getByRole('menu')).toBeHidden();
   // a right-click on the card opens the same menu
   await card(page, 'Left Alone').getByRole('button').first().click({ button: 'right' });

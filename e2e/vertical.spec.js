@@ -8,6 +8,7 @@ import {
   start, importFiles, epubFile, openBook, readBook, toLibrary, reload, bookPage, dialog,
   place, indicator, chapters, japaneseChapters,
   readingSettings, openReadingSettings, expectBarFollows, marks, selectionButton,
+  rawMouse,
 } from './helpers.js';
 
 const verticalBook = (title) => ({ title, author: 'Vertical Tests', language: 'ja', rtl: true, rawChapters: japaneseChapters(2, 40) });
@@ -62,11 +63,11 @@ test('a Japanese book read right to left is set vertically, its pages going down
   expect(await visibleText(page)).not.toBe(shown);
   // a tap on the left side turns on, as in any book read right to left
   const box = await bookPage(page).boundingBox();
-  await page.mouse.click(box.x + 10, box.y + box.height / 2);
+  await rawMouse(page, 'click', box.x + 10, box.y + box.height / 2);
   await expect.poll(async () => (await place(page)).p).toBe(3);
   expect((await scroll(page)).top).toBe(2 * before.height);
   // and the right side back
-  await page.mouse.click(box.x + box.width - 10, box.y + box.height / 2);
+  await rawMouse(page, 'click', box.x + box.width - 10, box.y + box.height / 2);
   await expect.poll(async () => (await place(page)).p).toBe(2);
   expect(errors).toEqual([]);
 });

@@ -501,6 +501,26 @@ export async function releaseClick(page, timeout = 2000) {
   }
 }
 
+/** Every raw pointer event a spec makes (`page.mouse`: a click, a double
+    click, a move, a press, a release, a wheel) goes through here (#630).
+    Callers name the action as a string: rawMouse(page, 'click', x, y). The
+    lint in tests/static/mouse.py fails a `.mouse` anywhere in e2e/ outside
+    this file.
+
+    releaseClick is a trial hover, and a trial hover MOVES the pointer to the
+    centre of the viewport (Playwright runs the move and only the hit-target
+    interceptor is blocked: measured on 1.58.2). So it is made only before an
+    event that sets the pointer itself (click, dblclick, move) and only while
+    no button is held, never between a move and the press, the wheel or the
+    release that rely on where the pointer is. */
+const buttonHeld = new WeakSet();
+export async function rawMouse(page, action, ...args) {
+  if (['click', 'dblclick', 'move'].includes(action) && !buttonHeld.has(page)) await releaseClick(page);
+  if (action === 'down') buttonHeld.add(page);
+  if (action === 'up') buttonHeld.delete(page);
+  return page.mouse[action](...args);
+}
+
 /** Opens the reader's bars when they are hidden */
 export async function showChrome(page) {
   const prev = control(page, 'Previous page');
@@ -510,8 +530,7 @@ export async function showChrome(page) {
     // a book page that is not there (a click that timed out was made, and
     // the library is shown) is no page to tap: the wait is the click's
     const box = await bookPage(page).boundingBox({ timeout: 2000 });
-    await releaseClick(page);
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await rawMouse(page, 'click', box.x + box.width / 2, box.y + box.height / 2);
     await page.waitForTimeout(150);
     // a tap between the zones on a highlight selects it, with its toolbar
     // (quire#428), and brings up no bars: the selection is ended and the

@@ -23,7 +23,7 @@
 
 import { writeFileSync } from 'node:fs';
 import { test, expect, onAndroid, androidInsets } from './fixtures.js';
-import { indicator, librarySearch, libraryShown } from './helpers.js';
+import { indicator, librarySearch, libraryShown, rawMouse } from './helpers.js';
 
 /** The time the tests' clock stands at */
 export const FIXED_TIME = new Date('2026-06-01T10:00:00Z');
@@ -153,7 +153,7 @@ export async function capture(page) {
   await settled(page);
   // the pointer away from every control: where the mouse last was is
   // not the app's state (a hover)
-  await page.mouse.move(0, 0);
+  await rawMouse(page, 'move', 0, 0);
   // nor is the focus, nor its ring, which the browser draws after keys
   // and not after a tap: whether the app drew one by itself is kept,
   // and the focus let go

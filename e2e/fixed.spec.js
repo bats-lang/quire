@@ -10,6 +10,7 @@ import {
   start, importFiles, epubFile, card, bookPage, indicator, dialog, openSettings, toLibrary, chapters,
   fixedLayoutBook, imagePage, fixedPlace, readFixed, fixedBoxes as boxes,
   readingSettings, openReadingSettings,
+  rawMouse,
 } from './helpers.js';
 import { solidPng } from './create-epub.js';
 
@@ -64,9 +65,9 @@ test('a turn goes to the next spine item, each a page, and back', async ({ page 
   // a tap at the view's sides, beside the page where it is letter-boxed,
   // turns it as on a reflowed page
   const view = await bookPage(page).boundingBox();
-  await page.mouse.click(view.x + view.width - 4, view.y + view.height / 2);
+  await rawMouse(page, 'click', view.x + view.width - 4, view.y + view.height / 2);
   await expect.poll(async () => (await fixedPlace(page)).p).toBe(3);
-  await page.mouse.click(view.x + 4, view.y + view.height / 2);
+  await rawMouse(page, 'click', view.x + 4, view.y + view.height / 2);
   await expect.poll(async () => (await fixedPlace(page)).p).toBe(2);
 });
 

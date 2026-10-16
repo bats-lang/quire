@@ -5,7 +5,7 @@
 // opened it, and Escape closes it.
 
 import { test, expect } from './fixtures.js';
-import { start, readBook, chapters, bookPage, dialog, place, clickControl, control, showChrome } from './helpers.js';
+import { start, readBook, chapters, bookPage, dialog, place, clickControl, control, showChrome, rawMouse } from './helpers.js';
 
 // Each panel the bars open: its button (the bottom bar's, or the top
 // bar's Search) and its dialog's name
@@ -97,17 +97,17 @@ for (const panel of panels) {
     // the page stays where it was
     const point = await outside(page, sheet);
     expect(point, 'the scrim shows beside or above the panel').not.toBeNull();
-    await page.mouse.move(point.x, point.y);
-    await page.mouse.down();
-    await page.mouse.move(point.x + 40, point.y, { steps: 4 });
-    await page.mouse.up();
+    await rawMouse(page, 'move', point.x, point.y);
+    await rawMouse(page, 'down');
+    await rawMouse(page, 'move', point.x + 40, point.y, { steps: 4 });
+    await rawMouse(page, 'up');
     await page.waitForTimeout(500);
     expect(await place(page)).toEqual(before);
 
     // a tap on the scrim, in a side's tap zone: the panel closes, the
     // page stays, and the focus is back on the button that opened it
     if (!(await sheet.isVisible())) sheet = await open(page, panel);
-    await page.mouse.click(point.x, point.y);
+    await rawMouse(page, 'click', point.x, point.y);
     await expect(sheet).toBeHidden();
     await expect(page.locator('#panel-scrim')).toBeHidden();
     await expect(opener(page, panel)).toBeFocused();

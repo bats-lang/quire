@@ -9,6 +9,7 @@ import {
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
   reload, readingSettings, openReadingSettings, openShelf, emptyTrashDialog, shelfTitle, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
+  rawMouse,
 } from './helpers.js';
 import { failLibrary, healReads, stubReads } from './storage-stub.js';
 import { legacyLibrary, bookKey, store, put, forgetRecords } from './legacy-library.js';
@@ -438,8 +439,8 @@ test('the reading settings sheet scrolls within the window, Close always in reac
   // at the sheet's middle (736 px down) to the DOM without scrolling it
   // (observed with the sheet at 55%, where it must scroll; at its upper
   // part the same wheel scrolls)
-  await page.mouse.move(box.x + 24, box.y + box.height * 0.2);
-  for (let i = 0; i < 20; i++) await page.mouse.wheel(0, 400);
+  await rawMouse(page, 'move', box.x + 24, box.y + box.height * 0.2);
+  for (let i = 0; i < 20; i++) await rawMouse(page, 'wheel', 0, 400);
   await expect.poll(() => panel.evaluate(e => e.scrollTop + e.clientHeight >= e.scrollHeight - 1)).toBe(true);
   await expect(last).toBeInViewport({ ratio: 1 });
   await expect(close).toBeInViewport({ ratio: 1 });
@@ -523,7 +524,7 @@ async function barsDown(page) {
   const footer = page.locator('#footer');
   if (!(await footer.isVisible())) {
     const box = await bookPage(page).boundingBox();
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await rawMouse(page, 'click', box.x + box.width / 2, box.y + box.height / 2);
   }
   await expect(footer).toBeVisible();
 }
