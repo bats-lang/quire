@@ -334,14 +334,24 @@ class Selection(unittest.TestCase):
         (self.root / 'tests' / 'static' / 'solver' / 'reject' / 'a.dats').write_text('y\n')
         self.assertIsNone(self.select())
 
-    def test_the_solver_pin_selects_everything(self):
-        path = self.root / '.github' / 'actions' / 'setup-bats'
+    def test_the_setup_action_pin_selects_everything(self):
+        path = self.root / '.github' / 'workflows'
         path.mkdir(parents=True)
-        (path / 'action.yml').write_text('one\n')
+        pin = 'uses: bats-lang/bats/.github/actions/setup@'
+        (path / 'check.yml').write_text(f'{pin}{"a" * 40}\n')
         self.git('add', '-A')
         self.git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'two')
-        (path / 'action.yml').write_text('two\n')
+        (path / 'check.yml').write_text(f'{pin}{"b" * 40}\n')
         self.assertIsNone(self.select())
+
+    def test_another_line_of_a_workflow_selects_nothing(self):
+        path = self.root / '.github' / 'workflows'
+        path.mkdir(parents=True)
+        (path / 'check.yml').write_text('uses: bats-lang/bats/.github/actions/setup@' + 'a' * 40 + '\nname: one\n')
+        self.git('add', '-A')
+        self.git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'two')
+        (path / 'check.yml').write_text('uses: bats-lang/bats/.github/actions/setup@' + 'a' * 40 + '\nname: two\n')
+        self.assertEqual(self.select(), set())
 
 
 if __name__ == '__main__':

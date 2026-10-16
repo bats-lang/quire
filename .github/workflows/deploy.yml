@@ -18,60 +18,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Install ATS2
-        run: |
-          sudo apt-get install -y -q libgmp-dev
-          curl -sL "https://raw.githubusercontent.com/ats-lang/ats-lang.github.io/master/FROZEN000/ATS-Postiats/ATS2-Postiats-gmp-0.4.2.tgz" -o /tmp/ats2.tgz
-          mkdir -p ~/.ats2
-          tar -xzf /tmp/ats2.tgz -C ~/.ats2
-          cd ~/.ats2/ATS2-Postiats-gmp-0.4.2
-          make -j$(nproc) -C src/CBOOT patsopt
-          mkdir -p bin
-          cp src/CBOOT/patsopt bin/patsopt
-          mkdir -p ~/.bats
-          ln -sf ~/.ats2/ATS2-Postiats-gmp-0.4.2 ~/.bats/ats2
-
-      - name: Install WASM tools
-        run: sudo apt-get install -y -q lld
-
-      # The compiler at the commit .github/bats-version pins (#203)
-      - name: Read the compiler pin
-        id: pins
-        run: echo "bats=$(tr -d '[:space:]' < .github/bats-version)" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout bats compiler
-        uses: actions/checkout@v4
-        with:
-          repository: bats-lang/bats
-          ref: ${{ steps.pins.outputs.bats }}
-          path: bats-src
-
-      - name: Build bats from checked-in bootstrap C
-        run: |
-          cp -R bats-src/bootstrap/c ~/bats-c
-          make -j$(nproc) -C ~/bats-c PATSHOME=$HOME/.ats2/ATS2-Postiats-gmp-0.4.2 debug/bats
-          mkdir -p ~/bats-bin
-          cp ~/bats-c/debug/bats ~/bats-bin/bats
-          rm -rf bats-src
-
-      - name: Setup
-        run: |
-          sudo cp $HOME/bats-bin/bats /bin/bats
-          git clone --depth 1 https://github.com/bats-lang/repository-prototype.git $HOME/repository
-          # The packages are the versions the committed bats.lock locks
-          # (#203); bats check and build fetch exactly those, and fail on
-          # a lock that does not match the project. Only a relock moves
-          # them: never this workflow.
-          test -f bats.lock || { echo "::error::bats.lock is missing: run 'bats lock --repository <dir>' and commit it"; exit 1; }
+      - name: Set up bats
+        uses: bats-lang/bats/.github/actions/setup@cf45c87611a9337b9bb28e2543dcb96dcd98639e # the setup action (bats#280)
 
       # The version is the date and short SHA of the commit deployed
       # (#219): HEAD's, which bats writes as the commit's facts
       # (src/version.bats words them)
       - name: Build the app and the PWA generator
-        run: |
-          bats build --repository $HOME/repository
+        run: bats build
 
       - name: Generate PWA
         run: ./dist/debug/gen-pwa

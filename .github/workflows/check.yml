@@ -54,9 +54,7 @@ jobs:
           fetch-depth: 2
 
       - name: Set up bats
-        uses: ./.github/actions/setup-bats
-        with:
-          commit: ${{ github.event.pull_request.head.sha || github.sha }}
+        uses: bats-lang/bats/.github/actions/setup@cf45c87611a9337b9bb28e2543dcb96dcd98639e # the setup action (bats#280)
 
       # A pull request and the merge queue's group start from the newest
       # build of the same toolchain (main's, or the pull request's own earlier
@@ -70,7 +68,7 @@ jobs:
           path: build
 
       - name: Build the app and the PWA generator
-        run: bats build --repository $HOME/repository
+        run: bats build
 
       - name: Generate PWA
         run: ./dist/debug/gen-pwa
@@ -138,12 +136,12 @@ jobs:
       # The record codec, natively: the checksum's check value, the edge of
       # 32 bits, damage to every byte, fuzz (#354)
       - name: Codec tests
-        run: tests/codec/run.sh $HOME/repository
+        run: tests/codec/run.sh $BATS_REPOSITORY
 
       # The CSS font-size reader, natively: values and units, declaration
       # blocks, selectors, whole style sheets and fuzz (#431)
       - name: CSS size tests
-        run: tests/css-size/run.sh $HOME/repository
+        run: tests/css-size/run.sh $BATS_REPOSITORY
 
       # Only after everything above passed: a cache holds no failed build
       - name: Save the compiler cache
@@ -189,9 +187,7 @@ jobs:
 
       - name: Set up bats
         if: steps.scope.outputs.run == 'yes'
-        uses: ./.github/actions/setup-bats
-        with:
-          commit: ${{ github.event.pull_request.head.sha || github.sha }}
+        uses: bats-lang/bats/.github/actions/setup@cf45c87611a9337b9bb28e2543dcb96dcd98639e # the setup action (bats#280)
 
       # The app's check is kept in a directory of a fixed name (run.sh
       # checks at the same path in every job, #460)
@@ -208,7 +204,7 @@ jobs:
         env:
           QUIRE_STATIC_WORK: ${{ runner.temp }}/quire-static
           QUIRE_MUTATION_BASE: ${{ steps.scope.outputs.base != 'none' && steps.scope.outputs.base || '' }}
-        run: tests/static/run.sh $HOME/repository $(scripts/ci-groups.py members static ${{ matrix.group }})
+        run: tests/static/run.sh $BATS_REPOSITORY $(scripts/ci-groups.py members static ${{ matrix.group }})
 
       - name: Save the compiler cache
         if: steps.scope.outputs.run == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'push')

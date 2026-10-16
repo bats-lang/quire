@@ -23,3 +23,4 @@ jobs:
       workflow-pins: |
         bats-lang/pwa/.github/workflows/android.yml
         bats-lang/repository-prototype/.github/workflows/relock-pins.yml
+        bats-lang/bats/.github/actions/setup

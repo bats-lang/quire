@@ -40,13 +40,11 @@ jobs:
         with:
           fetch-depth: 2
       - name: Set up bats
-        uses: ./.github/actions/setup-bats
-        with:
-          commit: ${{ github.sha }}
+        uses: bats-lang/bats/.github/actions/setup@cf45c87611a9337b9bb28e2543dcb96dcd98639e # the setup action (bats#280)
       - name: Mutation check
         env:
           QUIRE_STATIC_WORK: ${{ runner.temp }}/quire-static
-        run: tests/static/run.sh $HOME/repository $(scripts/ci-groups.py members static ${{ matrix.group }})
+        run: tests/static/run.sh $BATS_REPOSITORY $(scripts/ci-groups.py members static ${{ matrix.group }})
 
   report:
     needs: mutation

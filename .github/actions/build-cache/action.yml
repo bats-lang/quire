@@ -23,8 +23,10 @@ runs:
     # target: build/.bats_stamp, bats-lang/bats#273) and drops a build/ whose
     # stamp is not the one it would write, so the key no longer names the
     # compiler pin, the ATS2 pin or the runner image. What is left is what
-    # the stamp does not cover: the packages (the lock, bats.toml) and the
-    # system and architecture the cache was made on. The sources are the
+    # the stamp does not cover: the packages (the lock, bats.toml), the
+    # system and architecture the cache was made on, and the commit of bats's
+    # setup action, which installs ATS2 and builds the compiler (#623; the key
+    # still names the commit that does). The sources are the
     # key's last part, so an exact hit is the same sources, and a prefix hit
     # the newest earlier build of the same packages. The commit's facts
     # (build/src/_bats_facts, which src/version.bats words) are written
@@ -33,7 +35,10 @@ runs:
       id: key
       shell: bash
       run: |
-        echo "prefix=quire-${{ inputs.name }}-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bats.lock', 'bats.toml') }}-" >> "$GITHUB_OUTPUT"
+        # ATS2 and the way the compiler is built are bats's setup action's,
+        # called by commit: that commit names them (bats#280)
+        setup=$(grep -rhoE 'bats-lang/bats/\.github/actions/setup@[0-9a-f]{40}' .github/workflows | sort -u | sha256sum | cut -c1-16)
+        echo "prefix=quire-${{ inputs.name }}-v2-${{ runner.os }}-${{ runner.arch }}-${setup}-${{ hashFiles('bats.lock', 'bats.toml') }}-" >> "$GITHUB_OUTPUT"
         echo "sources=${{ hashFiles('src/**') }}" >> "$GITHUB_OUTPUT"
 
     - name: Restore the compiler cache

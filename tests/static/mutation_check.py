@@ -81,8 +81,12 @@ HEADER = re.compile(
     r'\d+\(line=\d+, offs=\d+\): error\((?:\d+|parsing|lexing)\): (?P<message>.*)$')
 BATS_ERROR = re.compile(r'^\s*--> (?P<path>\S+):(?P<line>\d+):\d+')
 # What, in a diff, can have changed the meaning of every proof: the solver (the ATS2 pin and the
-# solver's own fixtures). A compiler or package move is the scheduled run's.
-EVERYTHING_PATHS = ('.github/actions/setup-bats/action.yml', 'tests/static/solver.py')
+# solver's own fixtures). The ATS2 build is installed by bats's setup action (bats#280), called by
+# commit from the workflows, so a changed line there that names the action is a move of that pin.
+# A compiler or package move is the scheduled run's.
+EVERYTHING_PATHS = ('tests/static/solver.py',)
+SETUP_ACTION = 'bats-lang/bats/.github/actions/setup@'
+SETUP_ACTION_WORKFLOWS = ('.github/workflows/check.yml', '.github/workflows/mutation.yml', '.github/workflows/deploy.yml')
 EVERYTHING_PREFIXES = ('tests/static/solver/',)
 # A change to the checker and its data selects a smoke set (the modules marked `smoke` in
 # mutation_modules.txt), not every lemma: it is the scheduled run's to run the new checker on all
@@ -562,6 +566,8 @@ def select_by_diff(root, base, file):
     diff of the checker alone selects the smoke modules whole and nothing else."""
     changed = changed_files(root, base)
     if any(path in EVERYTHING_PATHS or path.startswith(EVERYTHING_PREFIXES) for path in changed):
+        return None
+    if any(SETUP_ACTION in changed_lines(root, base, path)[1] for path in changed if path in SETUP_ACTION_WORKFLOWS):
         return None
     if any(path in CHECKER_PATHS for path in changed) and any(m == file and smoke for m, _, smoke in read_modules(root)):
         return None
