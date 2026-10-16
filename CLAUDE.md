@@ -125,8 +125,10 @@ commit), and save theirs once the job passed. What was found:
   `static`. `.bats_cache_id` drops a cache when the compiler's semantics
   change.
 * Staleness. Nothing in `build/` records the compiler, ATS2 or the C
-  compiler, so the key names them: `.github/bats-version`, the ATS2 pin
-  (`setup-bats/action.yml`), `bats.lock`, `bats.toml`, the runner image and
+  compiler, so the key names them: `.github/bats-version`, the commit of bats's
+  setup action (the ATS2 pin is in it; read from the workflows by
+  `.github/actions/build-cache`, so a workflow edit that leaves the pin
+  alone keeps the cache), `bats.lock`, `bats.toml`, the runner image and
   architecture. The sources are the key's end, so an exact hit is the same
   sources, and a prefix hit is the incremental build the compiler does on a
   developer's machine: a changed module is re-emitted by its hash (its
@@ -243,13 +245,19 @@ A session sets up the compiler in its own environment and runs `bats
 check` before it pushes, so a push that does not type-check never
 reaches CI (#350's first push failed on a comparison and a free that
 `bats check` rejects in a few minutes; CI took 15 to learn it). Setup is
-what `.github/actions/setup-bats` does: ATS2 (`patsopt` from the
+what bats's composite action does (`bats-lang/bats/.github/actions/setup`,
+called by commit from `check.yml`, `mutation.yml` and `deploy.yml`, bats#280;
+quire has no copy of it, since a second app would copy it, #623): ATS2 (`patsopt` from the
 tarball it names: the gmp build, whose constraint solver computes in
 infinite precision, with libgmp-dev; the -int build's solver computes in
 C `int` and accepts false statements, #594, so a check made with it
 proves less than CI's), `lld`, the compiler built from the commit in
 `.github/bats-version` (its `bootstrap/c`, `make release/bats`), and a
-clone of bats-lang/repository-prototype; then `bats check --repository
+clone of bats-lang/repository-prototype at the commit
+`.github/repository-version` names (the relock moves it, with
+`.github/bats-version` and the action's own pin); the action sets
+`BATS_REPOSITORY`, `BATS_COMMIT` and the patsopt caps for the later steps, so
+CI passes `--repository` nowhere; then `bats check --repository
 <the clone>`, or with `BATS_REPOSITORY=<the clone>` in the environment
 and no flag (the flag wins). Nothing is written first: bats writes the
 version's facts from HEAD (above). A check takes 10 to 15 minutes on a
@@ -341,7 +349,7 @@ compile them in: About shows the text, a backup records it
 `android-release.gradle` as `versionName`, with `versionCode` the same
 time in minutes since 2025 (so it grows from release to release, and
 pwa's run-number code is overridden). CI names a pull request's own
-head (`BATS_COMMIT`, set by `setup-bats` for every later step: the
+head (`BATS_COMMIT`, set by bats's setup action for every later step: the
 merge's second parent, hence `fetch-depth: 2`), and for a run of a merge
 queue's group (`merge_group` in `check.yml`, should a queue be switched
 on) the group's own commit (`github.sha`). Outside a git repository a
@@ -2056,7 +2064,7 @@ only nested divisions. `tests/static/solver/` (standalone fixtures, run
 by `tests/static/solver.py` under any patsopt) holds the cases found with
 the `ATS2-Postiats-int-0.4.2` solver (CI built it until it moved to
 the infinite-precision build, whose own risk is a proof it cannot answer in
-time, not a false one it accepts; the caps of `setup-bats` end that): a context of `h < 65536`,
+time, not a false one it accepts; the caps of bats's setup action end that): a context of `h < 65536`,
 `q == h / 256`, `r == q + 256*h` proves `1 == 2`; so does a pair of
 matched copies of arith's `ROTR1` constructor (`rotr1_functional`,
 `shr1_functional` and `add32_functional` proved nothing); a product
@@ -2149,7 +2157,7 @@ the small record modules, so a job holds 14 minutes of mutants:
   nothing; the shard is then of the selected lemmas. A push to main and a
   dispatch run none of it.
 * **What selects what.** A change to a proof module selects as above. **A
-  change to the solver, its pin (`setup-bats/action.yml`) or its fixtures
+  change to the solver, its pin (bats's setup action, a changed line in a workflow that names `bats-lang/bats/.github/actions/setup@`) or its fixtures
   (`tests/static/solver/`, `solver.py`), selects everything**, sharded so
   each job fits. **A change to the checker alone** (`mutation_check.py`,
   `mutation_test.py`, `mutation_modules.txt`, `mutation_known.txt`,
@@ -2187,7 +2195,7 @@ the small record modules, so a job holds 14 minutes of mutants:
   mutmut and Dextool were not read.)
 * The job has `timeout-minutes` 120 (the nightly's 150) as a backstop, with
   the patsopt caps (`BATS_PATSOPT_TIMEOUT_S`, `BATS_PATSOPT_MEM_MB`, from
-  `setup-bats`) under it, so a runaway proof fails with its module named.
+  bats's setup action) under it, so a runaway proof fails with its module named.
 
 **The only way to change a record** is `libstore_save_book` and
 `libstore_save_index` (`idb_update`, bridge: one transaction in which a

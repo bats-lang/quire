@@ -20,8 +20,9 @@ runs:
   steps:
     # The key names everything the compiler's own freshness rules (the
     # source's SHA-256 for a module's .dats; file times for its C and
-    # objects) do not see: the compiler and ATS2 pins, the lock, the
-    # runner image (its C compiler). The sources are in the key's last
+    # objects) do not see: the compiler pin, the commit of bats's setup
+    # action (which installs ATS2), the lock, the runner image (its C
+    # compiler). The sources are in the key's last
     # part, so an exact hit is the same sources, and a prefix hit the
     # newest earlier build under the same toolchain. The commit's facts
     # (build/src/_bats_facts, which src/version.bats words) are written
@@ -30,7 +31,10 @@ runs:
       id: key
       shell: bash
       run: |
-        echo "prefix=quire-${{ inputs.name }}-v1-${{ runner.os }}-${{ runner.arch }}-${ImageVersion:-image}-${{ hashFiles('.github/bats-version', '.github/actions/setup-bats/action.yml', 'bats.lock', 'bats.toml') }}-" >> "$GITHUB_OUTPUT"
+        # ATS2 and the way the compiler is built are bats's setup action's,
+        # called by commit: that commit names them (bats#280)
+        setup=$(grep -rhoE 'bats-lang/bats/\.github/actions/setup@[0-9a-f]{40}' .github/workflows | sort -u | sha256sum | cut -c1-16)
+        echo "prefix=quire-${{ inputs.name }}-v1-${{ runner.os }}-${{ runner.arch }}-${ImageVersion:-image}-${setup}-${{ hashFiles('.github/bats-version', 'bats.lock', 'bats.toml') }}-" >> "$GITHUB_OUTPUT"
         echo "sources=${{ hashFiles('src/**') }}" >> "$GITHUB_OUTPUT"
 
     - name: Restore the compiler cache
