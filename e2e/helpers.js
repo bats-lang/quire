@@ -486,7 +486,8 @@ export async function toLibrary(page) {
     `page.mouse` tap is such an event, so the bars did not come up. The
     next action of a locator that completes sets up its own interceptor,
     replacing the stale one, and stops it: a trial hover on the document is
-    that action, with no effect on the page. */
+    that action: it moves the pointer to the centre of the viewport, which
+    the click, double click or move after it sets anyway (see rawMouse). */
 export async function releaseClick(page, timeout = 2000) {
   // a trial hover that times out in a task of seconds can leave its own
   // interceptor behind in the same way, so it is made again until one
