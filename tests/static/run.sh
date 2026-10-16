@@ -214,26 +214,6 @@ for d in "$ROOT"/tests/static/has_root/reject/*/; do
   else echo "FAIL has_root/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/has_root-$n.log"; fail=1; fi
 done
 
-# No e2e spec makes a raw pointer event (mouse.py, quire#630): every
-# page.mouse goes through rawMouse in e2e/helpers.js, which calls releaseClick
-# first. The e2e directory is the app's own, and the checker's fixtures, each
-# a directory with spec.js that must fail it with its `expect`
-if python3 "$ROOT/tests/static/mouse.py" "$ROOT/e2e" > "$TMP/mouse.log" 2>&1; then echo "ok   mouse: $(tail -1 "$TMP/mouse.log")"
-else echo "FAIL mouse:"; cat "$TMP/mouse.log"; fail=1; fi
-for d in "$ROOT"/tests/static/mouse/reject/*/; do
-  [ -d "$d" ] || continue
-  n=$(basename "$d")
-  if python3 "$ROOT/tests/static/mouse.py" "$d" > "$TMP/mouse-$n.log" 2>&1; then echo "FAIL mouse/reject/$n: should be rejected"; fail=1
-  elif grep -qF -- "$(cat "$d/expect")" "$TMP/mouse-$n.log"; then echo "ok   mouse/reject/$n"
-  else echo "FAIL mouse/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/mouse-$n.log"; fail=1; fi
-done
-for d in "$ROOT"/tests/static/mouse/accept/*/; do
-  [ -d "$d" ] || continue
-  n=$(basename "$d")
-  if python3 "$ROOT/tests/static/mouse.py" "$d" > "$TMP/mouse-$n.log" 2>&1; then echo "ok   mouse/accept/$n"
-  else echo "FAIL mouse/accept/$n: should pass"; cat "$TMP/mouse-$n.log"; fail=1; fi
-done
-
 # A choice of more than three is not cycled by a button (next.py,
 # quire#377): the app's own, and the checker's fixtures
 if python3 "$ROOT/tests/static/next.py" "$ROOT/src" > "$TMP/next.log" 2>&1; then echo "ok   next: $(tail -1 "$TMP/next.log")"

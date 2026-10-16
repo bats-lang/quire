@@ -486,7 +486,8 @@ export async function toLibrary(page) {
     `page.mouse` tap is such an event, so the bars did not come up. The
     next action of a locator that completes sets up its own interceptor,
     replacing the stale one, and stops it: a trial hover on the document is
-    that action, with no effect on the page. */
+    that action: it moves the pointer to the centre of the viewport, which
+    the click, double click or move after it sets anyway (see rawMouse). */
 export async function releaseClick(page, timeout = 2000) {
   // a trial hover that times out in a task of seconds can leave its own
   // interceptor behind in the same way, so it is made again until one
@@ -501,11 +502,12 @@ export async function releaseClick(page, timeout = 2000) {
   }
 }
 
-/** Every raw pointer event a spec makes (`page.mouse`: a click, a double
+/** Every raw pointer event a spec makes (Playwright's mouse: a click, a double
     click, a move, a press, a release, a wheel) goes through here (#630).
     Callers name the action as a string: rawMouse(page, 'click', x, y). The
-    lint in tests/static/mouse.py fails a `.mouse` anywhere in e2e/ outside
-    this file.
+    fixtures (fixtures.js) replace a test's page.mouse with one whose methods
+    throw, and keep the real mouse in `realMice`, which only this function
+    reads: a raw call, however it is written, fails at run time.
 
     releaseClick is a trial hover, and a trial hover MOVES the pointer to the
     centre of the viewport (Playwright runs the move and only the hit-target
@@ -514,11 +516,18 @@ export async function releaseClick(page, timeout = 2000) {
     no button is held, never between a move and the press, the wheel or the
     release that rely on where the pointer is. */
 const buttonHeld = new WeakSet();
+// the page's real mouse, given by fixtures.js (keepRealMouse); a page it did
+// not give one falls back on its own
+const realMice = new WeakMap();
+export function keepRealMouse(page, mouse) {
+  realMice.set(page, mouse);
+}
 export async function rawMouse(page, action, ...args) {
   if (['click', 'dblclick', 'move'].includes(action) && !buttonHeld.has(page)) await releaseClick(page);
   if (action === 'down') buttonHeld.add(page);
   if (action === 'up') buttonHeld.delete(page);
-  return page.mouse[action](...args);
+  const mouse = realMice.get(page) ?? page.mouse;
+  return mouse[action](...args);
 }
 
 /** Opens the reader's bars when they are hidden */
