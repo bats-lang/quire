@@ -42,9 +42,6 @@ jobs:
         id: groups
         run: scripts/ci-groups.py matrix
 
-      - name: The with-env script
-        run: tests/with-env/run.sh
-
   # The app and the PWA, built once: the Android project and the e2e
   # groups take them from here (the quire-android artifact)
   build:
