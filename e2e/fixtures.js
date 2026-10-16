@@ -123,12 +123,15 @@ export function androidApp() {
 // key, an alias), then fails the test at run time. Playwright keeps the mouse as
 // the page's own property, so the replacement is the page's mouse from now on.
 export function refuseRawMouse(page) {
+  // a page guarded once (the context's own event, then the page fixture) is left as it is
+  if (Object.getOwnPropertyDescriptor(page, 'mouse')?.writable === false) return;
   const refused = () => {
     throw new Error("use rawMouse (e2e/helpers.js): a page's mouse is not called directly");
   };
   const guard = { click: refused, dblclick: refused, down: refused, move: refused, up: refused, wheel: refused };
   keepRealMouse(page, page.mouse);
-  Object.defineProperty(page, 'mouse', { value: guard });
+  // Playwright's own mouse is writable and configurable: its attributes are set here, not kept
+  Object.defineProperty(page, 'mouse', { value: guard, writable: false, configurable: false });
 }
 
 export const test = base.extend({
@@ -140,6 +143,10 @@ export const test = base.extend({
   // the test's own context is watched before its page is made
   context: async ({ context, stallWatch }, use, testInfo) => {
     stallWatch.watchContext(context);
+    // every page of the context, made by a spec (newPage, a popup) or by the
+    // app, is guarded when it is made; the pages already there are guarded now
+    context.on('page', refuseRawMouse);
+    for (const page of context.pages()) refuseRawMouse(page);
     await googleStubbed(context);
     if (onAndroid(testInfo)) await context.addInitScript(androidApp);
     await use(context);

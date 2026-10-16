@@ -20,3 +20,14 @@ test('rawMouse still makes a raw pointer event', async ({ page }) => {
   await rawMouse(page, 'click', 5, 5);
   await expect(page.locator('#b')).toBeAttached();
 });
+
+test('a page a spec makes itself has the guard too', async ({ context }) => {
+  const second = await context.newPage();
+  try {
+    expect(() => second.mouse.click(1, 2)).toThrow(/use rawMouse \(e2e\/helpers\.js\)/);
+    await second.setContent('<p>second</p>');
+    await rawMouse(second, 'click', 5, 5);
+  } finally {
+    await second.close();
+  }
+});
