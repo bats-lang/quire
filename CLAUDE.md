@@ -232,7 +232,11 @@ What happened on 2026-10-15, and the rules it gave:
 * **At most two entries in the queue at a time** (at the current settings);
   the next goes in when one has merged or been removed.
 * **Superseded runs are cancelled**: a queue run that is not the newest of its
-  pull request is stale (GitHub does not cancel it); `qsweep` cancels them
+  pull request is stale (GitHub does not cancel it). `check.yml` listens for
+  the merge group's `destroyed` event (undocumented, delivered; community
+  discussion 137976, Chapel's merge workflow) and cancels that group's run by
+  its concurrency group (the queue ref), the destroyed run itself skipping
+  every job (#586); `qsweep` still cancels the ones that slip through
   (`CANCELLED STALE QUEUE RUN`). Read the pull request's timeline
   (`added_to_merge_queue`, `removed_from_merge_queue`) for where an entry is:
   `auto_merge` empty means enqueued or removed, not one or the other.

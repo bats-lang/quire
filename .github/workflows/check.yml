@@ -5,8 +5,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  # A merge queue runs the check on its own merge group
+  # A merge queue runs the check on its own merge group, and says when it
+  # destroys one (a rebuilt group, an entry removed): `destroyed` is
+  # undocumented by GitHub but delivered (community discussion 137976, and
+  # Chapel's workflow cancels superseded runs by it). It only cancels the
+  # group's run, below; its own run does nothing (#586)
   merge_group:
+    types: [checks_requested, destroyed]
   # The relock workflow starts it on its relock/<date> branch: a pull
   # request opened with GITHUB_TOKEN starts no workflow by itself
   workflow_dispatch:
@@ -18,20 +23,25 @@ on:
     - cron: '47 3 * * *'
 
 # A push to a pull request cancels the run for its earlier head (#586): the
-# queue's jobs are not left behind jobs for stale heads. Only a pull_request
-# run is ever cancelled. Each group is keyed on its event, and a merge_group,
-# push or dispatch run on the commit's own sha, which no other run shares, so
-# a queue entry's run is never cancelled and never cancels another. A
-# cancelled run's `check` belongs to the old head; the required status of
-# the new head is its own run's.
+# queue's jobs are not left behind jobs for stale heads. A merge group's run is
+# cancelled only by its own `destroyed` event: GitHub rebuilds the groups
+# behind an entry that is removed and leaves the old groups' runs queued
+# (six stale runs held the pool on 2026-10-15). A group's runs are keyed on
+# its ref (gh-readonly-queue/main/pr-N-<sha>, the same for checks_requested
+# and destroyed), so a destroyed run joins the group of the run it ends,
+# cancels it, and does nothing itself (every job below is skipped for it).
+# No other run is cancelled: push and dispatch runs are keyed on their own
+# sha. A cancelled run's `check` belongs to a head or group that is gone; the
+# required status of the live one is its own run's.
 concurrency:
-  group: check-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: check-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'merge_group' && github.ref) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'merge_group' && github.event.action == 'destroyed') }}
 
 jobs:
   # The groups the tests run in, side by side (tests/groups.json): every
   # e2e spec and every static test in exactly one, or this fails
   plan:
+    if: github.event.action != 'destroyed'
     runs-on: ubuntu-latest
     outputs:
       e2e: ${{ steps.groups.outputs.e2e }}
@@ -45,6 +55,7 @@ jobs:
   # The app and the PWA, built once: the Android project and the e2e
   # groups take them from here (the quire-android artifact)
   build:
+    if: github.event.action != 'destroyed'
     runs-on: ubuntu-latest
     steps:
       # Two commits deep: a pull request's checkout is the merge, and its
@@ -330,7 +341,7 @@ jobs:
   # The one check main's branch protection requires: every group passed
   # (a group skipped or cancelled is not a pass)
   check:
-    if: always()
+    if: always() && github.event.action != 'destroyed'
     needs: [plan, build, static, e2e]
     runs-on: ubuntu-latest
     steps:
