@@ -13,7 +13,7 @@
 # With members named, it runs only those (CI's static groups, in
 # tests/groups.json, each run by a job of its own): `check` (bats check of
 # the app itself), `checkers` (ids.py, case_plus.py, groups.py, with their
-# fixtures), `solver`, `mutation/<module>`, and fixtures, `accept/<name>` or `reject/<name>`. With none,
+# fixtures, and affected_test.py), `solver`, `mutation/<module>`, and fixtures, `accept/<name>` or `reject/<name>`. With none,
 # it runs the checkers and every fixture (the mutation members, which take
 # minutes a module, only when named: mutation/<module>, see below).
 #
@@ -150,6 +150,12 @@ done
 # lemmas by a diff, and that a vacuous lemma is flagged
 if python3 "$ROOT/tests/static/mutation_test.py" > "$TMP/mutation_test.log" 2>&1; then echo "ok   mutation_test: $(tail -1 "$TMP/mutation_test.log")"
 else echo "FAIL mutation_test:"; cat "$TMP/mutation_test.log"; fail=1; fi
+
+# Which groups a change can affect (scripts/affected.py, quire#619): the
+# rule's cases, the e2e import graph, and the claim of each rule that selects
+# nothing, checked against the text of what could read the path
+if python3 "$ROOT/tests/static/affected_test.py" > "$TMP/affected_test.log" 2>&1; then echo "ok   affected_test: $(tail -1 "$TMP/affected_test.log")"
+else echo "FAIL affected_test:"; cat "$TMP/affected_test.log"; fail=1; fi
 
 # The solver's 32 bits (literals.py) and the library's keys (keys.py)
 if python3 "$ROOT/tests/static/literals.py" "$ROOT/src" > "$TMP/literals.log" 2>&1; then echo "ok   literals: $(tail -1 "$TMP/literals.log")"

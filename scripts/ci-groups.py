@@ -40,13 +40,21 @@ usage:
                                        static=[...] (the matrices' group
                                        names, as JSON) to $GITHUB_OUTPUT,
                                        or to standard output
+  scripts/ci-groups.py plan <base> [full]
+                                       what every group runs for a change since the git
+                                       revision <base> (`none`: no change to go by, a push,
+                                       a dispatch, the nightly run: every group; `full`: the
+                                       merge group, whose e2e and static groups run whole
+                                       and whose mutation groups still compare with <base>):
+                                       the outputs e2e_run and static_run (JSON) to
+                                       $GITHUB_OUTPUT, or to standard output, and the reason
+                                       of each path to $GITHUB_STEP_SUMMARY (#619)
   scripts/ci-groups.py affected <group> <base>
                                        print `yes` when the group has something to run for
-                                       a change since the git revision <base> (`none`: no
-                                       change to go by), else `no`:
-                                       the groups of mutation members run only the lemmas
-                                       the change can have made vacuous (#594), every other
-                                       group always runs
+                                       the same change, else `no`: the groups of mutation
+                                       members run only the lemmas the change can have made
+                                       vacuous (#594), the others what scripts/affected.py
+                                       selects
   scripts/ci-groups.py members <kind> <group>
                                        check, then print that group's
                                        members, one per line (e2e specs
@@ -58,6 +66,8 @@ import re
 import sys
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import affected as selection  # noqa: E402  (which specs and members a change can affect, #619)
 
 
 def specs():
@@ -175,6 +185,8 @@ def problems(groups):
                 found.append(f'{kind}: {member} is in more than one group: {", ".join(where)}')
         for member, where in sorted(listed.items()):
             found.append(f'{kind}: {member} (in {", ".join(where)}) does not exist')
+    for group in sorted(set(groups['e2e']) & set(groups['static'])):
+        found.append(f'{group} is the name of an e2e group and of a static one (tests/groups.json)')
     return found
 
 
@@ -192,6 +204,22 @@ def affected(members, base):
         if mutation_check.selected_names(ROOT, file, original, set(), base, (index, count)):
             return 'yes'
     return 'no'
+
+
+def plan(groups, base, full=False):
+    """What every group runs for a change since `base` (scripts/affected.py); `full`
+    runs every e2e and static group whole, the mutation groups by their own rule."""
+    changes = None if base == 'none' or full else selection.git_changes(base, ROOT)
+    return selection.plan(groups, changes, selection.Tree(ROOT),
+                          lambda members: affected(members, base) == 'yes')
+
+
+def group_affected(groups, group, base):
+    """`yes` or `no` for one group of either kind."""
+    result = plan(groups, base)
+    if group in result['e2e']:
+        return 'yes' if result['e2e'][group] else 'no'
+    return 'yes' if result['static'][group]['members'] else 'no'
 
 
 def main(arguments):
@@ -213,8 +241,30 @@ def main(arguments):
         print(f'{total[0]} specs and {total[1]} static members, each in exactly one group',
               file=sys.stderr)
         return 0
-    if len(arguments) == 3 and arguments[0] == 'affected' and arguments[1] in groups['static']:
-        print(affected(groups['static'][arguments[1]], arguments[2]))
+    if arguments[:1] == ['plan'] and len(arguments) in (2, 3) and arguments[2:] in ([], ['full']):
+        result = plan(groups, arguments[1], full=len(arguments) == 3)
+        lines = [f"e2e_run={json.dumps(result['e2e'], separators=(',', ':'))}",
+                 f"static_run={json.dumps(result['static'], separators=(',', ':'))}"]
+        output = os.environ.get('GITHUB_OUTPUT')
+        if output:
+            with open(output, 'a') as output_file:
+                output_file.write(''.join(line + '\n' for line in lines))
+        report = [f'## What this run has to run (base: {arguments[1]})', '']
+        report += [f'* {line}' for line in result['why']] + ['']
+        report += ['e2e groups run: ' + (', '.join(group for group, run in result['e2e'].items() if run) or 'none')]
+        for group, info in result['static'].items():
+            members = info['members'].split()
+            report.append(f'static {group}: ' + ('nothing' if not members else
+                          f'{len(members)} of {len(groups["static"][group])} members' + (f' ({info["members"]})' if len(members) <= 6 else '')))
+        summary = os.environ.get('GITHUB_STEP_SUMMARY')
+        if summary:
+            with open(summary, 'a') as summary_file:
+                summary_file.write('\n'.join(report) + '\n')
+        print('\n'.join(lines + report))
+        return 0
+    if len(arguments) == 3 and arguments[0] == 'affected' \
+            and (arguments[1] in groups['static'] or arguments[1] in groups['e2e']):
+        print(group_affected(groups, arguments[1], arguments[2]))
         return 0
     if len(arguments) == 3 and arguments[0] == 'members' and arguments[1] in groups \
             and arguments[2] in groups[arguments[1]]:

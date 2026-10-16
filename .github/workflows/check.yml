@@ -39,18 +39,43 @@ concurrency:
 
 jobs:
   # The groups the tests run in, side by side (tests/groups.json): every
-  # e2e spec and every static test in exactly one, or this fails
+  # e2e spec and every static test in exactly one, or this fails. And what
+  # each of them has to run for this change (#619): decided here, once, from
+  # the pull request's own diff, so the reason of each skip is in one place
   plan:
     if: github.event.action != 'destroyed'
     runs-on: ubuntu-latest
     outputs:
       e2e: ${{ steps.groups.outputs.e2e }}
       static: ${{ steps.groups.outputs.static }}
+      e2e_run: ${{ steps.scope.outputs.e2e_run }}
+      static_run: ${{ steps.scope.outputs.static_run }}
     steps:
+      # Two commits deep: a pull request's checkout is the merge, and its
+      # first parent is the base the change is compared with
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
       - name: Every test in exactly one group
         id: groups
         run: scripts/ci-groups.py matrix
+
+      # A pull request runs the groups its change can affect and shows the
+      # rest unaffected (scripts/affected.py: a path it does not know selects
+      # everything). Every other run is whole: a push to main and the nightly
+      # run are the cold check, and the merge queue's group, which has a base
+      # too, runs every group (the mutation groups keep their own rule, which
+      # takes the group's base)
+      - name: What this run has to run
+        id: scope
+        run: |
+          base=none
+          full=
+          case "${{ github.event_name }}" in
+            pull_request) base=$(git rev-parse HEAD^1) ;;
+            merge_group) base=$(git rev-parse HEAD^1); full=full ;;
+          esac
+          scripts/ci-groups.py plan $base $full
 
   # The app and the PWA, built once: the Android project and the e2e
   # groups take them from here (the quire-android artifact)
@@ -177,48 +202,55 @@ jobs:
       matrix:
         group: ${{ fromJSON(needs.plan.outputs.static) }}
     name: static (${{ matrix.group }})
+    # What the plan selected of this group's members (#619): none ends the job
+    # after its first step, and only `checkers` (python) needs no compiler
+    env:
+      GROUP_MEMBERS: ${{ fromJSON(needs.plan.outputs.static_run)[matrix.group].members }}
+      GROUP_BATS: ${{ fromJSON(needs.plan.outputs.static_run)[matrix.group].bats && 'yes' || 'no' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: env.GROUP_MEMBERS != ''
         with:
           fetch-depth: 2
 
       # The groups of mutation members (#594) run only the lemmas the pull
       # request's change can have made vacuous, and nothing when it touches
-      # no proof (the job then ends here); every other group always runs.
-      # The scheduled run (mutation.yml) has all of them.
-      - name: What this group has to run
+      # no proof (the plan selects no member then); the other groups run what
+      # the plan selected. The scheduled run (mutation.yml) has all of them.
+      - name: What this group compares with
         id: scope
+        if: env.GROUP_MEMBERS != ''
         run: |
           base=none
           case "${{ github.event_name }}" in
             pull_request|merge_group) base=$(git rev-parse HEAD^1) ;;
           esac
           echo "base=$base" >> "$GITHUB_OUTPUT"
-          echo "run=$(scripts/ci-groups.py affected ${{ matrix.group }} $base)" >> "$GITHUB_OUTPUT"
 
       - name: Set up bats
-        if: steps.scope.outputs.run == 'yes'
+        if: env.GROUP_BATS == 'yes'
         uses: bats-lang/bats/.github/actions/setup@cf45c87611a9337b9bb28e2543dcb96dcd98639e # the setup action (bats#280)
 
       # The app's check is kept in a directory of a fixed name (run.sh
       # checks at the same path in every job, #460)
       - name: Restore the compiler cache
-        if: steps.scope.outputs.run == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+        if: env.GROUP_BATS == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
         uses: ./.github/actions/build-cache
         with:
           mode: restore
           name: static
           path: ${{ runner.temp }}/quire-static/app/build
 
+      # (no BATS_REPOSITORY without the compiler: the checkers read none)
       - name: Static tests
-        if: steps.scope.outputs.run == 'yes'
+        if: env.GROUP_MEMBERS != ''
         env:
           QUIRE_STATIC_WORK: ${{ runner.temp }}/quire-static
           QUIRE_MUTATION_BASE: ${{ steps.scope.outputs.base != 'none' && steps.scope.outputs.base || '' }}
-        run: tests/static/run.sh $BATS_REPOSITORY $(scripts/ci-groups.py members static ${{ matrix.group }})
+        run: tests/static/run.sh "${BATS_REPOSITORY:-none}" $GROUP_MEMBERS
 
       - name: Save the compiler cache
-        if: steps.scope.outputs.run == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'push')
+        if: env.GROUP_BATS == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'push')
         uses: ./.github/actions/build-cache
         with:
           mode: save
@@ -235,10 +267,17 @@ jobs:
       matrix:
         group: ${{ fromJSON(needs.plan.outputs.e2e) }}
     name: e2e (${{ matrix.group }})
+    # Whether the plan selected a spec of this group (#619); if not, the job
+    # ends here: every step below is skipped and the job still passes, as the
+    # change was shown not to reach any of the group's specs
+    env:
+      GROUP_RUN: ${{ fromJSON(needs.plan.outputs.e2e_run)[matrix.group] && 'yes' || 'no' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: env.GROUP_RUN == 'yes'
 
       - name: Download the PWA
+        if: env.GROUP_RUN == 'yes'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: quire-android
@@ -246,17 +285,20 @@ jobs:
 
       # gen-pwa, for `gen-pwa test` (an artifact keeps no file mode)
       - name: Download the PWA generator
+        if: env.GROUP_RUN == 'yes'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: quire-gen-pwa
           path: dist/debug
 
       - name: Make the generator runnable
+        if: env.GROUP_RUN == 'yes'
         run: chmod +x dist/debug/gen-pwa
 
       # The home page beside the app, as deploy.yml publishes it, for the
       # e2e test that the service worker leaves it to the network
       - name: Add the home page
+        if: env.GROUP_RUN == 'yes'
         run: cp -R homepage dist/pwa/homepage
 
       # Node's packages, retried and cached, and the Playwright browsers in
@@ -264,6 +306,7 @@ jobs:
       # 1.58 is the least Playwright the suite may run on (CLAUDE.md, "The e2e
       # suite needs Playwright 1.58 or later")
       - name: Set up Node.js and Playwright
+        if: env.GROUP_RUN == 'yes'
         uses: bats-lang/pwa/.github/actions/e2e-setup@e2d98d401f06abdccebad8a53f0be1938ab43b8a
         with:
           playwright-minimum: "1.58"
@@ -271,11 +314,13 @@ jobs:
       # A font with Japanese characters: the vertical book's shots are
       # empty boxes without one (quire#359; vertical.spec.js checks it)
       - name: Install a CJK font
+        if: env.GROUP_RUN == 'yes'
         run: sudo apt-get install -y -q fonts-noto-cjk
 
       # The checker of the books the specs read (epubcheck.spec.js),
       # pinned by its version and the archive's SHA-256
       - name: Install epubcheck
+        if: env.GROUP_RUN == 'yes'
         run: |
           curl -fsSL -o "$RUNNER_TEMP/epubcheck.zip" https://github.com/w3c/epubcheck/releases/download/v5.2.1/epubcheck-5.2.1.zip
           echo "0532f6291faa2bb729dd253f958868a2a57dbd2c32f881a97c7c980c5940309e  $RUNNER_TEMP/epubcheck.zip" | sha256sum -c -
@@ -285,6 +330,7 @@ jobs:
       # Each spec of the group, and only those: the filters must name
       # exactly as many files as the group lists
       - name: Run e2e tests
+        if: env.GROUP_RUN == 'yes'
         run: |
           specs=$(scripts/ci-groups.py members e2e ${{ matrix.group }})
           listed=$(npx playwright test --list $specs | tail -1)
@@ -303,7 +349,7 @@ jobs:
       # so the groups are balanced by measurement, not guessing: sum
       # `duration` of the report's tests by spec file (tests/groups.json)
       - name: Upload the spec timings
-        if: always()
+        if: always() && env.GROUP_RUN == 'yes'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-timings-${{ matrix.group }}
@@ -312,7 +358,7 @@ jobs:
           retention-days: 30
 
       - name: Upload the Playwright report
-        if: failure()
+        if: failure() && env.GROUP_RUN == 'yes'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-report-${{ matrix.group }}
@@ -322,7 +368,7 @@ jobs:
       # What a page that stopped answering was doing (#244, #254): also
       # in the screenshots, apart here so it is found at once
       - name: Upload stall captures
-        if: always()
+        if: always() && env.GROUP_RUN == 'yes'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-stall-captures-${{ matrix.group }}
@@ -331,7 +377,7 @@ jobs:
           retention-days: 30
 
       - name: Upload test screenshots
-        if: always()
+        if: always() && env.GROUP_RUN == 'yes'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-screenshots-${{ matrix.group }}
@@ -339,7 +385,10 @@ jobs:
           retention-days: 14
 
   # The one check main's branch protection requires: every group passed
-  # (a group skipped or cancelled is not a pass)
+  # (a group skipped or cancelled is not a pass). A group the plan showed
+  # unaffected (#619) is a job that ran and ended after its first step, so it
+  # passes as itself, and the plan's selection is printed here, beside the
+  # results, with the reason of each path in the plan job's summary
   check:
     if: always() && github.event.action != 'destroyed'
     needs: [plan, build, static, e2e]
@@ -348,8 +397,12 @@ jobs:
       - name: Every group passed
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          E2E_RUN: ${{ needs.plan.outputs.e2e_run }}
+          STATIC_RUN: ${{ needs.plan.outputs.static_run }}
         run: |
           echo "plan, build, static, e2e: $RESULTS"
+          echo "e2e groups run (false: shown unaffected by the change): $E2E_RUN"
+          echo "static members run, by group: $STATIC_RUN"
           for result in $RESULTS; do
             [ "$result" = success ] || { echo "::error::a job this check needs ended $result"; exit 1; }
           done

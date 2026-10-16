@@ -3860,6 +3860,80 @@ job). Every spec and every static fixture is in exactly one group, or
 area and balanced by time. The `check` job, which main's branch
 protection requires, passes only when every group did.
 
+### Only the groups a change can affect run (#619)
+
+A pull request that changed CLAUDE.md paid the whole check (the e2e groups,
+14 to 18 minutes each, and the static groups). Now the `plan` job decides,
+once, from the pull request's own diff (`git diff --no-renames` of the merge
+checkout's first parent against it), which e2e groups and which static
+*members* the change can affect (`scripts/ci-groups.py plan <base>`, the rule
+in `scripts/affected.py`), prints the reason of every path in its summary and
+hands the selection to the groups. A group with nothing selected is a job that
+runs and ends after its first step, so it passes as itself and `check` is
+unchanged (it prints the selection beside the results): not a job skipped
+(`check` rejects a skipped job), and not a workflow path filter, which GitHub's
+troubleshooting page for required status checks says leaves the check "Pending"
+for ever ("Waiting for status to be reported") and tells not to use on a required
+workflow. A job skipped by a condition reports Success there; the step-level
+skip keeps one meaning for `check`: every job ran, or was shown unaffected.
+
+* **The table** (`RULES` in `scripts/affected.py`, first match wins; a path no
+  rule names selects everything, an empty diff too, a deletion under `e2e/`
+  too). The CI's files (`check.yml`, the composite actions, `tests/groups.json`,
+  `tests/static/run.sh`, `expect.py`, the two scripts), the pins (`bats.lock`,
+  `bats.toml`, `.github/bats-version`, `repository-version`, `package*.json`,
+  `playwright.config.js`), `src/`, `assets/` and `scripts/sync-clients.*`:
+  everything. CLAUDE.md and the other notes, `ux-review/`, `reports/`, the
+  workflows that are runs of their own (`deploy`, `mutation`, `relock`,
+  `sync-*`), the build job's tests (`test/*.js`, `tests/codec`, `tests/css-size`,
+  `tests/version`): nothing. `homepage/`: every e2e group, no static member.
+  `test/fixtures/*.epub`: the specs that spell the name. `e2e/**.js`: the specs
+  that reach it through `import`, `import()` or `require` (the books and helpers
+  of one area select its specs and `epubcheck.spec.js`, which imports every
+  books module), and `checkers` (they read `e2e/`); a module no spec reaches
+  (`global-setup.js`) selects every spec; an asset (a font, an mp3, a JSON)
+  selects the specs reaching a module that names it or its directory, else
+  every spec. `tests/static/{accept,reject}/<name>/`: that fixture alone;
+  `tests/static/*.py` and their fixture directories: `checkers`; `solver`: its
+  member. A group is selected when one of its specs is (and runs all of them),
+  a static group runs only the members selected, so a spec-only change runs
+  one e2e group and the checkers (python, no compiler: `bats` is not set up
+  for a group that selected nothing else), not the 60 fixtures and the app's
+  check.
+* **Soundness.** A skipped member's inputs are the base's, which was tested
+  whole (main is checked cold on every push), and a merge queue's group, a
+  push, the nightly run and a dispatch run every e2e and static group, so a
+  mistake in the table can leave a pull request's feedback incomplete and
+  cannot put a red change on main. The mutation groups keep their own rule
+  (#594), asked with the group's base in the queue too. It fails closed: a
+  path nothing names, a diff that cannot be read (the plan job is red then,
+  and so is `check`), an empty diff. **Tested, not proved**
+  (`tests/static/affected_test.py`, in `checkers`): the import graph on a tree
+  built for it, `tests/static/affected/cases.json` on the real groups (docs
+  only, a spec only, a books module, a fixture only, `src/` only, each CI file
+  and pin, an unknown path, an empty diff, a deletion), that every spec and every
+  fixture is selected by a change to itself, and that each rule that selects
+  nothing of a kind is named by nothing that could read the path (the text of
+  the e2e suite and `playwright.config.js` without their comments, the static
+  checkers and the app's `staload`s; a scan with a reader in the home page's
+  case, so it is not vacuous). What it cannot see: a spec that builds a path
+  from pieces, or reads a file by a name no module spells.
+* **By research** (the issue's comment): Nx marks every project affected when
+  a lockfile changes ("a failsafe in case Nx misses a project", "the safest
+  option but may result in unnecessary CI work"), maps files to projects by a
+  graph and adds dependents; dorny/paths-filter detects changes against the pull
+  request's base and leaves the selection to the workflow's outputs; Bazel's
+  bazel-diff and Aspect's `cache diff` compare against a baseline and fail
+  closed where the evidence is incomplete. Taken: a graph where one can be
+  built (the e2e imports), a fail-closed default everywhere else.
+* **Not done** (the follow-up of #619): the `build` and `android` jobs still
+  run for every pull request (the build is cached, 3 minutes; `android` needs
+  it), though a change that selects no e2e group needs neither, and the merge
+  queue's group runs whole by decision, though the rule is sound there too
+  (`plan <base> full` in `check.yml`'s plan job).
+  The rule is Python in `scripts/` (#646): it runs in the plan job, before any
+  compiler exists, which is what it saves building.
+
 The tests that measure time (the describes of `pathological.spec.js` and
 `page-turn.spec.js` with a budget) are tagged `@serial`, and `gen-pwa
 test` runs them alone on one worker before the rest of the group, which
