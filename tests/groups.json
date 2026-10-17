@@ -35,7 +35,6 @@
       "progress.spec.js",
       "publisher.spec.js",
       "settings.spec.js",
-      "hosted-runner-proof.spec.js",
       "stall-capture.spec.js",
       "stats.spec.js",
       "sync-android-hang.spec.js",

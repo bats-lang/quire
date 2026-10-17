@@ -4454,15 +4454,26 @@ installed", or gdb cannot attach, with gdb's or sudo's own words) beside what it
 could take (the kernel's view and the addresses), then carries on with the
 JS/wasm capture. The spec's native-stack tests skip with that reason, on CI too
 (no throw there); another failure of the capture, with gdb present and allowed, fails
-them. So the first CI run is what shows whether the runner's sudo and gdb take the
-stacks. The long tests (a 12 s busy page, a frozen renderer,
+them. The hosted runner's sudo and gdb take the stacks (below). The long tests (a 12 s busy page, a frozen renderer,
 the teardown ones: about 2.5 minutes) run in the desktop project only and skip in
 the others, saying why, since the renderer and the machine do not depend on the
 project; the stall-capture group pays them once. A frozen renderer is made in the spec by SIGSTOP, armed and unarmed;
 a loop and a 12 s busy page are asserted to be captured and NOT attached to.
-Not verified: that a renderer that sleeps in an untimed futex shows its waiter's
-frames (none could be had; the first real stall will say), and the sudo paths on a
-hosted runner.
+**Seen on a hosted runner (PR #662, ubuntu-24.04 image, 4 cores, kernel 6.17 azure):**
+the runner user is `runner` (uid 1001) with `(ALL) NOPASSWD: ALL`, `ptrace_scope` is 1 and
+`core_pattern` pipes to systemd-coredump (unused: gdb writes the core itself). A page hung
+by a synchronous XHR to a server that never answers (no SIGSTOP) showed what the real
+freeze showed: the main thread in `futex(..., 0x189, 0, NULL, ...)` (an untimed wait),
+state S, 0 s of CPU, no answer to any DevTools command. The capture, as the runner
+user through `sudo -n`: gdb attached and stopped the renderer 0.66 s, wrote a 758 MB core
+(15.2 MB gzipped, gzip 3.0 s), named libc's frames (libc6-dbg installed by the Install gdb
+step, 6 to 7 s of the job), left nothing of gdb, timeout, prlimit, sudo or pkill behind,
+and the core opened in gdb with the build id's binary. The teardown of a real gdb attached
+to a really hung renderer (the `pkill -KILL` path through sudo) left no renderer stopped and
+the page answered once the request was let go. The Chrome for Testing 145.0.7632.6 binary
+there is stripped, as measured (`?? ()` and offsets from `exeBase`). Still not seen: a
+renderer that sleeps in an untimed futex for a reason other than this request (the real
+freeze's waiter), and the real thing at all (about 1 in 27,000 early loads).
 
 **A core of the frozen renderer, and symbols (#575, #591).** The same gdb attach,
 after the backtraces (stack first, then core, so a renderer is stopped once),
@@ -4478,8 +4489,8 @@ first calls `madvise(range, MADV_DONTDUMP)` in the stopped process for each
 mapping with no resident page and 16 MiB or more (`quietRanges`, from smaps),
 which a process blocked in a futex wait can run (with `scheduler-locking on`, so the other threads do not run during them), and then the dump is the resident
 memory: 686 MB raw, 14.9 MB gzipped, gdb stopped the renderer 0.6 s, gzip 2.8 s
-(4 cores here; the 1194 Chromium build of this machine: 806 MB, 90 MB, 2.5 s, 6 s;
-not measured on a 4-core hosted runner). Limits: the file gdb writes is bounded by
+(4 cores here; the 1194 Chromium build of this machine: 806 MB, 90 MB, 2.5 s, 6 s; on the
+4-core hosted runner: 741 to 758 MB, 15.1 to 15.2 MB, gdb stopped the renderer 0.6 s, gzip 2.9 to 3.0 s). Limits: the file gdb writes is bounded by
 `prlimit --fsize` (`CORE_MAX_BYTES`, 1 GiB), the gzip by `CORE_GZ_MAX_BYTES` (200
 MB), over either it is removed and the capture says why; gdb's whole time (backtraces
 and core) by `timeout`; a core is never asked of a process in a group stop (SIGSTOP:

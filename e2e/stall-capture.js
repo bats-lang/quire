@@ -603,6 +603,9 @@ async function backtrace(pid, maps, scope, gdbPath, corePath) {
   const core = prlimit ? corePath : null;
   const args = [gdbPath, '-batch', '-nx', '-q',
     '-iex', 'set auto-load off', '-iex', 'set debuginfod enabled off', '-iex', 'set pagination off', '-iex', 'set confirm off',
+    // an address on every frame: gdb leaves it out of a frame whose pc is the start of a source line, and the
+    // frame's module and offset (and the core's comparison with it) come from the address
+    '-iex', 'set print frame-info location-and-address',
     // the watch's token on the command line, so teardown can find this command by it (`abort`)
     ...(scope ? ['-iex', `echo ${scope.token}\\n`] : []),
     '-ex', 'info threads', '-ex', `thread apply all bt ${STACK_FRAMES}`,

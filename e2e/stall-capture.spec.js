@@ -285,19 +285,27 @@ test('a hung stand-in process is read through the same path: its library frames 
   }
 });
 
-test('the core of a renderer is bounded, kept compressed and opens in gdb with the stack the capture gave', async ({ page, browser }, testInfo) => {
+test('the core of a really hung renderer is bounded, kept compressed and opens in gdb with the stack the capture gave', async ({ page, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
-  await page.setContent('<!doctype html><title>Core</title><p>Core</p>');
-  // an idle renderer, its main thread in the message pump's wait: where a frozen one would be
-  const pids = await rendererPids(browser);
-  const found = await nativeStacks(pids.map((pid) => ({ pid })), nativeScope(), (pid) => testInfo.outputPath(`stall-core-${pid}.core`));
-  if (found.unavailable) unavailable(found.unavailable);
-  const renderer = found.renderers[0];
+  // the hang the real freeze is (idle, no answer, an untimed futex wait; seen on a hosted runner as the
+  // runner user through sudo: gdb stopped it 0.7 s, a 758 MB core, 15 MB gzipped), not a SIGSTOP (no core of that)
+  const hung = await hangPage(page, stallWatch);
+  let capture;
+  try {
+    capture = await stallWatch.next(page, 30000 + NATIVE_MOST_MS);
+  } finally {
+    hung.release();
+  }
+  expect(capture.answers.task.answered).toBe(false);
+  expect(capture.presumedBusy).toBeUndefined();
+  if (capture.native.unavailable) unavailable(capture.native.unavailable);
+  const renderer = capture.native.renderers.find((each) => each.gdbStacks && each.core);
+  expect(renderer, 'a renderer has native stacks and a core to say').toBeTruthy();
   if (!renderer.gdbStacks.ok && CANNOT_ATTACH.test(`${renderer.gdbStacks.stderr}\n${renderer.gdbStacks.text}\n${renderer.gdbStacks.error}`)) unavailable(`gdb cannot attach on this machine: ${renderer.gdbStacks.stderr}`);
   expect(renderer.gdbStacks.ok).toBe(true);
   // a core not kept (no prlimit, a call that could not run, a cap, the disk) is the machine's, not the
-  // code's: the test says so and skips, and the hosted-runner proof is where it is read
+  // code's: the test says so and skips
   if (!renderer.core.kept) unavailable(`no core was kept on this machine: ${JSON.stringify(renderer.core)}`);
   expect(renderer.core.bytes).toBeLessThanOrEqual(CORE_MAX_BYTES);
   expect(renderer.core.gzBytes).toBeLessThanOrEqual(CORE_GZ_MAX_BYTES);
@@ -315,6 +323,7 @@ test('the core of a renderer is bounded, kept compressed and opens in gdb with t
   expect(opened.stdout, 'thread 1 of the core is the main thread').toMatch(new RegExp(`\\* 1\\s+Thread \\S+ \\(LWP ${renderer.pid}\\)`));
   const live = renderer.gdbStacks.mainThread.frames[0].pc;
   expect(opened.stdout, 'the core\'s main thread is where the live one was').toContain(live.replace(/^0x0*/, ''));
+  await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
 });
 
 test('an unarmed page that is busy is judged as an armed one: no native stacks', async ({ browser, stallWatch }, testInfo) => {
