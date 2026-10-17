@@ -20,7 +20,7 @@ jobs:
   identity:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # pwa's script prints the upload key's fingerprints (log and summary)
       # and refuses a Play app signing SHA-1 that is the upload key's
