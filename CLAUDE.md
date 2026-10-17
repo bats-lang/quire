@@ -137,14 +137,18 @@ restore takes the newest cache of the name and pins (`restore-keys`
 `bats.toml`, no hash of the sources and no version a developer bumps, so a
 new input of those needs no new key part, and a key that is wrong can only
 restore less useful files, not make a build pass that should fail.
-**Until bats-lang/bats#305 is fixed and quire's pin is past the fix, the
-pins stay in the key**: `<pins>` is a digest of `.github/bats-version` (the
-compiler, which holds the ATS2 pin) and of the commit of bats's setup
-action, because `build/.bats_toolchain`, the listing the stamp is built from,
-is trusted across processes, so a `build/` restored from another ATS2
-install, or a patsopt edited in place, can pass the stamp as the same
-toolchain and have its C and objects reused. They go from the key when
-that is fixed. The `@` ends a name (`static` is never the prefix of
+**Until bats-lang/bats#316 is fixed, the freshness audit (bats#317) is done
+and quire's pin is past both, the pins stay in the key**: `<pins>` is a
+digest of `.github/bats-version` (the compiler, which holds the ATS2 pin) and
+of the commit of bats's setup action, because the toolchain digest the stamp
+is built from was not complete: a patsopt or a toolchain directory that was a
+symbolic link, changed in place, was not seen (bats#305, fixed in bats
+77e60a55, which the pin does not yet contain), a missing toolchain root gives
+a shorter listing and no error (bats#316, open), and the other freshness
+inputs bats reads back are not audited (bats#317). Until then a `build/`
+restored from another ATS2 install could pass the stamp as the same
+toolchain and have its C and objects reused. They go from the key when those
+are done. The `@` ends a name (`static` is never the prefix of
 `static-memo-rest@...`). What a restore holds is judged by bats, whose own
 CLAUDE.md is the record (`build/` carries a stamp of who made it; a build
 reuses what is still fresh; in check and test mode a module is not checked
@@ -156,7 +160,7 @@ and its memo):
   the C compiler's version, the flags and the target. A restored `build/`
   whose stamp is not the one the running bats would write (a compiler pin
   or setup action that moved, another ATS2 tarball, another runner image's
-  C compiler) is dropped at the start (except where bats#305 applies, above), with a line on stderr that names
+  C compiler) is dropped at the start (except where bats#316 or #317 apply, above), with a line on stderr that names
   what differs, and the build starts from nothing.
 * **Content, not time** (bats-lang/bats#254, #293): a module is emitted
   again when the SHA-256 of its source differs, its C and objects are

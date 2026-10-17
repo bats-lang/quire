@@ -23,22 +23,25 @@ inputs:
 runs:
   using: composite
   steps:
-    # A locator, and until bats-lang/bats#305 is fixed, the toolchain's pins
-    # (#622). The key is the cache's name, the pins and the commit (a GitHub
-    # cache is immutable, so a save needs a new key), and a restore takes the
-    # newest cache of the name and pins. The rest is bats's: it stamps every
-    # build/ with what made it and drops one whose stamp differs, rebuilds a
-    # module whose source hash changed, and keys each memo entry by what it
-    # read (bats's CLAUDE.md). It names no version a developer bumps, no
-    # runner image, no lock, no bats.toml and no hash of the sources, so a
-    # new input of those needs no new key part. What stays is the two pins
-    # that make the toolchain, because bats#305 (open): build/.bats_toolchain,
-    # which the stamp is built from, is trusted across processes, so a build/
-    # restored from another ATS2 install or a patsopt edited in place can pass
-    # the stamp as the same toolchain. The compiler's commit
-    # (.github/bats-version, whose compiler holds the ATS2 pin) and the commit
-    # of bats's setup action (which installs them) go when that is fixed and
-    # quire's pin is past the fix.
+    # A locator, and until bats-lang/bats#316 is fixed and the freshness audit
+    # (bats#317) is done, the toolchain's pins (#622). The key is the cache's
+    # name, the pins and the commit (a GitHub cache is immutable, so a save
+    # needs a new key), and a restore takes the newest cache of the name and
+    # pins. The rest is bats's: it stamps every build/ with what made it and
+    # drops one whose stamp differs, rebuilds a module whose source hash
+    # changed, and keys each memo entry by what it read (bats's CLAUDE.md).
+    # It names no version a developer bumps, no runner image, no lock, no
+    # bats.toml and no hash of the sources, so a new input of those needs no
+    # new key part. What stays is the two pins that make the toolchain,
+    # because the stamp's toolchain digest was not yet complete: bats#305 (a
+    # patsopt or a toolchain directory that is a symbolic link, changed in
+    # place, was not seen; fixed in bats 77e60a55, which this pin does not
+    # contain), bats#316 (a missing toolchain root gives a shorter listing and
+    # no error; open) and bats#317 (the other freshness inputs bats reads
+    # back are not audited yet). The compiler's commit (.github/bats-version,
+    # whose compiler holds the ATS2 pin) and the commit of bats's setup action
+    # (which installs them) go when those are done and quire's pin is past
+    # them.
     - name: Name the cache
       id: key
       shell: bash
