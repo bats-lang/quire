@@ -273,8 +273,13 @@ class Cases(unittest.TestCase):
 
     def test_a_fixture_needs_the_compiler_in_its_own_group_only(self):
         result = run_plan([('M', 'tests/static/accept/clip-last/expect')])
-        self.assertEqual(result['static']['accepts'], {'members': 'accept/clip-last', 'bats': True})
-        self.assertEqual(result['static']['app']['members'], '')
+        own = next(group for group, members in GROUPS['static'].items() if 'accept/clip-last' in members)
+        for group, plan in result['static'].items():
+            with self.subTest(group):
+                if group == own:
+                    self.assertEqual(plan, {'members': 'accept/clip-last', 'bats': True})
+                else:
+                    self.assertEqual(plan['members'], '')
 
 
 class Table(unittest.TestCase):
