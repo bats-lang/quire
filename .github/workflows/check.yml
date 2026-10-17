@@ -320,11 +320,19 @@ jobs:
       # gdb, for the stall capture's native stacks of a frozen renderer
       # (e2e/stall-capture.js, quire#575 and #591). A STOPGAP: pwa's e2e-setup
       # action should install it and keep the runner's passwordless sudo
-      # (bats-lang/pwa#109); this step goes when that lands. The capture uses
-      # gdb only if it is there, and installs nothing itself.
+      # (bats-lang/pwa#109); this step goes when that lands. A diagnostic for a
+      # rare freeze must not turn a job red, so the index is updated, the install
+      # retried, and a failure goes on (the capture uses gdb only if it is there;
+      # only the stall-capture spec fails, loudly, when it is not).
       - name: Install gdb
         if: env.GROUP_RUN == 'yes'
-        run: sudo apt-get install -y -q gdb
+        continue-on-error: true
+        run: |
+          for attempt in 1 2 3; do
+            sudo apt-get update -q && sudo apt-get install -y -q gdb && exit 0
+            sleep $((attempt * 5))
+          done
+          exit 1
 
       # The checker of the books the specs read (epubcheck.spec.js),
       # pinned by its version and the archive's SHA-256

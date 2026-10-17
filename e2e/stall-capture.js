@@ -34,7 +34,8 @@
  */
 
 import { execFile } from 'node:child_process';
-import { readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
+import { delimiter, isAbsolute, join } from 'node:path';
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
 const PROBE_EVERY_MS = 2000;
@@ -64,6 +65,8 @@ const STACK_FRAMES = 40;
 // stop() waits this long for captures still running (the native step can
 // outlast the test); what they found by then is already written (`save`)
 export const TEARDOWN_MS = 10000;
+// and stop() then ends their commands (at most HELPER_MS) and waits 1.5 s more
+export const TEARDOWN_MOST_MS = TEARDOWN_MS + HELPER_MS + 1500;
 
 /**
  * The longest a capture of a page that answers can take, every wait in
@@ -327,16 +330,32 @@ const runPrivileged = (args, ms, env, scope) => { const full = privileged(args, 
  * renderer lets go and the renderer runs again.
  */
 export function nativeScope() {
+  const token = `QUIRE_STALL_${Math.random().toString(36).slice(2, 10)}`;
   return {
     aborted: false,
+    token,
     children: new Set(),
-    abort() {
+    /**
+     * Ends what this watch runs: SIGTERM to each child's process group (all a
+     * root user can reach through; a user that is not root cannot signal
+     * sudo's group, root's), and `pkill -f` of the token that gdb's command
+     * line carries, as root through sudo (so `timeout`, which forwards the
+     * signal to gdb, and gdb are signalled whoever started them); SIGKILL a
+     * second later. Without any of it gdb still ends by `timeout -k 1
+     * GDB_SECONDS`, about 16 s after it started.
+     */
+    async abort() {
       this.aborted = true;
       const groups = [...this.children].map((child) => child.pid).filter(Boolean);
-      for (const group of groups) { try { process.kill(-group, 'SIGTERM'); } catch (gone) { /* it ended */ } }
-      if (groups.length) {
-        setTimeout(() => { for (const group of groups) { try { process.kill(-group, 'SIGKILL'); } catch (gone) { /* it ended */ } } }, 1000).unref();
-      }
+      for (const group of groups) { try { process.kill(-group, 'SIGTERM'); } catch (gone) { /* it ended, or it is root's */ } }
+      // the pattern matches the token in gdb's command line and not pkill's own
+      const pattern = `[${token[0]}]${token.slice(1)}`;
+      const signal = (name) => runPrivileged(['pkill', `-${name}`, '-f', pattern], HELPER_MS);
+      await signal('TERM');
+      setTimeout(() => {
+        for (const group of groups) { try { process.kill(-group, 'SIGKILL'); } catch (gone) { /* it ended */ } }
+        signal('KILL').catch(() => {});
+      }, 1000).unref();
       return groups.length;
     },
   };
@@ -344,17 +363,40 @@ export function nativeScope() {
 
 const cap = (text, most) => (text.length > most ? `${text.slice(0, most)}\n... (${text.length - most} more characters cut)` : text);
 
+// A path to gdb, instead of the one PATH finds (the specs' stand-in). An
+// absolute path, not a PATH entry: the privileged command runs under sudo,
+// whose own PATH (secure_path) is not this process's
+const GDB_PATH_VARIABLE = 'QUIRE_STALL_GDB';
+
+/** The absolute path of an executable on this process's PATH, or null. */
+function whichExecutable(name) {
+  if (isAbsolute(name)) { try { accessSync(name, constants.X_OK); return name; } catch (missing) { return null; } }
+  for (const directory of (process.env.PATH || '').split(delimiter)) {
+    if (!directory) continue;
+    try { accessSync(join(directory, name), constants.X_OK); return join(directory, name); } catch (missing) { /* not in this directory */ }
+  }
+  return null;
+}
+
 /**
- * gdb, if the machine has it. Nothing is installed here (a capture that
+ * gdb, if the machine has it, as an absolute path (the same one the
+ * privileged command then runs). Nothing is installed here (a capture that
  * installs packages in the middle of a test run is a supply chain
  * decision): the e2e jobs install it in a visible step of check.yml
  * (a stopgap, bats-lang/pwa#109). Looked for when a page is frozen, so a
  * healthy job runs nothing.
  */
 async function findGdb(scope) {
-  const version = await run('gdb', ['--version'], HELPER_MS, undefined, scope);
-  return { available: version.ok, version: version.ok ? version.stdout.split('\n')[0] : null, error: version.ok ? undefined : (version.error || 'gdb is not installed') };
+  const path = whichExecutable(process.env[GDB_PATH_VARIABLE] || 'gdb');
+  if (!path) return { available: false, version: null, path: null, error: 'gdb is not installed' };
+  const version = await run(path, ['--version'], HELPER_MS, undefined, scope);
+  return { available: version.ok, version: version.ok ? version.stdout.split('\n')[0] : null, path, error: version.ok ? undefined : (version.error || 'gdb does not answer --version') };
 }
+
+// What a machine that cannot take the stacks says: gdb's own words when the kernel refuses to
+// let it attach (Yama's ptrace_scope or a missing privilege), or sudo's when it wants a password
+// or a terminal. The capture then says `unavailable` and goes on without them
+export const CANNOT_ATTACH = /ptrace: (Operation not permitted|Permission denied)|Could not attach to process|yama\/ptrace_scope|sudo: (a password is required|a terminal is required|sorry, you are not allowed)/;
 
 const ANONYMOUS_CODE = '(anonymous executable memory)';
 
@@ -481,9 +523,11 @@ function frameLocated(text, maps) {
 }
 
 /** gdb attached to one process, to its end or GDB_MS, then let go. */
-async function backtrace(pid, maps, scope) {
-  const args = ['gdb', '-batch', '-nx', '-q',
+async function backtrace(pid, maps, scope, gdbPath) {
+  const args = [gdbPath, '-batch', '-nx', '-q',
     '-iex', 'set auto-load off', '-iex', 'set debuginfod enabled off', '-iex', 'set pagination off', '-iex', 'set confirm off',
+    // the watch's token on the command line, so teardown can find this command by it (`abort`)
+    ...(scope ? ['-iex', `echo ${scope.token}\\n`] : []),
     '-ex', 'info threads', '-ex', `thread apply all bt ${STACK_FRAMES}`, '-p', String(pid)];
   const out = await runPrivileged(args, GDB_MS, { DEBUGINFOD_URLS: '' }, scope);
   const parsed = parseGdb(out.stdout, pid, maps);
@@ -517,9 +561,14 @@ async function nativeStacks(renderers, scope) {
     // the kernel's view and the addresses first: gdb stops the process
     const { result: entry, maps } = await identity(renderer.pid, scope);
     entry.kernel = await kernelTasks(renderer.pid, scope);
-    entry.gdbStacks = gdb.available ? await backtrace(renderer.pid, maps, scope) : { ok: false, error: gdb.error };
+    entry.gdbStacks = gdb.available ? await backtrace(renderer.pid, maps, scope, gdb.path) : { ok: false, error: gdb.error };
     return entry;
   }));
+  // no gdb, or none that may attach: the capture carries on without the stacks, and says so
+  if (!gdb.available) result.unavailable = `native capture unavailable: ${gdb.error}`;
+  else if (result.renderers.length && result.renderers.every((renderer) => !renderer.gdbStacks.ok && CANNOT_ATTACH.test(`${renderer.gdbStacks.stderr}\n${renderer.gdbStacks.text}`))) {
+    result.unavailable = `native capture unavailable: gdb cannot attach (ptrace_scope ${result.ptraceScope}, root ${isRoot}): ${result.renderers[0].gdbStacks.stderr.trim().slice(0, 200)}`;
+  }
   return result;
 }
 
@@ -657,6 +706,7 @@ export function summary(result) {
   if (result.native) {
     if (result.native.error) lines.push(`  native stacks: ${result.native.error}`);
     else {
+      if (result.native.unavailable) lines.push(`  ${result.native.unavailable}`);
       lines.push(`  native stacks: gdb ${result.native.gdb.available ? result.native.gdb.version : 'not available'}, ptrace_scope ${result.native.ptraceScope}`);
       for (const renderer of result.native.renderers) {
         const stacks = renderer.gdbStacks;
@@ -812,7 +862,7 @@ export function stallWatch(browser, testInfo) {
         // a capture still running outside node (gdb attached to a renderer that
         // the browser, shared by the worker's next tests, would keep stopped) is
         // ended, and none starts
-        scope.abort();
+        await within(scope.abort(), HELPER_MS);
         await within(Promise.all([...running]), 1500);
       }
       for (const pending of armed.values()) {

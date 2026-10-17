@@ -4425,20 +4425,35 @@ its address and the offset in it (`frames[].module`, `.offset`; `pc - exeBase`
 for the binary). It is taken before the pause and the profile, which change what
 the renderer does, and written at once (`save`), so a teardown that does not wait
 for the rest keeps it: `stop()` waits `TEARDOWN_MS` (10 s) for captures still
-running, then **ends their commands** (SIGTERM to each process group, which sudo
-relays to `timeout` and so to gdb, SIGKILL a second later; none starts after) so a
-gdb attached to a renderer lets go and the browser, which the worker's next tests
-reuse, is not left with a stopped renderer. Every external command runs in a process group of its own with a hard limit
+running, then **ends their commands**: SIGTERM to each command's process group
+(all a user that is root can reach; sudo's group is root's, out of reach of one
+that is not) and `pkill -f` of a token that gdb's command line carries (`-iex echo
+QUIRE_STALL_<random>`), run as root through sudo, so `timeout`, which forwards the
+signal, and gdb are signalled whoever started them; SIGKILL a second later; none
+starts after. The real bound, if all of that failed (the non-root path has not been
+run), is `timeout -k 1 15` on gdb itself: about 16 s after it attached, the renderer
+stopped meanwhile in a browser the worker's next tests share. Tested as root with a
+stand-in gdb that hangs, ended by the `pkill` alone as well as by the group's signal. Every external command runs in a process group of its own with a hard limit
 (`timeout -k` inside sudo, since a SIGKILL of sudo reaches nothing of root's, and
 node's own limit and group kill behind it); the worst case is derived in code
 (`NATIVE_MOST_MS`). **Nothing is installed by the capture**: gdb comes from the
-e2e jobs' visible `Install gdb` step in `check.yml` (`sudo apt-get install -y -q
-gdb`, a stopgap; pwa's e2e-setup action should install it and keep the passwordless
-sudo, bats-lang/pwa#109), and without gdb or with ptrace refused the capture says
-`gdb` is unavailable or `ok: false` with gdb's own words. The spec skips with that
-reason for both, and fails on CI for a missing gdb only: a refused ptrace skips
-there too, so the first CI run is what shows whether the runner's sudo and gdb take
-the stacks. A frozen renderer is made in the spec by SIGSTOP, armed and unarmed;
+e2e jobs' visible `Install gdb` step in `check.yml` (`apt-get update` and install,
+retried, `continue-on-error`, so its failure never fails a job: a stopgap; pwa's e2e-setup action should install it
+and keep the passwordless sudo, bats-lang/pwa#109); gdb is found as an absolute
+path on this process's PATH (`QUIRE_STALL_GDB` names another, the spec's stand-in),
+the path the command then runs under sudo, whose own PATH is not this one's, and without gdb or with ptrace refused the capture says
+`gdb` is unavailable or `ok: false` with gdb's own words. **Without gdb, or with ptrace or sudo refused, the e2e run exactly as before and
+nothing goes red or flakes for it**: the Install gdb step never fails a job, and
+the capture records `native.unavailable` ("native capture unavailable: gdb is not
+installed", or gdb cannot attach, with gdb's or sudo's own words) beside what it
+could take (the kernel's view and the addresses), then carries on with the
+JS/wasm capture. The spec's native-stack tests skip with that reason, on CI too
+(no throw there); another failure of the capture, with gdb present and allowed, fails
+them. So the first CI run is what shows whether the runner's sudo and gdb take the
+stacks. The long tests (a 12 s busy page, a frozen renderer,
+the teardown ones: about 2.5 minutes) run in the desktop project only and skip in
+the others, saying why, since the renderer and the machine do not depend on the
+project; the stall-capture group pays them once. A frozen renderer is made in the spec by SIGSTOP, armed and unarmed;
 a loop and a 12 s busy page are asserted to be captured and NOT attached to.
 Not verified: that a renderer that sleeps in an untimed futex shows its waiter's
 frames (none could be had; the first real stall will say), and the sudo paths on a
