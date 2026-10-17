@@ -23,12 +23,19 @@
  *   - when it does not pause, a 2 s CPU profile (Profiler), if it can be
  *     taken;
  *   - each renderer process's CPU time over 1 s, which tells a busy main
- *     thread (a loop: about 1 s) from a blocked one (about 0).
+ *     thread (a loop: about 1 s) from a blocked one (about 0);
+ *   - when the page is judged stalled (it answered no evaluate, or its main
+ *     thread answers no task), the renderers' native stacks (#575, #591):
+ *     gdb's backtrace of every thread, the kernel's stack, wait channel
+ *     and system call of every thread, and what resolves the raw offsets
+ *     offline (the binary's path and build id, the load address of every
+ *     module, the executable anonymous regions where JIT code lives).
  * The capture is written to the test's output directory
  * (stall-capture-<n>.json, uploaded by CI), attached to the test, and
  * summed up on stderr.
  */
 
+import { execFile } from 'node:child_process';
 import { readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
@@ -40,17 +47,38 @@ const PROFILE_MS = 2000;
 // a test's pages are captured this long before its timeout (a third of a shorter one)
 const TIMEOUT_MARGIN_MS = 15000;
 
+// The native stacks (#575, #591) of a page judged stalled. Every external
+// command has a hard limit, so a capture never hangs the run
+const GDB_SECONDS = 15;                 // `timeout` ends gdb after this (and kills it 2 s later)
+const GDB_MS = (GDB_SECONDS + 2 + 3) * 1000; // node's own limit on the same command, a backstop
+const INSTALL_MS = 60000;               // gdb installed on the spot, all its commands together
+const HELPER_MS = 5000;                 // readelf, sudo cat, version checks
+const NATIVE_MOST = 6;                  // renderers whose stacks are taken, at once
+const STACK_FRAMES = 40;
+const UNANSWERED = 'page did not answer';
+
 /**
- * The longest a capture can take, every wait in `record` and
- * `captureArmed` run out one after another: the arming waited for (1
- * command); the interrupting command, the task and Debugger.pause (3);
- * the pause itself (PAUSE_MS); the debugger disabled, enabled and its
- * breakpoints made inactive again (3); Profiler.enable and
- * Profiler.start (2); the profile (PROFILE_MS); Profiler.stop (1). The
- * renderers' CPU time (a session, two reads and 1 s between them) is
- * taken alongside, and is shorter. 10 x 2 s + 3 s + 2 s = 25 s.
+ * The longest a capture of a page that answers can take, every wait in
+ * `record` and `captureArmed` run out one after another: the arming
+ * waited for (1 command); the interrupting command, the task and
+ * Debugger.pause (3); the pause itself (PAUSE_MS); the debugger
+ * disabled, enabled and its breakpoints made inactive again (3);
+ * Profiler.enable and Profiler.start (2); the profile (PROFILE_MS);
+ * Profiler.stop (1). The renderers' CPU time (a session, two reads and
+ * 1 s between them) is taken alongside, and is shorter.
+ * 10 x 2 s + 3 s + 2 s = 25 s.
  */
 export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS;
+
+/**
+ * What the native stacks of a page judged stalled add, again every wait
+ * run out: gdb installed on the spot (INSTALL_MS, all its commands
+ * together), gdb itself (GDB_MS; the renderers' run side by side), the
+ * build id and the kernel stacks (2 x HELPER_MS). 60 s + 20 s + 10 s =
+ * 90 s, and a capture of a stalled page takes at most CAPTURE_MOST_MS
+ * and this.
+ */
+export const NATIVE_MOST_MS = INSTALL_MS + GDB_MS + 2 * HELPER_MS;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -219,6 +247,245 @@ async function rendererCpu(browser, ms) {
   }
 }
 
+/**
+ * An external command, run to its end or to `ms`, whichever is first, and
+ * never rejected: { ok, code, stdout, stderr, ms, timedOut, error }. A
+ * command that outlives `ms` is killed (SIGKILL), so no capture waits on
+ * one for ever.
+ */
+function run(command, args, ms, env) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    try {
+      execFile(command, args, { timeout: ms, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 * 1024, env: { ...process.env, ...env }, encoding: 'utf8' },
+        (error, stdout, stderr) => resolve({
+          ok: !error,
+          code: error ? (typeof error.code === 'number' ? error.code : String(error.code || error.signal || 'error')) : 0,
+          stdout: stdout || '',
+          stderr: stderr || '',
+          ms: Date.now() - started,
+          timedOut: !!(error && error.killed),
+          error: error ? String(error.message || error).slice(0, 300) : undefined,
+        }));
+    } catch (error) {
+      resolve({ ok: false, code: 'error', stdout: '', stderr: '', ms: Date.now() - started, timedOut: false, error: String(error && error.message || error).slice(0, 300) });
+    }
+  });
+}
+
+const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+/** A command that needs root: itself as root, else through sudo without a password prompt (the runners allow it). */
+const privileged = (args) => (isRoot ? args : ['sudo', '-n', ...args]);
+const runPrivileged = (args, ms, env) => { const full = privileged(args); return run(full[0], full.slice(1), ms, env); };
+
+const cap = (text, most) => (text.length > most ? `${text.slice(0, most)}\n... (${text.length - most} more characters cut)` : text);
+
+// gdb is put in the machine once per process: the promise of how that went
+let gdbReady = null;
+
+/**
+ * gdb, found or installed on the spot. A stopgap (quire#575): the e2e jobs
+ * should install it (pwa's e2e-setup action, bats-lang/pwa#109), and
+ * until they do it is installed when the first page stalls, so a healthy
+ * job pays nothing. `apt-get install` first (the runner image's package
+ * lists), then `apt-get update` and again if that failed, all within
+ * INSTALL_MS.
+ */
+function ensureGdb() {
+  if (!gdbReady) {
+    gdbReady = (async () => {
+      const deadline = Date.now() + INSTALL_MS;
+      const left = () => Math.max(1000, deadline - Date.now());
+      const log = [];
+      const have = async () => {
+        const version = await run('gdb', ['--version'], HELPER_MS);
+        return version.ok ? version.stdout.split('\n')[0] : null;
+      };
+      let version = await have();
+      if (version) return { available: true, version, installed: false, log };
+      const env = { DEBIAN_FRONTEND: 'noninteractive' };
+      const apt = (...args) => runPrivileged(['env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', '-q', '-y', '-o', 'DPkg::Lock::Timeout=30', ...args], left(), env);
+      const step = (name, outcome) => log.push({ step: name, ok: outcome.ok, code: outcome.code, ms: outcome.ms, error: outcome.error, tail: outcome.stderr.slice(-300) || outcome.stdout.slice(-300) });
+      const install = await apt('install', '--no-install-recommends', 'gdb');
+      step('apt-get install gdb', install);
+      if (!install.ok && Date.now() < deadline) {
+        step('apt-get update', await apt('update'));
+        if (Date.now() < deadline) step('apt-get install gdb', await apt('install', '--no-install-recommends', 'gdb'));
+      }
+      version = await have();
+      return { available: !!version, version, installed: !!version, log };
+    })();
+  }
+  return gdbReady;
+}
+
+const ANONYMOUS_CODE = '(anonymous executable memory)';
+
+/** What the maps of a process say about where its code is: see `identity`. */
+function parseMaps(text, exe) {
+  const modules = new Map();     // path -> the lowest address of its first mapping
+  const regions = [];            // every mapping, to say which one an address is in
+  const exeMaps = [];
+  const anonymousCode = [];      // executable memory with no file: JIT code (V8's), the vdso
+  for (const line of text.split('\n')) {
+    const found = /^([0-9a-f]+)-([0-9a-f]+) (\S+) ([0-9a-f]+) \S+ \d+\s*(.*)$/.exec(line);
+    if (!found) continue;
+    const [, start, end, perms, offset, name] = found;
+    const path = name.replace(/ \(deleted\)$/, '');
+    regions.push({ start: BigInt(`0x${start}`), end: BigInt(`0x${end}`), perms, path: path.startsWith('/') ? path : (perms.includes('x') ? ANONYMOUS_CODE : null) });
+    if (path === exe) exeMaps.push(line.replace(/\s+/g, ' '));
+    if (path.startsWith('/')) {
+      if (!modules.has(path) || (BigInt(`0x${offset}`) === 0n && BigInt(`0x${start}`) < BigInt(`0x${modules.get(path)}`))) modules.set(path, start);
+    } else if (perms.includes('x')) {
+      anonymousCode.push(`${start}-${end} ${perms} ${name}`.trim());
+    }
+  }
+  const info = { exeBase: modules.get(exe) || null, exeMaps, modules: [...modules].map(([path, base]) => ({ path, base })), anonymousCode: anonymousCode.slice(0, 64) };
+  return { info, regions, bases: modules };
+}
+
+/**
+ * What resolves a raw address of the process's stacks offline: the
+ * binary's path, its GNU build id (readelf -n; the same download then
+ * gives the symbols), the address it is loaded at and every other
+ * module's, so address - exeBase is the offset in the binary. Kept apart
+ * from gdb's text because the maps change when the process runs again.
+ */
+async function identity(pid) {
+  const result = { pid };
+  let exe = null;
+  try { exe = readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, ''); } catch (error) { result.exeError = String(error.code || error.message); }
+  result.exe = exe;
+  let maps = null;
+  try {
+    maps = parseMaps(readFileSync(`/proc/${pid}/maps`, 'utf8'), exe);
+    Object.assign(result, maps.info);
+  } catch (error) { result.mapsError = String(error.code || error.message); }
+  if (exe) {
+    const notes = await run('readelf', ['-n', exe], HELPER_MS);
+    const id = /Build ID:\s*([0-9a-f]+)/.exec(notes.stdout);
+    result.buildId = id ? id[1] : null;
+    if (!id) result.buildIdError = notes.error || cap(notes.stderr || notes.stdout, 300) || 'no build id note';
+  }
+  return { result, maps };
+}
+
+/**
+ * The kernel's view of every thread: its name, state, wait channel,
+ * system call (a futex's address and operation) and stack. The stack is
+ * readable by root only, so it is read through sudo when this user cannot.
+ */
+async function kernelTasks(pid) {
+  let tids = [];
+  try { tids = readdirSync(`/proc/${pid}/task`); } catch (error) { return { error: String(error.code || error.message) }; }
+  const read = (tid, file) => { try { return readFileSync(`/proc/${pid}/task/${tid}/${file}`, 'utf8').trim(); } catch (error) { return `(${error.code || error.message})`; } };
+  const tasks = tids.map((tid) => {
+    const stat = read(tid, 'stat');
+    return { tid: +tid, comm: read(tid, 'comm'), state: stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3), wchan: read(tid, 'wchan'), syscall: read(tid, 'syscall'), kernelStack: read(tid, 'stack') };
+  });
+  const denied = tasks.filter((task) => /^\((EACCES|EPERM)\b/.test(task.kernelStack));
+  if (denied.length) {
+    // one sudo for all of them: `tail -v` heads each file with its name
+    const files = denied.map((task) => `/proc/${pid}/task/${task.tid}/stack`);
+    const out = await runPrivileged(['tail', '-v', '-n', '+1', ...files], HELPER_MS);
+    for (const block of out.stdout.split(/^==> /m).slice(1)) {
+      const head = /^\/proc\/\d+\/task\/(\d+)\/stack <==\n([\s\S]*)$/.exec(block);
+      const task = head && denied.find((each) => each.tid === +head[1]);
+      if (task) task.kernelStack = head[2].trim();
+    }
+    for (const task of denied) if (/^\(E/.test(task.kernelStack)) task.kernelStackError = out.error || cap(out.stderr, 200) || 'not read';
+  }
+  return { tasks };
+}
+
+/**
+ * gdb's text, taken apart: `Thread 3 (Thread 0x7f.. (LWP 123) "name"):`
+ * heads the frames below it. The thread whose LWP is the process id is
+ * the main thread, the one a page's script runs on.
+ */
+function parseGdb(text, pid, maps) {
+  const threads = [];
+  let current = null;
+  for (const line of text.split('\n')) {
+    const head = /^Thread (\d+) \((.*)\):\s*$/.exec(line);
+    if (head) {
+      const lwp = /LWP (\d+)/.exec(head[2]);
+      const name = /"([^"]*)"/.exec(head[2]);
+      current = { number: +head[1], lwp: lwp ? +lwp[1] : null, name: name ? name[1] : null, frames: [] };
+      threads.push(current);
+    } else if (current && /^#\d+ /.test(line)) {
+      current.frames.push(frameLocated(line.trim(), maps));
+    }
+  }
+  const main = threads.find((thread) => thread.lwp === pid) || null;
+  return { threads, mainThread: main };
+}
+
+/**
+ * A frame of gdb's text with where its address is: the module whose
+ * mapping holds it (a path, or the anonymous executable memory JIT code
+ * lives in) and, for a module, the offset in it from its first mapping,
+ * which is what an offline symbol lookup (addr2line, a symbol server)
+ * takes for a stripped binary.
+ */
+function frameLocated(text, maps) {
+  const found = /^#\d+\s+(0x[0-9a-f]+)/.exec(text);
+  const frame = { text };
+  if (!found) return frame;
+  frame.pc = found[1];
+  if (!maps) return frame;
+  const pc = BigInt(found[1]);
+  const region = maps.regions.find((each) => pc >= each.start && pc < each.end);
+  frame.module = region ? region.path : null;
+  if (region && region.path && region.path !== ANONYMOUS_CODE && maps.bases.has(region.path)) {
+    frame.offset = `0x${(pc - BigInt(`0x${maps.bases.get(region.path)}`)).toString(16)}`;
+  }
+  return frame;
+}
+
+/** gdb attached to one process, to its end or GDB_MS, then let go. */
+async function backtrace(pid, maps) {
+  const args = ['-k', '2', String(GDB_SECONDS), 'gdb', '-batch', '-nx', '-q',
+    '-iex', 'set auto-load off', '-iex', 'set debuginfod enabled off', '-iex', 'set pagination off', '-iex', 'set confirm off',
+    '-ex', 'info threads', '-ex', `thread apply all bt ${STACK_FRAMES}`, '-p', String(pid)];
+  const out = await runPrivileged(['timeout', ...args], GDB_MS, { DEBUGINFOD_URLS: '' });
+  const parsed = parseGdb(out.stdout, pid, maps);
+  return {
+    ok: out.ok,
+    exitCode: out.code,
+    timedOut: out.timedOut || out.code === 124 || out.code === 137,
+    ms: out.ms,
+    error: out.error,
+    stderr: cap(out.stderr, 4000),
+    // the whole text too, in case the parts miss a form of gdb's output
+    text: cap(out.stdout, 200000),
+    threadCount: parsed.threads.length,
+    mainThread: parsed.mainThread,
+    threads: parsed.threads,
+  };
+}
+
+/**
+ * The native stacks of these renderers (a page judged stalled: see the top
+ * of this file). Nothing here throws, and every command is limited.
+ */
+async function nativeStacks(renderers) {
+  const result = { ptraceScope: '(absent)' };
+  try { result.ptraceScope = readFileSync('/proc/sys/kernel/yama/ptrace_scope', 'utf8').trim(); } catch (error) { /* no Yama: ptrace is the kernel's usual rule */ }
+  result.root = isRoot;
+  const gdb = await ensureGdb();
+  result.gdb = { available: gdb.available, version: gdb.version, installedNow: gdb.installed, install: gdb.log };
+  const taken = renderers.slice(0, NATIVE_MOST);
+  result.renderers = await Promise.all(taken.map(async (renderer) => {
+    // the kernel's view and the addresses first: gdb stops the process
+    const { result: entry, maps } = await identity(renderer.pid);
+    entry.kernel = await kernelTasks(renderer.pid);
+    entry.gdbStacks = gdb.available ? await backtrace(renderer.pid, maps) : { ok: false, error: 'gdb is not installed and could not be' };
+    return entry;
+  }));
+  return result;
+}
+
 /** Where a page's main thread is: see the top of this file. */
 export async function capture(page, armed, reason, browser) {
   armed.capturing = true;
@@ -229,6 +496,7 @@ async function captureArmed(page, armed, reason, browser) {
   const result = { reason, at: new Date().toISOString(), url: page.url(), armed: !armed.error, armError: armed.error };
   const session = armed.session;
   const cpu = browser ? rendererCpu(browser, 1000) : Promise.resolve(null);
+  let stalled = reason.startsWith(UNANSWERED);
   if (session && !armed.error) {
     // An interrupting command (answered while script runs) and a task
     const interrupt = await within(session.send('Debugger.setBreakpointsActive', { active: false }), COMMAND_MS);
@@ -237,6 +505,19 @@ async function captureArmed(page, armed, reason, browser) {
       interrupt: { answered: interrupt.answered, ms: interrupt.ms, error: interrupt.error },
       task: { answered: task.answered, ms: task.ms, error: task.error },
     };
+    // a page whose main thread runs no task is stalled, whatever the reason of the capture
+    stalled = !task.answered;
+  }
+  let processes = null;
+  if (stalled) {
+    // the native stacks first, before the pause and the profile below
+    // change what the renderer does: the wait it is stuck in is the evidence
+    processes = await cpu;
+    if (Array.isArray(processes)) {
+      result.native = await nativeStacks(processes.filter((process) => process.type === 'renderer')).catch((error) => ({ error: String(error && error.stack || error) }));
+    }
+  }
+  if (session && !armed.error) {
     armed.pausing = true;
     const paused = new Promise((resolve) => session.once('Debugger.paused', resolve));
     const pause = await within(session.send('Debugger.pause'), COMMAND_MS);
@@ -263,7 +544,7 @@ async function captureArmed(page, armed, reason, browser) {
       }
     }
   }
-  const processes = await cpu;
+  processes = processes || await cpu;
   if (Array.isArray(processes)) {
     for (const process of processes) {
       process.threads = threadStates(process.pid);
@@ -309,6 +590,17 @@ export function summary(result) {
       if (process.threads) lines.push(`  renderer ${process.pid} threads: ${process.threads.join('; ')}`);
       if (process.mainThread) lines.push(`  renderer ${process.pid} main thread: syscall ${process.mainThread.syscall}; kernel stack ${process.mainThread.kernelStack.replace(/\s+/g, ' ').slice(0, 300)}`);
       if (process.channels) lines.push(`  renderer ${process.pid} open: ${process.channels.join(', ')}`);
+    }
+  }
+  if (result.native) {
+    if (result.native.error) lines.push(`  native stacks: ${result.native.error}`);
+    else {
+      lines.push(`  native stacks: gdb ${result.native.gdb.available ? result.native.gdb.version : 'not available'}, ptrace_scope ${result.native.ptraceScope}`);
+      for (const renderer of result.native.renderers) {
+        const stacks = renderer.gdbStacks;
+        lines.push(`  renderer ${renderer.pid}: ${renderer.exe}, build id ${renderer.buildId}, loaded at ${renderer.exeBase}; gdb ${stacks.ok ? 'ok' : `failed (${stacks.error})`}, ${stacks.threadCount || 0} threads`);
+        if (stacks.mainThread) for (const frame of stacks.mainThread.frames.slice(0, 12)) lines.push(`    main thread ${frame.text}${frame.module ? ` [${frame.module}${frame.offset ? ` +${frame.offset}` : ''}]` : ''}`);
+      }
     }
   }
   if (Array.isArray(result.otherProcesses)) for (const process of result.otherProcesses) {
