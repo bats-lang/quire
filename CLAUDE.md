@@ -254,7 +254,18 @@ What happened on 2026-10-15, and the rules it gave:
   discussion 137976, Chapel's merge workflow) and cancels that group's run by
   its concurrency group (the queue ref), the destroyed run itself skipping
   every job (#586); `qsweep` still cancels the ones that slip through
-  (`CANCELLED STALE QUEUE RUN`). Read the pull request's timeline
+  (`CANCELLED STALE QUEUE RUN`). `supersede.yml` (#620) covers the case the
+  `destroyed` event does not: on each `checks_requested` it cancels the queued
+  or running `check.yml` runs of the same pull request (its number from the
+  queue ref `gh-readonly-queue/main/pr-N-<sha>`) whose commit is another, and
+  which were created before the requested group's own run. A group with the
+  same commit is kept, and so is a later one; a run of another pull request is
+  never touched. Its one step is a few lines of `gh` and `jq` (the avenues:
+  a concurrency key per pull request needs the number, which the expression
+  language cannot take out of the ref; a job in `check.yml` queues for a runner
+  like every other job; bats has no HTTP client). It holds `actions: write` and
+  nothing else, and needs a runner, so under full pressure it waits its turn; the
+  `destroyed` path needs none (its jobs are skipped). Read the pull request's timeline
   (`added_to_merge_queue`, `removed_from_merge_queue`) for where an entry is:
   `auto_merge` empty means enqueued or removed, not one or the other.
 * A change that makes its own group longer than about 45 minutes does not
