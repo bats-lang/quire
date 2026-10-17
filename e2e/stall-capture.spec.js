@@ -4,16 +4,17 @@
  * watch on its own, and the capture names the loop's function. The page
  * is a test page of its own (setContent), not the app.
  *
- * The same capture holds the renderer's native stacks (#575, #591): gdb's
- * backtrace of every thread, the kernel's stack, wait channel and system
- * call of every thread, and what resolves their raw addresses offline.
- * A loop's main thread is busy in JIT code or the binary's, so its
- * backtrace has frames in those; where gdb or ptrace is not there the
- * test says so and skips.
+ * The same capture holds the native stacks (#575, #591) of a renderer that is
+ * frozen, no CPU and no answer: gdb's backtrace of every thread, the kernel's
+ * stack, wait channel and system call of every thread, and what resolves their
+ * raw addresses offline. A renderer that is only busy (a loop, a heavy layout)
+ * is never attached to: gdb stops the process. Frozen is made by SIGSTOP of the
+ * renderer, armed or not. Where gdb or ptrace is not there a test says so and
+ * skips, and on CI (which installs gdb and has sudo) fails instead.
  */
 
 import { test, expect } from './fixtures.js';
-import { arm, CAPTURE_MOST_MS, NATIVE_MOST_MS } from './stall-capture.js';
+import { arm, CAPTURE_MOST_MS, FROZEN_CPU_SECONDS, NATIVE_MOST_MS, TEARDOWN_MS } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
 const SPIN_MODULE = (() => {
@@ -63,24 +64,62 @@ async function endLoop(page, stallWatch) {
 }
 
 /**
- * The renderer that spins, among the native stacks of a capture: the one
- * that used the most CPU in the second the capture watched. Skips the
- * test, saying why, where gdb is not there or ptrace is refused.
+ * A machine that cannot take the native stacks: the test says so and skips,
+ * and on CI fails instead, since a skip there would hide the very thing the
+ * test is for (the job installs gdb and has sudo).
  */
-function spinningRenderer(capture) {
-  expect(capture.native.error).toBeUndefined();
-  const { gdb, renderers } = capture.native;
-  test.skip(!gdb.available, `gdb is not installed on this machine and could not be installed: ${JSON.stringify(gdb.install)}`);
-  const spinning = [...capture.rendererCpu].sort((a, b) => b.cpuSeconds - a.cpuSeconds)[0];
-  const renderer = renderers.find((each) => each.pid === spinning.pid);
-  expect(renderer, 'the busiest renderer has native stacks').toBeTruthy();
-  test.skip(!renderer.gdbStacks.ok && /ptrace|Operation not permitted|Permission denied/i.test(renderer.gdbStacks.stderr + renderer.gdbStacks.text),
-    `ptrace is refused on this machine (ptrace_scope ${capture.native.ptraceScope}, root ${capture.native.root}): ${renderer.gdbStacks.stderr}`);
-  return renderer;
+function unavailable(reason) {
+  if (process.env.CI) throw new Error(`the native stacks cannot be taken on CI: ${reason}`);
+  test.skip(true, reason);
 }
 
-/** What a capture of a loop holds of its renderer's native side (#575, #591). */
-function expectNativeStacks(renderer, capture, { reachesBinary }) {
+// gdb's own words when the kernel refuses to let it attach (Yama's ptrace_scope or a missing privilege)
+const PTRACE_REFUSED = /ptrace: (Operation not permitted|Permission denied)|Could not attach to process|yama\/ptrace_scope/;
+
+/** Every renderer process of the browser: the pids. */
+async function rendererPids(browser) {
+  const session = await browser.newBrowserCDPSession();
+  try {
+    const { processInfo } = await session.send('SystemInfo.getProcessInfo');
+    return processInfo.filter((process) => process.type === 'renderer').map((process) => process.id);
+  } finally {
+    await session.detach();
+  }
+}
+
+/**
+ * Freezes these renderers (SIGSTOP: no CPU, no answer to anything, as #575's and
+ * #591's), runs `during`, and always lets them go again (SIGCONT).
+ */
+async function frozen(pids, during) {
+  for (const pid of pids) process.kill(pid, 'SIGSTOP');
+  try {
+    return await during();
+  } finally {
+    for (const pid of pids) { try { process.kill(pid, 'SIGCONT'); } catch (gone) { /* it ended */ } }
+  }
+}
+
+/** What a capture of a busy page holds: gdb was never attached to a renderer that used CPU. */
+function expectBusyNotFrozen(capture) {
+  expect(capture.native, 'a busy renderer is not attached to').toBeUndefined();
+  const busiest = Math.max(...capture.rendererCpu.map((process) => process.cpuSeconds));
+  expect(busiest, 'the renderer used CPU over the second the capture watched').toBeGreaterThan(5 * FROZEN_CPU_SECONDS);
+}
+
+/**
+ * What a capture of a frozen renderer holds of its native side (#575, #591):
+ * skips where gdb or ptrace is not there, otherwise asserts everything.
+ */
+function expectNativeStacks(capture, pids) {
+  expect(capture.native.error).toBeUndefined();
+  if (!capture.native.gdb.available) unavailable(`gdb is not installed on this machine: ${capture.native.gdb.error}`);
+  const renderer = capture.native.renderers.find((each) => pids.includes(each.pid));
+  expect(renderer, 'the frozen renderer has native stacks').toBeTruthy();
+  const stacks = renderer.gdbStacks;
+  if (!stacks.ok && PTRACE_REFUSED.test(`${stacks.stderr}\n${stacks.text}`)) {
+    unavailable(`ptrace is refused on this machine (ptrace_scope ${capture.native.ptraceScope}, root ${capture.native.root}): ${stacks.stderr}`);
+  }
   // what resolves addresses offline: the binary, its build id, where it is loaded
   expect(renderer.exe).toMatch(/headless_shell|chrome/);
   expect(renderer.buildId).toMatch(/^[0-9a-f]{16,}$/);
@@ -94,49 +133,126 @@ function expectNativeStacks(renderer, capture, { reachesBinary }) {
   expect(main, 'the main thread is a task').toBeTruthy();
   expect(main.state).toMatch(/^[RSDtT]$/);
   for (const task of renderer.kernel.tasks) expect(task.syscall, `the syscall of ${task.comm}`).not.toBe('');
-  // gdb's backtrace of every thread, and the main thread's frames in script's native side
-  const stacks = renderer.gdbStacks;
+  // gdb's backtrace of every thread
   expect(stacks.ok, `${stacks.error} ${stacks.stderr}`).toBe(true);
   expect(stacks.threadCount).toBe(renderer.kernel.tasks.length);
   expect(stacks.mainThread, 'gdb listed the main thread (LWP = pid)').toBeTruthy();
   const frames = stacks.mainThread.frames;
   expect(frames.length).toBeGreaterThan(0);
-  // every frame address is in a mapping; a loop spins in JIT code or in the binary
+  // every frame's address is in a mapping, and the stack reaches the binary at an offset that resolves offline
   expect(frames[0].module).toBeTruthy();
-  expect([renderer.exe, '(anonymous executable memory)']).toContain(frames[0].module);
-  // gdb has no unwind information for JIT code and follows frame pointers there:
-  // script's frames keep them, so the stack reaches the binary's entry trampoline;
-  // wasm's do not, so only its first frame (the address in the loop) is dependable
-  if (reachesBinary) {
-    expect(frames.some((frame) => frame.module === renderer.exe && /^0x[0-9a-f]+$/.test(frame.offset)),
-      'the stack reaches the binary at an offset that resolves offline').toBe(true);
-  }
-  expect(capture.verdict).toContain('running script');
+  expect(frames.some((frame) => frame.module === renderer.exe && /^0x[0-9a-f]+$/.test(frame.offset))).toBe(true);
 }
 
-test('a page in an endless script loop is captured in that loop', async ({ page, stallWatch }, testInfo) => {
-  test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
+test('a page in an endless script loop is captured in that loop, and gdb is not attached to it', async ({ page, stallWatch }) => {
   await startLoop(page, stallWatch, 'setTimeout(spinForever, 0)');
-  const capture = await stallWatch.next(page, 20000 + NATIVE_MOST_MS);
+  const capture = await stallWatch.next(page, 20000);
   expect(capture.reason).toContain('did not answer');
   expect(capture.answers.interrupt.answered).toBe(true);
   expect(capture.answers.task.answered).toBe(false);
   expect(capture.paused.frames[0].functionName).toBe('spinForever');
   expect(capture.verdict).toContain('spinForever');
   await endLoop(page, stallWatch);
-  expectNativeStacks(spinningRenderer(capture), capture, { reachesBinary: true });
+  // a loop is busy, not frozen: it spends a second of CPU a second
+  expectBusyNotFrozen(capture);
 });
 
-test('a page in an endless wasm loop is captured in that loop', async ({ page, stallWatch }, testInfo) => {
-  test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
+test('a page in an endless wasm loop is captured in that loop, and gdb is not attached to it', async ({ page, stallWatch }) => {
   await startLoop(page, stallWatch, `setTimeout(() => enterWasm(${JSON.stringify(SPIN_MODULE)}), 0)`);
-  const capture = await stallWatch.next(page, 20000 + NATIVE_MOST_MS);
+  const capture = await stallWatch.next(page, 20000);
   const [inWasm, caller] = capture.paused.frames;
   expect(inWasm.functionName).toContain('spinInWasm');
   expect(inWasm.url).toMatch(/^wasm:\/\//);
   expect(caller.functionName).toBe('enterWasm');
   await endLoop(page, stallWatch);
-  expectNativeStacks(spinningRenderer(capture), capture, { reachesBinary: false });
+  expectBusyNotFrozen(capture);
+});
+
+test('a page busy for 12 s that then recovers is captured, not attached to, and runs on', async ({ page, stallWatch }) => {
+  await page.setContent('<!doctype html><title>Busy</title>');
+  const session = await stallWatch.session(page);
+  // heavy layout, a loaded runner: a synchronous task that ends by itself
+  await session.send('Runtime.evaluate', { expression: 'setTimeout(() => { const end = Date.now() + 12000; while (Date.now() < end); }, 0)' });
+  const capture = await stallWatch.next(page, 30000);
+  expect(capture.answers.task.answered, 'the task came after the busy time or not at all').toBe(false);
+  expectBusyNotFrozen(capture);
+  await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
+});
+
+test('a renderer that is frozen (no CPU, no answer) has its native stacks captured', async ({ page, browser, stallWatch }, testInfo) => {
+  test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
+  await page.setContent('<!doctype html><title>Frozen</title><p>Frozen</p>');
+  const pids = await rendererPids(browser);
+  expect(pids.length).toBeGreaterThan(0);
+  const capture = await frozen(pids, () => stallWatch.next(page, 20000 + NATIVE_MOST_MS));
+  expect(capture.reason).toContain('did not answer');
+  expect(capture.answers.task.answered).toBe(false);
+  expect(Math.max(...capture.rendererCpu.map((process) => process.cpuSeconds))).toBeLessThan(FROZEN_CPU_SECONDS);
+  expectNativeStacks(capture, pids);
+  await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
+});
+
+/**
+ * A page of a context made with QUIRE_NO_STALL_ARM=1, so it is not armed, in a
+ * renderer of its own: { context, page, pids, restore }.
+ */
+async function unarmedPage(browser) {
+  const kept = process.env.QUIRE_NO_STALL_ARM;
+  const restore = () => { if (kept === undefined) delete process.env.QUIRE_NO_STALL_ARM; else process.env.QUIRE_NO_STALL_ARM = kept; };
+  process.env.QUIRE_NO_STALL_ARM = '1';
+  try {
+    const before = await rendererPids(browser);
+    const context = await browser.newContext();   // watched at once, armed (or not) as its page is made
+    const page = await context.newPage();
+    await page.setContent('<!doctype html><title>Unarmed</title><p>Unarmed</p>');
+    const pids = (await rendererPids(browser)).filter((pid) => !before.includes(pid));
+    expect(pids.length).toBe(1);
+    return { context, page, pids, restore };
+  } finally {
+    restore();
+  }
+}
+
+test('an unarmed page that is busy is judged as an armed one: no native stacks', async ({ browser, stallWatch }) => {
+  const { context, page } = await unarmedPage(browser);
+  try {
+    // a loop through a session of the test's own, since the watch has none for it
+    const busy = await context.newCDPSession(page);
+    await busy.send('Runtime.evaluate', { expression: 'setTimeout(() => { const end = Date.now() + 12000; while (Date.now() < end); }, 0)' });
+    const capture = await stallWatch.next(page, 30000);
+    expect(capture.armed).toBe(false);
+    expect(capture.evaluate.answered, 'asked with an evaluate of its own').toBe(false);
+    expectBusyNotFrozen(capture);
+    await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
+  } finally {
+    await context.close();
+  }
+});
+
+test('an unarmed page that is frozen is judged as an armed one: native stacks', async ({ browser, stallWatch }, testInfo) => {
+  test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
+  const { context, page, pids } = await unarmedPage(browser);
+  try {
+    const capture = await frozen(pids, () => stallWatch.next(page, 20000 + NATIVE_MOST_MS));
+    expect(capture.armed).toBe(false);
+    expect(capture.evaluate.answered).toBe(false);
+    expectNativeStacks(capture, pids);
+  } finally {
+    for (const pid of pids) { try { process.kill(pid, 'SIGCONT'); } catch (gone) { /* it ended */ } }
+    await context.close();
+  }
+});
+
+test('teardown does not wait for a native capture to end', async ({ page, browser, stallWatch }) => {
+  await page.setContent('<!doctype html><title>Frozen</title><p>Frozen</p>');
+  const pids = await rendererPids(browser);
+  await frozen(pids, async () => {
+    await stallWatch.started(page, 30000);
+    const started = Date.now();
+    await stallWatch.stop();
+    // the capture of a frozen page takes longer than this: stop gives it TEARDOWN_MS
+    expect(Date.now() - started).toBeLessThan(TEARDOWN_MS + 3000);
+  });
 });
 
 test('a page that answers is not captured', async ({ page, stallWatch }) => {

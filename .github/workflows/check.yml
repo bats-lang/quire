@@ -317,6 +317,15 @@ jobs:
         if: env.GROUP_RUN == 'yes'
         run: sudo apt-get install -y -q fonts-noto-cjk
 
+      # gdb, for the stall capture's native stacks of a frozen renderer
+      # (e2e/stall-capture.js, quire#575 and #591). A STOPGAP: pwa's e2e-setup
+      # action should install it and keep the runner's passwordless sudo
+      # (bats-lang/pwa#109); this step goes when that lands. The capture uses
+      # gdb only if it is there, and installs nothing itself.
+      - name: Install gdb
+        if: env.GROUP_RUN == 'yes'
+        run: sudo apt-get install -y -q gdb
+
       # The checker of the books the specs read (epubcheck.spec.js),
       # pinned by its version and the archive's SHA-256
       - name: Install epubcheck

@@ -4389,34 +4389,49 @@ output (CI's `e2e-stall-captures-<group>` artifact), attached to the test, and
 summed up on stderr. `e2e/stall-capture.spec.js` checks it on pages that
 loop forever in script and in wasm.
 
-**The native stacks of a stalled renderer (#575, #591).** A renderer that
+**The native stacks of a frozen renderer (#575, #591).** A renderer that
 answers nothing at 0 CPU sits in an untimed futex wait (`0x189`, no timeout;
 a healthy idle one in `0x89` with a timeout) and the JavaScript side cannot say
-who it waits for. So a page judged stalled (it answered no evaluate for 5 s, or
-its main thread answers no task: a loop's, too) has the capture's `native`
-field: for each renderer (at most 6, side by side) gdb's backtrace of every
-thread (`gdb -batch -p`, `thread apply all bt 40`, through `timeout -k 2 15`
-and sudo where the user is not root, since Yama's ptrace_scope 1 allows only a
-descendant of the tracer; `ptraceScope` is recorded), the kernel's stack, wait
-channel, system call and state of every thread (the stack is root's, read by one
-`sudo tail`), and what resolves the raw offsets later against the same
-download: the binary's path, its GNU build id (`readelf -n`), the address it is
-loaded at (`exeBase`), every module's, the executable anonymous regions (JIT
-code) and, for each frame, the module holding its address and the offset in it
-(`frames[].module`, `.offset`; `frames[].offset` is `pc - exeBase` for the
-binary). It is taken before the pause and the profile, which change what the
-renderer does; a page that answers is never attached to. Every external command
-has a hard limit (`GDB_MS`, `HELPER_MS`, `INSTALL_MS`, summed in
-`NATIVE_MOST_MS`), so a capture never hangs the run. Costs nothing on a healthy
-job: gdb is looked for only when a page stalls, and installed then
-(`apt-get install gdb`, then `update` and again if that failed, in 60 s) when
-the image lacks it (a stopgap, pwa's e2e-setup action should install it: the
-ticket is bats-lang/pwa#109). Without a Yama or a sudo the capture says
-`gdb ok: false` with gdb's own error, and the spec skips with the reason.
-A loop's stack is gdb following frame pointers through JIT code: script's reach
-the binary (`Builtins_JSEntryTrampoline`), wasm's give the first frame only.
-Not verified: that a renderer that sleeps in a futex shows its waiter's frames
-(none could be had; the first real stall will say), and the sudo paths on a
+who it waits for. gdb is attached **only to a renderer that is frozen: the page
+answers nothing AND the renderer used less than `FROZEN_CPU_SECONDS` (0.1 s) of
+CPU over the capture's 1 s window.** "Answers nothing" is the armed session's
+`Runtime.evaluate` for 2 s, or, for a page that is not armed (no debugger, see
+below, or it stopped answering before it was armed), an `evaluate` of its own:
+armed and unarmed pages are judged alike, and so are the capture's two reasons
+(an unanswered probe, a test about to time out). A page that is only busy is
+never attached to, since gdb stops the process: a loop or a heavy layout spends
+about a second of CPU a second (0.98 measured for a loop here), a SIGSTOPped or
+idle renderer 0, and #575's and #591's frozen ones 0 and 0.02. Other renderers
+with CPU under the threshold are attached to too when one page is frozen (an idle
+renderer of another page of the test, stopped for about 2 s): the CPU cannot tell
+whose renderer is whose. A healthy job runs nothing: a page that answers is never
+looked at.
+
+The capture's `native` field has, for each such renderer (at most 6, side by
+side): gdb's backtrace of every thread (`gdb -batch -p`, `thread apply all bt
+40`, through `timeout -k 1 15`, and sudo where the user is not root, since
+Yama's ptrace_scope 1 allows only a descendant of the tracer; `ptraceScope` is
+recorded), the kernel's stack, wait channel, system call and state of every
+thread (the stack is root's, read by one `sudo tail`), and what resolves the raw
+offsets later against the same download: the binary's path, its GNU build id
+(`readelf -n`), the address it is loaded at (`exeBase`), every module's, the
+executable anonymous regions (JIT code) and, for each frame, the module holding
+its address and the offset in it (`frames[].module`, `.offset`; `pc - exeBase`
+for the binary). It is taken before the pause and the profile, which change what
+the renderer does, and written at once (`save`), so a teardown that does not wait
+for the rest (`stop()` waits `TEARDOWN_MS`, 10 s, for captures still running) keeps
+it. Every external command runs in a process group of its own with a hard limit
+(`timeout -k` inside sudo, since a SIGKILL of sudo reaches nothing of root's, and
+node's own limit and group kill behind it); the worst case is derived in code
+(`NATIVE_MOST_MS`). **Nothing is installed by the capture**: gdb comes from the
+e2e jobs' visible `Install gdb` step in `check.yml` (`sudo apt-get install -y -q
+gdb`, a stopgap; pwa's e2e-setup action should install it and keep the passwordless
+sudo, bats-lang/pwa#109), and without gdb or with ptrace refused the capture says
+`gdb` is unavailable or `ok: false` with gdb's own words, and the spec skips locally
+and fails on CI. A frozen renderer is made in the spec by SIGSTOP, armed and unarmed;
+a loop and a 12 s busy page are asserted to be captured and NOT attached to.
+Not verified: that a renderer that sleeps in an untimed futex shows its waiter's
+frames (none could be had; the first real stall will say), and the sudo paths on a
 hosted runner.
 
 **`QUIRE_NO_STALL_ARM=1` (anything but empty or 0) skips arming** (`arm` in
@@ -4425,8 +4440,9 @@ and the capture says `armed: false` with that reason. It is for comparing the
 stall rate with and without the arming (every frozen renderer of #575 and #591
 had it, a suspect and not evidence; at one stall in about 900 jobs, 2,700 jobs
 without it show no stall with 95 % power if arming is the cause). Without
-arming the watch still probes with `page.evaluate` and still takes the native
-stacks, and loses the pause, the profile and the answers; the specs that need
-the debugger (`stall-capture.spec.js`'s loops) fail with it on, as they should.
+arming the watch still probes with `page.evaluate` and takes the native stacks
+under the same rule as an armed page (no answer AND no CPU), and loses the
+pause, the profile and the interrupt/task answers; the specs that need the
+debugger (`stall-capture.spec.js`'s loops) fail with it on, as they should.
 The default stays armed and nothing sets it: a scheduled run that does is a
 change of its own.
