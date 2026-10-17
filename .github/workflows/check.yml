@@ -259,7 +259,7 @@ jobs:
           QUIRE_STATIC_WORK: ${{ runner.temp }}/quire-static
           # a run that restores nothing (a push to main, the nightly run, a
           # dispatch) audits the fixtures' memo instead of serving it (#622)
-          FIXTURES_COLD: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && '' || '--cold' }}
+          FIXTURES_COLD: ${{ (github.event_name != 'pull_request' && github.event_name != 'merge_group') && '--cold' || '' }}
           QUIRE_MUTATION_BASE: ${{ steps.scope.outputs.base != 'none' && steps.scope.outputs.base || '' }}
         run: tests/static/run.sh $FIXTURES_COLD "${BATS_REPOSITORY:-none}" $GROUP_MEMBERS
 
