@@ -9,8 +9,9 @@
  * stack, wait channel and system call of every thread, and what resolves their
  * raw addresses offline. A renderer that is only busy (a loop, a heavy layout)
  * is never attached to: gdb stops the process. Frozen is made by SIGSTOP of the
- * renderer, armed or not. Where gdb or ptrace is not there a test says so and
- * skips, and on CI (which installs gdb and has sudo) fails instead.
+ * renderer, armed or not. Where gdb, sudo or ptrace is not there a test says so
+ * and skips, on CI too: nothing about gdb turns a run red (a stall-capture
+ * failure with gdb present and allowed still fails this spec's group).
  */
 
 import { createServer } from 'node:http';
@@ -448,13 +449,16 @@ test('teardown ends a gdb attached to a hung renderer: gdb lets go and the rende
   const shim = testInfo.outputPath('staying-gdb');
   mkdirSync(shim, { recursive: true });
   const standIn = `${shim}/gdb`;
-  writeFileSync(standIn, `#!/bin/sh\n[ "$1" = --version ] && exec ${real} --version\nexec ${real} "$@" -ex 'shell sleep 117'\n`);
+  // this test's own number in the stay's command (`sleep <marker>`), so what it looks for and kills is
+  // what it started, never another run's or another checkout's
+  const marker = 100000 + Math.floor(Math.random() * 899999);
+  writeFileSync(standIn, `#!/bin/sh\n[ "$1" = --version ] && exec ${real} --version\nexec ${real} "$@" -ex 'shell sleep ${marker}'\n`);
   chmodSync(standIn, 0o755);
   const kept = process.env.QUIRE_STALL_GDB;
-  const staying = () => spawnSync('ps', ['-eo', 'stat=,args='], { encoding: 'utf8' }).stdout.split('\n')
-    .filter((line) => /^[^Z]\S*\s+sleep 117$/.test(line.trim())).join('\n');
-  const gdbRunning = () => spawnSync('ps', ['-eo', 'stat=,args='], { encoding: 'utf8' }).stdout.split('\n')
-    .filter((line) => /^[^Z]\S*\s+.*QUIRE_STALL_/.test(line.trim()) && !/ps -eo/.test(line)).join('\n');
+  const processes = () => spawnSync('ps', ['-eo', 'stat=,args='], { encoding: 'utf8' }).stdout.split('\n').map((line) => line.trim());
+  const staying = () => processes().filter((line) => new RegExp(`^[^Z]\\S*\\s+sleep ${marker}$`).test(line)).join('\n');
+  // gdb (its command ends in the stay's `shell sleep <marker>`) and the `timeout` that runs the stand-in (its path)
+  const gdbRunning = () => processes().filter((line) => /^[^Z]/.test(line) && (line.includes(`shell sleep ${marker}`) || line.includes(standIn))).join('\n');
   process.env.QUIRE_STALL_GDB = standIn;
   let hung;
   try {
@@ -477,7 +481,7 @@ test('teardown ends a gdb attached to a hung renderer: gdb lets go and the rende
     await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
   } finally {
     if (hung) hung.release();
-    spawnSync('pkill', ['-KILL', '-f', 'sleep 117']);
+    spawnSync('pkill', ['-KILL', '-f', `sleep ${marker}`]);
     if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
   }
 });
