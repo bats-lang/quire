@@ -92,7 +92,7 @@ export async function stored(page) {
 /** Waits until every write the app has started has reached IndexedDB:
     a read-write transaction on a store completes only after every one
     created before it */
-async function writesDone(page) {
+export async function writesDone(page) {
   await page.evaluate(async () => {
     for (const { name } of await indexedDB.databases()) {
       await new Promise((resolve, reject) => {
@@ -109,6 +109,22 @@ async function writesDone(page) {
       });
     }
   });
+}
+
+/** The time the app is given to rest in `rested`: more than its longest
+    debounce (a scroll's 150 ms, a resize's 200 ms) and its `_settle`
+    re-counts (250 ms, 12 times) that a place waits for */
+const REST_MS = 1500;
+
+/** Lets the app rest: the fake clock (installed before the page opened,
+    as `fixedClock` and `page.clock.install()` do) runs REST_MS ahead, so
+    every debounce and re-count the app has pending fires in order, and
+    then every write they started has reached IndexedDB (#657). It
+    replaces `waitForTimeout(1500)`, which waited the same time in real
+    time and wrote nothing down */
+export async function rested(page) {
+  await page.clock.runFor(REST_MS);
+  await writesDone(page);
 }
 
 /** Longer than the longest moment (the hint's 13 s) */
