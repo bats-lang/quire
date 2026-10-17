@@ -317,8 +317,10 @@ jobs:
         if: env.GROUP_RUN == 'yes'
         run: sudo apt-get install -y -q fonts-noto-cjk
 
-      # gdb, for the stall capture's native stacks of a frozen renderer
-      # (e2e/stall-capture.js, quire#575 and #591). A STOPGAP: pwa's e2e-setup
+      # gdb, for the stall capture's native stacks and core of a frozen renderer
+      # (e2e/stall-capture.js, quire#575 and #591), and libc6-dbg, which names the
+      # C library's internal functions in them (7 MB to download, 11 MB installed;
+      # without it only the exported ones are named). A STOPGAP: pwa's e2e-setup
       # action should install it and keep the runner's passwordless sudo
       # (bats-lang/pwa#109); this step goes when that lands. A diagnostic for a
       # rare freeze must not turn a job red, so the index is updated, the install
@@ -329,7 +331,7 @@ jobs:
         continue-on-error: true
         run: |
           for attempt in 1 2 3; do
-            sudo apt-get update -q && sudo apt-get install -y -q gdb && exit 0
+            sudo apt-get update -q && sudo apt-get install -y -q gdb libc6-dbg && exit 0
             sleep $((attempt * 5))
           done
           exit 1
@@ -393,12 +395,27 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+      # The core of a renderer that froze (e2e/stall-capture.js): written, gzipped
+      # and capped only when a page froze, so a run without one uploads nothing.
+      # Short retention: a core holds the renderer's memory, which here is the
+      # e2e fixtures' own pages and books and the app, never a user's data
+      - name: Upload stall cores
+        if: always() && env.GROUP_RUN == 'yes'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-stall-cores-${{ matrix.group }}
+          path: test-results/**/stall-core-*.core.gz
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Upload test screenshots
         if: always() && env.GROUP_RUN == 'yes'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-screenshots-${{ matrix.group }}
-          path: test-results/
+          path: |
+            test-results/
+            !test-results/**/stall-core-*
           retention-days: 14
 
   # The one check main's branch protection requires: every group passed

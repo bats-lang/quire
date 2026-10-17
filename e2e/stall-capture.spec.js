@@ -13,10 +13,10 @@
  * skips, and on CI (which installs gdb and has sudo) fails instead.
  */
 
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
 import { test, expect } from './fixtures.js';
-import { arm, CANNOT_ATTACH, CAPTURE_MOST_MS, FROZEN_CPU_SECONDS, NATIVE_MOST_MS, TEARDOWN_MOST_MS } from './stall-capture.js';
+import { arm, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, nativeScope, nativeStacks, NATIVE_MOST_MS, TEARDOWN_MOST_MS } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
 const SPIN_MODULE = (() => {
@@ -150,6 +150,29 @@ function expectNativeStacks(capture, pids) {
   // every frame's address is in a mapping, and the stack reaches the binary at an offset that resolves offline
   expect(frames[0].module).toBeTruthy();
   expect(frames.some((frame) => frame.module === renderer.exe && /^0x[0-9a-f]+$/.test(frame.offset))).toBe(true);
+  // symbols (B): the system library's frames are named (exported functions by the dynamic symbols
+  // alone; libc6-dbg, installed by the job where it can be, names the internal ones too); the
+  // browser's are named when it is not stripped, and else an offset from its recorded load address
+  // (any thread's: the main thread of a renderer stopped at a random moment may be in Blink's code)
+  expectLibraryFramesNamed(stacks.threads.flatMap((thread) => thread.frames));
+  expect(renderer.binary.version).toMatch(/\d+\.\d+/);
+  expect(typeof renderer.binary.hasSymtab).toBe('boolean');
+  const inBinary = frames.filter((frame) => frame.module === renderer.exe);
+  if (renderer.binary.hasSymtab) expect(inBinary.some((frame) => namedFrame(frame.text))).toBe(true);
+  else for (const frame of inBinary) expect(frame.offset).toMatch(/^0x[0-9a-f]+$/);
+  expect(renderer.libraries.some((library) => /libc\.so/.test(library.path) && /^[0-9a-f]{16,}$/.test(library.buildId))).toBe(true);
+}
+
+/** A frame of gdb's text that has a function's name (and not ?? or ???). */
+function namedFrame(text) {
+  return /^#\d+\s+0x[0-9a-f]+ in (?!\?)\S+/.test(text) || /^#\d+\s+(?!0x)\S+ \(/.test(text);
+}
+
+/** At least one frame in the C library or the loader is named: what symbols the machine has. */
+function expectLibraryFramesNamed(frames) {
+  const library = frames.filter((frame) => frame.module && /(libc|ld-linux[^/]*|libpthread)\.so/.test(frame.module));
+  expect(library.length, 'the stack runs through the C library').toBeGreaterThan(0);
+  expect(library.some((frame) => namedFrame(frame.text)), `a named frame among ${library.map((frame) => frame.text.slice(0, 60)).join(' | ')}`).toBe(true);
 }
 
 test('a page in an endless script loop is captured in that loop, and gdb is not attached to it', async ({ page, stallWatch }) => {
@@ -241,6 +264,53 @@ test('without gdb the capture of a frozen renderer says so and carries on', asyn
   } finally {
     if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
   }
+});
+
+test('a hung stand-in process is read through the same path: its library frames are named', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  // a process that is hung for good (it sleeps), in the same sudo and gdb path as a renderer
+  const hung = spawn('sleep', ['300'], { stdio: 'ignore' });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const found = await nativeStacks([{ pid: hung.pid }], nativeScope());
+    if (found.unavailable) unavailable(found.unavailable);
+    const stacks = found.renderers[0].gdbStacks;
+    if (!stacks.ok && CANNOT_ATTACH.test(`${stacks.stderr}\n${stacks.text}`)) unavailable(`gdb cannot attach on this machine: ${stacks.stderr}`);
+    expect(stacks.ok, `${stacks.error} ${stacks.stderr}`).toBe(true);
+    expectLibraryFramesNamed(stacks.mainThread.frames);
+    expect(stacks.mainThread.frames[0].text, 'the first frame is the sleep').toMatch(/nanosleep/);
+  } finally {
+    hung.kill('SIGKILL');
+  }
+});
+
+test('the core of a renderer is bounded, kept compressed and opens in gdb with the stack the capture gave', async ({ page, browser }, testInfo) => {
+  desktopOnly(testInfo);
+  test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
+  await page.setContent('<!doctype html><title>Core</title><p>Core</p>');
+  // an idle renderer, its main thread in the message pump's wait: where a frozen one would be
+  const pids = await rendererPids(browser);
+  const found = await nativeStacks(pids.map((pid) => ({ pid })), nativeScope(), (pid) => testInfo.outputPath(`stall-core-${pid}.core`));
+  if (found.unavailable) unavailable(found.unavailable);
+  const renderer = found.renderers[0];
+  if (!renderer.gdbStacks.ok && CANNOT_ATTACH.test(`${renderer.gdbStacks.stderr}\n${renderer.gdbStacks.text}`)) unavailable(`gdb cannot attach on this machine: ${renderer.gdbStacks.stderr}`);
+  expect(renderer.gdbStacks.ok).toBe(true);
+  expect(renderer.core.kept, JSON.stringify(renderer.core)).toBe(true);
+  expect(renderer.core.bytes).toBeLessThanOrEqual(CORE_MAX_BYTES);
+  expect(renderer.core.gzBytes).toBeLessThanOrEqual(CORE_GZ_MAX_BYTES);
+  expect(renderer.gdbStacks.ms, 'the renderer was stopped for the backtraces and the core within gdb\'s limit').toBeLessThan(35000);
+  const coreFacts = `${renderer.core.bytes} bytes, ${renderer.core.gzBytes} gzipped, gdb stopped the renderer ${renderer.gdbStacks.ms} ms, gzip ${renderer.core.gzipMs} ms`;
+  testInfo.annotations.push({ type: 'core', description: coreFacts });
+  console.error(`[stall-core] ${coreFacts}`);
+  // the core opens later with the binary it names, and gives the stack the live gdb gave
+  const raw = testInfo.outputPath('opened.core');
+  const unpacked = spawnSync('sh', ['-c', 'gzip -dc "$1" > "$2"', 'sh', renderer.core.file, raw], { timeout: 60000 });
+  expect(unpacked.status).toBe(0);
+  const opened = spawnSync('gdb', ['-batch', '-nx', '-q', '-iex', 'set debuginfod enabled off', '-ex', 'thread 1', '-ex', 'bt 3', renderer.exe, raw], { encoding: 'utf8', timeout: 120000 });
+  expect(opened.stdout + opened.stderr).toContain('#0');
+  unlinkSync(raw);
+  const live = renderer.gdbStacks.mainThread.frames[0].pc;
+  expect(opened.stdout, 'the core\'s main thread is where the live one was').toContain(live.replace(/^0x0*/, ''));
 });
 
 test('an unarmed page that is busy is judged as an armed one: no native stacks', async ({ browser, stallWatch }, testInfo) => {

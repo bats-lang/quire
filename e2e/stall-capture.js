@@ -34,7 +34,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { accessSync, constants, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, readdirSync, readFileSync, readlinkSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, isAbsolute, join } from 'node:path';
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
@@ -57,10 +57,21 @@ const CPU_WINDOW_MS = 1000;             // the renderers' CPU time is read over 
 // #522's 15 s layout, a loaded runner) spends about a second a second, so it
 // is far above this and is not attached to.
 export const FROZEN_CPU_SECONDS = 0.1;
-const GDB_SECONDS = 15;                 // `timeout` ends gdb after this (and kills it 1 s later)
-const GDB_MS = GDB_SECONDS * 1000 + 2000;     // node's own limit on the same command: after `timeout -k 1`, so a backstop
+const GDB_SECONDS = 15;                 // the backtraces: `timeout` ends gdb after this plus CORE_SECONDS (and kills it 1 s later)
+// A core file of each frozen renderer is written by the same gdb, after the
+// backtraces (stack first, then core), so the renderer is stopped once. The
+// whole of gdb's time, the backtraces and the core, is bounded by `timeout`
+const CORE_SECONDS = 15;
+// Limits on what is kept: the core as gdb writes it, and gzipped (what is uploaded)
+export const CORE_MAX_BYTES = 1024 * 1024 * 1024;
+export const CORE_GZ_MAX_BYTES = 200 * 1024 * 1024;
+const GZIP_MS = 60000;
+const CORE_QUIET_MIN_BYTES = 16 * 1024 * 1024; // an empty mapping at least this large is left out of the core
+const CORE_QUIET_MOST = 200;
+const GDB_MS = (GDB_SECONDS + CORE_SECONDS) * 1000 + 2000; // node's own limit on the same command: after `timeout -k 1`, so a backstop
 const HELPER_MS = 5000;                 // readelf, sudo tail, the gdb version check
 const NATIVE_MOST = 6;                  // renderers whose stacks are taken, at once
+const CORE_MOST = 2;                    // and whose core is written too (a core is up to CORE_MAX_BYTES of disk until it is gzipped)
 const STACK_FRAMES = 40;
 // stop() waits this long for captures still running (the native step can
 // outlast the test); what they found by then is already written (`save`)
@@ -86,11 +97,11 @@ export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS;
  * evaluate of an unarmed page (1 command); the renderers' CPU time awaited
  * (the browser session, two reads and CPU_WINDOW_MS: 3 commands and the
  * window, all of it counted, though it began alongside the probes above);
- * gdb's version; per renderer (side by side) readelf, `sudo tail` for the
- * kernel stacks and gdb. A capture of a frozen page takes at most
+ * gdb's version; per renderer (side by side) readelf (the binary's
+ * notes, sections and version, the system libraries' notes, dpkg), `sudo tail` for the kernel stacks, gdb (backtraces and core) and gzip. A capture of a frozen page takes at most
  * CAPTURE_MOST_MS and this.
  */
-export const NATIVE_MOST_MS = COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 2 * HELPER_MS + GDB_MS;
+export const NATIVE_MOST_MS = COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 8 * HELPER_MS + GDB_MS + GZIP_MS;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -445,6 +456,33 @@ async function identity(pid, scope) {
     const id = /Build ID:\s*([0-9a-f]+)/.exec(notes.stdout);
     result.buildId = id ? id[1] : null;
     if (!id) result.buildIdError = notes.error || cap(notes.stderr || notes.stdout, 300) || 'no build id note';
+    // what the browser binary is, so a core or an address can be matched to symbols later
+    const sections = await run('readelf', ['-S', '-W', exe], HELPER_MS, undefined, scope);
+    const version = await run(exe, ['--version'], HELPER_MS, undefined, scope);
+    let size = null;
+    try { size = statSync(exe).size; } catch (gone) { /* the binary was replaced */ }
+    result.binary = {
+      version: version.ok ? version.stdout.split('\n')[0].trim() : null,
+      bytes: size,
+      hasSymtab: /\s\.symtab\s/.test(sections.stdout),     // function names, if not stripped
+      hasDebugLink: /\s\.gnu_debuglink\s/.test(sections.stdout), // names a separate debug file, which no public source of this browser holds
+      hasDebugInfo: /\s\.debug_info\s/.test(sections.stdout),
+    };
+  }
+  if (maps) {
+    // the system libraries a stack runs through (libc, the loader, libstdc++): their build ids and
+    // the libc package, which name the separate debug files that symbolise them (Debian and
+    // Ubuntu's debuginfod, libc6-dbg) later, when this machine is gone
+    const wanted = maps.info.modules.filter((module) => /\/(libc|ld-linux[^/]*|libpthread|libstdc\+\+|libm)\.so/.test(module.path)).slice(0, 6);
+    result.libraries = await Promise.all(wanted.map(async (module) => {
+      const notes = await run('readelf', ['-n', module.path], HELPER_MS, undefined, scope);
+      const id = /Build ID:\s*([0-9a-f]+)/.exec(notes.stdout);
+      return { path: module.path, base: module.base, buildId: id ? id[1] : null };
+    }));
+    const release = (() => { try { return /^PRETTY_NAME="?([^"\n]*)/m.exec(readFileSync('/etc/os-release', 'utf8'))[1]; } catch (error) { return null; } })();
+    const libc = await run('dpkg-query', ['-W', '-f', '${Version}', 'libc6'], HELPER_MS, undefined, scope);
+    const libcDebug = await run('dpkg-query', ['-W', '-f', '${Version}', 'libc6-dbg'], HELPER_MS, undefined, scope);
+    result.system = { os: release, libc6: libc.ok ? libc.stdout : null, libc6Dbg: libcDebug.ok ? libcDebug.stdout : null };
   }
   return { result, maps };
 }
@@ -522,19 +560,65 @@ function frameLocated(text, maps) {
   return frame;
 }
 
+/**
+ * The mappings that hold nothing (no resident page) and are large, from the
+ * process's smaps: a Chromium renderer reserves over a terabyte of address space
+ * (PROT_NONE cages of V8 and PartitionAlloc, 1.4 TB here, 64 MB resident), and
+ * gdb's core writer reads every page of what it is not told to leave out: 52 s of
+ * system time and no core in 60 s, measured. Marked MADV_DONTDUMP in the stopped
+ * process (`madvise(..., 16)` called by gdb, after the backtraces), they are left out,
+ * and the core takes 2 s and is the resident memory.
+ */
+function quietRanges(pid) {
+  const ranges = [];
+  let current = null;
+  let text = '';
+  try { text = readFileSync(`/proc/${pid}/smaps`, 'utf8'); } catch (error) { return ranges; }
+  for (const line of text.split('\n')) {
+    const header = /^([0-9a-f]+)-([0-9a-f]+) \S+ /.exec(line);
+    if (header) {
+      current = { start: BigInt(`0x${header[1]}`), end: BigInt(`0x${header[2]}`) };
+    } else if (current && line.startsWith('Rss:')) {
+      if (/^Rss:\s+0 kB/.test(line) && current.end - current.start >= BigInt(CORE_QUIET_MIN_BYTES)) ranges.push(current);
+      current = null;
+    }
+  }
+  return ranges.slice(0, CORE_QUIET_MOST);
+}
+
 /** gdb attached to one process, to its end or GDB_MS, then let go. */
-async function backtrace(pid, maps, scope, gdbPath) {
+async function backtrace(pid, maps, scope, gdbPath, corePath) {
+  // The core is asked only where `prlimit` can bound the file gdb writes (CORE_MAX_BYTES):
+  // when the empty reservations cannot be left out (a call in the process fails: a process
+  // that is in a group stop, SIGSTOPped, cannot run one) the dump is the whole address space,
+  // 5 GB measured, and the limit ends gdb at the cap
+  const prlimit = corePath ? whichExecutable('prlimit') : null;
+  const core = prlimit ? corePath : null;
   const args = [gdbPath, '-batch', '-nx', '-q',
     '-iex', 'set auto-load off', '-iex', 'set debuginfod enabled off', '-iex', 'set pagination off', '-iex', 'set confirm off',
     // the watch's token on the command line, so teardown can find this command by it (`abort`)
     ...(scope ? ['-iex', `echo ${scope.token}\\n`] : []),
-    '-ex', 'info threads', '-ex', `thread apply all bt ${STACK_FRAMES}`, '-p', String(pid)];
-  const out = await runPrivileged(args, GDB_MS, { DEBUGINFOD_URLS: '' }, scope);
+    '-ex', 'info threads', '-ex', `thread apply all bt ${STACK_FRAMES}`,
+    // after the backtraces, in the same attach (what is stopped is stopped once): the empty
+    // reservations are left out of the dump, then the core is written
+    ...(core ? quietRanges(pid).flatMap((range) => ['-ex', `call (int)madvise(${range.start}UL, ${range.end - range.start}UL, 16)`]) : []),
+    ...(core ? ['-ex', `generate-core-file ${core}`] : []),
+    '-p', String(pid)];
+  const out = await runPrivileged(core ? [prlimit, `--fsize=${CORE_MAX_BYTES}`, '--', ...args] : args, GDB_MS, { DEBUGINFOD_URLS: '' }, scope);
   const parsed = parseGdb(out.stdout, pid, maps);
+  const timedOut = out.timedOut || out.code === 124 || out.code === 137;
+  // the backtraces come first: a gdb that ended while it wrote the core (the time limit, the size
+  // limit) still gave the stacks, and the core's failure is the core's (`keepCore` says it), never the stacks'
+  const stacksBeforeEnd = !!(core && !out.ok && parsed.mainThread && parsed.mainThread.frames.length > 0);
   return {
-    ok: out.ok,
+    ok: out.ok || stacksBeforeEnd,
+    coreEndedEarly: stacksBeforeEnd,
+    coreSaved: !!core && out.stdout.includes('Saved corefile'),
+    // a call into the process that could not run (a process in a group stop cannot run one): the reservations stay in the dump
+    coreCallsFailed: (out.stderr.match(/Evaluation of the expression containing the function/g) || []).length,
+    coreAsked: !!core,
     exitCode: out.code,
-    timedOut: out.timedOut || out.code === 124 || out.code === 137,
+    timedOut,
     ms: out.ms,
     error: out.error,
     stderr: cap(out.stderr, 4000),
@@ -547,21 +631,55 @@ async function backtrace(pid, maps, scope, gdbPath) {
 }
 
 /**
+ * The core gdb wrote (or not): gzipped to `<core>.gz` and the raw file removed,
+ * or removed when it is over CORE_MAX_BYTES or its gzip over CORE_GZ_MAX_BYTES.
+ * Never throws and never fails a test: the answer says what became of it.
+ */
+async function keepCore(corePath, scope, saved, callsFailed) {
+  const gz = `${corePath}.gz`;
+  const remove = (path) => { try { unlinkSync(path); } catch (gone) { /* not there */ } };
+  try {
+    if (!existsSync(corePath)) return { written: false, reason: 'gdb wrote no core (it failed, or was ended first)' };
+    if (!saved) { const partial = statSync(corePath).size; remove(corePath); return { written: false, kept: false, bytes: partial, reason: 'gdb did not finish the core (ended by the size or time limit, or failed): a partial core is useless and was removed' }; }
+    if (callsFailed) { const partial = statSync(corePath).size; remove(corePath); return { written: true, kept: false, bytes: partial, reason: `${callsFailed} call(s) into the process failed (it is in a group stop, SIGSTOPped, and cannot run one), so the empty reservations could not be left out and the dump is not a core of its memory` }; }
+    const bytes = statSync(corePath).size;
+    if (bytes > CORE_MAX_BYTES) { remove(corePath); return { written: true, kept: false, bytes, reason: `over the cap of ${CORE_MAX_BYTES} bytes` }; }
+    const packed = await run('gzip', ['-1', '-f', corePath], GZIP_MS, undefined, scope);
+    remove(corePath);
+    if (!packed.ok || !existsSync(gz)) { remove(gz); return { written: true, kept: false, bytes, reason: `gzip failed: ${packed.error || packed.stderr}` }; }
+    const gzBytes = statSync(gz).size;
+    if (gzBytes > CORE_GZ_MAX_BYTES) { remove(gz); return { written: true, kept: false, bytes, gzBytes, reason: `compressed over the cap of ${CORE_GZ_MAX_BYTES} bytes` }; }
+    return { written: true, kept: true, file: gz, bytes, gzBytes, gzipMs: packed.ms };
+  } catch (error) {
+    remove(corePath);
+    return { written: false, kept: false, reason: String(error && error.message || error).slice(0, 300) };
+  }
+}
+
+/**
  * The native stacks of these renderers (a page judged stalled: see the top
  * of this file). Nothing here throws, and every command is limited.
  */
-async function nativeStacks(renderers, scope) {
+export async function nativeStacks(renderers, scope, corePathFor) {
   const result = { ptraceScope: '(absent)' };
   try { result.ptraceScope = readFileSync('/proc/sys/kernel/yama/ptrace_scope', 'utf8').trim(); } catch (error) { /* no Yama: ptrace is the kernel's usual rule */ }
   result.root = isRoot;
   const gdb = await findGdb(scope);
   result.gdb = gdb;
   const taken = renderers.slice(0, NATIVE_MOST);
-  result.renderers = await Promise.all(taken.map(async (renderer) => {
+  result.renderers = await Promise.all(taken.map(async (renderer, index) => {
     // the kernel's view and the addresses first: gdb stops the process
     const { result: entry, maps } = await identity(renderer.pid, scope);
     entry.kernel = await kernelTasks(renderer.pid, scope);
-    entry.gdbStacks = gdb.available ? await backtrace(renderer.pid, maps, scope, gdb.path) : { ok: false, error: gdb.error };
+    // A process in a group stop (SIGSTOP, state T) cannot run the calls that leave the empty
+    // reservations out of the core, and a call abandoned there leaves it broken: no core of it
+    const main = entry.kernel.tasks && entry.kernel.tasks.find((task) => task.tid === renderer.pid);
+    const stopped = !!main && main.state === 'T';
+    const corePath = corePathFor && index < CORE_MOST && !stopped ? corePathFor(renderer.pid) : null;
+    entry.gdbStacks = gdb.available ? await backtrace(renderer.pid, maps, scope, gdb.path, corePath) : { ok: false, error: gdb.error };
+    if (corePath && entry.gdbStacks.coreAsked) entry.core = await keepCore(corePath, scope, entry.gdbStacks.coreSaved, entry.gdbStacks.coreCallsFailed);
+    else if (corePath) entry.core = { written: false, kept: false, reason: gdb.available ? 'no prlimit to bound the file' : gdb.error };
+    else if (stopped && corePathFor) entry.core = { written: false, kept: false, reason: 'the process is in a group stop (SIGSTOP): no call can run in it to leave the empty reservations out, and a core of all of its address space is not possible' };
     return entry;
   }));
   // no gdb, or none that may attach: the capture carries on without the stacks, and says so
@@ -573,12 +691,12 @@ async function nativeStacks(renderers, scope) {
 }
 
 /** Where a page's main thread is: see the top of this file. */
-export async function capture(page, armed, reason, browser, save = () => {}, scope = nativeScope()) {
+export async function capture(page, armed, reason, browser, save = () => {}, scope = nativeScope(), corePathFor = null) {
   armed.capturing = true;
-  try { return await captureArmed(page, armed, reason, browser, save, scope); } finally { armed.capturing = false; }
+  try { return await captureArmed(page, armed, reason, browser, save, scope, corePathFor); } finally { armed.capturing = false; }
 }
 
-async function captureArmed(page, armed, reason, browser, save, scope) {
+async function captureArmed(page, armed, reason, browser, save, scope, corePathFor) {
   const result = { reason, at: new Date().toISOString(), url: page.url(), armed: !armed.error, armError: armed.error };
   const session = armed.session;
   const cpu = browser ? rendererCpu(browser, CPU_WINDOW_MS) : Promise.resolve(null);
@@ -623,7 +741,7 @@ async function captureArmed(page, armed, reason, browser, save, scope) {
       if (busy.length) {
         result.presumedBusy = `renderer ${busy.map((process) => `${process.pid} used ${process.cpuSeconds} s of CPU`).join(', ')} over ${CPU_WINDOW_MS / 1000} s, so the page is presumed busy, not frozen, and nothing is attached`;
       } else if (renderers.length) {
-        result.native = await nativeStacks(renderers, scope).catch((error) => ({ error: String(error && error.stack || error) }));
+        result.native = await nativeStacks(renderers, scope, corePathFor).catch((error) => ({ error: String(error && error.stack || error) }));
         save(result);
       }
     }
@@ -711,6 +829,8 @@ export function summary(result) {
       for (const renderer of result.native.renderers) {
         const stacks = renderer.gdbStacks;
         lines.push(`  renderer ${renderer.pid}: ${renderer.exe}, build id ${renderer.buildId}, loaded at ${renderer.exeBase}; gdb ${stacks.ok ? 'ok' : `failed (${stacks.error})`}, ${stacks.threadCount || 0} threads`);
+        if (renderer.binary) lines.push(`    binary: ${renderer.binary.version}, ${renderer.binary.bytes} bytes, symbols ${renderer.binary.hasSymtab ? 'in .symtab' : 'none (stripped)'}${renderer.binary.hasDebugLink ? ', .gnu_debuglink' : ''}`);
+        if (renderer.core) lines.push(`    core: ${renderer.core.kept ? `kept ${renderer.core.file} (${renderer.core.bytes} bytes, ${renderer.core.gzBytes} gzipped)` : `not kept: ${renderer.core.reason}`}`);
         if (stacks.mainThread) for (const frame of stacks.mainThread.frames.slice(0, 12)) lines.push(`    main thread ${frame.text}${frame.module ? ` [${frame.module}${frame.offset ? ` +${frame.offset}` : ''}]` : ''}`);
       }
     }
@@ -770,7 +890,7 @@ export function stallWatch(browser, testInfo) {
     // written when the native stacks are in and again at the end, so what the
     // native step found survives a teardown that does not wait for the rest
     const save = (partial) => { try { writeFileSync(path, JSON.stringify(partial, null, 2)); } catch (error) { /* the output directory is gone: the test is over */ } };
-    const result = await capture(page, armedPage, reason, browser, save, scope);
+    const result = await capture(page, armedPage, reason, browser, save, scope, (pid) => testInfo.outputPath(`stall-core-${count}-${pid}.core`));
     save(result);
     await testInfo.attach(`stall-capture-${count}`, { path, contentType: 'application/json' }).catch(() => {});
     console.error(summary(result));

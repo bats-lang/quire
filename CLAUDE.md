@@ -4459,6 +4459,61 @@ Not verified: that a renderer that sleeps in an untimed futex shows its waiter's
 frames (none could be had; the first real stall will say), and the sudo paths on a
 hosted runner.
 
+**A core of the frozen renderer, and symbols (#575, #591).** The same gdb attach,
+after the backtraces (stack first, then core, so a renderer is stopped once),
+writes a core file of up to `CORE_MOST` (2) of the renderers attached to, gzips it
+(`gzip -1`, after gdb let go) and uploads it as the artifact `e2e-stall-cores-<group>`
+(7 days) only when one was kept, so a run with no freeze uploads nothing; the
+screenshots artifact leaves cores out. Measured, on the Chrome for Testing
+145.0.7632.6 headless shell (the binary Playwright 1.58.2 downloads for CI): a renderer's address
+space is 1.4 TB, nearly all of it PROT_NONE reservations of V8 and PartitionAlloc
+with nothing resident (64 MB resident), and gdb's `generate-core-file` read every page of
+them: 52 s of system time and no core in 60 s, then 5 GB where it did finish. So gdb
+first calls `madvise(range, MADV_DONTDUMP)` in the stopped process for each
+mapping with no resident page and 16 MiB or more (`quietRanges`, from smaps),
+which a process blocked in a futex wait can run, and then the dump is the resident
+memory: 686 MB raw, 14.9 MB gzipped, gdb stopped the renderer 0.6 s, gzip 2.8 s
+(4 cores here; the 1194 Chromium build of this machine: 806 MB, 90 MB, 2.5 s, 6 s;
+not measured on a 4-core hosted runner). Limits: the file gdb writes is bounded by
+`prlimit --fsize` (`CORE_MAX_BYTES`, 1 GiB), the gzip by `CORE_GZ_MAX_BYTES` (200
+MB), over either it is removed and the capture says why; gdb's whole time (backtraces
+and core) by `timeout`; a core is never asked of a process in a group stop (SIGSTOP:
+no call can run in it, and the one that was tried left the renderer broken), and a gdb
+ended during the core still gave the stacks (`coreEndedEarly`). A failed core never
+fails a test or a capture (`core.reason`). Disk: at most 2 raw cores of 1 GiB at a
+time on the runner, then the gzips. A core holds the renderer's memory: here the e2e
+fixtures' own pages, books and the app, never a user's data (the runners hold no
+other); it is uploaded to a public repository's artifacts only for a freeze, and
+expires in 7 days. `e2e/stall-capture.spec.js` writes the core of an idle renderer,
+checks the caps, and opens it with gdb and the binary it names: the main thread's
+pc is the live backtrace's. The perturbation: the `madvise` calls run in the main
+thread of the frozen renderer after the stacks are taken (a real freeze is a failing
+test).
+
+Symbols: the capture records the binary (`binary`: path, `--version`, size, whether
+it has `.symtab`, `.debug_info`, a `.gnu_debuglink`), its GNU build id, `exeBase`,
+every module's base, the system libraries' build ids (libc, the loader, libstdc++,
+libm) and the OS and libc6 and libc6-dbg versions. **The browser has no symbols to be
+had:** Playwright's Chrome for Testing 145.0.7632.6 headless shell is stripped (no
+`.symtab`; `.gnu_debuglink` names `headless_shell.debug`), Chrome for Testing's
+manifest lists no symbol download for it, Google's per-version debug-info zip
+(`https://edgedl.me.gvt1.com/chrome/linux/symbols/google-chrome-debug-info-linux64-<version>.zip`,
+documented in Chromium's debugging_minidump.md) exists for releases such as
+145.0.7632.67 and 145.0.7632.109 and answers 404 for 145.0.7632.6, and a different
+build's symbols do not fit its addresses. So its frames are `?? ()` with an
+offset (`frames[].offset`, from `exeBase`); what can be done later: disassemble
+the same download at that offset, read its imports and call sites (what #599's
+stacks were resolved by), or inspect the core's memory and the other threads with
+the binary and build id. The Playwright-built Chromium of this machine (1194) is not
+stripped (830,000 symbols, C++ names). The system libraries are named: exported
+functions by the dynamic symbols alone, the internal ones (`__futex_abstimed_wait_common64`)
+by libc6-dbg, which the Install gdb step adds where it can (7 MB download); debuginfod
+is not used (a download while the process is stopped has no bound, and Ubuntu's server
+was not reachable from here). The spec asserts it on a hung stand-in process
+(`sleep`, through the same sudo and gdb path: `nanosleep` in libc named) and on a real
+renderer (some libc or loader frame of some thread named), and on the browser: named
+if it has `.symtab`, else an offset for every frame.
+
 **`QUIRE_NO_STALL_ARM=1` (anything but empty or 0) skips arming** (`arm` in
 `e2e/stall-capture.js`, read at each arming): the debugger is never enabled,
 and the capture says `armed: false` with that reason. It is for comparing the
