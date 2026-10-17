@@ -15,6 +15,12 @@ inputs:
   path:
     description: The build/ directory, at a path that is the same in every job
     required: true
+  runner-image:
+    description: >-
+      The runs-on label the job is pinned to (ubuntu-24.04, #667). Named in the
+      key, so a move of the label to another image starts a new cache; each
+      caller passes the label it writes in runs-on.
+    required: true
 runs:
   using: composite
   steps:
@@ -24,6 +30,7 @@ runs:
     # stamp is not the one it would write, so the key no longer names the
     # compiler pin, the ATS2 pin or the runner image. What is left is what
     # the stamp does not cover: the packages (the lock, bats.toml), the
+    # runner label (#667: the job's runs-on, as the caller passes it), the
     # system and architecture the cache was made on, and the commit of bats's
     # setup action, which installs ATS2 and builds the compiler (#623; the key
     # still names the commit that does). The sources are the
@@ -38,7 +45,7 @@ runs:
         # ATS2 and the way the compiler is built are bats's setup action's,
         # called by commit: that commit names them (bats#280)
         setup=$(grep -rhoE 'bats-lang/bats/\.github/actions/setup@[0-9a-f]{40}' .github/workflows | sort -u | sha256sum | cut -c1-16)
-        echo "prefix=quire-${{ inputs.name }}-v2-${{ runner.os }}-${{ runner.arch }}-${setup}-${{ hashFiles('bats.lock', 'bats.toml') }}-" >> "$GITHUB_OUTPUT"
+        echo "prefix=quire-${{ inputs.name }}-v2-${{ inputs.runner-image }}-${{ runner.os }}-${{ runner.arch }}-${setup}-${{ hashFiles('bats.lock', 'bats.toml') }}-" >> "$GITHUB_OUTPUT"
         echo "sources=${{ hashFiles('src/**') }}" >> "$GITHUB_OUTPUT"
 
     - name: Restore the compiler cache
