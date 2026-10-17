@@ -108,9 +108,8 @@ reusable workflow of its own to write it once in). `ubuntu-latest` is not
 used, since it moves with GitHub's default: the runner-images README says
 `ubuntu-latest` is `ubuntu-24.04` today. The label moves by hand, in a PR
 of its own, when GitHub announces its successor (as bridge's CLAUDE.md
-says); the build cache's key names it (`runner-image` in
-`.github/actions/build-cache`, passed by each call), so that move starts a
-new cache.
+says). The build cache's key does not name it: bats stamps a `build/` with
+the C compiler's version, so a build made on another image is dropped (#622).
 
 A quire PR that adopts new package versions runs `bats lock --repository
 <dir>` and commits `bats.lock` with the change that needs them. Package
@@ -124,98 +123,112 @@ breaking publish shows as a red relock PR. GITHUB_TOKEN cannot change
 workflow files, so without a `RELOCK_TOKEN` secret that PR lists pwa's
 `android.yml` pin as not moved; move it in a PR of its own.
 
-### The compiler's cache (#460)
+### The compiler's cache (#460, #622)
 
 `build` and the `static` jobs each compiled the whole app from nothing
 (about 10 minutes of the same work four times). A pull request's jobs
-now restore the `build/` directory of the newest earlier build under the
-same toolchain (`.github/actions/build-cache`, `actions/cache` pinned by
-commit), and save theirs once the job passed. What was found:
+now restore what bats kept in the newest earlier run (`.github/actions/build-cache`,
+`actions/cache` pinned by commit) and save theirs once the job passed.
+**No key is relied on for correctness** (#622): the key is a locator, the
+cache's name, two toolchain pins and the commit
+(`quire-<name>@<pins>-<sha>`, since a GitHub cache is immutable), and a
+restore takes the newest cache of the name and pins (`restore-keys`
+`quire-<name>@<pins>-`). It names no runner image, no lock, no
+`bats.toml`, no hash of the sources and no version a developer bumps, so a
+new input of those needs no new key part, and a key that is wrong can only
+restore less useful files, not make a build pass that should fail.
+**Until bats-lang/bats#316 is fixed, the freshness audit (bats#317) is done
+and quire's pin is past both, the pins stay in the key**: `<pins>` is a
+digest of `.github/bats-version` (the compiler, which holds the ATS2 pin) and
+of the commit of bats's setup action, because the toolchain digest the stamp
+is built from was not complete: a patsopt or a toolchain directory that was a
+symbolic link, changed in place, was not seen (bats#305, fixed in bats
+77e60a55, which the pin does not yet contain), a missing toolchain root gives
+a shorter listing and no error (bats#316, open), and the other freshness
+inputs bats reads back are not audited (bats#317). Until then a `build/`
+restored from another ATS2 install could pass the stamp as the same
+toolchain and have its C and objects reused. They go from the key when those
+are done. The `@` ends a name (`static` is never the prefix of
+`static-memo-rest@...`). What a restore holds is judged by bats, whose own
+CLAUDE.md is the record (`build/` carries a stamp of who made it; a build
+reuses what is still fresh; in check and test mode a module is not checked
+again when the files patsopt read for it are unchanged; `bats fixtures`
+and its memo):
 
-* What bats keeps (read from the compiler pinned in `.github/bats-version`,
-  `src/build.dats` and `helpers.dats`, and a project's `build/`): per
-  module a `.dats` and the SHA-256 of its source in `<module>.dats.src`
-  (a module is emitted again exactly when the hash, or the target, differs;
-  the compiler's comment says an mtime cannot tell, a relocked
-  dependency's files keep their archive's), then its C (patsopt's output)
-  and objects, which are fresh when newer than the `.dats` and than
-  `build/.sats_changed`, a stamp touched whenever an emitted `.sats`
-  changes. A build of another target or mode (`.bats_target`: native, wasm,
-  and 2 more in check and test mode) is set aside in `build/.stash/<n>`
-  with its mtimes. `check` and `build` therefore never share a cache (check
-  is mode 2 and 3, build 0 and 1), so there are two caches, `build` and
-  `static`. `.bats_cache_id` drops a cache when the compiler's semantics
-  change.
-* Staleness. A build/ records what made it (#622, bats-lang/bats#273):
-  `build/.bats_stamp` holds the bats's own inputs' digest, patsopt's
-  toolchain, the C compiler's version, the flags and the target, and bats
-  drops a build/ whose stamp is not the one it would write, so the key does
-  not name the compiler pin, the ATS2 pin or the runner image any more (they
-  were `.github/bats-version`, the ATS2 pin and the image). It names
-  `bats.lock`, `bats.toml`, the runner label (`runner-image`, #667, passed by
-  each call: the label the job's `runs-on` writes), the system and
-  architecture, which the stamp does not cover, and the commit of bats's setup action (ATS2 and the compiler's
-  build are in it; read from the workflows by `.github/actions/build-cache`,
-  so a workflow edit that leaves the pin alone keeps the cache). The sources are the key's end, so an exact hit is the same
-  sources, and a prefix hit is the incremental build the compiler does on a
-  developer's machine: a changed module is re-emitted by its hash (its
-  `.dats` is then newer than its C), a changed `.sats` rebuilds every
-  module that staloads it. A cache is saved only by a job that passed
-  (`actions/cache` saves on success only), so it holds no failed build, and a
-  module that failed to emit has an empty `.src` and is never fresh. The
-  residual risk is a bug of that incremental logic, so main never restores:
-  a push to main (and a dispatched relock, and the nightly run) builds and
-  checks from nothing, then (the push) saves for the pull requests and the
-  queue (GitHub gives a pull request and a merge group its base branch's
-  caches, and a pull request's own are readable only by that pull request:
-  same repository, no cross-fork writes). The required check on a pull
-  request and the merge queue's group is incremental (#586: the queue's group
-  was cold at first, 13 minutes of build before the e2e jobs could start, in
-  a 60-minute window; by decision of 2026-10-15 it restores main's cache,
-  its build job then taking about 3), main's is cold, so a stale hit that
-  passes the queue shows on main at the latest, in the push run that follows
-  the merge (and in the nightly run `check.yml` makes of main from nothing,
-  whose runner image and packages are the day's).
-* Paths. patsopt named C symbols by the absolute path of the files, so a
-  cache was valid only at the path it was made at (bats now takes the
-  checkout's path out of the C, bats-lang/bats#250). `build` is at the checkout,
-  `/home/runner/work/quire/quire` in every job. The static jobs checked in
-  `mktemp -d`, a different path each time; `tests/static/run.sh` now takes
-  `QUIRE_STATIC_WORK`, a fixed directory (CI: `$RUNNER_TEMP/quire-static`),
-  where the app is copied and checked and which is not removed.
-* Sharing. Jobs of one run start together, so none sees what another saves:
-  the gain is from the previous build (main's, or the pull request's earlier
-  push), a few modules instead of 63, in all four jobs at once, and not from
-  a job feeding another (a first job the others wait for would have made the
-  run longer). Each static group saves the same key; the second to finish
-  gets a warning, not a failure. Caches are immutable, 10 GB per repository,
-  evicted by last access and after 7 days unused: a miss is today's cold
-  build.
-* What others do. Swatinem/rust-cache keys on the lockfile, the rustc version
-  and the toolchain's environment, restores the newest older cache for a
-  changed lockfile, caches dependencies only (the workspace's crates are not
-  cached, "generally not effective"), deletes incremental artifacts and
-  anything older than a week before saving, sets `CARGO_INCREMENTAL=0`,
-  and suggests `save-if` main only. ccache and sccache key each result on a
-  hash of the preprocessed source and the compiler and flags, never on a
-  time, and Bazel's remote cache is content-addressed with the toolchain among
-  the inputs: they are right where the key holds every input. bats's
-  own rule for C is a time, which is why the toolchain is in the key, only
-  passed builds are saved, and main is checked cold.
-* `BATS_CACHE_DIR` (bats-lang/bats#250) is not used in CI, by measurement
-  (#499). A pull request's job restores the `build/` of its base or its
-  earlier push, and what it compiles again is what changed (a few modules;
-  the adoption experiment's one comment changed, 106 s, a `#pub`
-  added to one `.sats`, 325 s). A cache of patsopt's C instead still runs
-  cc for every module and looks each one up (about 0.4 s a module,
-  bats-lang/bats#253): a copy of a checked tree at another path, every
-  module a hit, took 229 s against a cold 355 s here, so on a pull request
-  it is slower than `build/`, and it would only speed up main, which is
-  checked cold on purpose. Kept beside `build/`, it hits only a module
-  whose every input was compiled before, which the restored `build/`
-  already holds. Paths no longer matter (bats strips the checkout's path
-  from the C), but the static jobs keep their fixed directory, which costs
-  nothing.
+* **The stamp** (bats-lang/bats#273): `build/.bats_stamp` holds the digest
+  of bats's own inputs, patsopt's toolchain (ATS2, whichever solver build),
+  the C compiler's version, the flags and the target. A restored `build/`
+  whose stamp is not the one the running bats would write (a compiler pin
+  or setup action that moved, another ATS2 tarball, another runner image's
+  C compiler) is dropped at the start (except where bats#316 or #317 apply, above), with a line on stderr that names
+  what differs, and the build starts from nothing.
+* **Content, not time** (bats-lang/bats#254, #293): a module is emitted
+  again when the SHA-256 of its source differs, its C and objects are
+  fresh when the keys beside them equal the hashes of their inputs, and a
+  changed `.sats` rebuilds every module that staloads it (in check mode, by
+  what patsopt read for the module, #298). A relocked package's files, or a
+  restore that gives every file the time of the restore, change nothing.
+* **The fixtures' memo** (bats-lang/bats#303): `bats fixtures` keeps the
+  result of each static fixture, keyed by the toolchain's stamp, the
+  snippet, the module with it in and every file patsopt reads for the
+  module; an entry is served only when all of them are as they were, and
+  `--cold` (run.sh's first argument; not `BATS_COLD`, which would also make every check cold, 3 to 5 minutes a fixture, measured) serves none and audits the entries it would
+  have served.
+* **Paths**: bats takes the checkout's path out of the C
+  (bats-lang/bats#250), so a cache is valid wherever the checkout is.
+  `QUIRE_STATIC_WORK` (CI: `$RUNNER_TEMP/quire-static`) is only the
+  directory `tests/static/run.sh` works in and the static jobs cache
+  (`app/build`, `memo`): a directory known to the workflow, not a path
+  the cache needs.
+
+What is cached, and who restores. The `build` job caches `build/`. A
+static job caches the app's `build/` under the one name `static` (every
+group checks the same app) and its fixtures' memo under its own name,
+`static-memo-<group>` (a group's fixtures are its own). `check` and
+`build` never share a `build/` (check is mode 2 and 3, build 0 and 1). A
+pull request and the merge queue's group restore; main's push, the
+nightly run and a dispatched relock restore nothing (the static jobs pass
+`--cold`, so a memo that was somehow there is audited), so every state of main is checked
+from nothing and is the base the caches of pull requests start from (GitHub
+gives a pull request and a merge group its base branch's caches, and a
+pull request's own are readable only by that pull request: same
+repository, no cross-fork writes). The required check on a pull request is
+incremental, main's is cold, so a bug of bats's incremental logic that
+passes a pull request shows on main at the latest, in the push run that
+follows the merge, and in the nightly run (#586: the queue's group was
+cold at first, 13 minutes of build before the e2e jobs could start, in a
+60-minute window; by decision of 2026-10-15 it restores main's cache, its
+build job then taking about 3). A cache is saved only by a job that
+passed, so it holds no failed build and no memo entry of a failed fixture.
+
+Sharing. Jobs of one run start together, so none sees what another saves:
+the gain is from the previous build (main's, or the pull request's earlier
+push), a few modules instead of 63, and from the memo's fixtures that no
+change reached, and not from a job feeding another (a first job the others
+wait for would have made the run longer). Each static group saves the
+`static` build under the same key; the second to finish gets a warning, not
+a failure. Caches are immutable, 10 GB per repository, evicted by last
+access and after 7 days unused: a miss is a cold run.
+
+What others do. Swatinem/rust-cache keys on the lockfile, the rustc version
+and the toolchain's environment, restores the newest older cache for a
+changed lockfile, caches dependencies only, and suggests `save-if` main
+only. ccache and sccache key each result on a hash of the preprocessed
+source and the compiler and flags, never on a time, and Bazel's remote
+cache is content-addressed with the toolchain among the inputs: the key
+holds every input because the tool computes it. Quire's keys do not try to:
+bats does, and a stale restore is dropped by it.
+
+`BATS_CACHE_DIR` (bats-lang/bats#250) is not used in CI, by measurement
+(#499). A pull request's job restores the `build/` of its base or its
+earlier push, and what it compiles again is what changed (a few modules;
+the adoption experiment's one comment changed, 106 s, a `#pub`
+added to one `.sats`, 325 s). A cache of patsopt's C instead still runs
+cc for every module and looks each one up (about 0.4 s a module,
+bats-lang/bats#253): a copy of a checked tree at another path, every
+module a hit, took 229 s against a cold 355 s here, so on a pull request
+it is slower than `build/`, and it would only speed up main, which is
+checked cold on purpose.
 
 ### The merge queue (#586)
 
@@ -3885,7 +3898,7 @@ line `before`), and it knows what proof fails when it is built. A reject
 fixture's `expect` names the function of its snippet, the line of the
 snippet patsopt reports, and patsopt's error word for word (the
 constraint left unsolved, the case left out, the type that does not
-match); `tests/static/expect.py` passes it only when that is the one
+match); `bats fixtures` passes it only when that is the one
 error of the check, in that module, at that line, inside that function.
 A substring that another error could also hold is not enough. An accept
 fixture must check. Each fixture is put into the app checked whole in
@@ -3893,7 +3906,9 @@ the same job, so only its module is checked again, and what depends on
 it when its `#pub` declarations change (bats keeps a module's C while
 the `.sats` it staloads has only moved, and each of check's passes keeps
 a cache of its own, bats-lang/bats#243), and a reject fixture stops at
-its error: a fixture costs about what its snippet changes.
+its error: a fixture costs about what its snippet changes, and a fixture
+whose result the memo holds (`bats fixtures`, restored by CI with the
+group's cache, #622) and whose inputs are unchanged costs nothing.
 
 CI runs the static tests and the e2e suite in groups side by side
 (`tests/groups.json`), the e2e groups on the app built once (the `build`
@@ -3922,7 +3937,7 @@ skip keeps one meaning for `check`: every job ran, or was shown unaffected.
 * **The table** (`RULES` in `scripts/affected.py`, first match wins; a path no
   rule names selects everything, an empty diff too, a deletion under `e2e/`
   too). The CI's files (`check.yml`, the composite actions, `tests/groups.json`,
-  `tests/static/run.sh`, `expect.py`, the two scripts), the pins (`bats.lock`,
+  `tests/static/run.sh`, the two scripts), the pins (`bats.lock`,
   `bats.toml`, `.github/bats-version`, `repository-version`, `package*.json`,
   `playwright.config.js`), `src/`, `assets/` and `scripts/sync-clients.*`:
   everything. CLAUDE.md and the other notes, `ux-review/`, `reports/`, the

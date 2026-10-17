@@ -201,7 +201,7 @@ RULES = [
     Rule('CI files', [
         '.github/workflows/check.yml', '.github/actions/**', '.github/bats-version',
         '.github/repository-version', 'tests/groups.json', 'tests/static/run.sh',
-        'tests/static/expect.py', 'scripts/ci-groups.py', 'scripts/affected.py',
+        'scripts/ci-groups.py', 'scripts/affected.py',
         'bats.toml', 'bats.lock', 'package.json', 'package-lock.json', 'playwright.config.js',
     ], ALL, ALL),
     # What the app is built from
