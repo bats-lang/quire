@@ -23,7 +23,7 @@ import {
 
 const kinds = ['webdav', 'drive', 'autobackup'];
 
-/** The chunks of a record: its tag, where it starts and ends, and its data (a record's layout is in CLAUDE.md) */
+/** The chunks of a record: its tag, where it starts and ends, and its data (a record's layout is in .claude/rules/library-records.md) */
 function chunksOf(record) {
   const out = [];
   for (let at = 7; at + 8 <= record.length;) {

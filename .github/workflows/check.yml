@@ -197,7 +197,7 @@ jobs:
   static:
     needs: plan
     runs-on: ubuntu-24.04
-    # a mutation group of a change to crc.bats is the longest (CLAUDE.md, #594)
+    # a mutation group of a change to crc.bats is the longest (.claude/rules/ci.md, #594)
     timeout-minutes: 120
     strategy:
       fail-fast: false

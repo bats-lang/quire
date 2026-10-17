@@ -433,7 +433,7 @@ fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 2242} (sheet: sheet
   (* a picture of black ink on no ground (a typeset equation, a diagram) is
      drawn on paper in the themes with a dark ground, where black would be
      lost; a picture with a ground of its own covers the paper. By research
-     (CLAUDE.md, "Equations as pictures") *)
+     (.claude/rules/epub-media.md, "Equations as pictures") *)
   val sheet = rule(sheet, ".th-dark .caf img,.th-night .caf img,.th-grey .caf img")
   val sheet = tint(sheet, true, 100)
   val sheet = close(sheet)

@@ -64,7 +64,7 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 | `lay-fxl-xhtml-icb_units` | deprecated | units are ignored, values in pixels (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 13/13 | policy |
 
 A failure marked `next` is a bug whose e2e test is written with its fix, in the area of fixes it belongs to (so a branch
-carries only tests that pass). A `decision` is a failure settled in CLAUDE.md (#419) and kept: `mol-css` (the book's own highlight CSS,
+carries only tests that pass). A `decision` is a failure settled in .claude/rules/epub-media.md (#419) and kept: `mol-css` (the book's own highlight CSS,
 dropped by design, #411).
 
 ## Not applicable

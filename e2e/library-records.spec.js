@@ -304,7 +304,7 @@ test('a set aside that is aborted midway leaves the old record byte for byte, an
 
 // The chunks of a record, by tag: "QREC", the kind, the version and the
 // oldest that reads it, then each chunk as a u32 length, its tag, its
-// data and a CRC-32 (a record's layout is in CLAUDE.md)
+// data and a CRC-32 (a record's layout is in .claude/rules/library-records.md)
 function chunks(record) {
   const out = [];
   for (let at = 7; at + 8 <= record.length;) {
