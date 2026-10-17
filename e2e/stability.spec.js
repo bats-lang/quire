@@ -8,7 +8,7 @@ import { test, expect } from './fixtures.js';
 import {
   epubFile, importFiles, openBook, card, placeChanged, toLibrary, reload, bookPage, place, chapters, openReadingSettings, readingSettings, fixedLayoutBook, readFixed, fixedPlace, japaneseChapters,
 } from './helpers.js';
-import { launch, relaunch, chapterShown, nextChapter } from './relaunch.js';
+import { launch, relaunch, rested, chapterShown, nextChapter } from './relaunch.js';
 import { legacyLibrary, store, put, forgetRecords } from './legacy-library.js';
 
 const paged = { title: 'Stable', author: 'Stability', rawChapters: chapters(1, 90) };
@@ -99,6 +99,21 @@ async function swapWindow(page, size) {
   await page.clock.runFor(250);
 }
 
+/** Listens for the page's next scroll event, before the scroll is made */
+async function scrollListening(page) {
+  await bookPage(page).evaluate(doc => { window.scrolled = new Promise(done => doc.addEventListener('scroll', () => done(), { once: true })); });
+}
+
+/** Waits for the scroll made since `scrollListening` to reach the page's
+    listener (the browser sends the event with the next frame, not with the
+    clock; the app's listener sets its 150 ms rest timer in it), then lets
+    the app rest on the fake clock: the place follows a scroll once the
+    page rests a moment */
+async function scrollRested(page) {
+  await page.evaluate(() => window.scrolled);
+  await rested(page);
+}
+
 test('several changes in a row, a rotation among them, end on the same paragraph', async ({ page }) => {
   await page.goto('/');
   await readFar(page, paged);
@@ -129,9 +144,10 @@ test('a window swap keeps the paragraph when scrolled, in two columns, and verti
   await expect.poll(() => onScreen(page, top)).toBe(true);
   // scrolled
   await change(page, 'Page', sheet => group(sheet, 'Layout', 'Scroll'));
+  await scrollListening(page);
   await bookPage(page).evaluate(doc => { doc.scrollTop = doc.scrollHeight / 3; });
   // the place follows a scroll once the page rests a moment
-  await page.waitForTimeout(1500);
+  await scrollRested(page);
   top = await middleParagraph(page);
   await swapWindow(page, { width: size.height, height: size.width });
   await expect.poll(() => onScreen(page, top)).toBe(true);
@@ -163,11 +179,13 @@ test('scrolled, a hand scroll within one screenful is the place a window swap ke
   await openBook(page, paged.title);
   await change(page, 'Page', sheet => group(sheet, 'Layout', 'Scroll'));
   // one whole screenful down, so the screenful's first paragraph is known
+  await scrollListening(page);
   await bookPage(page).evaluate(doc => { doc.scrollTop = doc.clientHeight; });
-  await page.waitForTimeout(1500);
+  await scrollRested(page);
   const first = await topParagraph(page);
   // a hand scroll of less than half a screen, so the screenful is the same,
   // far enough that another paragraph is at the top
+  await scrollListening(page);
   const moved = await bookPage(page).evaluate(doc => {
     const start = doc.scrollTop;
     const firstTop = () => { const c = doc.getBoundingClientRect(); for (const e of doc.querySelectorAll('p')) { const r = e.getClientRects()[0]; if (r && r.top >= c.top - 2 && r.top < c.bottom) return e; } return null; };
@@ -176,7 +194,7 @@ test('scrolled, a hand scroll within one screenful is the place a window swap ke
     return doc.scrollTop - start;
   });
   expect(moved).toBeGreaterThan(0);
-  await page.waitForTimeout(1500);
+  await scrollRested(page);
   const top = await topParagraph(page);
   expect(top).toBeTruthy();
   // the scroll moved the paragraph at the top, or the test would prove nothing
@@ -195,16 +213,18 @@ test('scrolled, a hand scroll within one screenful is the place the book opens a
   await importFiles(page, [epubFile(paged)], 1);
   await openBook(page, paged.title);
   await change(page, 'Page', sheet => group(sheet, 'Layout', 'Scroll'));
+  await scrollListening(page);
   await bookPage(page).evaluate(doc => { doc.scrollTop = doc.clientHeight; });
-  await page.waitForTimeout(1500);
+  await scrollRested(page);
   const first = await topParagraph(page);
+  await scrollListening(page);
   await bookPage(page).evaluate(doc => {
     const start = doc.scrollTop;
     const firstTop = () => { const c = doc.getBoundingClientRect(); for (const e of doc.querySelectorAll('p')) { const r = e.getClientRects()[0]; if (r && r.top >= c.top - 2 && r.top < c.bottom) return e; } return null; };
     const was = firstTop();
     while (doc.scrollTop - start < doc.clientHeight * 0.45 && firstTop() === was) doc.scrollTop += 10;
   });
-  await page.waitForTimeout(1500);
+  await scrollRested(page);
   const top = await topParagraph(page);
   expect(top).toBeTruthy();
   expect(top).not.toBe(first);
@@ -255,7 +275,7 @@ for (const [name, apply] of Object.entries(changes)) {
     await expect.poll(() => middleParagraph(page)).toBeTruthy();
     const top = await middleParagraph(page);
     // let the place be kept (it is written as it settles)
-    await page.waitForTimeout(1500);
+    await rested(page);
     const next = await relaunch(page, 'killed');
     await expect(bookPage(next)).toBeVisible();
     await expect.poll(() => onScreen(next, top)).toBe(true);
@@ -269,7 +289,7 @@ test('killed after a window swap, the app opens at the same paragraph', async ({
   const top = await middleParagraph(page);
   await page.setViewportSize({ width: size.height, height: size.width });
   await expect.poll(() => onScreen(page, top)).toBe(true);
-  await page.waitForTimeout(1500);
+  await rested(page);
   const next = await relaunch(page, 'killed');
   await next.setViewportSize({ width: size.height, height: size.width });
   await expect(bookPage(next)).toBeVisible();
@@ -282,6 +302,7 @@ test('killed after a window swap, the app opens at the same paragraph', async ({
 for (let version = 1; version <= 6; version++) {
   for (const by of ['page', 'anchor']) {
     test(`a book converted from QLB${version} opens at its stored ${by}`, async ({ page }) => {
+      await page.clock.install();
       await page.goto('/');
       const opts = { title: 'Legacy Place', author: 'Stability', rawChapters: chapters(5, 40), toc: [1, 2, 3, 4, 5].map(k => ({ label: `Chapter ${k}`, href: `chapter${k}.xhtml` })) };
       await importFiles(page, [epubFile(opts)], 1);
@@ -293,7 +314,7 @@ for (let version = 1; version <= 6; version++) {
         await page.keyboard.press('ArrowRight');
         await expect.poll(async () => JSON.stringify(await place(page))).not.toBe(JSON.stringify(before));
       }
-      await page.waitForTimeout(1500);
+      await rested(page);
       const at = await place(page);
       const top = await middleParagraph(page);
       const node = await bookPage(page).evaluate((doc, top) => {
