@@ -4,7 +4,7 @@
 // server that lets the app's origin in would.
 
 import { test, expect } from './fixtures.js';
-import { start, dialog, librarySettings, settingsButton } from './helpers.js';
+import { start, dialog, librarySettings, settingsButton, runUntil } from './helpers.js';
 
 const SERVER = 'https://cloud.example.com';
 const TOKEN = '6ad14f1e0c2b9ad4c1f3e1b2a7d8c9e0';
@@ -81,7 +81,11 @@ async function openSync(page, server) {
 /** The browser's own logs of the 404s the flow and a first sync expect */
 const unexpected = errors => errors.filter(e => !/status of 404/.test(e));
 
+// The flow is polled every 3 s (POLL_MILLISECONDS, sync.bats): the page's
+// clock is installed before it opens and run ahead to each poll, not
+// waited for (#657); the server's answers still come in real time
 test('signing in with Nextcloud polls its flow, finds the files folder and syncs there', async ({ page }) => {
+  await page.clock.install();
   const errors = await start(page);
   const server = nextcloud({ pollsBeforeGrant: 1 });
   await openSync(page, server);
@@ -93,8 +97,9 @@ test('signing in with Nextcloud polls its flow, finds the files folder and syncs
   await expect(link).toHaveAttribute('href', `${SERVER}/login/v2/flow/zQ81kLmn`);
   await expect(link).toHaveAttribute('target', '_blank');
   await expect(status(page)).toHaveText(/sign in and grant access/);
-  // granted on the second poll: the user's id found, the folder kept,
-  // a sync made with the app password
+  // granted on the second poll, 3 s after the first: the user's id found,
+  // the folder kept, a sync made with the app password
+  await runUntil(page, () => server.polls >= 2);
   await expect(status(page)).toHaveText(/^Last synced on /, { timeout: 30000 });
   expect(server.polls).toBe(2);
   expect(server.pollBodies.every(body => body === `token=${TOKEN}1`)).toBe(true);
@@ -125,6 +130,7 @@ test('a server address that is not https, or not a Nextcloud, is said so', async
 });
 
 test('a sign-in started again stops the first one polling', async ({ page }) => {
+  await page.clock.install();
   await start(page);
   const server = nextcloud({ pollsBeforeGrant: 1000 });
   await openSync(page, server);
@@ -132,13 +138,14 @@ test('a sign-in started again stops the first one polling', async ({ page }) => 
   const signIn = panel(page).getByRole('button', { name: 'Sign in to Nextcloud' });
   const pollsWith = start => server.pollBodies.filter(body => body === `token=${TOKEN}${start}`).length;
   await signIn.click();
-  await expect.poll(() => pollsWith(1), { timeout: 15000 }).toBeGreaterThanOrEqual(1);
+  await runUntil(page, () => pollsWith(1) >= 1);
   await signIn.click();
-  await expect.poll(() => pollsWith(2), { timeout: 15000 }).toBeGreaterThanOrEqual(1);
-  // the first sign-in's token is not polled again
+  await runUntil(page, () => pollsWith(2) >= 1);
+  // the first sign-in's token is not polled again: the second is polled
+  // three more times, each 3 s on, and the first not once (were its timer
+  // alive it would fire in the same spans)
   const first = pollsWith(1);
-  await page.waitForTimeout(7000);
+  await runUntil(page, () => pollsWith(2) >= 4);
   expect(pollsWith(1)).toBe(first);
-  expect(pollsWith(2)).toBeGreaterThanOrEqual(2);
   expect(server.puts).toBe(0);
 });

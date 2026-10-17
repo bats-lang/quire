@@ -10,7 +10,7 @@ import {
   showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
   importFiles, indicator, chapterBody, oneColumn, selectText, selectionButton, selectionPick,
   readingSettings, openReadingSettings, expectBarFollows, libraryShown,
-  rawMouse,
+  rawMouse, clockNow, expectMoment,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -80,10 +80,14 @@ test('tapping the page\'s sides turns it, and its middle shows or hides the bars
 });
 
 test('the bars hide by themselves after a few seconds', async ({ page }) => {
+  await page.clock.install();
   await start(page);
   await readBook(page, book('Auto Hide'));
+  const since = await clockNow(page);
   await showChrome(page);
-  await expect(control(page, 'Previous page')).toBeHidden({ timeout: 8000 });
+  // 5 s after they were shown (quire.bats), on the page's clock (#657):
+  // up at 3.5 s, gone at 6.5 s
+  await expectMoment(page, control(page, 'Previous page'), { since, ms: 5000 });
 });
 
 test('the mouse wheel turns pages', async ({ page }) => {
@@ -402,10 +406,12 @@ test.describe('a late reading face', () => {
     let release;
     const held = new Promise(r => { release = r; });
     await page.route('**/literata-latin.woff2', async route => { await held; await route.continue(); });
+    await page.clock.install();
     await start(page);
     const filler = Array.from({ length: 60 }, (_, k) => `<p>Filler ${k} ` + 'lorem ipsum dolor sit amet '.repeat(12) + '</p>').join('');
     await readBook(page, { title: 'Late face', author: 'Bot', rawChapters: [{ body: filler }] });
-    await page.waitForTimeout(3500);
+    // the re-checks run out on the page's clock (#657)
+    await page.clock.runFor(3500);
     const fallback = await place(page);
     release();
     await expect.poll(() => page.evaluate(() => document.fonts.check('16px Literata'))).toBe(true);
@@ -1279,6 +1285,7 @@ test('the hint on turning pages lies clear of the text, and says both gestures',
 
 // #384: the button to go back from a jump goes after 10 s; the way back stays in Contents
 test('the way back from a jump stays in Contents after the button is gone', async ({ page }) => {
+  await page.clock.install();
   await start(page);
   await readBook(page, book('Way Back', 3));
   await page.keyboard.press('ArrowRight');
@@ -1289,11 +1296,13 @@ test('the way back from a jump stays in Contents after the button is gone', asyn
   const contents = dialog(page, 'Contents');
   // nothing to go back to before a jump
   await expect(contents.getByRole('button', { name: /^Back to / })).toBeHidden();
+  const jumped = await clockNow(page);
   await contents.getByRole('tabpanel', { name: 'Contents' }).getByRole('button', { name: 'Chapter 3' }).click();
   await expect.poll(async () => (await place(page)).ch).toBe(3);
   await expect(page.getByRole('button', { name: '↩ Back' })).toBeVisible();
-  // the button goes, as it always did
-  await expect(page.getByRole('button', { name: '↩ Back' })).toBeHidden({ timeout: 15000 });
+  // the button goes, as it always did: 10 s after the jump (BACK_SHOWN),
+  // on the page's clock (#657)
+  await expectMoment(page, page.getByRole('button', { name: '↩ Back' }), { since: jumped, ms: 10000 });
   // the way back does not
   await showChrome(page);
   await control(page, 'Contents').click();

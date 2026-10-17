@@ -3980,6 +3980,21 @@ A budget keeps headroom over what a loaded runner has been seen to give
 CI, against a quarter's slack), and still fails a turn that costs twice
 as much.
 
+A test never waits in real time for a moment of the app's own (#657; the
+bars' 5 s, the back button's 10 s, a toast's 2 s, the Nextcloud sign-in's 3 s
+poll). It installs the fake clock before the page opens (`page.clock.install()`;
+time still flows as real time, and `runFor` adds to it, firing every timer
+due, those a timer sets too; the network, IndexedDB and fonts are not the
+clock's) and runs it to the moment: `expectMoment` (`e2e/helpers.js`)
+asserts the thing is still there 1.5 s before the moment's end and gone 1.5 s
+after (so a timer that never fires, or fires at once, fails; the first is
+left out when a loaded machine has let the real flow carry the clock to within
+0.5 s of the end), `runUntil` runs the clock on in steps until an answer that
+comes in real time has come, and `settled` and `rested` in `e2e/relaunch.js`
+do it for the relaunch and stability specs. What keeps real time, and says
+why: the `@serial` budgets, the stall watch (Node's timers), media playback
+and anything that waits for a font or the network.
+
 Each group runs every project of `playwright.config.js`: `desktop` and
 `mobile-portrait` every spec, `narrow` (320 px, WCAG's reflow width),
 `mobile-landscape`, `tablet` and `wide` the layout specs, and `android`
