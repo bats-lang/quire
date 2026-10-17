@@ -25,31 +25,32 @@
 #   line <n>
 #   <the error, after "error(N): ", and the lines patsopt adds to it>
 #
-# and expect.py passes it only when that is what the check fails with
-# and nothing else: in the module the snippet is in, at that line, in
-# that function. A substring another error could also hold is not
-# enough.
+# and passes only when that is what the check fails with and nothing else:
+# in the module the snippet is in, at that line, in that function. A
+# substring another error could also hold is not enough.
 #
-# The fixtures start from the app checked whole: the app is checked first
-# (as `check`, or for the fixtures alone) in a copy of the checkout, and
-# each fixture is put into that copy with its build as the check left
-# it (each of check's passes keeps a cache of its own), so only the
-# module its snippet is in is checked again, and a reject fixture stops
-# at its error. A snippet adds private code, which only moves the #pub
-# declarations after it to other lines of its module's .sats, and bats
-# checks the modules that staload a .sats again only when more than that
-# changed (bats-lang/bats#243). patsopt names C symbols by the absolute
-# path of their files, so every fixture is checked at the same path, one
-# after another. The app must check for its fixtures to mean anything,
-# so a fixture run fails when the app does.
+# The fixtures are run by `bats fixtures` (bats-lang/bats#267, quire#598),
+# not by this script: it copies the checkout to <work>/app, checks it whole
+# first (the fixtures mean nothing if the app does not check), and puts each
+# snippet into that copy with its build as the check left it, so only the
+# module the snippet is in is checked again. It keeps the result of each
+# fixture in a memo (<work>/memo), served only when every file patsopt reads
+# for the module is unchanged, so a typical group re-runs the fixtures a
+# change can reach. --cold (first argument) is its --cold: no memo is
+# served, and one that would have been is audited against the cold result
+# (CI's push to main, the nightly run). It is not BATS_COLD, which would also
+# make every check cold: 3 to 5 minutes a fixture. Which compiler, ATS2, C compiler or
+# flags made a build/ is bats's to judge (its stamp): nothing here does.
 #
-# usage: tests/static/run.sh <repository-dir> [<member> ...]
+# usage: tests/static/run.sh [--cold] <repository-dir> [<member> ...]
 #        (bats must be on PATH)
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-# QUIRE_STATIC_WORK names the working directory (CI, #460): the same path
-# in every job, with the app's build/ there restored from a cache, and
-# kept at the end for it to be saved. Otherwise a temporary one.
+# QUIRE_STATIC_WORK names the working directory (CI, #460): kept at the end,
+# so that a cache can save what bats keeps there (app/build, memo) and a later
+# job restore it before the run. It need not be at the same path (bats strips
+# the checkout's path from what it keeps, bats-lang/bats#250). Otherwise a
+# temporary one.
 if [ -n "${QUIRE_STATIC_WORK:-}" ]; then
   TMP=$QUIRE_STATIC_WORK
   mkdir -p "$TMP"
@@ -57,6 +58,8 @@ else
   TMP=$(mktemp -d)
   trap 'rm -rf "$TMP"' EXIT
 fi
+cold=""
+if [ "${1:-}" = --cold ]; then cold=--cold; shift; fi
 repository=$1
 shift
 all=yes
@@ -108,22 +111,21 @@ done
 fail=0
 
 # The app itself, checked whole in a copy of the checkout (with its
-# fetched modules, not its outputs): as `check`, and as what the fixtures
-# start from, its build kept aside to be put back after each
+# fetched modules, not its outputs): as `check`, and as what the mutation
+# members start from
 app="$TMP/app"
 # The copy has no .git, and bats writes the commit's facts (the version,
 # src/version.bats) from git: it reads the checkout's repository
 GIT_DIR=$(git -C "$ROOT" rev-parse --absolute-git-dir)
 export GIT_DIR
-if named check || [ -n "$mutation_run" ] || [ -n "$fixtures" ]; then
+if named check || [ -n "$mutation_run" ]; then
   mkdir -p "$app"
   (cd "$ROOT" && tar cf - --exclude=./node_modules --exclude=./dist \
     --exclude=./build --exclude=./test-results --exclude=./.git .) | (cd "$app" && tar xf -)
   if (cd "$app" && bats check --repository "$repository") > "$TMP/app.log" 2>&1; then
     if named check; then echo "ok   check"; fi
   elif named check; then echo "FAIL check:"; cat "$TMP/app.log"; fail=1
-  else echo "FAIL check (the app, which the fixtures start from):"; cat "$TMP/app.log"; fail=1; fi
-  [ -z "$fixtures" ] || { rm -rf "$TMP/build-checked"; cp -a "$app/build" "$TMP/build-checked"; }
+  else echo "FAIL check (the app, which the mutation members start from):"; cat "$TMP/app.log"; fail=1; fi
 fi
 
 # Element ids (ids.py): the app's own, and the checker's fixtures, each
@@ -249,41 +251,18 @@ if named solver; then
   else echo "FAIL solver:"; grep -v '^ok' "$TMP/solver.log"; fail=1; fi
 fi
 
-# The fixtures, one after another, each put into the checked copy
-for member in $fixtures; do
-  fixture="$ROOT/tests/static/$member"
-  n=$(basename "$member")
-  file=$(cat "$fixture/file")
-  f="$app/$file"
-  before=$(cat "$fixture/before")
-  log="$TMP/$n.log"
-  started=$(date +%s)
-  if ! grep -qxF -- "$before" "$f"; then
-    echo "FAIL $member: no line \"$before\" in $file"; fail=1; continue
+# The fixtures (bats-lang/bats#267): `bats fixtures` copies the checkout to
+# $TMP/app, which the check above left its build in, and keeps its memo in
+# $TMP/memo. With none named, every fixture
+if [ -n "$fixtures" ]; then
+  only=""
+  if [ $all = no ]; then
+    for member in $fixtures; do only="$only --only $member"; done
   fi
-  # the line of the module the snippet's first line is at
-  at=$(grep -nxF -- "$before" "$f" | head -1 | cut -d: -f1)
-  awk -v before="$before" -v snip="$fixture/snippet.bats" '
-    $0 == before && !done { while ((getline l < snip) > 0) print l; print ""; done = 1 }
-    { print }' "$f" > "$f.new" && mv "$f.new" "$f"
-  status=0
-  (cd "$app" && bats check --repository "$repository") > "$log" 2>&1 || status=$?
-  took="($(( $(date +%s) - started )) s)"
-  case $member in
-    accept/*)
-      if [ "$status" = 0 ]; then echo "ok   $member $took"
-      else echo "FAIL $member: should type-check"; grep -E 'error' "$log" | head -5; fail=1; fi ;;
-    reject/*)
-      if [ "$status" = 0 ]; then echo "FAIL $member: should be rejected"; fail=1
-      elif python3 "$ROOT/tests/static/expect.py" "$fixture" "$log" "$at" > "$TMP/$n.expect" 2>&1; then echo "ok   $member $took"
-      else echo "FAIL $member: rejected, but not as its expect says: $(cat "$TMP/$n.expect")"; grep -E 'error' "$log" | head -5; fail=1; fi ;;
-  esac
-  # the module and the build back as the app's check left them (cp -p:
-  # the same bytes and mtime, so the module is fresh again)
-  cp -p "$ROOT/$file" "$f"
-  rm -rf "$app/build"
-  cp -a "$TMP/build-checked" "$app/build"
-done
+  if (cd "$ROOT" && bats fixtures tests/static $only $cold --work "$TMP" --memo "$TMP/memo" \
+        --repository "$repository"); then :
+  else fail=1; fi
+fi
 # Every lemma of the proof modules has its false variant rejected
 # (mutation_check.py, quire#594): a mutant the compiler accepts is a lemma
 # whose context is contradictory. Runs in the checked copy after the
