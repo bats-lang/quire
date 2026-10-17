@@ -68,7 +68,7 @@ export const CORE_GZ_MAX_BYTES = 200 * 1024 * 1024;
 const GZIP_MS = 60000;
 const CORE_QUIET_MIN_BYTES = 16 * 1024 * 1024; // an empty mapping at least this large is left out of the core
 const CORE_QUIET_MOST = 200;
-const GDB_MS = (GDB_SECONDS + CORE_SECONDS) * 1000 + 2000; // node's own limit on the same command: after `timeout -k 1`, so a backstop
+const GDB_MS = (GDB_SECONDS + CORE_SECONDS) * 1000 + 2000; // node's own limit on the same command: after `timeout -s KILL`, so a backstop
 const HELPER_MS = 5000;                 // readelf, sudo tail, the gdb version check
 const NATIVE_MOST = 6;                  // renderers whose stacks are taken, at once
 const CORE_MOST = 2;                    // and whose core is written too (a core is up to CORE_MAX_BYTES of disk until it is gzipped)
@@ -289,7 +289,7 @@ async function rendererCpu(browser, ms) {
  * never rejected: { ok, code, stdout, stderr, ms, timedOut, error }. It runs
  * in a process group of its own, which is killed (SIGKILL) at `ms`, so no
  * capture waits on one for ever. A command that needs root and so runs
- * through sudo is also wrapped, inside sudo, in `timeout -k` (see
+ * through sudo is also wrapped, inside sudo, in `timeout -s KILL` (see
  * `privileged`), because a SIGKILL of sudo reaches no process of root's:
  * `timeout` is the one that ends the command, `ms` being the later backstop.
  */
@@ -323,12 +323,14 @@ function run(command, args, ms, env, scope) {
 
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 /**
- * A command that needs root, ended by `timeout -k 1 <seconds>` as root (so
+ * A command that needs root, ended by `timeout -s KILL <seconds>` as root (so
  * the real command is killed even if sudo is not), through sudo without a
  * password prompt where this user is not root (the runners allow it).
  */
 function privileged(args, ms) {
-  const limited = ['timeout', '-k', '1', String(Math.max(1, Math.floor(ms / 1000) - 2)), ...args];
+  // KILL, not TERM then KILL: a gdb that is ended with TERM or INT leaves the process it is attached to
+  // stopped for good (measured by the review), and a killed gdb is detached from it by the kernel
+  const limited = ['timeout', '-s', 'KILL', String(Math.max(1, Math.floor(ms / 1000) - 2)), ...args];
   return isRoot ? limited : ['sudo', '-n', ...limited];
 }
 const runPrivileged = (args, ms, env, scope) => { const full = privileged(args, ms); return run(full[0], full.slice(1), ms, env, scope); };
@@ -346,30 +348,35 @@ export function nativeScope() {
     aborted: false,
     token,
     children: new Set(),
+    attached: new Set(),   // the pids gdb is attached to now
     /**
-     * Ends what this watch runs: SIGTERM to each child's process group (all a
-     * root user can reach through; a user that is not root cannot signal
-     * sudo's group, root's), and `pkill -f` of the token that gdb's command
-     * line carries, as root through sudo (so `timeout`, which forwards the
-     * signal to gdb, and gdb are signalled whoever started them); SIGKILL a
-     * second later. Without any of it gdb still ends by `timeout -k 1
-     * GDB_SECONDS`, about 16 s after it started.
+     * Ends what this watch runs: SIGKILL to each child's process group (all a root user can
+     * reach; sudo's group is root's, out of reach of one that is not) and `pkill -KILL -f` of the
+     * token that gdb's command line carries, as root through sudo, so `timeout` and gdb are
+     * killed whoever started them (KILL: gdb ended by TERM or INT leaves its process stopped),
+     * and then SIGCONT to every pid gdb was attached to, which a gdb ended in the middle of a call
+     * into the process can still leave stopped. Without any of it gdb still ends by `timeout -s
+     * KILL`, about 30 s after it started. A gdb ended during a call into the renderer can leave
+     * it broken, not only stopped: that is a renderer that was frozen.
      */
     async abort() {
       this.aborted = true;
       const groups = [...this.children].map((child) => child.pid).filter(Boolean);
-      for (const group of groups) { try { process.kill(-group, 'SIGTERM'); } catch (gone) { /* it ended, or it is root's */ } }
+      for (const group of groups) { try { process.kill(-group, 'SIGKILL'); } catch (gone) { /* it ended, or it is root's */ } }
       // the pattern matches the token in gdb's command line and not pkill's own
       const pattern = `[${token[0]}]${token.slice(1)}`;
-      const signal = (name) => runPrivileged(['pkill', `-${name}`, '-f', pattern], HELPER_MS);
-      await signal('TERM');
-      setTimeout(() => {
-        for (const group of groups) { try { process.kill(-group, 'SIGKILL'); } catch (gone) { /* it ended */ } }
-        signal('KILL').catch(() => {});
-      }, 1000).unref();
+      await runPrivileged(['pkill', '-KILL', '-f', pattern], HELPER_MS);
+      await Promise.all([...this.attached].map((pid) => resume(pid)));
       return groups.length;
     },
   };
+}
+
+/** SIGCONT, as root through sudo where this user cannot: a renderer a gdb let go of stopped runs again. */
+async function resume(pid) {
+  try { process.kill(pid, 'SIGCONT'); return true; } catch (error) { /* not ours to signal: root's? try sudo */ }
+  const out = await runPrivileged(['kill', '-CONT', String(pid)], HELPER_MS);
+  return out.ok;
 }
 
 const cap = (text, most) => (text.length > most ? `${text.slice(0, most)}\n... (${text.length - most} more characters cut)` : text);
@@ -407,7 +414,7 @@ async function findGdb(scope) {
 // What a machine that cannot take the stacks says: gdb's own words when the kernel refuses to
 // let it attach (Yama's ptrace_scope or a missing privilege), or sudo's when it wants a password
 // or a terminal. The capture then says `unavailable` and goes on without them
-export const CANNOT_ATTACH = /ptrace: (Operation not permitted|Permission denied)|Could not attach to process|yama\/ptrace_scope|sudo: (a password is required|a terminal is required|sorry, you are not allowed)/;
+export const CANNOT_ATTACH = /ptrace: (Operation not permitted|Permission denied)|Could not attach to process|yama\/ptrace_scope|sudo: (a password is required|a terminal is required|sorry, you are not allowed)|spawn sudo ENOENT|sudo: (command )?not found/;
 
 const ANONYMOUS_CODE = '(anonymous executable memory)';
 
@@ -601,10 +608,17 @@ async function backtrace(pid, maps, scope, gdbPath, corePath) {
     '-ex', 'info threads', '-ex', `thread apply all bt ${STACK_FRAMES}`,
     // after the backtraces, in the same attach (what is stopped is stopped once): the empty
     // reservations are left out of the dump, then the core is written
+    // only this thread runs during a call, so the other threads' state is the stack's (the core is still
+    // written after the stacks, not at the same instant)
+    ...(core ? ['-ex', 'set scheduler-locking on'] : []),
     ...(core ? quietRanges(pid).flatMap((range) => ['-ex', `call (int)madvise(${range.start}UL, ${range.end - range.start}UL, 16)`]) : []),
     ...(core ? ['-ex', `generate-core-file ${core}`] : []),
     '-p', String(pid)];
+  if (scope) scope.attached.add(pid);
   const out = await runPrivileged(core ? [prlimit, `--fsize=${CORE_MAX_BYTES}`, '--', ...args] : args, GDB_MS, { DEBUGINFOD_URLS: '' }, scope);
+  if (scope) scope.attached.delete(pid);
+  // a gdb that did not finish (the limit, the size cap, an abort) can leave the renderer stopped: let it run
+  if (!out.ok) await resume(pid);
   const parsed = parseGdb(out.stdout, pid, maps);
   const timedOut = out.timedOut || out.code === 124 || out.code === 137;
   // the backtraces come first: a gdb that ended while it wrote the core (the time limit, the size
@@ -684,7 +698,7 @@ export async function nativeStacks(renderers, scope, corePathFor) {
   }));
   // no gdb, or none that may attach: the capture carries on without the stacks, and says so
   if (!gdb.available) result.unavailable = `native capture unavailable: ${gdb.error}`;
-  else if (result.renderers.length && result.renderers.every((renderer) => !renderer.gdbStacks.ok && CANNOT_ATTACH.test(`${renderer.gdbStacks.stderr}\n${renderer.gdbStacks.text}`))) {
+  else if (result.renderers.length && result.renderers.every((renderer) => !renderer.gdbStacks.ok && CANNOT_ATTACH.test(`${renderer.gdbStacks.stderr}\n${renderer.gdbStacks.text}\n${renderer.gdbStacks.error}`))) {
     result.unavailable = `native capture unavailable: gdb cannot attach (ptrace_scope ${result.ptraceScope}, root ${isRoot}): ${result.renderers[0].gdbStacks.stderr.trim().slice(0, 200)}`;
   }
   return result;

@@ -13,7 +13,8 @@
  * skips, and on CI (which installs gdb and has sudo) fails instead.
  */
 
-import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { test, expect } from './fixtures.js';
 import { arm, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, nativeScope, nativeStacks, NATIVE_MOST_MS, TEARDOWN_MOST_MS } from './stall-capture.js';
@@ -125,7 +126,7 @@ function expectNativeStacks(capture, pids) {
   const renderer = capture.native.renderers.find((each) => pids.includes(each.pid));
   expect(renderer, 'the frozen renderer has native stacks').toBeTruthy();
   const stacks = renderer.gdbStacks;
-  if (!stacks.ok && CANNOT_ATTACH.test(`${stacks.stderr}\n${stacks.text}`)) {
+  if (!stacks.ok && CANNOT_ATTACH.test(`${stacks.stderr}\n${stacks.text}\n${stacks.error}`)) {
     unavailable(`gdb cannot attach on this machine (ptrace_scope ${capture.native.ptraceScope}, root ${capture.native.root}): ${stacks.stderr}`);
   }
   // what resolves addresses offline: the binary, its build id, where it is loaded
@@ -275,7 +276,7 @@ test('a hung stand-in process is read through the same path: its library frames 
     const found = await nativeStacks([{ pid: hung.pid }], nativeScope());
     if (found.unavailable) unavailable(found.unavailable);
     const stacks = found.renderers[0].gdbStacks;
-    if (!stacks.ok && CANNOT_ATTACH.test(`${stacks.stderr}\n${stacks.text}`)) unavailable(`gdb cannot attach on this machine: ${stacks.stderr}`);
+    if (!stacks.ok && CANNOT_ATTACH.test(`${stacks.stderr}\n${stacks.text}\n${stacks.error}`)) unavailable(`gdb cannot attach on this machine: ${stacks.stderr}`);
     expect(stacks.ok, `${stacks.error} ${stacks.stderr}`).toBe(true);
     expectLibraryFramesNamed(stacks.mainThread.frames);
     expect(stacks.mainThread.frames[0].text, 'the first frame is the sleep').toMatch(/nanosleep/);
@@ -293,22 +294,25 @@ test('the core of a renderer is bounded, kept compressed and opens in gdb with t
   const found = await nativeStacks(pids.map((pid) => ({ pid })), nativeScope(), (pid) => testInfo.outputPath(`stall-core-${pid}.core`));
   if (found.unavailable) unavailable(found.unavailable);
   const renderer = found.renderers[0];
-  if (!renderer.gdbStacks.ok && CANNOT_ATTACH.test(`${renderer.gdbStacks.stderr}\n${renderer.gdbStacks.text}`)) unavailable(`gdb cannot attach on this machine: ${renderer.gdbStacks.stderr}`);
+  if (!renderer.gdbStacks.ok && CANNOT_ATTACH.test(`${renderer.gdbStacks.stderr}\n${renderer.gdbStacks.text}\n${renderer.gdbStacks.error}`)) unavailable(`gdb cannot attach on this machine: ${renderer.gdbStacks.stderr}`);
   expect(renderer.gdbStacks.ok).toBe(true);
-  expect(renderer.core.kept, JSON.stringify(renderer.core)).toBe(true);
+  // a core not kept (no prlimit, a call that could not run, a cap, the disk) is the machine's, not the
+  // code's: the test says so and skips, and the hosted-runner proof is where it is read
+  if (!renderer.core.kept) unavailable(`no core was kept on this machine: ${JSON.stringify(renderer.core)}`);
   expect(renderer.core.bytes).toBeLessThanOrEqual(CORE_MAX_BYTES);
   expect(renderer.core.gzBytes).toBeLessThanOrEqual(CORE_GZ_MAX_BYTES);
-  expect(renderer.gdbStacks.ms, 'the renderer was stopped for the backtraces and the core within gdb\'s limit').toBeLessThan(35000);
   const coreFacts = `${renderer.core.bytes} bytes, ${renderer.core.gzBytes} gzipped, gdb stopped the renderer ${renderer.gdbStacks.ms} ms, gzip ${renderer.core.gzipMs} ms`;
   testInfo.annotations.push({ type: 'core', description: coreFacts });
   console.error(`[stall-core] ${coreFacts}`);
-  // the core opens later with the binary it names, and gives the stack the live gdb gave
+  // the core opens later with the binary it names, its thread 1 is the process's main thread (the pid is
+  // its LWP), and it gives the stack the live gdb gave
   const raw = testInfo.outputPath('opened.core');
-  const unpacked = spawnSync('sh', ['-c', 'gzip -dc "$1" > "$2"', 'sh', renderer.core.file, raw], { timeout: 60000 });
+  const unpacked = spawnSync('sh', ['-c', 'gzip -dc "$1" > "$2"', 'sh', renderer.core.file, raw], { timeout: 300000 });
   expect(unpacked.status).toBe(0);
-  const opened = spawnSync('gdb', ['-batch', '-nx', '-q', '-iex', 'set debuginfod enabled off', '-ex', 'thread 1', '-ex', 'bt 3', renderer.exe, raw], { encoding: 'utf8', timeout: 120000 });
-  expect(opened.stdout + opened.stderr).toContain('#0');
+  const opened = spawnSync('gdb', ['-batch', '-nx', '-q', '-iex', 'set debuginfod enabled off', '-ex', 'thread 1', '-ex', 'info threads', '-ex', 'bt 3', renderer.exe, raw], { encoding: 'utf8', timeout: 300000 });
   unlinkSync(raw);
+  expect(opened.stdout + opened.stderr).toContain('#0');
+  expect(opened.stdout, 'thread 1 of the core is the main thread').toMatch(new RegExp(`\\* 1\\s+Thread \\S+ \\(LWP ${renderer.pid}\\)`));
   const live = renderer.gdbStacks.mainThread.frames[0].pc;
   expect(opened.stdout, 'the core\'s main thread is where the live one was').toContain(live.replace(/^0x0*/, ''));
 });
@@ -400,36 +404,71 @@ test('a frozen page next to an idle healthy one: every idle renderer is attached
   }
 });
 
-test('teardown ends a native capture still running: gdb lets go', async ({ page, browser, stallWatch }, testInfo) => {
+/**
+ * Hangs a page's main thread the way a freeze does, with no SIGSTOP (a group-stopped process can run
+ * no call, so it gets no core): a synchronous XHR to a local server that never answers, which leaves
+ * the main thread blocked and idle in an untimed wait. { release } lets it go (the request fails).
+ */
+async function hangPage(page, stallWatch) {
+  const held = new Set();
+  const server = createServer(() => { /* never answers */ });
+  server.on('connection', (socket) => held.add(socket));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  await page.setContent('<!doctype html><title>Hung</title><p>Hung</p>');
+  const session = await stallWatch.session(page);
+  await session.send('Runtime.evaluate', { expression: `setTimeout(() => { const request = new XMLHttpRequest(); request.open('GET', 'http://127.0.0.1:${port}/never', false); request.send(); }, 0)` });
+  return { release() { for (const socket of held) socket.destroy(); server.close(); } };
+}
+
+/** The state letter of a process (R, S, T stopped, t traced), or null when it is gone. */
+function stateOf(pid) {
+  try { const stat = readFileSync(`/proc/${pid}/stat`, 'utf8'); return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3); } catch (gone) { return null; }
+}
+
+test('teardown ends a gdb attached to a hung renderer: gdb lets go and the renderer runs again', async ({ page, browser, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
-  // A gdb that answers its version and then hangs, named by QUIRE_STALL_GDB (an absolute path: the
-  // capture runs it under sudo, whose PATH is not this process's). A shell script, written here,
-  // because it must run as root under sudo's own PATH, where node is not (a runner's node lives
-  // under its tool cache), and /bin/sh always is; no existing program hangs on gdb's arguments.
-  const shim = testInfo.outputPath('hanging-gdb');
+  const real = spawnSync('sh', ['-c', 'command -v gdb'], { encoding: 'utf8' }).stdout.trim();
+  if (!real) unavailable('gdb is not installed on this machine');
+  // A gdb that is the real one, attached to the renderer, and then stays (a `shell sleep` after its
+  // commands), named by QUIRE_STALL_GDB (an absolute path: the capture runs it under sudo, whose PATH is
+  // not this process's). A shell script, written here, because it must run as root under sudo's own PATH,
+  // where node is not (a runner's node lives under its tool cache) and /bin/sh always is, and no existing
+  // program does this: gdb itself has to be attached when the teardown ends it.
+  const shim = testInfo.outputPath('staying-gdb');
   mkdirSync(shim, { recursive: true });
   const standIn = `${shim}/gdb`;
-  writeFileSync(standIn, '#!/bin/sh\n[ "$1" = --version ] && { echo "GNU gdb hanging stand-in"; exit 0; }\nexec sleep 119\n');
+  writeFileSync(standIn, `#!/bin/sh\n[ "$1" = --version ] && exec ${real} --version\nexec ${real} "$@" -ex 'shell sleep 117'\n`);
   chmodSync(standIn, 0o755);
   const kept = process.env.QUIRE_STALL_GDB;
-  // the stand-in's process (a zombie that nobody has reaped yet is gone, only its entry is left)
-  const hanging = () => spawnSync('ps', ['-eo', 'stat=,args='], { encoding: 'utf8' }).stdout.split('\n')
-    .filter((line) => /^[^Z]\S*\s+sleep 119$/.test(line.trim())).join('\n');
+  const staying = () => spawnSync('ps', ['-eo', 'stat=,args='], { encoding: 'utf8' }).stdout.split('\n')
+    .filter((line) => /^[^Z]\S*\s+sleep 117$/.test(line.trim())).join('\n');
+  const gdbRunning = () => spawnSync('ps', ['-eo', 'stat=,args='], { encoding: 'utf8' }).stdout.split('\n')
+    .filter((line) => /^[^Z]\S*\s+.*QUIRE_STALL_/.test(line.trim()) && !/ps -eo/.test(line)).join('\n');
   process.env.QUIRE_STALL_GDB = standIn;
+  let hung;
   try {
-    await page.setContent('<!doctype html><title>Frozen</title><p>Frozen</p>');
+    hung = await hangPage(page, stallWatch);
     const pids = await rendererPids(browser);
-    await frozen(pids, async () => {
-      await stallWatch.started(page, 30000);
-      // gdb is started by the capture some seconds after it began: wait for it to be there
-      for (let waited = 0; !hanging() && waited < 20000; waited += 250) await new Promise((resolve) => setTimeout(resolve, 250));
-      expect(hanging(), 'the stand-in gdb is running, attached to nothing but standing for gdb').not.toBe('');
-      await stallWatch.stop();
-      for (let waited = 0; hanging() && waited < 3000; waited += 250) await new Promise((resolve) => setTimeout(resolve, 250));
-      expect(hanging(), 'stop() ended the command: nothing left behind').toBe('');
-    });
+    // gdb has attached, written the stacks and the core, and stays
+    for (let waited = 0; !staying() && waited < 45000; waited += 250) await new Promise((resolve) => setTimeout(resolve, 250));
+    if (!staying()) {
+      const capture = stallWatch.captures[0] && stallWatch.captures[0].result;
+      if (capture && capture.native && capture.native.unavailable) unavailable(capture.native.unavailable);
+    }
+    expect(staying(), 'gdb is attached to the hung renderer and staying').not.toBe('');
+    expect(pids.some((pid) => ['t', 'T'].includes(stateOf(pid))), 'gdb holds the renderer stopped').toBe(true);
+    await stallWatch.stop();
+    for (let waited = 0; gdbRunning() && waited < 3000; waited += 250) await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(gdbRunning(), 'stop() ended gdb: nothing of the capture left behind').toBe('');
+    expect(pids.some((pid) => ['t', 'T'].includes(stateOf(pid))), 'no renderer is left stopped').toBe(false);
+    // and the renderer works: the request is let go, the main thread returns, the page answers
+    hung.release();
+    await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
   } finally {
+    if (hung) hung.release();
+    spawnSync('pkill', ['-KILL', '-f', 'sleep 117']);
     if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
   }
 });

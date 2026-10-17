@@ -4414,7 +4414,7 @@ answers is never looked at.
 
 The capture's `native` field has, for each such renderer (at most 6, side by
 side): gdb's backtrace of every thread (`gdb -batch -p`, `thread apply all bt
-40`, through `timeout -k 1 15`, and sudo where the user is not root, since
+40`, through `timeout -s KILL`, and sudo where the user is not root, since
 Yama's ptrace_scope 1 allows only a descendant of the tracer; `ptraceScope` is
 recorded), the kernel's stack, wait channel, system call and state of every
 thread (the stack is root's, read by one `sudo tail`), and what resolves the raw
@@ -4425,16 +4425,21 @@ its address and the offset in it (`frames[].module`, `.offset`; `pc - exeBase`
 for the binary). It is taken before the pause and the profile, which change what
 the renderer does, and written at once (`save`), so a teardown that does not wait
 for the rest keeps it: `stop()` waits `TEARDOWN_MS` (10 s) for captures still
-running, then **ends their commands**: SIGTERM to each command's process group
-(all a user that is root can reach; sudo's group is root's, out of reach of one
-that is not) and `pkill -f` of a token that gdb's command line carries (`-iex echo
-QUIRE_STALL_<random>`), run as root through sudo, so `timeout`, which forwards the
-signal, and gdb are signalled whoever started them; SIGKILL a second later; none
-starts after. The real bound, if all of that failed (the non-root path has not been
-run), is `timeout -k 1 15` on gdb itself: about 16 s after it attached, the renderer
-stopped meanwhile in a browser the worker's next tests share. Tested as root with a
-stand-in gdb that hangs, ended by the `pkill` alone as well as by the group's signal. Every external command runs in a process group of its own with a hard limit
-(`timeout -k` inside sudo, since a SIGKILL of sudo reaches nothing of root's, and
+running, then **ends their commands**: SIGKILL to each command's process group (all a
+user that is root can reach; sudo's group is root's, out of reach of one that is not)
+and `pkill -KILL -f` of a token that gdb's command line carries (`-iex echo
+QUIRE_STALL_<random>`), run as root through sudo, so `timeout` and gdb are killed
+whoever started them, then SIGCONT to every pid gdb was attached to; none starts
+after. **KILL, never TERM or INT**: a gdb ended by TERM or INT stays attached while
+it waits for what it runs (reproduced: the renderer stays in state `t`, a page
+evaluate hangs, SIGCONT does nothing), and only a killed gdb is detached by the
+kernel and lets the renderer run (state S). A gdb killed in the middle of a call into
+the renderer (the `madvise` calls) can leave it broken, not only stopped; that is a
+renderer that was frozen. The real bound, if all of that failed, is `timeout -s KILL`
+on gdb itself, about 30 s after it attached (backtraces and core). Tested with the real
+gdb attached to a really hung renderer, ended by the teardown: nothing of the capture
+is left, no renderer is stopped, and the page answers when the request is let go. Every external command runs in a process group of its own with a hard limit
+(`timeout -s KILL` inside sudo, since a SIGKILL of sudo reaches nothing of root's, and
 node's own limit and group kill behind it); the worst case is derived in code
 (`NATIVE_MOST_MS`). **Nothing is installed by the capture**: gdb comes from the
 e2e jobs' visible `Install gdb` step in `check.yml` (`apt-get update` and install,
@@ -4471,7 +4476,7 @@ with nothing resident (64 MB resident), and gdb's `generate-core-file` read ever
 them: 52 s of system time and no core in 60 s, then 5 GB where it did finish. So gdb
 first calls `madvise(range, MADV_DONTDUMP)` in the stopped process for each
 mapping with no resident page and 16 MiB or more (`quietRanges`, from smaps),
-which a process blocked in a futex wait can run, and then the dump is the resident
+which a process blocked in a futex wait can run (with `scheduler-locking on`, so the other threads do not run during them), and then the dump is the resident
 memory: 686 MB raw, 14.9 MB gzipped, gdb stopped the renderer 0.6 s, gzip 2.8 s
 (4 cores here; the 1194 Chromium build of this machine: 806 MB, 90 MB, 2.5 s, 6 s;
 not measured on a 4-core hosted runner). Limits: the file gdb writes is bounded by
@@ -4486,9 +4491,10 @@ fixtures' own pages, books and the app, never a user's data (the runners hold no
 other); it is uploaded to a public repository's artifacts only for a freeze, and
 expires in 7 days. `e2e/stall-capture.spec.js` writes the core of an idle renderer,
 checks the caps, and opens it with gdb and the binary it names: the main thread's
-pc is the live backtrace's. The perturbation: the `madvise` calls run in the main
-thread of the frozen renderer after the stacks are taken (a real freeze is a failing
-test).
+pc is the live backtrace's. The perturbation, stated: the `madvise` calls run in the main
+thread of the frozen renderer after the stacks are taken, so the core is of the process after
+the stacks, not at the same instant; `MADV_DONTDUMP` persists on a renderer that survives, and
+up to 200 mappings no longer merge with their neighbours. A real freeze is a failing test.
 
 Symbols: the capture records the binary (`binary`: path, `--version`, size, whether
 it has `.symtab`, `.debug_info`, a `.gnu_debuglink`), its GNU build id, `exeBase`,

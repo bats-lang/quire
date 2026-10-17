@@ -96,9 +96,10 @@ test('hosted-runner proof: a deliberately hung page', async ({ page, stallWatch 
     // the core opens in gdb with the binary it names
     const raw = testInfo.outputPath('proof-opened.core');
     expect(spawnSync('sh', ['-c', 'gzip -dc "$1" > "$2"', 'sh', renderer.core.file, raw], { timeout: 120000 }).status).toBe(0);
-    const opened = spawnSync('gdb', ['-batch', '-nx', '-q', '-iex', 'set debuginfod enabled off', '-ex', 'thread 1', '-ex', 'bt 3', renderer.exe, raw], { encoding: 'utf8', timeout: 180000 });
+    const opened = spawnSync('gdb', ['-batch', '-nx', '-q', '-iex', 'set debuginfod enabled off', '-ex', 'thread 1', '-ex', 'info threads', '-ex', 'bt 3', renderer.exe, raw], { encoding: 'utf8', timeout: 180000 });
     say('core opened in gdb', `${opened.stdout}${opened.stderr}`.trim().split('\n').slice(-6));
     unlinkSync(raw);
+    expect(opened.stdout, 'thread 1 of the core is the main thread').toMatch(new RegExp(`\\* 1\\s+Thread \\S+ \\(LWP ${renderer.pid}\\)`));
     expect(opened.stdout).toContain(renderer.gdbStacks.mainThread.frames[0].pc.replace(/^0x0*/, ''));
     expect(leftBehind(), 'nothing of gdb, prlimit, timeout, sudo or pkill is left').toBe('');
     say('core file', { bytes: statSync(renderer.core.file).size });
