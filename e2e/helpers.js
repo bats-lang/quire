@@ -553,6 +553,51 @@ export async function showChrome(page) {
   await expect(prev).toBeVisible();
 }
 
+// ---- the app's own timers, run on the fake clock (#657) ----
+//
+// A page whose clock was installed before it opened (`page.clock.install()`)
+// still sees time pass as real time does, and `runFor` adds to it: every
+// timer due in the span fires in order, those a timer sets in turn too, and
+// the network, IndexedDB and fonts, which are not the clock's, are left
+// alone. A test waits for a moment of the app's (the bars' 5 s, the back
+// button's 10 s, a toast's 2 s, a poll's 3 s) by running the clock to it,
+// not by waiting for it.
+
+/** What the page's clock reads, in milliseconds */
+export const clockNow = page => page.evaluate(() => Date.now());
+
+/** Runs the page's fake clock until it reads `since + ms` (it does not go
+    back if it is past), and answers how far past `since` it reads */
+export async function runTo(page, since, ms) {
+  const now = await clockNow(page);
+  if (now < since + ms) await page.clock.runFor(since + ms - now);
+  return (await clockNow(page)) - since;
+}
+
+/** A moment of the app's of `ms` that began no earlier than `since` (a
+    `clockNow` read before what began it) is over: the element is still
+    there `slack` before it ends, and gone `slack` after. The first is
+    not asserted when a loaded machine has let the real flow of time
+    carry the clock to within half a second of the end by itself, since
+    it could then be gone by right; the second always is */
+export async function expectMoment(page, element, { since, ms, slack = 1500 }) {
+  const early = await runTo(page, since, ms - slack);
+  if (early < ms - 500) await expect(element).toBeVisible();
+  await runTo(page, since, ms + slack);
+  await expect(element).toBeHidden();
+}
+
+/** Runs the fake clock on in steps of `stepMs` until `done` answers true
+    (the polls of a sign-in, a retry): the span is as long as the app's
+    timers need, and the real wait is only for the answers that come in
+    real time */
+export async function runUntil(page, done, { stepMs = 1000, timeout = 30000 } = {}) {
+  await expect.poll(async () => {
+    await page.clock.runFor(stepMs);
+    return done();
+  }, { timeout, intervals: [50] }).toBe(true);
+}
+
 /** Clicks the bottom bar's control name, bringing the bars up first.
     The bars hide themselves 5 s after they are shown, so a slow step
     before the click (an audit, a loaded machine) can see them up and

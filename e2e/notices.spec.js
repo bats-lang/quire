@@ -5,7 +5,7 @@
 import { test, expect, onAndroid } from './fixtures.js';
 import {
   expectBannerSaysWhatToDo, start, readBook, importFiles, epubFile, card, place, chapterTitle, showChrome, control, dialog,
-  librarySearch, selectText, selectionButton, bookPage, chapters, libraryShown,
+  librarySearch, selectText, selectionButton, bookPage, chapters, libraryShown, clockNow, expectMoment,
 } from './helpers.js';
 
 const alert = page => page.getByRole('alert');
@@ -115,16 +115,19 @@ test('a book whose file cannot be stored is named in the banner', async ({ page 
 
 test('Copy says "Copied" for a moment, and a copy the browser refuses is said in the banner', async ({ page, context }, testInfo) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.clock.install();
   await start(page);
   await readBook(page, { title: 'Copied Book', author: 'Notice Tests', rawChapters: chapters(1) });
   await selectText(page, 0, 8);
+  const copyAt = await clockNow(page);
   await selectionButton(page, 'Copy').click();
   const copied = page.getByRole('status').filter({ hasText: 'Copied' });
   await expect(copied).toBeVisible();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('Para 1.0');
   // it is not the Undo toast, and it goes on its own
   await expect(page.getByRole('button', { name: 'Undo' })).toBeHidden();
-  await expect(copied).toBeHidden({ timeout: 5000 });
+  // COPIED_SHOWN, 2 s (notice.bats), on the page's clock (#657)
+  await expectMoment(page, copied, { since: copyAt, ms: 2000, slack: 1000 });
   await expect(alert(page)).toBeHidden();
   // refused
   await page.evaluate(() => { navigator.clipboard.writeText = () => Promise.reject(new Error('denied')); });
