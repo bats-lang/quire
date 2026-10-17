@@ -317,6 +317,33 @@ jobs:
         if: env.GROUP_RUN == 'yes'
         run: sudo apt-get install -y -q fonts-noto-cjk
 
+      # gdb, for the stall capture's native stacks and core of a frozen renderer
+      # (e2e/stall-capture.js, quire#575 and #591), and libc6-dbg, which names the
+      # C library's internal functions in them (7 MB to download, 11 MB installed;
+      # without it only the exported ones are named; the time is printed). A STOPGAP: pwa's e2e-setup
+      # action should install it and keep the runner's passwordless sudo
+      # (bats-lang/pwa#109); this step goes when that lands. A diagnostic for a
+      # rare freeze must not turn a job red, so the index is updated, the install
+      # retried, and a failure goes on (the capture uses gdb only if it is there,
+      # and the specs that need it skip, saying why, when it is not).
+      - name: Install gdb
+        if: env.GROUP_RUN == 'yes'
+        continue-on-error: true
+        run: |
+          started=$(date +%s)
+          installed=no
+          for attempt in 1 2 3; do
+            if sudo apt-get update -q && sudo apt-get install -y -q gdb; then installed=yes; break; fi
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 5))
+          done
+          # libc6-dbg of exactly the installed libc6, never an upgrade of libc6 in the middle of a job
+          # (it is pinned to its libc6's version); without it only libc's exported functions are named
+          libc_version=$(dpkg-query -W -f='${Version}' libc6)
+          sudo apt-get install -y -q --no-upgrade "libc6-dbg=$libc_version" \
+            || echo "libc6-dbg $libc_version is not available: libc's internal functions stay unnamed"
+          echo "Install gdb: installed=$installed after $(( $(date +%s) - started )) s"
+          [ "$installed" = yes ]
+
       # The checker of the books the specs read (epubcheck.spec.js),
       # pinned by its version and the archive's SHA-256
       - name: Install epubcheck
@@ -376,12 +403,27 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+      # The core of a renderer that froze (e2e/stall-capture.js): written, gzipped
+      # and capped only when a page froze, so a run without one uploads nothing.
+      # Short retention: a core holds the renderer's memory, which here is the
+      # e2e fixtures' own pages and books and the app, never a user's data
+      - name: Upload stall cores
+        if: always() && env.GROUP_RUN == 'yes'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-stall-cores-${{ matrix.group }}
+          path: test-results/**/stall-core-*.core.gz
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Upload test screenshots
         if: always() && env.GROUP_RUN == 'yes'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-screenshots-${{ matrix.group }}
-          path: test-results/
+          path: |
+            test-results/
+            !test-results/**/stall-core-*
           retention-days: 14
 
   # The one check main's branch protection requires: every group passed
