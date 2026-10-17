@@ -7,6 +7,7 @@ import { createEpub } from './create-epub.js';
 import { mathBooks } from './math-books.js';
 import {
   importFiles, openBook, bookPage, rawFile, cards, openReadingSettings, readingSettings, topBar, place, placeChanged,
+  runUntil,
 } from './helpers.js';
 
 export const MATHML_NAMESPACE = 'http://www.w3.org/1998/Math/MathML';
@@ -80,9 +81,9 @@ async function pixelsOf(page, rect) {
     that differs most. null for a region with no ink */
 export async function inkIn(page, rect, threshold = 48) {
   // the bars of the reader lie over the page's head and foot, and the hint on turning pages over its
-  // middle, until they hide themselves
-  await expect(topBar(page)).toBeHidden({ timeout: 15000 });
-  await expect(page.getByText('Swipe or tap the sides to turn the page')).toBeHidden({ timeout: 15000 });
+  // middle, until they hide themselves (5 s and 13 s after they show, quire.bats): the page's fake
+  // clock, installed before it opened (math-native and math-images do so), runs until both are gone (#657)
+  await runUntil(page, async () => !(await topBar(page).isVisible()) && !(await page.getByText('Swipe or tap the sides to turn the page').isVisible()));
   const { clip, base64 } = await pixelsOf(page, rect);
   const found = await page.evaluate(async ({ base64, clip, threshold }) => {
     const image = new Image();
