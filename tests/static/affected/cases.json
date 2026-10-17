@@ -1,4 +1,7 @@
 [
+  {"name": "the agents' settings", "changes": [["M", ".claude/settings.json"]], "e2e": "none", "static": "none"},
+  {"name": "a rule, the orchestration notes, an agent and a skill of the agents", "changes": [["M", ".claude/rules/x.md"], ["A", ".claude/orchestration.md"], ["M", ".claude/agents/reviewer.md"], ["A", ".claude/skills/a/b/SKILL.md"]], "e2e": "none", "static": "none"},
+  {"name": "a note of the agents beside a source change selects what the source selects", "changes": [["M", ".claude/x.md"], ["M", "src/foo.bats"]], "e2e": "all", "static": "all"},
   {"name": "docs only", "changes": [["M", "CLAUDE.md"]], "e2e": "none", "static": "none"},
   {"name": "several notes", "changes": [["M", "README.md"], ["A", "ux-review/new.md"], ["M", "reports/quire-w3c-epub-tests.md"], ["M", "plan.txt"]], "e2e": "none", "static": "none"},
   {"name": "another workflow", "changes": [["M", ".github/workflows/deploy.yml"]], "e2e": "none", "static": "none"},
