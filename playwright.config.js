@@ -8,6 +8,19 @@ const chromiumArgs = [
   '--disable-software-rasterizer',
 ];
 
+// The browser's environment. Chromium 145's browser process calls
+// setenv("FC_FONTATIONS", "1") on a thread-pool thread about 50 ms after it
+// starts. When the variable is not there, glibc grows `environ`: it
+// reallocates the array and frees the old one, while the D-Bus thread (and
+// the resolver, and tzset) may be in getenv() scanning that very array, and
+// the freed array then reads as allocator garbage: SEGV_MAPERR in getenv,
+// the browser dead at launch (quire#599: three launches in 3,600 e2e jobs).
+// With the variable already set to the value Chromium sets, setenv replaces
+// one pointer in place and the array is never freed. The value is the one
+// Chromium writes itself, so the browser does the same as before.
+const chromiumEnv = { ...process.env, FC_FONTATIONS: '1' };
+const chromiumLaunch = { args: chromiumArgs, env: chromiumEnv };
+
 // Android's System WebView on a Pixel, as the app's pages see it
 const ANDROID_USER_AGENT = 'Mozilla/5.0 (Linux; Android 15; Pixel 8 Build/AP4A.250105.002; wv) '
   + 'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.7339.207 Mobile Safari/537.36';
@@ -55,7 +68,7 @@ export default defineConfig({
       use: {
         browserName: 'chromium',
         viewport: { width: 1024, height: 768 },
-        launchOptions: { args: chromiumArgs },
+        launchOptions: chromiumLaunch,
       },
     },
     {
@@ -63,7 +76,7 @@ export default defineConfig({
       use: {
         browserName: 'chromium',
         viewport: { width: 375, height: 667 },
-        launchOptions: { args: chromiumArgs },
+        launchOptions: chromiumLaunch,
       },
     },
     // the narrowest width content must work at (WCAG 1.4.10 Reflow:
@@ -76,7 +89,7 @@ export default defineConfig({
       use: {
         browserName: 'chromium',
         viewport: { width: 320, height: 640 },
-        launchOptions: { args: chromiumArgs },
+        launchOptions: chromiumLaunch,
       },
     },
     // Android, as the app runs there (#295): a Pixel-class phone (412 x
@@ -95,7 +108,7 @@ export default defineConfig({
         isMobile: true,
         hasTouch: true,
         userAgent: ANDROID_USER_AGENT,
-        launchOptions: { args: chromiumArgs },
+        launchOptions: chromiumLaunch,
       },
     },
     {
@@ -104,7 +117,7 @@ export default defineConfig({
       use: {
         browserName: 'chromium',
         viewport: { width: 667, height: 375 },
-        launchOptions: { args: chromiumArgs },
+        launchOptions: chromiumLaunch,
       },
     },
     {
@@ -113,7 +126,7 @@ export default defineConfig({
       use: {
         browserName: 'chromium',
         viewport: { width: 768, height: 1024 },
-        launchOptions: { args: chromiumArgs },
+        launchOptions: chromiumLaunch,
       },
     },
     {
@@ -122,7 +135,7 @@ export default defineConfig({
       use: {
         browserName: 'chromium',
         viewport: { width: 1440, height: 900 },
-        launchOptions: { args: chromiumArgs },
+        launchOptions: chromiumLaunch,
       },
     },
   ],
