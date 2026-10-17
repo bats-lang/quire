@@ -88,6 +88,7 @@
       "ruby.spec.js"
     ],
     "extras": [
+      "display-size.spec.js",
       "epub2.spec.js",
       "epubcheck.spec.js",
       "settings-screen.spec.js",

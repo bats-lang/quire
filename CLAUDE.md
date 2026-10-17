@@ -1077,6 +1077,24 @@ the system's while a panel is open. `gen-pwa test` serves the app at a port
 the kernel picks, and a bare `npx playwright test` at `QUIRE_PORT`
 (`playwright.config.js`), so two runs of the suite from two checkouts
 do not serve each other's build.
+### Display size and the system font scale (#412)
+Android's display size at its largest is a window of 320 CSS px wide at a
+device pixel ratio of 3.375 (Settings clamps the smallest width to 320 dp:
+AOSP's `DensityPreference`; a 1080 x 2400 Pixel is 320 x 711), where its
+default is 412 x 915 at 2.625. `e2e/display-size.spec.js` walks every screen
+through `fits` (`e2e/fits.js`, shared with `layout.spec.js`) and a chapter's
+pages at that size.
+The system font scale (130%, 200%) is not played: the WebView scales text by
+it unless the embedder calls `setTextZoom` (Chromium's `AwSettings`
+`updateFontScaleLocked`), which Quire and Capacitor do not, so on a device the
+app's px sizes are multiplied once, by the system. Desktop Chromium's
+`--blink-settings=accessibilityFontScaleFactor` is the closest engine
+switch, and it was measured not to be the same: it scales the text of a plain
+page (`16px` becomes `32px` at 2) through the text autosizer, which skips
+narrow blocks, buttons and anything in a box with a fixed height, so it left
+every size of Quire's screens, book included, unchanged. A test that passed on
+it would pass for nothing, and a CSS stand-in would test the stand-in, so the
+two font scale boxes of #412 stay open until a real WebView is driven.
 ### Where a book opens the first time (#409)
 A book never read opens where it says reading starts, as Apple Books
 opens at the bodymatter landmark (and as the EPUB 3.3 landmarks section,
