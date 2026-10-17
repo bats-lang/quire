@@ -109,11 +109,26 @@ export const folderBooks = {
   repeated: { valid: true, opts: {
     title: 'Repeated ids', author: 'Folders',
     rawChapters: [1, 2].map(i => ({ file: `text/ch${i}.xhtml`, body:
+      // chapter 2 has a paragraph before its heading, so the same words sit at other content nodes
+      (i === 2 ? '<p>Lead of chapter 2, before its heading.</p>\n' : '') +
       `<h1>Number ${i}</h1>\n<p id="top">Top of ${i}</p>\n<p>A claim<a epub:type="noteref" href="#n1">1</a> in chapter ${i}.</p>\n` +
       paras(`Part${i}`, 14) + `\n<p id="t">Target t of chapter ${i}, a needle</p>\n` + paras(`Part${i} end`, 8) +
       `\n<aside epub:type="footnote" id="n1"><p>The note of chapter ${i}.</p></aside>` })),
     toc: [{ label: 'Number 1', href: 'text/ch1.xhtml' }, { label: 'Note 1', href: 'text/ch1.xhtml#n1' },
       { label: 'Number 2', href: 'text/ch2.xhtml' }, { label: 'Note 2', href: 'text/ch2.xhtml#n1' }],
+  } },
+
+  /** Both chapters link one stylesheet (in css/), which sizes each one's big paragraph */
+  shared: { valid: true, opts: {
+    title: 'Shared stylesheet', author: 'Folders',
+    rawChapters: [
+      { file: 'text/ch1.xhtml', head: '<link rel="stylesheet" type="text/css" href="../css/shared.css"/>',
+        body: `<h1>Shared one</h1>\n<p class="big">Big in one</p>\n${paras('One', 6)}` },
+      { file: 'text/ch2.xhtml', head: '<link rel="stylesheet" type="text/css" href="../css/shared.css"/>',
+        body: `<h1>Shared two</h1>\n<p class="big">Big in two</p>\n${paras('Two', 6)}` },
+    ],
+    extraFiles: [{ name: 'css/shared.css', mediaType: 'text/css', data: '.big { font-size: 72px; }' }],
+    toc: [{ label: 'Shared one', href: 'text/ch1.xhtml' }, { label: 'Shared two', href: 'text/ch2.xhtml' }],
   } },
 
   /** Chapter 1 links one stylesheet and has a <style>; chapter 2 links another */
