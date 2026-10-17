@@ -102,6 +102,16 @@ versions, and fail when a locked one is missing or the lock does not
 match the project (a package used but not locked, or locked but not
 used).
 
+The runner label is pinned too (#667): every job runs on `ubuntu-24.04`,
+written in each job's `runs-on` in `.github/workflows` (quire has no
+reusable workflow of its own to write it once in). `ubuntu-latest` is not
+used, since it moves with GitHub's default: the runner-images README says
+`ubuntu-latest` is `ubuntu-24.04` today. The label moves by hand, in a PR
+of its own, when GitHub announces its successor (as bridge's CLAUDE.md
+says); the build cache's key names it (`runner-image` in
+`.github/actions/build-cache`, passed by each call), so that move starts a
+new cache.
+
 A quire PR that adopts new package versions runs `bats lock --repository
 <dir>` and commits `bats.lock` with the change that needs them. Package
 releases publish first; then the quire PR with the new lock. A publish
@@ -142,8 +152,9 @@ commit), and save theirs once the job passed. What was found:
   drops a build/ whose stamp is not the one it would write, so the key does
   not name the compiler pin, the ATS2 pin or the runner image any more (they
   were `.github/bats-version`, the ATS2 pin and the image). It names
-  `bats.lock`, `bats.toml`, the system and architecture, which the stamp does
-  not cover, and the commit of bats's setup action (ATS2 and the compiler's
+  `bats.lock`, `bats.toml`, the runner label (`runner-image`, #667, passed by
+  each call: the label the job's `runs-on` writes), the system and
+  architecture, which the stamp does not cover, and the commit of bats's setup action (ATS2 and the compiler's
   build are in it; read from the workflows by `.github/actions/build-cache`,
   so a workflow edit that leaves the pin alone keeps the cache). The sources are the key's end, so an exact hit is the same
   sources, and a prefix hit is the incremental build the compiler does on a

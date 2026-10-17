@@ -24,7 +24,7 @@ permissions: {}
 
 jobs:
   cancel-superseded:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       actions: write
     env:

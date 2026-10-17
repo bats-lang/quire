@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   plan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       groups: ${{ steps.groups.outputs.groups }}
     steps:
@@ -28,7 +28,7 @@ jobs:
 
   mutation:
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 150
     strategy:
       fail-fast: false
@@ -49,7 +49,7 @@ jobs:
   report:
     needs: mutation
     if: failure()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Open an issue
         env:

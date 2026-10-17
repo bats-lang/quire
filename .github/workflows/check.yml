@@ -44,7 +44,7 @@ jobs:
   # the pull request's own diff, so the reason of each skip is in one place
   plan:
     if: github.event.action != 'destroyed'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       e2e: ${{ steps.groups.outputs.e2e }}
       static: ${{ steps.groups.outputs.static }}
@@ -81,7 +81,7 @@ jobs:
   # groups take them from here (the quire-android artifact)
   build:
     if: github.event.action != 'destroyed'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # Two commits deep: a pull request's checkout is the merge, and its
       # own head (its second parent) is what the version names (#219)
@@ -102,6 +102,7 @@ jobs:
           mode: restore
           name: build
           path: build
+          runner-image: ubuntu-24.04
 
       - name: Build the app and the PWA generator
         run: bats build
@@ -187,6 +188,7 @@ jobs:
           mode: save
           name: build
           path: build
+          runner-image: ubuntu-24.04
 
   # The static tests (tests/static/run.sh): bats check of the app, the
   # checkers, and the fixtures, each put into the app checked whole, so
@@ -194,7 +196,7 @@ jobs:
   # checking the app first
   static:
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # a mutation group of a change to crc.bats is the longest (CLAUDE.md, #594)
     timeout-minutes: 120
     strategy:
@@ -240,6 +242,7 @@ jobs:
           mode: restore
           name: static
           path: ${{ runner.temp }}/quire-static/app/build
+          runner-image: ubuntu-24.04
 
       # (no BATS_REPOSITORY without the compiler: the checkers read none)
       - name: Static tests
@@ -256,12 +259,13 @@ jobs:
           mode: save
           name: static
           path: ${{ runner.temp }}/quire-static/app/build
+          runner-image: ubuntu-24.04
 
   # The e2e suite, in groups by area side by side, each on the PWA built
   # once (quire-android)
   e2e:
     needs: [plan, build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -434,7 +438,7 @@ jobs:
   check:
     if: always() && github.event.action != 'destroyed'
     needs: [plan, build, static, e2e]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Every group passed
         env:
