@@ -83,7 +83,7 @@ import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, placeChanged, bookPage, control, showChrome, dialog, selectionButton, marks, oneColumn,
   openReadingSettings, readingSettings,
-  rawMouse,
+  rawMouse, runUntil,
 } from './helpers.js';
 import { cutOff, insetsShort, labelInName, coveredByBanner } from './controls-shown.js';
 import { selectionBooks } from './selection-books.js';
@@ -269,6 +269,9 @@ async function settled(page) {
 
 /** Opens a book of selection-books.js on its first page with the bars away */
 async function open(page, name, opts = {}) {
+  // the page's clock is the fake one before the page opens, so the bars'
+  // timer is run on it below and not waited for (#657)
+  await page.clock.install();
   await start(page);
   await readBook(page, selectionBooks[name].opts);
   // hyphenation depends on the browser's dictionaries, which a machine may
@@ -282,8 +285,10 @@ async function open(page, name, opts = {}) {
   await page.keyboard.press('Escape');
   await expect(readingSettings(page)).toBeHidden();
   if (opts.oneColumn) await oneColumn(page);
-  // the bars are up as the book opens, and go in a few seconds
-  await expect(control(page, 'Previous page')).toBeHidden({ timeout: 20000 });
+  // the bars are up as the book opens, and the app hides them 5 s after
+  // they were shown (quire.bats): the page's clock runs until they are
+  // gone, and a bars timer that never fires makes this time out (#657)
+  await runUntil(page, async () => !(await barsUp(page)));
   await settled(page);
 }
 

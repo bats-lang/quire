@@ -12,6 +12,12 @@ import { test, expect } from './fixtures.js';
 import { start, bookPage, place, toLibrary, colours, rawMouse } from './helpers.js';
 import { readMathBook, setSize, sizeRange, chooseTheme, inkIn, turnTo, MATHML_NAMESPACE } from './math-helpers.js';
 
+// the page's fake clock is installed before each test's page opens, so the
+// bars' and the hint's timers are run on it by inkIn and not waited for (#657)
+test.beforeEach(async ({ page }) => {
+  await page.clock.install();
+});
+
 const THEMES = ['Light', 'Dark', 'Sepia', 'Grey', 'Night'];
 
 test('inline math is drawn as math and stands on the text baseline', async ({ page }) => {

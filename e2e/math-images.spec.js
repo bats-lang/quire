@@ -9,6 +9,12 @@ import { test, expect } from './fixtures.js';
 import { start, bookPage, colours } from './helpers.js';
 import { block, readMathBook, setSize, sizeRange, chooseTheme, inkIn, turnTo } from './math-helpers.js';
 
+// the page's fake clock is installed before each test's page opens, so the
+// bars' and the hint's timers are run on it by inkIn and not waited for (#657)
+test.beforeEach(async ({ page }) => {
+  await page.clock.install();
+});
+
 const luminance = ([r, g, b]) => {
   const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
   return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
