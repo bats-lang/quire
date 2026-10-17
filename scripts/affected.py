@@ -210,6 +210,9 @@ RULES = [
     Rule('docs and other workflows', [
         'README.md', 'CLAUDE.md', 'ANDROID.md', 'implementation-plan.md', 'plan.txt',
         'success.txt', 'ux-review/**', 'reports/**',
+        # The agents' settings, rules, orchestration notes, agents and skills (#680):
+        # no workflow, script or test reads `.claude/`
+        '.claude/**',
         '.github/workflows/deploy.yml', '.github/workflows/mutation.yml',
         '.github/workflows/relock.yml', '.github/workflows/sync-identity.yml',
         '.github/workflows/sync-providers.yml', '.github/workflows/supersede.yml',
