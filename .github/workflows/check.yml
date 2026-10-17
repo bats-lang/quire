@@ -330,11 +330,29 @@ jobs:
         if: env.GROUP_RUN == 'yes'
         continue-on-error: true
         run: |
+          started=$(date +%s)
+          installed=no
           for attempt in 1 2 3; do
-            sudo apt-get update -q && sudo apt-get install -y -q gdb libc6-dbg && exit 0
+            if sudo apt-get update -q && sudo apt-get install -y -q gdb libc6-dbg; then installed=yes; break; fi
             sleep $((attempt * 5))
           done
-          exit 1
+          echo "Install gdb: installed=$installed after $(( $(date +%s) - started )) s"
+          [ "$installed" = yes ]
+
+      # TEMPORARY diagnostic (quire#575, PR #662), removed with the hosted-runner
+      # proof spec once it has been seen to pass here: what the runner user may do
+      # with sudo, ptrace, disk and memory, printed so a failure of the proof can
+      # be read from this log
+      - name: What the runner allows (temporary)
+        if: env.GROUP_RUN == 'yes'
+        continue-on-error: true
+        run: |
+          id
+          sudo -n -l || true
+          echo "ptrace_scope: $(cat /proc/sys/kernel/yama/ptrace_scope 2>&1)"
+          echo "core_pattern: $(cat /proc/sys/kernel/core_pattern 2>&1)"
+          gdb --version | head -1 || true
+          nproc; free -m; df -h . /tmp
 
       # The checker of the books the specs read (epubcheck.spec.js),
       # pinned by its version and the archive's SHA-256
