@@ -1,0 +1,64 @@
+name: supersede
+
+# A merge queue group that is requested (checks_requested) replaces the groups
+# of the same pull request that the queue built before it: GitHub rebuilds the
+# groups behind a removed entry and leaves the old groups' runs queued, which
+# kept the pool full on 2026-10-15 (quire#586, #620). check.yml cancels a
+# group's run when the queue destroys the group (its `destroyed` event, #650).
+# This cancels the older runs of the same pull request when a new group is
+# requested, for the case in which the destroyed event does not come.
+#
+# A run is cancelled only when all of these hold, and it is never another
+# pull request's: it is a check.yml run of the merge queue (event merge_group),
+# still queued or in progress; its queue ref names this pull request
+# (gh-readonly-queue/main/pr-N-<sha>); its head is another commit than the
+# requested group's (a group with the same commit is the same tree, kept); and
+# it was created before the requested group's own check.yml run (a later one is
+# newer and is kept). If the requested group's run cannot be found, nothing is
+# cancelled. The job holds only the default token with actions: write.
+on:
+  merge_group:
+    types: [checks_requested]
+
+permissions: {}
+
+jobs:
+  cancel-superseded:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      QUEUE_REF: ${{ github.event.merge_group.head_ref }}
+      GROUP_SHA: ${{ github.event.merge_group.head_sha }}
+    steps:
+      # The one shell step: GitHub's expression language cannot take the
+      # pull request's number out of the queue ref, so jq and gh do it here
+      - name: Cancel the queue runs this group supersedes
+        run: |
+          pr=${QUEUE_REF##*/pr-}
+          pr=${pr%%-*}
+          # the live runs only (queued, then in progress), so no finished run can fill the list
+          runs=$(for status in queued in_progress; do gh run list --repo "$REPO" --workflow check.yml --event merge_group --status "$status" --limit 100 --json databaseId,headBranch,headSha,status; done | jq -s 'add')
+          trigger=$(jq -r --arg sha "$GROUP_SHA" '[.[] | select(.headSha == $sha) | .databaseId] | max // empty' <<< "$runs")
+          if [ -z "$trigger" ]; then
+            echo "No check.yml run for the requested group $GROUP_SHA: nothing is cancelled"
+            exit 0
+          fi
+          ids=$(jq -r --arg pr "$pr" --arg sha "$GROUP_SHA" --argjson trigger "$trigger" '
+            .[]
+            | select(.status == "queued" or .status == "in_progress")
+            | select(.headBranch | test("/pr-" + $pr + "-"))
+            | select(.headSha != $sha and .databaseId < $trigger)
+            | .databaseId' <<< "$runs")
+          if [ -z "$ids" ]; then
+            echo "No superseded run of pull request #$pr (requested group run $trigger)"
+          fi
+          for id in $ids; do
+            if gh run cancel "$id" --repo "$REPO"; then
+              echo "Cancelled superseded run $id of pull request #$pr (requested group run $trigger)"
+            else
+              echo "Could not cancel run $id (already finished?)"
+            fi
+          done

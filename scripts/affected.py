@@ -212,7 +212,7 @@ RULES = [
         'success.txt', 'ux-review/**', 'reports/**',
         '.github/workflows/deploy.yml', '.github/workflows/mutation.yml',
         '.github/workflows/relock.yml', '.github/workflows/sync-identity.yml',
-        '.github/workflows/sync-providers.yml',
+        '.github/workflows/sync-providers.yml', '.github/workflows/supersede.yml',
     ], NONE, NONE),
     # Tests of the build job (vitest on the wasm, the codec, the CSS reader, the
     # version) and the home page, which the e2e groups serve beside the app
