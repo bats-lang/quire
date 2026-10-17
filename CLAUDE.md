@@ -378,8 +378,10 @@ run is left to CI and said in the PR. A fix pushed after a red CI is
 checked the same way first.
 
 The e2e suite needs Playwright 1.58 or later (`package.json` says so,
-`package-lock.json` pins 1.58.2): before 1.58 its fake clock can set the
-time back after a `page.clock.fastForward` (a `_runTo` already in flight
+`package-lock.json` pins 1.58.2, and the jobs that install it pass
+`playwright-minimum: "1.58"` to pwa's `e2e-setup` action, which fails below
+it; `gen-pwa test` refuses it too, pwa#92): before 1.58 its fake clock can
+set the time back after a `page.clock.fastForward` (a `_runTo` already in flight
 finishes after the jump and writes its old target over it; 1.58 ignores a
 target in the past), so a spec that counts minutes, like "the minutes
 read on each device are summed" (#352), loses one now and then (about one

@@ -163,7 +163,7 @@ jobs:
       # pwa's action (quire#637). The WASM smoke tests need no browsers, which
       # are restored from the cache here
       - name: Set up Node.js and Playwright
-        uses: bats-lang/pwa/.github/actions/e2e-setup@f27f152a210d88de3a538dd704c56db23fcb0e97
+        uses: bats-lang/pwa/.github/actions/e2e-setup@b594790eebf7e3caab054cff1f07217dae049579
         with:
           playwright-minimum: "1.58"
 
@@ -311,7 +311,7 @@ jobs:
       # suite needs Playwright 1.58 or later")
       - name: Set up Node.js and Playwright
         if: env.GROUP_RUN == 'yes'
-        uses: bats-lang/pwa/.github/actions/e2e-setup@f27f152a210d88de3a538dd704c56db23fcb0e97
+        uses: bats-lang/pwa/.github/actions/e2e-setup@b594790eebf7e3caab054cff1f07217dae049579
         with:
           playwright-minimum: "1.58"
 
@@ -461,7 +461,7 @@ jobs:
   android:
     needs: build
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@f27f152a210d88de3a538dd704c56db23fcb0e97
+    uses: bats-lang/pwa/.github/workflows/android.yml@b594790eebf7e3caab054cff1f07217dae049579
     secrets: inherit
     with:
       artifact: quire-android
@@ -495,12 +495,12 @@ jobs:
   play-internal:
     needs: [check, android]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: bats-lang/pwa/.github/workflows/play-release.yml@ae21e1cd63f59f4f190b5f900151e16a3cd17fc8
+    uses: bats-lang/pwa/.github/workflows/play-release.yml@b594790eebf7e3caab054cff1f07217dae049579
     permissions:
       contents: read
       id-token: write
     with:
-      pwa-ref: ae21e1cd63f59f4f190b5f900151e16a3cd17fc8
+      pwa-ref: b594790eebf7e3caab054cff1f07217dae049579
       package: dev.middlefield.quire
       workload-identity-provider: projects/162611675413/locations/global/workloadIdentityPools/github/providers/quire
       service-account: quire-play-release@spring-duality-395520.iam.gserviceaccount.com
