@@ -93,12 +93,26 @@ async function within(promise, ms) {
   try { return await Promise.race([outcome, silent]); } finally { clearTimeout(timer); }
 }
 
+// QUIRE_NO_STALL_ARM=1 (anything but empty or 0) skips arming: the debugger is
+// never enabled, so a run can be compared with and without it (#575, #591: the
+// frozen renderers all had it armed, which is a suspect, not evidence). The
+// watch still probes and still takes the native stacks; it loses what needs
+// the debugger (the pause, the profile, the answers). Read at each arming.
+// Nothing sets it: it is for a run someone chooses to make.
+const NO_ARM = 'QUIRE_NO_STALL_ARM';
+const armingOff = () => !['', '0'].includes(process.env[NO_ARM] || '');
+
 /**
  * A page's DevTools session, made while the page still answers, with
  * the debugger enabled; `scripts` maps a script id to its URL.
  */
 export async function arm(page) {
   const armed = { session: null, scripts: new Map(), error: null, pausing: false };
+  if (armingOff()) {
+    // the capture then says the page was not armed (`armed: false`, this reason)
+    armed.error = `not armed: ${NO_ARM}=${process.env[NO_ARM]} (the debugger is never enabled)`;
+    return armed;
+  }
   try {
     const session = await page.context().newCDPSession(page);
     armed.session = session;

@@ -13,7 +13,7 @@
  */
 
 import { test, expect } from './fixtures.js';
-import { CAPTURE_MOST_MS, NATIVE_MOST_MS } from './stall-capture.js';
+import { arm, CAPTURE_MOST_MS, NATIVE_MOST_MS } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
 const SPIN_MODULE = (() => {
@@ -144,6 +144,29 @@ test('a page that answers is not captured', async ({ page, stallWatch }) => {
   // longer than a probe's limit, so a page that answers has been probed
   await page.waitForTimeout(7000);
   expect(stallWatch.captures).toEqual([]);
+});
+
+test('QUIRE_NO_STALL_ARM skips arming and nothing else sets it', async ({ page }) => {
+  const kept = process.env.QUIRE_NO_STALL_ARM;
+  try {
+    delete process.env.QUIRE_NO_STALL_ARM;
+    const armed = await arm(page);
+    expect(armed.error, 'armed by default').toBeNull();
+    expect(armed.session).not.toBeNull();
+    await armed.session.detach();
+    for (const off of ['', '0']) {
+      process.env.QUIRE_NO_STALL_ARM = off;
+      const stillArmed = await arm(page);
+      expect(stillArmed.error, `armed when set to "${off}"`).toBeNull();
+      await stillArmed.session.detach();
+    }
+    process.env.QUIRE_NO_STALL_ARM = '1';
+    const notArmed = await arm(page);
+    expect(notArmed.session, 'no DevTools session, so no debugger').toBeNull();
+    expect(notArmed.error).toContain('QUIRE_NO_STALL_ARM=1');
+  } finally {
+    if (kept === undefined) delete process.env.QUIRE_NO_STALL_ARM; else process.env.QUIRE_NO_STALL_ARM = kept;
+  }
 });
 
 // The timeout this test starts with, short so the capture begins soon

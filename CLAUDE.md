@@ -4418,3 +4418,15 @@ the binary (`Builtins_JSEntryTrampoline`), wasm's give the first frame only.
 Not verified: that a renderer that sleeps in a futex shows its waiter's frames
 (none could be had; the first real stall will say), and the sudo paths on a
 hosted runner.
+
+**`QUIRE_NO_STALL_ARM=1` (anything but empty or 0) skips arming** (`arm` in
+`e2e/stall-capture.js`, read at each arming): the debugger is never enabled,
+and the capture says `armed: false` with that reason. It is for comparing the
+stall rate with and without the arming (every frozen renderer of #575 and #591
+had it, a suspect and not evidence; at one stall in about 900 jobs, 2,700 jobs
+without it show no stall with 95 % power if arming is the cause). Without
+arming the watch still probes with `page.evaluate` and still takes the native
+stacks, and loses the pause, the profile and the answers; the specs that need
+the debugger (`stall-capture.spec.js`'s loops) fail with it on, as they should.
+The default stays armed and nothing sets it: a scheduled run that does is a
+change of its own.
