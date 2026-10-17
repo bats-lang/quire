@@ -13,6 +13,8 @@
  * skips, and on CI (which installs gdb and has sudo) fails instead.
  */
 
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { test, expect } from './fixtures.js';
 import { arm, CAPTURE_MOST_MS, FROZEN_CPU_SECONDS, NATIVE_MOST_MS, TEARDOWN_MS } from './stall-capture.js';
 
@@ -64,12 +66,14 @@ async function endLoop(page, stallWatch) {
 }
 
 /**
- * A machine that cannot take the native stacks: the test says so and skips,
- * and on CI fails instead, since a skip there would hide the very thing the
- * test is for (the job installs gdb and has sudo).
+ * A machine that cannot take the native stacks: the test says so and skips.
+ * gdb missing is the one case that fails on CI (`gdbMissing`), where the job
+ * installs it and a skip would hide the very thing the test is for; a refusal
+ * of ptrace skips there too, with its reason (the first CI run is what shows
+ * whether the runner's sudo and gdb take the stacks).
  */
-function unavailable(reason) {
-  if (process.env.CI) throw new Error(`the native stacks cannot be taken on CI: ${reason}`);
+function unavailable(reason, { gdbMissing = false } = {}) {
+  if (gdbMissing && process.env.CI) throw new Error(`gdb is not installed on CI: ${reason}`);
   test.skip(true, reason);
 }
 
@@ -113,7 +117,7 @@ function expectBusyNotFrozen(capture) {
  */
 function expectNativeStacks(capture, pids) {
   expect(capture.native.error).toBeUndefined();
-  if (!capture.native.gdb.available) unavailable(`gdb is not installed on this machine: ${capture.native.gdb.error}`);
+  if (!capture.native.gdb.available) unavailable(`gdb is not installed on this machine: ${capture.native.gdb.error}`, { gdbMissing: true });
   const renderer = capture.native.renderers.find((each) => pids.includes(each.pid));
   expect(renderer, 'the frozen renderer has native stacks').toBeTruthy();
   const stacks = renderer.gdbStacks;
@@ -240,6 +244,89 @@ test('an unarmed page that is frozen is judged as an armed one: native stacks', 
   } finally {
     for (const pid of pids) { try { process.kill(pid, 'SIGCONT'); } catch (gone) { /* it ended */ } }
     await context.close();
+  }
+});
+
+/** A second page of the browser in a context of its own, so a renderer of its own: { context, page, pids }. */
+async function otherPage(browser, title) {
+  const before = await rendererPids(browser);
+  const context = await browser.newContext();   // watched at once, like the test's
+  const page = await context.newPage();
+  await page.setContent(`<!doctype html><title>${title}</title><p>${title}</p>`);
+  const pids = (await rendererPids(browser)).filter((pid) => !before.includes(pid));
+  expect(pids.length, 'a renderer of its own').toBe(1);
+  return { context, page, pids };
+}
+
+test('a busy page next to an idle healthy one: nothing is attached, the idle page is not delayed', async ({ page, browser, stallWatch }) => {
+  await page.setContent('<!doctype html><title>Busy</title>');
+  const other = await otherPage(browser, 'Idle');
+  try {
+    const session = await stallWatch.session(page);
+    await session.send('Runtime.evaluate', { expression: 'setTimeout(() => { const end = Date.now() + 12000; while (Date.now() < end); }, 0)' });
+    // the idle page is asked all the while the busy page is captured: gdb stopping its renderer would show as a slow answer
+    let slowest = 0;
+    let capture;
+    stallWatch.next(page, 30000).then((found) => { capture = found; });
+    while (!capture) {
+      const asked = Date.now();
+      expect(await other.page.evaluate(() => 1)).toBe(1);
+      slowest = Math.max(slowest, Date.now() - asked);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    expect(capture.native, 'the busy page is presumed busy, so no renderer is attached to').toBeUndefined();
+    expect(capture.presumedBusy).toContain('presumed busy');
+    expect(slowest, 'the idle page was never stopped').toBeLessThan(1500);
+    const idle = capture.rendererCpu.find((process) => other.pids.includes(process.pid));
+    expect(idle.cpuSeconds, 'the other renderer was idle').toBeLessThan(FROZEN_CPU_SECONDS);
+    await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
+  } finally {
+    await other.context.close();
+  }
+});
+
+test('a frozen page next to an idle healthy one: every idle renderer is attached to (collateral)', async ({ page, browser, stallWatch }, testInfo) => {
+  test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
+  await page.setContent('<!doctype html><title>Frozen</title><p>Frozen</p>');
+  const frozenPids = await rendererPids(browser);
+  const other = await otherPage(browser, 'Idle');
+  try {
+    const capture = await frozen(frozenPids, () => stallWatch.next(page, 20000 + NATIVE_MOST_MS));
+    expect(capture.presumedBusy).toBeUndefined();
+    expectNativeStacks(capture, frozenPids);
+    // documented: the idle page's renderer, whose CPU is as low, is attached to as well
+    expect(capture.native.renderers.map((renderer) => renderer.pid)).toContain(other.pids[0]);
+  } finally {
+    await other.context.close();
+  }
+});
+
+test('teardown ends a native capture still running: gdb lets go', async ({ page, browser, stallWatch }, testInfo) => {
+  test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
+  // a gdb that answers its version and then hangs, found first on PATH
+  const shim = testInfo.outputPath('hanging-gdb');
+  mkdirSync(shim, { recursive: true });
+  writeFileSync(`${shim}/gdb`, '#!/bin/sh\n[ "$1" = --version ] && { echo "GNU gdb hanging stand-in"; exit 0; }\nexec sleep 119\n');
+  chmodSync(`${shim}/gdb`, 0o755);
+  const kept = process.env.PATH;
+  // the stand-in's process (a zombie that nobody has reaped yet is gone, only its entry is left)
+  const hanging = () => spawnSync('ps', ['-eo', 'stat=,args='], { encoding: 'utf8' }).stdout.split('\n')
+    .filter((line) => /^[^Z]\S*\s+sleep 119$/.test(line.trim())).join('\n');
+  process.env.PATH = `${shim}:${kept}`;
+  try {
+    await page.setContent('<!doctype html><title>Frozen</title><p>Frozen</p>');
+    const pids = await rendererPids(browser);
+    await frozen(pids, async () => {
+      await stallWatch.started(page, 30000);
+      // gdb is started by the capture some seconds after it began: wait for it to be there
+      for (let waited = 0; !hanging() && waited < 20000; waited += 250) await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(hanging(), 'the stand-in gdb is running, attached to nothing but standing for gdb').not.toBe('');
+      await stallWatch.stop();
+      for (let waited = 0; hanging() && waited < 3000; waited += 250) await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(hanging(), 'stop() ended the command: nothing left behind').toBe('');
+    });
+  } finally {
+    process.env.PATH = kept;
   }
 });
 

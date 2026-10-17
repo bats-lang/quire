@@ -4392,20 +4392,25 @@ loop forever in script and in wasm.
 **The native stacks of a frozen renderer (#575, #591).** A renderer that
 answers nothing at 0 CPU sits in an untimed futex wait (`0x189`, no timeout;
 a healthy idle one in `0x89` with a timeout) and the JavaScript side cannot say
-who it waits for. gdb is attached **only to a renderer that is frozen: the page
-answers nothing AND the renderer used less than `FROZEN_CPU_SECONDS` (0.1 s) of
-CPU over the capture's 1 s window.** "Answers nothing" is the armed session's
-`Runtime.evaluate` for 2 s, or, for a page that is not armed (no debugger, see
-below, or it stopped answering before it was armed), an `evaluate` of its own:
-armed and unarmed pages are judged alike, and so are the capture's two reasons
-(an unanswered probe, a test about to time out). A page that is only busy is
-never attached to, since gdb stops the process: a loop or a heavy layout spends
-about a second of CPU a second (0.98 measured for a loop here), a SIGSTOPped or
-idle renderer 0, and #575's and #591's frozen ones 0 and 0.02. Other renderers
-with CPU under the threshold are attached to too when one page is frozen (an idle
-renderer of another page of the test, stopped for about 2 s): the CPU cannot tell
-whose renderer is whose. A healthy job runs nothing: a page that answers is never
-looked at.
+who it waits for. gdb stops the process it is attached to, so it is attached
+**only when a page answers nothing AND no renderer of the browser used
+`FROZEN_CPU_SECONDS` (0.1 s) of CPU or more over the capture's 1 s window.**
+"Answers nothing" is the armed session's `Runtime.evaluate` for 2 s, or, for a
+page that is not armed (no debugger, see below, or it stopped answering before
+it was armed), an `evaluate` of its own: armed and unarmed pages are judged
+alike, and so are the capture's two reasons (an unanswered probe, a test about
+to time out). Which renderer is a page's own is not known (a DevTools target has no
+process id, and `SystemInfo.getProcessInfo` has no target),
+so the rule is about all of them: if any renderer used CPU, the page that
+answers nothing is presumed to be that busy one (a loop or a heavy layout spends
+about a second of CPU a second, 0.98 measured here) and **nothing is attached**
+(`presumedBusy` says which renderer); only when every renderer is idle (a
+SIGSTOPped or idle one 0 s, #575's and #591's frozen ones 0 and 0.02 s) is the
+page presumed frozen, and every idle renderer is attached to, **the other pages'
+too** (collateral, about 2 s of stop each, next to a page that is frozen, which is
+a failing test anyway). The price of not knowing the pid: a frozen page next to
+another that is busy is not attached to. A healthy job runs nothing: a page that
+answers is never looked at.
 
 The capture's `native` field has, for each such renderer (at most 6, side by
 side): gdb's backtrace of every thread (`gdb -batch -p`, `thread apply all bt
@@ -4419,16 +4424,21 @@ executable anonymous regions (JIT code) and, for each frame, the module holding
 its address and the offset in it (`frames[].module`, `.offset`; `pc - exeBase`
 for the binary). It is taken before the pause and the profile, which change what
 the renderer does, and written at once (`save`), so a teardown that does not wait
-for the rest (`stop()` waits `TEARDOWN_MS`, 10 s, for captures still running) keeps
-it. Every external command runs in a process group of its own with a hard limit
+for the rest keeps it: `stop()` waits `TEARDOWN_MS` (10 s) for captures still
+running, then **ends their commands** (SIGTERM to each process group, which sudo
+relays to `timeout` and so to gdb, SIGKILL a second later; none starts after) so a
+gdb attached to a renderer lets go and the browser, which the worker's next tests
+reuse, is not left with a stopped renderer. Every external command runs in a process group of its own with a hard limit
 (`timeout -k` inside sudo, since a SIGKILL of sudo reaches nothing of root's, and
 node's own limit and group kill behind it); the worst case is derived in code
 (`NATIVE_MOST_MS`). **Nothing is installed by the capture**: gdb comes from the
 e2e jobs' visible `Install gdb` step in `check.yml` (`sudo apt-get install -y -q
 gdb`, a stopgap; pwa's e2e-setup action should install it and keep the passwordless
 sudo, bats-lang/pwa#109), and without gdb or with ptrace refused the capture says
-`gdb` is unavailable or `ok: false` with gdb's own words, and the spec skips locally
-and fails on CI. A frozen renderer is made in the spec by SIGSTOP, armed and unarmed;
+`gdb` is unavailable or `ok: false` with gdb's own words. The spec skips with that
+reason for both, and fails on CI for a missing gdb only: a refused ptrace skips
+there too, so the first CI run is what shows whether the runner's sudo and gdb take
+the stacks. A frozen renderer is made in the spec by SIGSTOP, armed and unarmed;
 a loop and a 12 s busy page are asserted to be captured and NOT attached to.
 Not verified: that a renderer that sleeps in an untimed futex shows its waiter's
 frames (none could be had; the first real stall will say), and the sudo paths on a
