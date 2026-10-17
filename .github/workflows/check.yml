@@ -162,7 +162,7 @@ jobs:
       # pwa's action (quire#637). The WASM smoke tests need no browsers, which
       # are restored from the cache here
       - name: Set up Node.js and Playwright
-        uses: bats-lang/pwa/.github/actions/e2e-setup@e2d98d401f06abdccebad8a53f0be1938ab43b8a
+        uses: bats-lang/pwa/.github/actions/e2e-setup@f27f152a210d88de3a538dd704c56db23fcb0e97
         with:
           playwright-minimum: "1.58"
 
@@ -307,7 +307,7 @@ jobs:
       # suite needs Playwright 1.58 or later")
       - name: Set up Node.js and Playwright
         if: env.GROUP_RUN == 'yes'
-        uses: bats-lang/pwa/.github/actions/e2e-setup@e2d98d401f06abdccebad8a53f0be1938ab43b8a
+        uses: bats-lang/pwa/.github/actions/e2e-setup@f27f152a210d88de3a538dd704c56db23fcb0e97
         with:
           playwright-minimum: "1.58"
 
@@ -457,7 +457,7 @@ jobs:
   android:
     needs: build
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@bc1a92fea5bc2e4bce0a5a9636ee4e5fd68ab9bd
+    uses: bats-lang/pwa/.github/workflows/android.yml@f27f152a210d88de3a538dd704c56db23fcb0e97
     secrets: inherit
     with:
       artifact: quire-android
