@@ -112,5 +112,11 @@ machine's slots and env file, the cache, the e2e run): `.claude/rules/ci.md`.
 
 ## The version is the commit's
 
-Quire's version is the commit's, never the build's: the same commit always gives the same
-version (#219). How it is made and shown, and the Play release: `.claude/rules/release.md`.
+Quire's version is the date of the commit it is built from, never of the build: the same
+commit always gives the same version (#219). How it is made and shown: `.claude/rules/release.md`.
+
+## Play release
+
+A push to main that passes the whole check is released to Google Play's internal testing
+track by `check.yml`'s `play-internal` job; production is a promotion in the Play Console
+(details: `.claude/rules/release.md`).
