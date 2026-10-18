@@ -881,6 +881,77 @@ implement ui_el(parent, id, element_tag, class_name) = let
 in _set_attr(id, $D.Class, class_name) end
 
 (* ============================================================
+   Lists (#690)
+   ============================================================ *)
+
+(* A list is made only here, so every one says it is a list: Safari with
+   VoiceOver drops the semantics of a list whose markers are gone (the
+   items are blocks), unless it states its role. The items are list items
+   (the native element: a list in an item is announced as a nested list
+   and its level, so no aria-level is written). A list or an item is
+   given its class, which is the stylesheet's to say how it looks *)
+fn _list_part {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}
+  (document: !$D.document(document_loc), parent_bytes: !$A.borrow(byte, parent_loc, parent_len), parent_len: int parent_len,
+   id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, element: $D.tag, is_list: bool, class_name: string class_len): void = let
+  val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, element)
+  val () = _document_attr(document, id_bytes, id_len, $D.Class, class_name)
+in (if is_list then _document_attr(document, id_bytes, id_len, $D.Role, "list") else ()) end
+
+(* A list id, a child of parent *)
+#pub fn ui_list {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}
+  (parent: string parent_len, id: string id_len, class_name: string class_len): void
+
+implement ui_list(parent, id, class_name) = let
+  val parent_len = _length(parent) and id_len = _length(id)
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(_literal_bytes(parent, parent_len))
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = _list_part(document, parent_bytes, parent_len, id_bytes, id_len, $D.Ul(), true, class_name)
+  val () = $D.destroy(document)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in release_bytes(id_frozen, id_bytes) end
+
+(* A list with a numbered id, in a numbered parent (an item) *)
+#pub fn ui_list_nn {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}
+  (parent: $A.arr(byte, parent_loc, parent_len), parent_len: int parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len, class_name: string class_len): void
+
+implement ui_list_nn(parent, parent_len, id, id_len, class_name) = let
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = _list_part(document, parent_bytes, parent_len, id_bytes, id_len, $D.Ul(), true, class_name)
+  val () = $D.destroy(document)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in release_bytes(id_frozen, id_bytes) end
+
+(* A list item with a numbered id, in the list parent *)
+#pub fn ui_item_n {parent_len:pos | parent_len < 256}{id_loc:agz}{id_len:pos | id_len < 256}{class_len:pos | class_len < 256}
+  (parent: string parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len, class_name: string class_len): void
+
+implement ui_item_n(parent, id, id_len, class_name) = let
+  val parent_len = _length(parent)
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(_literal_bytes(parent, parent_len))
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = _list_part(document, parent_bytes, parent_len, id_bytes, id_len, $D.Li(), false, class_name)
+  val () = $D.destroy(document)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in release_bytes(id_frozen, id_bytes) end
+
+(* A list item with a numbered id, in a numbered list *)
+#pub fn ui_item_nn {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}
+  (parent: $A.arr(byte, parent_loc, parent_len), parent_len: int parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len, class_name: string class_len): void
+
+implement ui_item_nn(parent, parent_len, id, id_len, class_name) = let
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = _list_part(document, parent_bytes, parent_len, id_bytes, id_len, $D.Li(), false, class_name)
+  val () = $D.destroy(document)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in release_bytes(id_frozen, id_bytes) end
+
+(* ============================================================
    The words of leaving (#380): one place says what a button that
    dismisses is called, by what it dismisses, so a layer is not left
    with a word of its own. A screen is left with Done, a sheet, a panel
