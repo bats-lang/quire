@@ -157,6 +157,88 @@ class Graph(unittest.TestCase):
         self.assertNotIn(' b ', text)
 
 
+class StripComments(unittest.TestCase):
+    """strip_comments and the import pattern on the text shapes that can
+    hide an import (#656)."""
+
+    def imports(self, text):
+        return af.IMPORT.findall(af.strip_comments(text))
+
+    def test_a_glob_in_a_string_starts_no_block_comment(self):
+        text = "const files = 'e2e/*.js';\nimport { book } from './books.js';\nconst end = '*/';\n"
+        self.assertEqual(self.imports(text), ['./books.js'])
+
+    def test_a_glob_in_a_string_before_a_real_block_comment(self):
+        text = "const g = 'e2e/*.js'; import './x.js'; /* c */ y();\n"
+        self.assertEqual(self.imports(text), ['./x.js'])
+        self.assertNotIn(' c ', af.strip_comments(text))
+
+    def test_a_double_quoted_and_a_template_string_are_kept(self):
+        text = 'const a = "x/*y"; const b = `p//q`; import "./z.js";\n'
+        stripped = af.strip_comments(text)
+        self.assertIn('"x/*y"', stripped)
+        self.assertIn('`p//q`', stripped)
+        self.assertEqual(self.imports(text), ['./z.js'])
+
+    def test_a_line_comment_marker_in_a_string_is_not_a_comment(self):
+        self.assertEqual(self.imports("const u = 'a//b'; import './x.js'\n"), ['./x.js'])
+
+    def test_a_quote_in_a_comment_starts_no_string(self):
+        text = "// it's here\nimport './x.js';\n/* don't */ import './y.js';\n"
+        self.assertEqual(self.imports(text), ['./x.js', './y.js'])
+
+    def test_a_commented_import_is_dropped_whatever_the_comment(self):
+        text = "// import './a.js'\n/* import './b.js'; */\n/*\n * import './c.js'\n */\nimport './d.js';\n"
+        self.assertEqual(self.imports(text), ['./d.js'])
+
+    def test_a_block_comment_ends_at_the_first_close(self):
+        self.assertEqual(self.imports("/* a */ import './x.js'; /* b */\n"), ['./x.js'])
+
+    def test_a_trailing_line_comment_keeps_the_code_before_it(self):
+        self.assertEqual(self.imports("import './x.js'; // import './y.js'\n"), ['./x.js'])
+
+    def test_a_template_literal_without_substitution_is_an_import(self):
+        self.assertEqual(self.imports("const m = await import(`./c.js`);\nrequire(`./d.js`);\n"), ['./c.js', './d.js'])
+
+    def test_a_template_literal_with_substitution_is_not_a_static_specifier(self):
+        # not seen: nothing in e2e/ writes one (a gap of the rule, not a pass)
+        self.assertEqual(self.imports("await import(`./book-${name}.js`);\n"), [])
+
+    def test_a_misread_quote_costs_its_line_not_the_file(self):
+        text = "const quote = /'/; const x = 1;\nimport './x.js';\n"
+        self.assertEqual(self.imports(text), ['./x.js'])
+
+
+class Workflow(unittest.TestCase):
+    """The jobs read the plan so that a group it does not name is not
+    skipped (#656). In an expression `null == false` is true (a loose
+    comparison turns both into 0), so `!= false` would skip a missing group;
+    the text of the entry, 'null' against 'false', tells them apart. This
+    reads the workflow's text: the expression itself runs only on GitHub."""
+
+    TEXT = (ROOT / '.github' / 'workflows' / 'check.yml').read_text()
+
+    def test_the_plan_has_an_entry_for_every_group(self):
+        result = run_plan([('M', 'README.md')])
+        self.assertEqual(sorted(result['e2e']), sorted(GROUPS['e2e']))
+        self.assertEqual(sorted(result['static']), sorted(GROUPS['static']))
+
+    def test_an_e2e_group_is_skipped_only_when_the_plan_says_false(self):
+        reads = re.findall(r"\$\{\{[^}]*e2e_run\)\[matrix\.group\][^}]*\}\}", self.TEXT)
+        self.assertEqual(len(reads), 1)
+        self.assertIn("toJSON(fromJSON(needs.plan.outputs.e2e_run)[matrix.group]) == 'false' && 'no' || 'yes'", reads[0])
+
+    def test_no_job_reads_a_group_of_the_plan_as_a_bare_truth_value(self):
+        for read in re.findall(r"[^\n]*_run\)\[matrix\.group\][^\n]*", self.TEXT):
+            with self.subTest(read):
+                self.assertTrue("toJSON(" in read or ".members" in read or ".bats" in read, read)
+
+    def test_a_static_group_the_plan_does_not_name_fails_its_job(self):
+        self.assertIn("if: toJSON(fromJSON(needs.plan.outputs.static_run)[matrix.group]) == 'null'", self.TEXT)
+        step = self.TEXT.index('- name: The plan names this group')
+        self.assertIn('exit 1', self.TEXT[step:step + 600])
+
+
 class Diff(unittest.TestCase):
     """The paths a change touched, as git says them (-z: any name).
 
