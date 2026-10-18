@@ -23,11 +23,17 @@ const summary = page => searchPanel(page).getByRole('status');
 /** The text of the page, whole (not only what is on the screen) */
 const pageText = page => bookPage(page).evaluate(el => el.textContent);
 
-/** Searches the book for text: how many results it says */
+/**
+ * Searches the book for text: how many results it says. The query is set
+ * in one fill(), which fires one input event, so the app runs one search
+ * for the whole text. Typed key by key, the app's input (debounced 300 ms)
+ * ran a search for each prefix whose gap was longer than that, and the
+ * status showed the count of an earlier prefix ("4 results" for 'p').
+ */
 async function searched(page, text) {
   await page.keyboard.press('/');
   await expect(searchPanel(page)).toBeVisible();
-  await page.keyboard.type(text);
+  await searchPanel(page).getByRole('searchbox', { name: 'Search in book' }).fill(text);
   await expect(summary(page)).toHaveText(/^(\d+ results?|No results.*)$/);
   const said = await summary(page).textContent();
   await page.keyboard.press('Escape');
