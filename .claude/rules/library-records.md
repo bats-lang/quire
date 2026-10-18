@@ -14,6 +14,11 @@ paths:
   - src/import.bats
   - src/file_version.bats
   - src/storage.bats
+  - src/bytes.bats
+  - src/crc.bats
+  - src/seq.bats
+  - src/chapter_hrefs.bats
+  - e2e/sync-lost-groups*
   - scripts/record_tables.py
   - scripts/gen-record.py
   - tests/codec/**

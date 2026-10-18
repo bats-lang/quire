@@ -173,7 +173,9 @@ toast.
   once there is anything to go back from, and never takes a guard back on its
   own (`history.back()` is asynchronous: raced pushes and reloads); a guard left
   behind is taken by the next Back, and with nothing to go back from that Back
-  is the platform's (`back_leave`). `e2e/back.spec.js` walks every screen of
+  is the platform's (`back_leave`). The page restores its own scroll
+  (`history_scroll_restoration`, `ScrollManual`), so going back over a guard never
+  moves the library. `e2e/back.spec.js` walks every screen of
   `e2e/walk.js` (also walked by `e2e/layout.spec.js`, so a screen added there is
   covered) and checks Back goes exactly one step from each.
 * **Settings** (`LSettings`, `_wire_settings_screen`) follows Android's pattern:

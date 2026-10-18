@@ -104,7 +104,7 @@ first (the mutation check is, below).
   removed entry and leaves the old runs queued. `check.yml` cancels a group's
   run on the group's `destroyed` event, and `supersede.yml` (#620) cancels the
   older runs of the same PR on `checks_requested` (the file's header says
-  when); `qsweep` cancels what slips through.
+  when).
 * Where an entry is: the PR timeline (`added_to_merge_queue`,
   `removed_from_merge_queue`); `auto_merge` empty means enqueued or removed.
 

@@ -4,6 +4,8 @@ paths:
   - src/settings.bats
   - src/page_size.bats
   - src/annot.bats
+  - src/locator.bats
+  - src/toc.bats
   - e2e/touch-selection*
   - e2e/footnotes*
   - e2e/wide*

@@ -54,7 +54,7 @@ each entry the register `bstep` makes from zero), the byte step (`bstep_by_table
 built from arith's XOR algebra `xor_comm`, `xor_assoc`, `xor_cat`, `xor_cancel`
 and the linearity of the step, `step1_xor`, `stepn_xor`, `shift8`) and the loop
 (`holds_snoc`, `crcfrom_snoc`, `table_step`). Statements are written in digits so
-no index nests a division: eight chained `step_even` with `high/256` in their
+no index nests a division: a statement with a division (`high/256`) in its
 indices did not finish under the infinite-precision solver (quire#594).
 `tests/static/accept/crc-*` and `reject/crc-*` (a shift off by a bit, a table entry
 of another byte, a register not complemented, a cell read for another) fail to

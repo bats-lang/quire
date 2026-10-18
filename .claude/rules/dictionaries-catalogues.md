@@ -5,6 +5,7 @@ paths:
   - src/catalogue*.bats
   - src/opds.bats
   - src/url.bats
+  - src/stored_key.bats
   - e2e/dictionary*
   - e2e/create-stardict.js
   - e2e/catalogue*
