@@ -107,6 +107,14 @@ the machine's load and pressure, and native stacks and a core. The capture is
   bats-lang/pwa#109); `QUIRE_STALL_GDB` names another. Without gdb, or with ptrace or sudo
   refused, the e2e run as before and nothing goes red: the capture records `native.unavailable`
   and the spec's native tests skip with that reason, on CI too.
+* **When gdb gives no stacks** (not installed, or the kernel refuses its attach) the capture asks
+  `eu-stack` (the job installs `elfutils` beside gdb) and then `pstack` for the renderer's
+  user-space stacks, and each renderer's `userSpaceStacks` says which answered (`gdb`, `eu-stack`,
+  `pstack`) or `not available: <why for each tool>` (`fallbackStacks.tried` has each tool's text,
+  exit code and note). The kernel's view of the other browser processes (the browser's, the GPU's)
+  is `native.browserProcesses`: their threads, wait channels and syscalls, never attached to.
+  `ptraceScope`, `root`, the maps, the build id and the kernel stack of every thread are always
+  recorded. Pure fallback: a step that fails is a note in the capture, never a red test.
 * **A core** of up to `CORE_MOST` renderers, gzipped, is uploaded as `e2e-stall-cores-<group>`
   only when one was kept. gdb first calls `madvise(MADV_DONTDUMP)` on the mappings with no
   resident page (`quietRanges`), or `generate-core-file` never finishes. Over `CORE_MAX_BYTES`

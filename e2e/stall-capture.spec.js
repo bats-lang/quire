@@ -15,8 +15,10 @@
  */
 
 import { createServer } from 'node:http';
-import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
 import { test, expect } from './fixtures.js';
 import { arm, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, nativeScope, nativeStacks, NATIVE_MOST_MS, TEARDOWN_MOST_MS } from './stall-capture.js';
 
@@ -139,6 +141,15 @@ function expectNativeStacks(capture, pids) {
   expect(renderer.anonymousCode.length, 'JIT code lives in executable memory with no file').toBeGreaterThan(0);
   // the kernel's view of every thread, the main thread (tid = pid) among them
   expect(renderer.kernel.tasks.length).toBeGreaterThan(2);
+  // the new fields (#575): where the user-space stacks came from, ptrace's setting, the other browser processes
+  expect(renderer.userSpaceStacks).toBe('gdb');
+  expect(renderer.fallbackStacks, 'the fallback tools are asked only when gdb gave none').toBeUndefined();
+  expect(typeof capture.native.ptraceScope).toBe('string');
+  expect(typeof capture.native.root).toBe('boolean');
+  expect(renderer.exe).toBeTruthy();
+  expect(capture.native.browserProcesses.length, 'the browser process is noted').toBeGreaterThan(0);
+  for (const other of capture.native.browserProcesses) expect(other.kernel.tasks.length, `${other.type} ${other.pid} has threads`).toBeGreaterThan(0);
+  expect(capture.native.browserProcesses.some((other) => other.type === 'browser')).toBe(true);
   const main = renderer.kernel.tasks.find((task) => task.tid === renderer.pid);
   expect(main, 'the main thread is a task').toBeTruthy();
   expect(main.state).toMatch(/^[RSDtT]$/);
@@ -146,6 +157,7 @@ function expectNativeStacks(capture, pids) {
   // gdb's backtrace of every thread
   expect(stacks.ok, `${stacks.error} ${stacks.stderr}`).toBe(true);
   expect(stacks.threadCount).toBe(renderer.kernel.tasks.length);
+  expect(stacks.threads.length, 'the thread list of a hung page is not empty').toBeGreaterThan(0);
   expect(stacks.mainThread, 'gdb listed the main thread (LWP = pid)').toBeTruthy();
   const frames = stacks.mainThread.frames;
   expect(frames.length).toBeGreaterThan(0);
@@ -263,7 +275,63 @@ test('without gdb the capture of a frozen renderer says so and carries on', asyn
     expect(capture.rendererCpu.length).toBeGreaterThan(0);
     expect(capture.verdict).toContain('blocked');
     expect(capture.native.renderers.every((renderer) => renderer.exe && renderer.kernel.tasks.length > 0 && !renderer.gdbStacks.ok)).toBe(true);
+    // the fallback tools were asked in order; what none could give is said, with a reason
+    for (const renderer of capture.native.renderers) {
+      expect(renderer.fallbackStacks.tried.map((each) => each.tool)).toEqual(expect.arrayContaining(['eu-stack']));
+      expect(renderer.userSpaceStacks).toMatch(/^(eu-stack|pstack|not available: .+)$/);
+      for (const each of renderer.fallbackStacks.tried) if (!each.ok) expect(each.note).toMatch(/^not available: /);
+    }
   } finally {
+    if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
+  }
+});
+
+/** A directory with an executable stand-in for a stack tool, first on PATH while `during` runs. */
+async function withTools(tools, during) {
+  const directory = mkdtempSync(join(tmpdir(), 'stall-tools-'));
+  const kept = process.env.PATH;
+  try {
+    for (const [name, script] of Object.entries(tools)) { writeFileSync(join(directory, name), `#!/bin/sh\n${script}\n`); chmodSync(join(directory, name), 0o755); }
+    process.env.PATH = `${directory}${delimiter}${kept}`;
+    return await during();
+  } finally {
+    process.env.PATH = kept;
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+const NO_GDB = '/nonexistent/gdb';
+
+test('without gdb the stacks come from eu-stack, else pstack, else the capture says why none can', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const hung = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const kept = process.env.QUIRE_STALL_GDB;
+  process.env.QUIRE_STALL_GDB = NO_GDB;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const FRAMES = 'echo "PID $2 - process"; echo "TID $2:"; echo "#0  0x00007f0000001000 - /lib/libc.so.6 + 0x1000 nanosleep"; echo "#1  0x0000555500002000 - /usr/bin/sleep + 0x2000 main"';
+    // eu-stack answers: it is used, pstack is not asked
+    const first = await withTools({ 'eu-stack': FRAMES, pstack: 'echo "#0 pstack should not run"' }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
+    expect(first.renderers[0].userSpaceStacks).toBe('eu-stack');
+    expect(first.renderers[0].fallbackStacks.tried.map((each) => each.tool)).toEqual(['eu-stack']);
+    expect(first.renderers[0].fallbackStacks.tried[0].text).toContain('nanosleep');
+    // eu-stack fails (ptrace refused), pstack answers
+    const second = await withTools({ 'eu-stack': 'echo "eu-stack: cannot attach to process: Operation not permitted" >&2; exit 1', pstack: 'echo "#0  0x00007f0000001000 in nanosleep ()"' }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
+    expect(second.renderers[0].userSpaceStacks).toBe('pstack');
+    const [failed, answered] = second.renderers[0].fallbackStacks.tried;
+    expect(failed.ok).toBe(false);
+    expect(failed.note).toMatch(/^not available: eu-stack gave no stacks: .*Operation not permitted/);
+    expect(answered.ok).toBe(true);
+    // both fail: the entry says why, and nothing throws
+    const third = await withTools({ 'eu-stack': 'exit 3', pstack: 'echo nothing to show' }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
+    expect(third.error).toBeUndefined();
+    expect(third.renderers[0].userSpaceStacks).toMatch(/^not available: gdb \(gdb is not installed\); not available: eu-stack gave no stacks.*; not available: pstack gave no stacks/);
+    // the kernel's view and the maps are there whatever the tools said
+    expect(third.renderers[0].kernel.tasks.length).toBeGreaterThan(0);
+    expect(third.renderers[0].mapsError).toBeUndefined();
+    expect(third.renderers[0].modules.length).toBeGreaterThan(0);
+  } finally {
+    hung.kill('SIGKILL');
     if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
   }
 });
