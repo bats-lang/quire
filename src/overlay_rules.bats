@@ -18,10 +18,10 @@ staload "declarations.sats"
 
 implement image_zoom_axes () = $GT.AxNone()
 
-#pub fn overlay_rules {left:nat | left >= 8269} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8269] sheet(after, false, false)
+#pub fn overlay_rules {left:nat | left >= 8325} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8325] sheet(after, false, false)
 
 (* The image viewer and toasts, from .imview on *)
-fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2600] sheet(after, false, false) = let
+fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2629} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2629] sheet(after, false, false) = let
   (* a book's image, full screen, on the bars' dark ground (a picture is
      best seen on a dark one, and every theme's bar is dark); the fingers
      zoom and pan it (image_viewer.bats) *)
@@ -67,6 +67,9 @@ fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2600} (sheet: sheet
   val sheet = lay(sheet, Bottom(), "max(8px,var(--safe-bottom))")
   val sheet = centre_x(sheet)
   val sheet = lay(sheet, Display(), "flex")
+  (* its two words at the system's font scale are wider than the half
+     of the window it would be shrunk to (#412) *)
+  val sheet = lay(sheet, Width(), "max-content")
   val sheet = spaced(sheet, Gap(), SpaceSmall())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".imzoom .btn")
@@ -216,6 +219,9 @@ fn overlay_rules_menus {left:nat | left >= 2293} (sheet: sheet(left, false, fals
   val sheet = close(sheet)
   val sheet = rule(sheet, ".mname")
   val sheet = lay(sheet, Font(), "inherit")
+  (* the field is as wide as the dialog, not as the twenty characters of
+     its default size, which at the system's font scale outgrow it (#412) *)
+  val sheet = lay(sheet, Width(), "100%")
   val sheet = spaced(sheet, Padding(), SpaceSmall())
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = close(sheet)
@@ -226,7 +232,7 @@ fn overlay_rules_menus {left:nat | left >= 2293} (sheet: sheet(left, false, fals
 in sheet end
 
 (* The dialog fields and book info, from .sfields on *)
-fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2771} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2771] sheet(after, false, false) = let
+fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2798} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2798] sheet(after, false, false) = let
   val sheet = rule(sheet, ".sfields")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")

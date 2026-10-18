@@ -64,11 +64,28 @@ QLB6 opens at its stored place (`e2e/legacy-library.js`).
   each other's build.
 * Display size: Android's largest is 320 CSS px wide at ratio 3.375 (default 412
   x 915 at 2.625); `e2e/display-size.spec.js` walks every screen and a chapter's
-  pages at that size. The system font scale (130%, 200%) is not played: the
-  WebView applies it itself, and desktop Chromium's
-  `--blink-settings=accessibilityFontScaleFactor` was measured not to scale
-  Quire's screens (a test on it would pass for nothing); the two font scale
-  boxes of #412 stay open until a real WebView is driven.
+  pages at that size. The system font scale (130%, 200%) is played by
+  `e2e/font-scale.spec.js` with Chromium's own `text-size-adjust: <percent>`
+  on the root element (set through a constructable style sheet, since the
+  app's content security policy refuses a `<style>` made by a script), which
+  multiplies every computed text size and leaves a box as it is, as a
+  WebView's text size percent does; it applies in a mobile viewport only, so
+  the spec skips elsewhere. `--blink-settings=accessibilityFontScaleFactor`
+  was measured not to scale Quire's screens (it goes through the text
+  autosizer, which skips them), so a test on it would pass for nothing. It
+  found, at 200%, what em lengths and fixed widths do (an em is the specified
+  size, so it does not grow with the text): an icon glyph outgrew its 48 px
+  button (a glyph is `text-size-adjust: none`: Android's icons are dp, not sp;
+  so is the theme swatch's "Aa"), the picture viewer's Zoom buttons were
+  wider than the half window they were shrunk to (`.imzoom` is `max-content`),
+  the new collection field was wider than its dialog (`.mname` is 100%), a
+  setting's label and value were narrower than their longest word (`.slabel`
+  and `.sval` are at least `min-content`), a panel's title and Close did not
+  fit one line (`.ph` wraps) and the reading settings' tabs shrank under their
+  words (they wrap, not shrink). Not shown: the real WebView (that nothing in
+  the Capacitor shell sets its text zoom, and how its text size percent treats
+  a box), which only the emulator job can; that part of #412's font scale
+  boxes stays open.
 
 ## Where a book opens the first time (#409)
 

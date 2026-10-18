@@ -9,7 +9,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn shell_rules {left:nat | left >= 9443} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9443] sheet(after, false, false)
+#pub fn shell_rules {left:nat | left >= 9465} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9465] sheet(after, false, false)
 
 (* The library page, from body on *)
 fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1919] sheet(after, false, false) = let
@@ -104,7 +104,7 @@ fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false,
 in sheet end
 
 (* The fields and banners, from .btn input[type=file] on *)
-fn shell_rules_fields_and_banners {left:nat | left >= 2200} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2200] sheet(after, false, false) = let
+fn shell_rules_fields_and_banners {left:nat | left >= 2222} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2222] sheet(after, false, false) = let
   val sheet = rule(sheet, ".btn input[type=file],.ibtn input[type=file]")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Top(), "0")
@@ -120,6 +120,11 @@ fn shell_rules_fields_and_banners {left:nat | left >= 2200} (sheet: sheet(left, 
      own text colour (#295) *)
   val sheet = rule(sheet, "[data-icon]")
   val sheet = lay(sheet, FontFamily(), "'Material Symbols',Inter,system-ui,sans-serif")
+  (* a glyph is a picture the size of its button, as Android's icons are
+     (dp, not sp): the system's font scale, which a WebView applies to
+     the page's text (e2e/font-scale.spec.js), does not enlarge it past
+     its box (#412) *)
+  val sheet = lay(sheet, TextSizeAdjust(), "none")
   val sheet = close(sheet)
   (* an icon button; text it shows (Skip table) is in the app's face *)
   val sheet = rule(sheet, ".ibtn")

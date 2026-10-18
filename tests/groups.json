@@ -93,6 +93,7 @@
       "display-size.spec.js",
       "epub2.spec.js",
       "epubcheck.spec.js",
+      "font-scale.spec.js",
       "settings-screen.spec.js",
       "raw-mouse.spec.js"
     ],
