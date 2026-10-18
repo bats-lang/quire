@@ -3,7 +3,7 @@
 // as the words beside them do, and a picture of black ink on no ground is
 // legible in the dark themes.
 //
-// By research (decisions are in CLAUDE.md, "Equations as pictures"): see there.
+// By research (decisions are in .claude/rules/epub-media.md, "Equations as pictures"): see there.
 
 import { test, expect } from './fixtures.js';
 import { start, bookPage, colours } from './helpers.js';

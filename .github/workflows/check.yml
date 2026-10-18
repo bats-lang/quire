@@ -195,7 +195,7 @@ jobs:
   static:
     needs: plan
     runs-on: ubuntu-24.04
-    # a mutation group of a change to crc.bats is the longest (CLAUDE.md, #594)
+    # a mutation group of a change to crc.bats is the longest (.claude/rules/ci.md, #594)
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -325,8 +325,8 @@ jobs:
 
       # Node's packages, retried and cached, and the Playwright browsers in
       # one directory (PLAYWRIGHT_BROWSERS_PATH): pwa's action (quire#637).
-      # 1.58 is the least Playwright the suite may run on (CLAUDE.md, "The e2e
-      # suite needs Playwright 1.58 or later")
+      # 1.58 is the least Playwright the suite may run on (.claude/rules/e2e.md, "No flaky
+      # waits")
       - name: Set up Node.js and Playwright
         if: env.GROUP_RUN == 'yes'
         uses: bats-lang/pwa/.github/actions/e2e-setup@b594790eebf7e3caab054cff1f07217dae049579

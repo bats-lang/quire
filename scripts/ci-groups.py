@@ -19,7 +19,7 @@ Two kinds of group:
   check and as many fixtures as keep it near the e2e path (build, 10.5
   min, then a group of e2e, 5): `app` (with `check`) takes the rejects,
   `accepts` the accepts and a few rejects. The split into groups of about
-  equal time is measured (CLAUDE.md, #618).
+  equal time is measured (.claude/rules/ci.md, #618).
 
 Every spec and every static member is in exactly one group of its kind,
 and every name a group lists exists: anything else fails, so a spec or a

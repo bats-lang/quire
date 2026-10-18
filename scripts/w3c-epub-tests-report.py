@@ -363,7 +363,7 @@ def main(clone):
     lines += [
         '',
         'A failure marked `next` is a bug whose e2e test is written with its fix, in the area of fixes it belongs to (so a branch',
-        'carries only tests that pass). A `decision` is a failure settled in CLAUDE.md (#419) and kept: `mol-css` (the book\'s own highlight CSS,',
+        'carries only tests that pass). A `decision` is a failure settled in .claude/rules/epub-media.md (#419) and kept: `mol-css` (the book\'s own highlight CSS,',
         'dropped by design, #411).',
     ]
     lines += ['', '## Not applicable', '', '| test | level | why |', '| --- | --- | --- |']
