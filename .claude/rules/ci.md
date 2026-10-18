@@ -31,9 +31,9 @@ The pins and the relock are in CLAUDE.md. Specifics:
 A pull request's jobs restore what bats kept in the newest earlier run
 (`.github/actions/build-cache`, `actions/cache` pinned by commit) and save theirs once the
 job passed. **No key is relied on for correctness**: the key is a locator,
-`quire-<name>@<pins>-<sha>` (a GitHub cache is immutable, so each save needs a new key), and a
-restore takes the newest cache of the name and pins (`restore-keys` `quire-<name>@<pins>-`; the
-`@` ends a name, so `static` never finds `static-memo-rest@...`). It names no runner image, lock,
+`quire-<name>@<pins>-<hash of bats.lock>-<sha>` (a GitHub cache is immutable, so each save needs a new key), and a
+restore takes the newest cache of the name and pins (`restore-keys` `quire-<name>@<pins>-<hash of bats.lock>-`; the
+`@` ends a name, so `static` never finds `static-memo-rest@...`). It names no runner image,
 `bats.toml`, source hash or version a developer bumps, so a new input needs no new key part and
 a wrong key can only restore less useful files.
 
@@ -55,11 +55,17 @@ a wrong key can only restore less useful files.
     the dependency `.dats` it staloads: it can bite** in the `build` job, which restores
     `build/`. quire instantiates array's templates (`$A.alloc<byte>`, `$A.get<byte>` ...
     thousands of times), so a relock that changes the body of one of them without its `.sats`
-    leaves the old instance in the restored C. The lock is not in the key, so the pins are
-    not the cause and removing them is not the fix; check mode (the static jobs) is keyed on
+    leaves the old instance in the restored C. The pins are neutral to it; check mode (the static jobs) is keyed on
     the closure and is not affected. Main builds cold and shows it, a pull request does not.
-    Until bats#323 lands, a PR that changes `bats.lock` should be built cold (or `bats.lock`
-    goes back into the key).
+    So `bats.lock` is in the key again (#682 had dropped it, because bats judges dependency
+    files; in build mode it does not): a relock starts a cold build cache, main's too.
+  * **Exit:** when bats#323 and bats#320 are fixed and quire's bats pin is past them, the pins
+    and `bats.lock` may both leave the key.
+  * **Research** (what others key on): Swatinem/rust-cache keys on the lockfile and the
+    toolchain; actions/cache's own examples key on `hashFiles` of the lock; ccache and sccache
+    key on the content of every input, dependency headers included. A key naming the lock is
+    the common choice wherever the tool does not itself see a dependency's content, which is
+    what bats#323 shows for build mode.
 * **bats judges what a restore holds** (bats's CLAUDE.md is the record): `build/.bats_stamp`
   (bats's inputs, patsopt's toolchain, the C compiler's version, flags, target) drops a `build/`
   made by another toolchain, naming what differs (bats#273); freshness is by content hash, never
