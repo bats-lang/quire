@@ -65,7 +65,9 @@ jobs:
       # everything). Every other run is whole: a push to main and the nightly
       # run are the cold check, and the merge queue's group, which has a base
       # too, runs every group (the mutation groups keep their own rule, which
-      # takes the group's base)
+      # takes the group's base): the queue's group is the whole check of the
+      # combination about to reach main, not a second selection by one pull
+      # request's diff (.claude/rules/ci.md, #656)
       - name: What this run has to run
         id: scope
         run: |
@@ -78,7 +80,10 @@ jobs:
           scripts/ci-groups.py plan $base $full
 
   # The app and the PWA, built once: the Android project and the e2e
-  # groups take them from here (the quire-android artifact)
+  # groups take them from here (the quire-android artifact). It reads
+  # nothing of the plan and is never skipped by it: the Android jobs need its
+  # artifact, and the Android job is never skipped by the plan (below), so a missing or
+  # malformed plan entry cannot make it skip (#656)
   build:
     if: github.event.action != 'destroyed'
     runs-on: ubuntu-24.04
@@ -490,6 +495,12 @@ jobs:
   # branch's or a pull request's too, builds and signs them the same way
   # and checks that both are signed with the release key; only a push to
   # main uploads them as downloadable artifacts.
+  #
+  # It reads nothing of the plan and has no `if`: a skipped job that calls a
+  # reusable workflow starts none of that workflow's jobs, so the required
+  # contexts `android / build-android` and `android / smoke-test` would never
+  # be reported and the pull request would wait for them for ever (GitHub:
+  # "avoid requiring workflows that can be skipped"; #656)
   android:
     needs: build
     # Pinned by commit; the relock workflow moves it (#203)

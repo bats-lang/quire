@@ -195,4 +195,26 @@ each kind selects) and prints each path's reason in its summary. Rules:
   proved: a spec that builds a path from pieces is not seen.
 * The rule is Python in `scripts/` because it runs in the plan job, before any
   compiler exists.
-* Not done: the `build` and `android` jobs still run for every PR.
+* **`build` and `android` run for every PR, by decision (#656).** The plan has no
+  entry for them and they read none, so a missing or malformed entry cannot
+  skip them. `android` is a call of pwa's reusable workflow, and a skipped
+  caller starts none of that workflow's jobs: the required contexts
+  `android / build-android` and `android / smoke-test` would never be
+  reported and the PR would wait for ever (GitHub's troubleshooting page: a job
+  skipped by a condition reports success, but "avoid requiring workflows that
+  can be skipped"; community discussion 29825 has the nested context left
+  unfulfilled). `android` needs the `build` artifact, so `build` runs too.
+  Skipping them waits for the required checks to be `check` alone, and for
+  `check` to need `android` (today it needs `plan`, `build`, `static` and
+  `e2e`; only `play-internal` needs `android`), a change of the branch
+  protection that is an admin's;
+  tested: `Workflow` in `tests/static/affected_test.py`.
+* **The merge queue's group runs everything, by decision (#656).** Its diff
+  (against `HEAD^1`) is one PR's, so a selection by it would be the PR's own
+  and would miss what two PRs do together, which is what the queue is for
+  (the "not rocket science" rule: what reaches main passed the whole suite,
+  as rust-lang's bors runs the full suite on the merge commit and a limited
+  one on the PR, rustc-dev-guide, "Continuous integration"). GitHub also needs
+  the required checks to report on `merge_group` (it does). The cost is the
+  queue's 60 minutes, which the groups' balance keeps (#618); the PR's run is
+  where the selection saves.
