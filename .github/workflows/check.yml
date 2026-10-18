@@ -477,18 +477,24 @@ jobs:
     needs: [plan, build, static, e2e]
     runs-on: ubuntu-24.04
     steps:
-      - name: Every group passed
+      # What the plan selected, printed beside the results (as the aggregator
+      # printed it before the action of repository-prototype, #328)
+      - name: What the plan selected
         env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
           E2E_RUN: ${{ needs.plan.outputs.e2e_run }}
           STATIC_RUN: ${{ needs.plan.outputs.static_run }}
         run: |
-          echo "plan, build, static, e2e: $RESULTS"
           echo "e2e groups run (false: shown unaffected by the change): $E2E_RUN"
           echo "static members run, by group: $STATIC_RUN"
-          for result in $RESULTS; do
-            [ "$result" = success ] || { echo "::error::a job this check needs ended $result"; exit 1; }
-          done
+
+      # Every job in needs must have passed: skipped, cancelled and failed are
+      # not a pass, and a job missing from needs fails (repository-prototype's
+      # check-aggregate, #328, called by commit)
+      - name: Every group passed
+        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@f2c21c6cd217ccdd1f3390840758aca29472a6ba # check-aggregate at repository-prototype main (#345, #347)
+        with:
+          jobs: plan build static e2e
+          results: ${{ toJSON(needs) }}
 
   # The Android app (AAB and APK), built by the pwa package's workflow and
   # signed with this repository's secrets; see ANDROID.md. Every run, a
