@@ -218,3 +218,39 @@ each kind selects) and prints each path's reason in its summary. Rules:
   the required checks to report on `merge_group` (it does). The cost is the
   queue's 60 minutes, which the groups' balance keeps (#618); the PR's run is
   where the selection saves.
+
+## Checking locally before a push
+
+A session sets up the compiler in its own environment: what bats's composite action does
+(`bats-lang/bats/.github/actions/setup`, called by commit from `check.yml`, `mutation.yml` and
+`deploy.yml`; quire keeps no copy of it). That is ATS2's `patsopt` from the tarball it names
+(the gmp build, whose solver computes in infinite precision, with libgmp-dev; the -int build's
+solver computes in C `int` and accepts false statements, #594, so a check made with it proves
+less than CI's), `lld`, the compiler built from the commit in `.github/bats-version` (its
+`bootstrap/c`, `make release/bats`), and a clone of bats-lang/repository-prototype at the
+commit `.github/repository-version` names. Locally run `bats check --repository <the clone>`,
+or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
+
+* Two bats in one checkout take turns (a lock on `bats.toml`). Two checkouts take turns by
+  bats's opt-in machine-wide slots: with `BATS_SLOTS=N` (1 to 64) `check`, `build`, `test` and
+  `run`'s build each hold one of N `flock` files in `BATS_LOCK_DIR`. `gen-pwa test` uses the
+  same files for `PWA_TEST_SLOTS` in `PWA_TEST_LOCK_DIR`; one directory for both makes builds
+  and e2e runs one pool. A machine shared by sessions sets `BATS_SLOTS=1`, `BATS_LOCK_DIR` and
+  `PWA_TEST_LOCK_DIR` (one directory), `PWA_TEST_SLOTS=1`, `BATS_CACHE_DIR` and
+  `BATS_REPOSITORY` in the shell's profile.
+* A shell that reads no profile (an agent's) gets the same from an env file that is not in the
+  repo (say `~/quire.env`) through `bats with-env <env-file> <command> [args...]` (bats#277):
+  it adds the file's variables and runs the command exactly as given, e.g. `bats with-env
+  ~/quire.env bats check`.
+* `BATS_CACHE_DIR=<dir>` keeps patsopt's C in that directory, keyed by what patsopt reads,
+  shared by every checkout of the machine (#499). Set it in the profile.
+* The e2e suite runs through the app's generator, `./dist/debug/gen-pwa test [--timings
+  <dir>] [-- <playwright args> <spec>...]` (pwa's `test_run`, bats-lang/pwa#82), after `bats
+  build`, `./dist/debug/gen-pwa`, `scripts/sync-clients.sh dist/pwa` and `cp -R homepage
+  dist/pwa/homepage` (`e2e/about.spec.js` reads the home page). It serves `dist/pwa` at a port
+  the kernel picks, takes a slot, checks that `PLAYWRIGHT_BROWSERS_PATH` holds the headless
+  Chromium this Playwright expects (it never downloads one), and runs the `@serial` tests alone
+  and then the others. A `--grep` or `--workers` of the caller's makes it one run. A change to
+  a spec or a static fixture runs that group too where the machine can (`tests/static/run.sh`,
+  `gen-pwa test -- <spec>`); what it cannot run is left to CI and said in the PR. Playwright
+  1.58 or later is required (`.claude/rules/e2e.md`).

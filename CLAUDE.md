@@ -104,69 +104,13 @@ are in `.claude/rules/ci.md`, which loads when CI files are touched.
 
 ## Check locally before every push
 
-A session sets up the compiler in its own environment and runs `bats check` before it
-pushes, so a push that does not type-check never reaches CI. Setup is what bats's composite
-action does (`bats-lang/bats/.github/actions/setup`, called by commit from `check.yml`,
-`mutation.yml` and `deploy.yml`; quire has no copy of it): ATS2's `patsopt` from the tarball
-it names (the gmp build, whose solver computes in infinite precision, with libgmp-dev; the
--int build's solver computes in C `int` and accepts false statements, #594, so a check made
-with it proves less than CI's), `lld`, the compiler built from the commit in
-`.github/bats-version` (its `bootstrap/c`, `make release/bats`), and a clone of
-bats-lang/repository-prototype at the commit `.github/repository-version` names. The action
-sets `BATS_REPOSITORY`, `BATS_COMMIT` and the patsopt caps for later steps; locally run `bats
-check --repository <the clone>`, or with `BATS_REPOSITORY=<the clone>` and no flag (the flag
-wins). A check takes 10 to 15 minutes on a cold build: run it in the background and wait for
-it, never push on the hope that it passes.
-
-* Two bats in one checkout take turns (a lock on `bats.toml`). Two checkouts take turns by
-  bats's opt-in machine-wide slots: with `BATS_SLOTS=N` (1 to 64) `check`, `build`, `test` and
-  `run`'s build each hold one of N `flock` files in `BATS_LOCK_DIR`. `gen-pwa test` uses the
-  same files for `PWA_TEST_SLOTS` in `PWA_TEST_LOCK_DIR`; one directory for both makes builds
-  and e2e runs one pool. A machine shared by sessions sets `BATS_SLOTS=1`, `BATS_LOCK_DIR` and
-  `PWA_TEST_LOCK_DIR` (one directory), `PWA_TEST_SLOTS=1`, `BATS_CACHE_DIR` and
-  `BATS_REPOSITORY` in the shell's profile.
-* A shell that reads no profile (an agent's) gets the same from an env file that is not in the
-  repo (say `~/quire.env`) through `bats with-env <env-file> <command> [args...]` (bats#277):
-  it adds the file's variables and runs the command exactly as given, e.g. `bats with-env
-  ~/quire.env bats check`.
-* `BATS_CACHE_DIR=<dir>` keeps patsopt's C in that directory, keyed by what patsopt reads,
-  shared by every checkout of the machine (#499). Set it in the profile.
-* The e2e suite runs through the app's generator, `./dist/debug/gen-pwa test [--timings
-  <dir>] [-- <playwright args> <spec>...]` (pwa's `test_run`, bats-lang/pwa#82), after `bats
-  build`, `./dist/debug/gen-pwa`, `scripts/sync-clients.sh dist/pwa` and `cp -R homepage
-  dist/pwa/homepage` (`e2e/about.spec.js` reads the home page). It serves `dist/pwa` at a port
-  the kernel picks, takes a slot, checks that `PLAYWRIGHT_BROWSERS_PATH` holds the headless
-  Chromium this Playwright expects (it never downloads one), runs the `@serial` tests alone
-  and then the others. A `--grep` or `--workers` of the caller's makes it one run. It needs
-  Playwright 1.58 or later (`.claude/rules/e2e.md`). A change to a spec or a static fixture
-  runs that group too where the machine can (`tests/static/run.sh`, `gen-pwa test --
-  <spec>`); what it cannot run is left to CI and said in the PR. A fix pushed after a red CI
-  is checked the same way first.
+Run `bats check` before every push, so a push that does not type-check never reaches CI. A
+cold check takes 10 to 15 minutes: run it in the background and wait for it, never push on
+the hope that it passes. Run the e2e or static groups a change touches where the machine can,
+and a fix pushed after a red CI is checked the same way first. How (the compiler, the
+machine's slots and env file, the cache, the e2e run): `.claude/rules/ci.md`.
 
 ## The version is the commit's
 
-Quire's version is the date of the commit it is built from, never of the build, so the same
-commit always gives the same version (#219): the committer date in UTC,
-`YEAR.MONTH.DAY.SECONDS` (seconds since midnight), and the short SHA, `2026.10.2.61373
-(f95ce82)`. bats writes the commit's facts as a module (`build/src/_bats_facts`, from the
-commit `BATS_COMMIT` names, else HEAD) and `src/version.bats` words them (`quire_version`,
-`quire_commit_short`, `quire_version_text`, `quire_version_code`). The app and gen-pwa compile
-them in: About shows the text, a backup records it (`appVersion`), and gen-pwa appends it to
-the Android project's `android-release.gradle` as `versionName`, with `versionCode` the same
-time in minutes since 2025. CI names a pull request's own head (`BATS_COMMIT`, set by bats's
-setup action: the merge's second parent, hence `fetch-depth: 2`) and for a merge group the
-group's own commit (`github.sha`). Outside a git repository a build fails and says so;
-`tests/static/run.sh` points git at the checkout's repository (`GIT_DIR`).
-`tests/version/same.sh` checks that the facts are the same in other time zones, name the
-commit, and that the Android project carries the version and its code.
-
-## Main goes to Play's internal testing (#308)
-
-Every push to main that passes the whole check is released to Google Play's internal testing
-track by `check.yml`'s `play-internal` job, which calls pwa's reusable workflow
-`play-release.yml` by commit (the script, its stub of Play and its test live in pwa): the
-run's own `release-aab`, the commit's first line as its notes. The caller passes the same
-commit twice, as `uses:` and as `pwa-ref`, and its public names as `with:` inputs. It signs in
-by Workload Identity Federation, whose provider admits only a push to main of this
-repository, so no key exists and no other run can release. Production is a promotion in the
-Play Console; ANDROID.md says how.
+Quire's version is the commit's, never the build's: the same commit always gives the same
+version (#219). How it is made and shown, and the Play release: `.claude/rules/release.md`.
