@@ -109,7 +109,7 @@ jobs:
           echo "play_signing_sha1=$sha1" >> "$GITHUB_OUTPUT"
 
       - name: Set up bats
-        uses: bats-lang/bats/.github/actions/setup@e2b86606c7f04ab43908a0820446871c1d4e0244 # the setup action (bats#280)
+        uses: bats-lang/bats/.github/actions/setup@c488d5205fc805c505618272c66761481365e2c4 # the setup action (bats#280)
 
       # A pull request and the merge queue's group start from the newest
       # build of the same toolchain (main's, or the pull request's own earlier
@@ -258,7 +258,7 @@ jobs:
 
       - name: Set up bats
         if: env.GROUP_BATS == 'yes'
-        uses: bats-lang/bats/.github/actions/setup@e2b86606c7f04ab43908a0820446871c1d4e0244 # the setup action (bats#280)
+        uses: bats-lang/bats/.github/actions/setup@c488d5205fc805c505618272c66761481365e2c4 # the setup action (bats#280)
 
       # What bats keeps of the static run, in the directory run.sh works in
       # (QUIRE_STATIC_WORK): the app's build/, which every group shares, and
@@ -505,7 +505,7 @@ jobs:
       # not a pass, and a job missing from needs fails (repository-prototype's
       # check-aggregate, #328, called by commit)
       - name: Every group passed
-        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@f2c21c6cd217ccdd1f3390840758aca29472a6ba # check-aggregate at repository-prototype main (#345, #347)
+        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@45e66f62b0e65f1e3fc1fa9f8a8309f67082b3d2 # check-aggregate at repository-prototype main (#345, #347)
         with:
           jobs: plan build static e2e
           results: ${{ toJSON(needs) }}
