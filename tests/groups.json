@@ -8,7 +8,8 @@
       "relaunch.spec.js",
       "series.spec.js",
       "spreads.spec.js",
-      "sync-fastmail.spec.js"
+      "sync-fastmail.spec.js",
+      "sync-lost-groups.spec.js"
     ],
     "reader": [
       "backup.spec.js",
@@ -54,7 +55,8 @@
       "touch-selection.spec.js",
       "containers.spec.js",
       "replace.spec.js",
-      "replace-corrected.spec.js"
+      "replace-corrected.spec.js",
+      "sync-idempotent.spec.js"
     ],
     "settings": [
       "a11y.spec.js",
@@ -68,8 +70,6 @@
       "old-library.spec.js",
       "publisher-sizes.spec.js",
       "search.spec.js",
-      "sync-idempotent.spec.js",
-      "sync-lost-groups.spec.js",
       "vertical.spec.js"
     ],
     "relaunch": [
