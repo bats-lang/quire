@@ -1681,9 +1681,25 @@ val _dated_pages = ref<Int>(0)
    transient ones (#448) *)
 val _settling = ref<bool>(false)
 
+(* Whether the page is laid out as it was when the page shown was: its
+   width and height are those _measure_pagination and _show_page_down last
+   measured. A window that changed size is laid out again by the debounced
+   relayout (_relayout_settled, 200 ms after the last resize), and until
+   then the page's scroll is not a page of the new layout: the first node
+   that starts on the screen is then not the reader's place (quire#484: a
+   record made in that window took it as the place, and the relayout kept
+   it, six pages on). The place is recorded again once the relayout shows
+   the page *)
+fn _laid_as_shown (): bool = let
+  val () = _measure_literal("page")
+  val width = $DR.get_measure_w()
+  val height = $DR.get_measure_h()
+in (width = !_page_width) && (height = !_page_height) end
+
 (* The position read to the open book's record in the library, which is
-   then stored *)
-fn _record_position (): void = let
+   then stored; not while the window changed and the page is not laid out
+   again yet (a fixed page is laid out as it is shown, so none) *)
+fn _record_position (): void = if (~_is_fixed()) && (~_laid_as_shown()) then () else let
   val book_index = lib_index_of_key(open_key_get())
   (* a fixed page is its spine item, whole: no node marks a place in
      it (a hit test there finds one or none as its image comes in, and
