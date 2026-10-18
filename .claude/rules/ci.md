@@ -31,18 +31,41 @@ The pins and the relock are in CLAUDE.md. Specifics:
 A pull request's jobs restore what bats kept in the newest earlier run
 (`.github/actions/build-cache`, `actions/cache` pinned by commit) and save theirs once the
 job passed. **No key is relied on for correctness**: the key is a locator,
-`quire-<name>@<pins>-<sha>` (a GitHub cache is immutable, so each save needs a new key), and a
-restore takes the newest cache of the name and pins (`restore-keys` `quire-<name>@<pins>-`; the
-`@` ends a name, so `static` never finds `static-memo-rest@...`). It names no runner image, lock,
+`quire-<name>@<pins>-<hash of bats.lock>-<sha>` (a GitHub cache is immutable, so each save needs a new key), and a
+restore takes the newest cache of the name and pins (`restore-keys` `quire-<name>@<pins>-<hash of bats.lock>-`; the
+`@` ends a name, so `static` never finds `static-memo-rest@...`). It names no runner image,
 `bats.toml`, source hash or version a developer bumps, so a new input needs no new key part and
 a wrong key can only restore less useful files.
 
 * **The pins stay in the key** (`<pins>` = a digest of `.github/bats-version`, which holds the
-  ATS2 pin, and of the commit of bats's setup action) until bats-lang/bats#316 (a missing
-  toolchain root gives a shorter listing and no error) is fixed, the freshness audit (bats#317)
-  is done, and quire's pin contains bats#305's fix (77e60a55; a patsopt or toolchain directory
-  that is a symbolic link, changed in place, was not seen). Until then a `build/` restored from
-  another ATS2 install could pass the stamp and have its C and objects reused.
+  ATS2 pin, and of the commit of bats's setup action). bats#305 (a toolchain that is a symbolic
+  link, changed in place) and bats#316 (a missing toolchain root gave a shorter listing) are
+  fixed in the bats the pin names (99fdf6b6), but the audit of every freshness input (bats#317)
+  found four holes, still open, and a wrong cache is worse than a slow one. Which can bite
+  here (read from `check.yml`, `setup-bats` and `.gitignore`, 2026-10-18):
+  * bats#320, the profile is in no object key: cannot bite while every job runs the same
+    command (`bats build` in `build` and `deploy`, `bats check` in the static jobs, which
+    compile nothing); a workflow change to `--only` would restore the other profile's objects.
+  * bats#321, a `bats_modules` copy is not compared with the lock's sha256: cannot bite, no
+    job restores `bats_modules` (it is ignored by git and fetched at the locked sha256).
+  * bats#322, the environment clang reads (`CPATH` ...) is not in the stamp: cannot bite, no
+    workflow and not the setup action sets one. System headers are the same mechanism and
+    were not audited; the runner image is not in the key (#622).
+  * **bats#323, build mode keys a module's C on its own `.dats` and `.sats_changed`, not on
+    the dependency `.dats` it staloads: it can bite** in the `build` job, which restores
+    `build/`. quire instantiates array's templates (`$A.alloc<byte>`, `$A.get<byte>` ...
+    thousands of times), so a relock that changes the body of one of them without its `.sats`
+    leaves the old instance in the restored C. The pins are neutral to it; check mode (the static jobs) is keyed on
+    the closure and is not affected. Main builds cold and shows it, a pull request does not.
+    So `bats.lock` is in the key again (#682 had dropped it, because bats judges dependency
+    files; in build mode it does not): a relock starts a cold build cache, main's too.
+  * **Exit:** when bats#323 and bats#320 are fixed and quire's bats pin is past them, the pins
+    and `bats.lock` may both leave the key.
+  * **Research** (what others key on): Swatinem/rust-cache keys on the lockfile and the
+    toolchain; actions/cache's own examples key on `hashFiles` of the lock; ccache and sccache
+    key on the content of every input, dependency headers included. A key naming the lock is
+    the common choice wherever the tool does not itself see a dependency's content, which is
+    what bats#323 shows for build mode.
 * **bats judges what a restore holds** (bats's CLAUDE.md is the record): `build/.bats_stamp`
   (bats's inputs, patsopt's toolchain, the C compiler's version, flags, target) drops a `build/`
   made by another toolchain, naming what differs (bats#273); freshness is by content hash, never
