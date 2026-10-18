@@ -95,7 +95,7 @@ jobs:
           fetch-depth: 2
 
       - name: Set up bats
-        uses: bats-lang/bats/.github/actions/setup@cf45c87611a9337b9bb28e2543dcb96dcd98639e # the setup action (bats#280)
+        uses: bats-lang/bats/.github/actions/setup@e2b86606c7f04ab43908a0820446871c1d4e0244 # the setup action (bats#280)
 
       # A pull request and the merge queue's group start from the newest
       # build of the same toolchain (main's, or the pull request's own earlier
@@ -244,7 +244,7 @@ jobs:
 
       - name: Set up bats
         if: env.GROUP_BATS == 'yes'
-        uses: bats-lang/bats/.github/actions/setup@cf45c87611a9337b9bb28e2543dcb96dcd98639e # the setup action (bats#280)
+        uses: bats-lang/bats/.github/actions/setup@e2b86606c7f04ab43908a0820446871c1d4e0244 # the setup action (bats#280)
 
       # What bats keeps of the static run, in the directory run.sh works in
       # (QUIRE_STATIC_WORK): the app's build/, which every group shares, and
@@ -504,7 +504,7 @@ jobs:
   android:
     needs: build
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@b594790eebf7e3caab054cff1f07217dae049579
+    uses: bats-lang/pwa/.github/workflows/android.yml@1618395525b76fb5fe750b9fe058af6c6ce9221c
     secrets: inherit
     with:
       artifact: quire-android
