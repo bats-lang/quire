@@ -30,7 +30,14 @@
  *     backtrace of every thread, the kernel's stack, wait channel and system
  *     call of every thread, and what resolves the raw offsets offline (the
  *     binary's path and build id, the load address of every module, the
- *     executable anonymous regions where JIT code lives).
+ *     executable anonymous regions where JIT code lives);
+ *   - when gdb gives no stacks (not installed, or the kernel will not let it
+ *     attach) the user-space stacks are asked of `eu-stack` and then `pstack`,
+ *     and what none could give is said as `not available: <why>`
+ *     (`userSpaceStacks`, `fallbackStacks`), never a failure of the test;
+ *   - the kernel's view of the other browser processes too (the browser
+ *     process, the GPU process: `native.browserProcesses`), which a frozen
+ *     renderer may wait on, never attached to.
  */
 
 import { execFile } from 'node:child_process';
@@ -73,6 +80,7 @@ const HELPER_MS = 5000;                 // readelf, sudo tail, the gdb version c
 const NATIVE_MOST = 6;                  // renderers whose stacks are taken, at once
 const CORE_MOST = 2;                    // and whose core is written too (a core is up to CORE_MAX_BYTES of disk until it is gzipped)
 const STACK_FRAMES = 40;
+const FALLBACK_MS = 10000;              // eu-stack, pstack: each, when gdb gave no stacks
 // stop() waits this long for captures still running (the native step can
 // outlast the test); what they found by then is already written (`save`)
 export const TEARDOWN_MS = 10000;
@@ -98,10 +106,10 @@ export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS;
  * (the browser session, two reads and CPU_WINDOW_MS: 3 commands and the
  * window, all of it counted, though it began alongside the probes above);
  * gdb's version; per renderer (side by side) readelf (the binary's
- * notes, sections and version, the system libraries' notes, dpkg), `sudo tail` for the kernel stacks, gdb (backtraces and core) and gzip. A capture of a frozen page takes at most
+ * notes, sections and version, the system libraries' notes, dpkg), `sudo tail` for the kernel stacks, gdb (backtraces and core), the two fallback stack tools when gdb gave none, and gzip. A capture of a frozen page takes at most
  * CAPTURE_MOST_MS and this.
  */
-export const NATIVE_MOST_MS = COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 8 * HELPER_MS + GDB_MS + GZIP_MS;
+export const NATIVE_MOST_MS = COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 8 * HELPER_MS + GDB_MS + GZIP_MS + 2 * FALLBACK_MS;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -416,6 +424,35 @@ async function findGdb(scope) {
 // or a terminal. The capture then says `unavailable` and goes on without them
 export const CANNOT_ATTACH = /ptrace: (Operation not permitted|Permission denied)|Could not attach to process|yama\/ptrace_scope|sudo: (a password is required|a terminal is required|sorry, you are not allowed)|spawn sudo ENOENT|sudo: (command )?not found/;
 
+// The tools that give a process's user-space stacks when gdb does not (not installed, or not
+// allowed to attach), tried in this order and the first that answers is kept. eu-stack is
+// elfutils' (Ubuntu's `elfutils`; `-m` names the module of each frame), pstack is the old
+// script (`pstack` of Red Hat's, absent on Ubuntu)
+const FALLBACK_TOOLS = [
+  { tool: 'eu-stack', args: (pid) => ['-p', String(pid), '-m', '-n', String(STACK_FRAMES)] },
+  { tool: 'pstack', args: (pid) => [String(pid)] },
+];
+
+/**
+ * The stacks of one process by the fallback tools: { ok, tried }, `tried` the
+ * tools in order, each { tool, available, ... } and, for one that gave none,
+ * `note: 'not available: <why>'`. Never throws.
+ */
+async function fallbackStacks(pid, scope) {
+  const tried = [];
+  for (const { tool, args } of FALLBACK_TOOLS) {
+    const path = whichExecutable(tool);
+    if (!path) { tried.push({ tool, available: false, note: `not available: ${tool} is not installed` }); continue; }
+    const out = await runPrivileged([path, ...args(pid)], FALLBACK_MS, undefined, scope);
+    // a stack has frames, "#0  0x... "; a tool that attached to nothing prints none
+    const ok = out.ok && /^#0\s/m.test(out.stdout);
+    const why = (cap(out.stderr.trim(), 200) || out.error || 'it printed no frames').replace(/\s+/g, ' ');
+    tried.push({ tool, available: true, path, ok, exitCode: out.code, ms: out.ms, stderr: cap(out.stderr, 2000), text: cap(out.stdout, 100000), note: ok ? undefined : `not available: ${tool} gave no stacks: ${why}` });
+    if (ok) break;
+  }
+  return { ok: tried.some((each) => each.ok), tried };
+}
+
 const ANONYMOUS_CODE = '(anonymous executable memory)';
 
 /** What the maps of a process say about where its code is: see `identity`. */
@@ -677,13 +714,15 @@ async function keepCore(corePath, scope, saved, callsFailed) {
  * The native stacks of these renderers (a page judged stalled: see the top
  * of this file). Nothing here throws, and every command is limited.
  */
-export async function nativeStacks(renderers, scope, corePathFor) {
+export async function nativeStacks(renderers, scope, corePathFor, others = []) {
   const result = { ptraceScope: '(absent)' };
   try { result.ptraceScope = readFileSync('/proc/sys/kernel/yama/ptrace_scope', 'utf8').trim(); } catch (error) { /* no Yama: ptrace is the kernel's usual rule */ }
   result.root = isRoot;
   const gdb = await findGdb(scope);
   result.gdb = gdb;
   const taken = renderers.slice(0, NATIVE_MOST);
+  // the other browser processes (the browser's, the GPU's): what the kernel says of their threads, never attached to
+  const aside = Promise.all(others.slice(0, NATIVE_MOST).map(async (other) => ({ pid: other.pid, type: other.type, cpuSeconds: other.cpuSeconds, kernel: await kernelTasks(other.pid, scope) })));
   result.renderers = await Promise.all(taken.map(async (renderer, index) => {
     // the kernel's view and the addresses first: gdb stops the process
     const { result: entry, maps } = await identity(renderer.pid, scope);
@@ -697,8 +736,17 @@ export async function nativeStacks(renderers, scope, corePathFor) {
     if (corePath && entry.gdbStacks.coreAsked) entry.core = await keepCore(corePath, scope, entry.gdbStacks.coreSaved, entry.gdbStacks.coreCallsFailed);
     else if (corePath) entry.core = { written: false, kept: false, reason: gdb.available ? 'no prlimit to bound the file' : gdb.error };
     else if (stopped && corePathFor) entry.core = { written: false, kept: false, reason: 'the process is in a group stop (SIGSTOP): no call can run in it to leave the empty reservations out, and a core of all of its address space is not possible' };
+    // gdb gave no stacks: the next tools may, or the entry says why none could (never a failure)
+    if (entry.gdbStacks.ok) {
+      entry.userSpaceStacks = 'gdb';
+    } else {
+      entry.fallbackStacks = await fallbackStacks(renderer.pid, scope);
+      const used = entry.fallbackStacks.tried.find((each) => each.ok);
+      entry.userSpaceStacks = used ? used.tool : `not available: gdb (${entry.gdbStacks.error || cap((entry.gdbStacks.stderr || '').trim(), 200) || 'no stacks'}); ${entry.fallbackStacks.tried.map((each) => each.note).join('; ')}`;
+    }
     return entry;
   }));
+  result.browserProcesses = await aside;
   // no gdb, or none that may attach: the capture carries on without the stacks, and says so
   if (!gdb.available) result.unavailable = `native capture unavailable: ${gdb.error}`;
   else if (result.renderers.length && result.renderers.every((renderer) => !renderer.gdbStacks.ok && CANNOT_ATTACH.test(`${renderer.gdbStacks.stderr}\n${renderer.gdbStacks.text}\n${renderer.gdbStacks.error}`))) {
@@ -758,7 +806,7 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
       if (busy.length) {
         result.presumedBusy = `renderer ${busy.map((process) => `${process.pid} used ${process.cpuSeconds} s of CPU`).join(', ')} over ${CPU_WINDOW_MS / 1000} s, so the page is presumed busy, not frozen, and nothing is attached`;
       } else if (renderers.length) {
-        result.native = await nativeStacks(renderers, scope, corePathFor).catch((error) => ({ error: String(error && error.stack || error) }));
+        result.native = await nativeStacks(renderers, scope, corePathFor, processes.filter((process) => process.type !== 'renderer' && process.cpuSeconds !== null)).catch((error) => ({ error: String(error && error.stack || error) }));
         save(result);
       }
     }
@@ -848,9 +896,15 @@ export function summary(result) {
         lines.push(`  renderer ${renderer.pid}: ${renderer.exe}, build id ${renderer.buildId}, loaded at ${renderer.exeBase}; gdb ${stacks.ok ? 'ok' : `failed (${stacks.error})`}, ${stacks.threadCount || 0} threads`);
         if (renderer.binary) lines.push(`    binary: ${renderer.binary.version}, ${renderer.binary.bytes} bytes, symbols ${renderer.binary.hasSymtab ? 'in .symtab' : 'none (stripped)'}${renderer.binary.hasDebugLink ? ', .gnu_debuglink' : ''}`);
         if (renderer.core) lines.push(`    core: ${renderer.core.kept ? `kept ${renderer.core.file} (${renderer.core.bytes} bytes, ${renderer.core.gzBytes} gzipped)` : `not kept: ${renderer.core.reason}`}`);
+        lines.push(`    user-space stacks: ${renderer.userSpaceStacks}`);
+        if (renderer.fallbackStacks) for (const each of renderer.fallbackStacks.tried) if (each.ok) lines.push(...each.text.split('\n').slice(0, 14).map((line) => `    ${each.tool}: ${line}`));
         if (stacks.mainThread) for (const frame of stacks.mainThread.frames.slice(0, 12)) lines.push(`    main thread ${frame.text}${frame.module ? ` [${frame.module}${frame.offset ? ` +${frame.offset}` : ''}]` : ''}`);
       }
     }
+  }
+  if (result.native && Array.isArray(result.native.browserProcesses)) for (const other of result.native.browserProcesses) {
+    const tasks = other.kernel.tasks || [];
+    lines.push(`  ${other.type} ${other.pid}: ${tasks.length} threads by the kernel${other.kernel.error ? ` (${other.kernel.error})` : ''}, main thread syscall ${(tasks.find((task) => task.tid === other.pid) || {}).syscall}`);
   }
   if (Array.isArray(result.otherProcesses)) for (const process of result.otherProcesses) {
     lines.push(`  ${process.type} ${process.pid}: CPU ${process.cpuSeconds}s over 1 s; threads: ${process.threads.join('; ')}`);

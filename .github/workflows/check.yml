@@ -373,7 +373,9 @@ jobs:
         run: sudo apt-get install -y -q fonts-noto-cjk
 
       # gdb, for the stall capture's native stacks and core of a frozen renderer
-      # (e2e/stall-capture.js, quire#575 and #591), and libc6-dbg, which names the
+      # (e2e/stall-capture.js, quire#575 and #591), elfutils (eu-stack, the capture's
+      # fallback when gdb cannot attach; unversioned like libgmp-dev and lld, the runner
+      # image bounds them), and libc6-dbg, which names the
       # C library's internal functions in them (7 MB to download, 11 MB installed;
       # without it only the exported ones are named; the time is printed). A STOPGAP: pwa's e2e-setup
       # action should install it and keep the runner's passwordless sudo
@@ -388,7 +390,7 @@ jobs:
           started=$(date +%s)
           installed=no
           for attempt in 1 2 3; do
-            if sudo apt-get update -q && sudo apt-get install -y -q gdb; then installed=yes; break; fi
+            if sudo apt-get update -q && sudo apt-get install -y -q gdb elfutils; then installed=yes; break; fi
             [ "$attempt" -lt 3 ] && sleep $((attempt * 5))
           done
           # libc6-dbg of exactly the installed libc6, never an upgrade of libc6 in the middle of a job
