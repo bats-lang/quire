@@ -34,6 +34,19 @@ import { launch, relaunch, rested } from './relaunch.js';
 
 const SCALES = [130, 200];
 
+/** The voices a device that speaks has, so the Read aloud tab is built
+    (it is only where the platform speaks) and walked at every scale */
+function voicesPlayed() {
+  window.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+  const voices = [
+    { name: 'Reader', lang: 'en-US', voiceURI: 'reader-en', default: true },
+    { name: 'Narrator', lang: 'en-GB', voiceURI: 'narrator-en', default: false },
+  ];
+  Object.defineProperty(window, 'speechSynthesis', { value: {
+    getVoices: () => voices, speak() {}, cancel() {}, pause() {}, resume() {}, addEventListener() {},
+  } });
+}
+
 /** The script that makes every text size of the page scale percent of
     itself, before the app starts */
 function scaledBy(percent) {
@@ -84,6 +97,7 @@ test('the engine multiplies a text size and leaves a box as it is', async ({ pag
 for (const percent of SCALES) {
   test(`at a font scale of ${percent}% every screen fits`, async ({ page }) => {
     await page.addInitScript(appPlayed);
+    await page.addInitScript(voicesPlayed);
     await page.addInitScript(scaledBy(percent));
     await page.goto('/');
     expect(await page.evaluate(() => parseFloat(getComputedStyle(document.body).fontSize)), 'the scale reached the app').toBeGreaterThan(16 * percent / 100 - 1);

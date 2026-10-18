@@ -300,7 +300,12 @@ fn shell_rules_import_and_book_lists {left:nat | left >= 1358} (sheet: sheet(lef
   val sheet = lay(sheet, Font(), "inherit")
   val sheet = spaced(sheet, Padding(), SpaceSmall())
   val sheet = lay(sheet, BorderRadius(), "6px")
-  val sheet = lay(sheet, MaxWidth(), "12em")
+  (* as wide as the row at most, not 12em: an em is the font size
+     before the system's text scale (text-size-adjust, Android's font
+     scale), so at 200% the cap stayed 192 px and cut the chosen
+     option's text, which grew with the scale (#412); the row wraps a
+     wider select onto a line of its own *)
+  val sheet = lay(sheet, MaxWidth(), "100%")
   val sheet = close(sheet)
   (* the hint for iOS Safari, shown (on) only there (library.bats);
      Install Quire and the storage notes are shown by their elements'
