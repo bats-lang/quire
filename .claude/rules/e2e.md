@@ -52,9 +52,14 @@ it does not hang on the machine's fonts.
   stability specs. Real time stays for the `@serial` budgets, the stall watch,
   media playback and anything that waits for a font or the network.
 * Playwright 1.58 or later is required (the fake clock; the reason and the check are pwa's:
-  `gen-pwa test` and its `e2e-setup` action, bats-lang/pwa's CLAUDE.md). A machine whose
-  Chromium is older than the one 1.58 expects points `PLAYWRIGHT_BROWSERS_PATH` at a directory whose
-  `chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell` links to
+  `gen-pwa test` and its `e2e-setup` action, bats-lang/pwa's CLAUDE.md). That floor is the
+  fake clock's and stays 1.58 (`playwright-minimum`); the version quire is pinned to is
+  **1.61.0** (#599), the oldest with the headless shell of Chromium 149.0.7827.55 (revision
+  1228), which has upstream's fix of the launch crash (a `setenv` of `FC_FONTATIONS` racing a
+  `getenv` on another thread, fixed in 149.0.7798.0, commit 970a6d5; 1.58.2 to 1.60.0 ship 145,
+  147 and 148, which still have it). A machine whose Chromium is older than the one the pin
+  expects points `PLAYWRIGHT_BROWSERS_PATH` at a directory whose
+  `chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell` links to
   the installed `headless_shell`; it does not downgrade Playwright.
 
 ## Nothing of one book shows in the next (#435)
