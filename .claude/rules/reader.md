@@ -75,8 +75,9 @@ QLB6 opens at its stored place (`e2e/legacy-library.js`).
   autosizer, which skips them), so a test on it would pass for nothing. It
   found, at 200%, what em lengths and fixed widths do (an em is the specified
   size, so it does not grow with the text): an icon glyph outgrew its 48 px
-  button (a glyph is `text-size-adjust: none`: Android's icons are dp, not sp;
-  so is the theme swatch's "Aa"), the picture viewer's Zoom buttons were
+  button (a glyph is set `text-size-adjust: none`, as Android's icons are dp,
+  not sp, and so is the theme swatch's "Aa"; that this holds the glyph in a
+  real WebView is not shown, only against this Chromium stand-in), the picture viewer's Zoom buttons were
   wider than the half window they were shrunk to (`.imzoom` is `max-content`),
   the new collection field was wider than its dialog (`.mname` is 100%), a
   setting's label and value were narrower than their longest word (`.slabel`

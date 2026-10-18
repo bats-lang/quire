@@ -18,7 +18,7 @@ staload "declarations.sats"
 
 implement image_zoom_axes () = $GT.AxNone()
 
-#pub fn overlay_rules {left:nat | left >= 8325} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8325] sheet(after, false, false)
+#pub fn overlay_rules {left:nat | left >= 8320} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8320] sheet(after, false, false)
 
 (* The image viewer and toasts, from .imview on *)
 fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2629} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2629] sheet(after, false, false) = let
@@ -133,7 +133,7 @@ fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2629} (sheet: sheet
 in sheet end
 
 (* The menus, from .ovl on *)
-fn overlay_rules_menus {left:nat | left >= 2293} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2293] sheet(after, false, false) = let
+fn overlay_rules_menus {left:nat | left >= 2315} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2315] sheet(after, false, false) = let
   val sheet = rule(sheet, ".ovl")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Inset(), "0")
@@ -232,7 +232,7 @@ fn overlay_rules_menus {left:nat | left >= 2293} (sheet: sheet(left, false, fals
 in sheet end
 
 (* The dialog fields and book info, from .sfields on *)
-fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2798} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2798] sheet(after, false, false) = let
+fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2771} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2771] sheet(after, false, false) = let
   val sheet = rule(sheet, ".sfields")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")

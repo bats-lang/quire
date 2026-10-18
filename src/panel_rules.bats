@@ -10,10 +10,10 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn panel_rules {left:nat | left >= 10081} (sheet: sheet(left, false, false)): [after:nat | after >= left - 10081] sheet(after, false, false)
+#pub fn panel_rules {left:nat | left >= 10054} (sheet: sheet(left, false, false)): [after:nat | after >= left - 10054] sheet(after, false, false)
 
 (* The panel frame and tabs, from .panel on *)
-fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1699} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1699] sheet(after, false, false) = let
+fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1690} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1690] sheet(after, false, false) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
@@ -383,7 +383,7 @@ fn panel_rules_settings_sheet {left:nat | left >= 2771} (sheet: sheet(left, fals
 in sheet end
 
 (* The setting rows, from .srow on *)
-fn panel_rules_setting_rows {left:nat | left >= 1610} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1610] sheet(after, false, false) = let
+fn panel_rules_setting_rows {left:nat | left >= 1592} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1592] sheet(after, false, false) = let
   val sheet = rule(sheet, ".srow")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
