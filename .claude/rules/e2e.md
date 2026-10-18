@@ -51,13 +51,11 @@ it does not hang on the machine's fonts.
   `settled` and `rested` (`e2e/relaunch.js`) do it for the relaunch and
   stability specs. Real time stays for the `@serial` budgets, the stall watch,
   media playback and anything that waits for a font or the network.
-* Playwright 1.58 or later is required (its fake clock can set the time back
-  after a `page.clock.fastForward`; 1.58 ignores a
-  target in the past, so before it a spec that counts minutes lost one now and
-  then). A machine whose Chromium is older than 1.58 expects runs 1.58.2 with
-  `PLAYWRIGHT_BROWSERS_PATH` at a directory whose
-  `chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell`
-  links to the installed `headless_shell`; it does not downgrade Playwright.
+* Playwright 1.58 or later is required (the fake clock; the reason and the check are pwa's:
+  `gen-pwa test` and its `e2e-setup` action, bats-lang/pwa's CLAUDE.md). A machine whose
+  Chromium is older than the one 1.58 expects points `PLAYWRIGHT_BROWSERS_PATH` at a directory whose
+  `chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell` links to
+  the installed `headless_shell`; it does not downgrade Playwright.
 
 ## Nothing of one book shows in the next (#435)
 
