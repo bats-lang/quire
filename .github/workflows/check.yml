@@ -100,7 +100,13 @@ jobs:
       # pwa's script compare with the upload key's
       - name: Play signing SHA-1
         id: clients
-        run: echo "play_signing_sha1=$(sed -n 's/^PLAY_SIGNING_SHA1=//p' scripts/sync-clients.env)" >> "$GITHUB_OUTPUT"
+        run: |
+          sha1="$(sed -n 's/^PLAY_SIGNING_SHA1=//p' scripts/sync-clients.env)"
+          if ! printf '%s' "$sha1" | grep -Eq '^([0-9A-F]{2}:){19}[0-9A-F]{2}$'; then
+            echo "scripts/sync-clients.env must set PLAY_SIGNING_SHA1 to a SHA-1 fingerprint (AA:BB:... in capitals, 20 pairs) (got: '$sha1'); without it android.yml would skip the signing-key comparison" >&2
+            exit 1
+          fi
+          echo "play_signing_sha1=$sha1" >> "$GITHUB_OUTPUT"
 
       - name: Set up bats
         uses: bats-lang/bats/.github/actions/setup@e2b86606c7f04ab43908a0820446871c1d4e0244 # the setup action (bats#280)
