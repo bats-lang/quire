@@ -1,6 +1,7 @@
 name: Compiler cache
 description: >-
-  Restores or saves a bats build/ directory (#460). Restore on a pull request
+  Restores or saves what bats keeps between runs (a build/ directory, a
+  fixtures memo) as a GitHub cache (#460, #622). Restore on a pull request
   and on the merge queue's group (#586); main's pushes and the nightly run
   build cold, and the pushes save, so every state of main is checked from
   nothing and is the base the pull requests and the queue start from.
@@ -10,50 +11,51 @@ inputs:
     description: restore or save
     required: true
   name:
-    description: Which cache (build, static), each its own key prefix
+    description: >-
+      Which cache (build, static, static-memo-<group>), each its own key
+      prefix. It must not end the way another name continues: the prefix is
+      the name and "@", so "static" never finds "static-memo-rest@..."
     required: true
   path:
-    description: The build/ directory, at a path that is the same in every job
-    required: true
-  runner-image:
     description: >-
-      The runs-on label the job is pinned to (ubuntu-24.04, #667). Named in the
-      key, so a move of the label to another image starts a new cache; each
-      caller passes the label it writes in runs-on.
+      What to keep, one path a line (a build/ directory, a memo directory)
     required: true
 runs:
   using: composite
   steps:
-    # A locator, not a guarantee (#622): bats stamps every build/ with what
-    # made it (the bats, patsopt and ATS2, the C compiler, the flags and the
-    # target: build/.bats_stamp, bats-lang/bats#273) and drops a build/ whose
-    # stamp is not the one it would write, so the key no longer names the
-    # compiler pin, the ATS2 pin or the runner image. What is left is what
-    # the stamp does not cover: the packages (the lock, bats.toml), the
-    # runner label (#667: the job's runs-on, as the caller passes it), the
-    # system and architecture the cache was made on, and the commit of bats's
-    # setup action, which installs ATS2 and builds the compiler (#623; the key
-    # still names the commit that does). The sources are the
-    # key's last part, so an exact hit is the same sources, and a prefix hit
-    # the newest earlier build of the same packages. The commit's facts
-    # (build/src/_bats_facts, which src/version.bats words) are written
-    # again per commit and change only their own module.
+    # A locator, and until bats-lang/bats#316 is fixed and the freshness audit
+    # (bats#317) is done, the toolchain's pins (#622). The key is the cache's
+    # name, the pins and the commit (a GitHub cache is immutable, so a save
+    # needs a new key), and a restore takes the newest cache of the name and
+    # pins. The rest is bats's: it stamps every build/ with what made it and
+    # drops one whose stamp differs, rebuilds a module whose source hash
+    # changed, and keys each memo entry by what it read (bats's CLAUDE.md).
+    # It names no version a developer bumps, no runner image, no lock, no
+    # bats.toml and no hash of the sources, so a new input of those needs no
+    # new key part. What stays is the two pins that make the toolchain,
+    # because the stamp's toolchain digest was not yet complete: bats#305 (a
+    # patsopt or a toolchain directory that is a symbolic link, changed in
+    # place, was not seen; fixed in bats 77e60a55, which this pin does not
+    # contain), bats#316 (a missing toolchain root gives a shorter listing and
+    # no error; open) and bats#317 (the other freshness inputs bats reads
+    # back are not audited yet). The compiler's commit (.github/bats-version,
+    # whose compiler holds the ATS2 pin) and the commit of bats's setup action
+    # (which installs them) go when those are done and quire's pin is past
+    # them.
     - name: Name the cache
       id: key
       shell: bash
       run: |
-        # ATS2 and the way the compiler is built are bats's setup action's,
-        # called by commit: that commit names them (bats#280)
-        setup=$(grep -rhoE 'bats-lang/bats/\.github/actions/setup@[0-9a-f]{40}' .github/workflows | sort -u | sha256sum | cut -c1-16)
-        echo "prefix=quire-${{ inputs.name }}-v2-${{ inputs.runner-image }}-${{ runner.os }}-${{ runner.arch }}-${setup}-${{ hashFiles('bats.lock', 'bats.toml') }}-" >> "$GITHUB_OUTPUT"
-        echo "sources=${{ hashFiles('src/**') }}" >> "$GITHUB_OUTPUT"
+        pins=$( { cat .github/bats-version; grep -rhoE 'bats-lang/bats/\.github/actions/setup@[0-9a-f]{40}' .github/workflows | sort -u; } | sha256sum | cut -c1-16)
+        echo "prefix=quire-${{ inputs.name }}@${pins}-" >> "$GITHUB_OUTPUT"
+        echo "key=quire-${{ inputs.name }}@${pins}-${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
     - name: Restore the compiler cache
       if: inputs.mode == 'restore'
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: ${{ inputs.path }}
-        key: ${{ steps.key.outputs.prefix }}${{ steps.key.outputs.sources }}
+        key: ${{ steps.key.outputs.key }}
         restore-keys: ${{ steps.key.outputs.prefix }}
 
     - name: Save the compiler cache
@@ -61,4 +63,4 @@ runs:
       uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: ${{ inputs.path }}
-        key: ${{ steps.key.outputs.prefix }}${{ steps.key.outputs.sources }}
+        key: ${{ steps.key.outputs.key }}

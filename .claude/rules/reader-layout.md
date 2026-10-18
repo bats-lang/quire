@@ -44,8 +44,7 @@ paths:
   blob URLs, quire#532). A turn shows only a `fresh_copy`, which only
   `_copy_ready` gives, so no turn shows a chapter or a layout gone. The page
   itself goes to the incoming page at once, so the place, the indicator and the
-  arenas' window move as before. 280 ms, eased out; `e2e/page-turn.spec.js` holds
-  the first frame within 30 ms of an instant turn's. Under
+  arenas' window move as before. 280 ms, eased out (`e2e/page-turn.spec.js` budgets the first frame). Under
   `prefers-reduced-motion: reduce`, and in a chapter too big to slide a copy of
   (`_chapter_heavy`, #423: 6000 content nodes or 600 KB), a turn is instant and
   no copy is kept ahead.
@@ -77,16 +76,15 @@ paths:
   same variables are the page's margins (`_put_scrolled` in `src/settings.bats`),
   so text is clipped there, never drawn under the footer or a system bar, and a
   turn (`_step`) scrolls the area's height less one line.
-  `e2e/page-margins.js` measures this against the insets, and the e2e fixture
-  measures it at the end of every test in the phone-sized projects
-  (`MARGIN_PROJECTS`) whenever a reflowed page is shown with the bars down.
+  The e2e fixture measures this (`e2e/page-margins.js`) at the end of every test in the
+  phone-sized projects (`MARGIN_PROJECTS`) whenever a reflowed page is shown with the bars down.
 * **The reader's bottom bar follows the reading direction** (quire#359): the
   book's `reading_direction` (`LeftToRight | RightToLeft`, `_direction_set`)
   gives the bar (`.bot.rtl`) and the scrubber (`.trk.rtl`) their class and swaps
   the page-turn buttons' arrows; every drawing along the reading axis takes
   `_drawn_at`, and a drag's x is turned back by `_track_at`. `expectBarFollows`
-  (`e2e/helpers.js`) checks four kinds of book; `vertical.spec.js` needs a font
-  with Japanese characters (CI installs `fonts-noto-cjk`).
+  (`e2e/helpers.js`) checks it; `vertical.spec.js` needs a Japanese font (CI installs
+  `fonts-noto-cjk`).
 * **A bookmarked page shows its mark once the bars hide** (#388): a ribbon
   (`bookmark-mark`, `.bmk`) in the page's top-right corner, in the accent (proven
   as text is, `S_accent_bg`); `annot_star`, the one place the bookmark's state
@@ -123,8 +121,7 @@ reaching the page passes through it. A pinch is the gestures package's own
 one finger's drag is the viewer's own (`viewer_pointer`; a second finger ends it;
 a mouse is not dragged, its wheel and scroll bars are). A double tap zooms to 2.5
 times the fit where it is made, the next goes back; Zoom in and Zoom out buttons
-(1.5 times) are the single-pointer way (WCAG 2.5.1). PhotoSwipe does the same
-(2.5 times on a double tap, at most 4 times). `e2e/image-viewer.spec.js`.
+(1.5 times) are the single-pointer way (WCAG 2.5.1). (PhotoSwipe: 2.5 times on a double tap, at most 4.) `e2e/image-viewer.spec.js`.
 
 ## The reading settings sheet (#288, #301)
 
@@ -138,8 +135,7 @@ under them all. The tabs (`sheet_tab`) follow WAI-ARIA's tabs pattern
 (`_sheet_tab_key`); the sheet opens on Look and its head stays at its top. **The
 sheet is as tall as its tallest tab**: the panels lie in one grid cell
 (`.tabpanels`), the ones not chosen `.unchosen` (`visibility: hidden`), so
-switching tabs moves neither the sheet nor its tabs. Their controls are one
-`typography_control` datatype, stored, backed up and reset as before.
+switching tabs moves neither the sheet nor its tabs. Their controls are one `typography_control` datatype.
 
 ## Writing modes, fixed layout and spreads
 

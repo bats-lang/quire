@@ -79,63 +79,36 @@ paused and holds only a blob URL the app revoked.
 
 ## A page that stops answering in e2e explains itself (#244, #575, #591)
 
-Every spec takes `test` from `e2e/fixtures.js` (`e2e/global-setup.js` refuses a
-spec that does not). Its auto fixture `stallWatch` (`e2e/stall-capture.js`)
-arms each page with a DevTools session of its own (debugger enabled,
-breakpoints inactive: a page already stuck in a loop can no longer be attached
-to), asks each page to evaluate `1` every 2 s, and captures a page that does
-not answer within 5 s, and every page of a test 15 s before its timeout:
-the frames `Debugger.pause` stops in, a CPU profile, the renderers' CPU time,
-threads and `/proc` state, the machine's load and pressure, and the native
-stacks and a core below. The capture is `stall-capture-<n>.json` in the
-test's output (CI's `e2e-stall-captures-<group>` artifact), attached to the
-test. `e2e/stall-capture.spec.js` checks it; its long tests run in the desktop
-project only.
+Every spec takes `test` from `e2e/fixtures.js` (`e2e/global-setup.js` refuses one that does
+not). Its auto fixture `stallWatch` (`e2e/stall-capture.js`) arms each page with a DevTools
+session of its own (debugger enabled, breakpoints inactive: a page already stuck in a loop
+can no longer be attached to), asks it to evaluate `1` every 2 s, and captures a page that
+does not answer within 5 s, and every page of a test 15 s before its timeout: the frames
+`Debugger.pause` stops in, a CPU profile, the renderers' CPU time, threads and `/proc` state,
+the machine's load and pressure, and native stacks and a core. The capture is
+`stall-capture-<n>.json` in the test's output (CI's `e2e-stall-captures-<group>` artifact).
+`e2e/stall-capture.spec.js` checks it; its long tests run in the desktop project only.
+`QUIRE_NO_STALL_ARM=1` skips arming (to compare stall rates); nothing sets it.
 
-**Native stacks (gdb).** A frozen renderer sits in an untimed futex wait and
-JS cannot say who it waits for. gdb stops the process it attaches to, so it is
-attached **only when a page answers nothing AND no renderer used
-`FROZEN_CPU_SECONDS` of CPU over the capture's 1 s window**. A DevTools target
-has no process id, so the rule is about all renderers: if any used CPU, the
-page is presumed busy (`presumedBusy`) and nothing is attached; if every one is
-idle, every idle renderer is attached to, the other pages' too. A healthy job
-runs nothing.
-
-* The `native` field has, per renderer (at most 6): gdb's backtrace of every
-  thread, the kernel's stack, wait channel and state of each thread, and what
-  resolves offsets later (binary path, build id, `exeBase`, per-frame module
-  and offset). It is taken before the pause and the profile, which change what
-  the renderer does, and written at once, so a teardown keeps it.
-* `stop()` waits `TEARDOWN_MS` for captures running, then **ends their
-  commands with KILL, never TERM or INT**: a gdb ended by TERM or INT stays
-  attached and the renderer stays stopped; only a killed gdb is detached by the
-  kernel. Every external command runs in its own process group under
-  `timeout -s KILL` inside sudo (worst case `NATIVE_MOST_MS`).
-* **Nothing is installed by the capture.** gdb comes from the e2e jobs'
-  `Install gdb` step in `check.yml` (a stopgap that never fails a job; pwa's
-  e2e-setup action should install it, bats-lang/pwa#109); `QUIRE_STALL_GDB`
-  names another. **Without gdb, or with ptrace or sudo refused, the e2e run
-  exactly as before and nothing goes red for it**: the capture records
-  `native.unavailable` with the reason and carries on with the JS/wasm
-  capture, and the spec's native tests skip with that reason, on CI too.
-* **A core** of up to `CORE_MOST` renderers, gzipped, is uploaded as
-  `e2e-stall-cores-<group>` (7 days) only when one was kept. gdb first calls
-  `madvise(MADV_DONTDUMP)` on the mappings with no resident page (`quietRanges`),
-  or `generate-core-file` reads 1.4 TB of reservations and never finishes.
-  Caps: `CORE_MAX_BYTES` (`prlimit --fsize`) and `CORE_GZ_MAX_BYTES`, over
-  either the core is removed and the capture says why. A core is never asked
-  of a process in a group stop (SIGSTOP). A failed core never fails a test or a
-  capture (`core.reason`). A core holds only the fixtures' pages, books and the
-  app, never a user's data.
-* The Playwright-built headless shell is stripped and Google publishes no
-  symbols for it, so its frames are `?? ()` with an offset from `exeBase`;
-  system libraries are named by libc6-dbg, which the Install gdb step adds
-  where it can. debuginfod is not used (a download with the process stopped has
-  no bound).
-
-**`QUIRE_NO_STALL_ARM=1`** skips arming (`arm` in `e2e/stall-capture.js`): the
-debugger is never enabled and the capture says `armed: false`; it still probes
-with `page.evaluate` and takes native stacks under the same rule, and loses the
-pause and the profile. It exists to compare the stall rate with and without
-arming. The default stays armed and nothing sets it: a scheduled run that does
-is a change of its own.
+* **Native stacks (gdb)** are taken **only when a page answers nothing AND no renderer used
+  `FROZEN_CPU_SECONDS` of CPU over the capture's 1 s window** (a DevTools target has no
+  process id, so any renderer's CPU means the page is presumed busy, `presumedBusy`). Every
+  idle renderer is then attached to (at most 6): gdb's backtrace of every thread, the kernel's
+  stack and wait channel, and what resolves offsets later (binary path, build id, `exeBase`).
+  It is taken before the pause and the profile, which change what the renderer does.
+* **gdb is ended with KILL, never TERM or INT** (`stop()` after `TEARDOWN_MS`): a gdb ended by
+  TERM or INT stays attached and the renderer stays stopped. Every external command runs in
+  its own process group under `timeout -s KILL` inside sudo.
+* **Nothing is installed by the capture.** gdb comes from the e2e jobs' `Install gdb` step in
+  `check.yml` (a stopgap that never fails a job; pwa's e2e-setup action should install it,
+  bats-lang/pwa#109); `QUIRE_STALL_GDB` names another. Without gdb, or with ptrace or sudo
+  refused, the e2e run as before and nothing goes red: the capture records `native.unavailable`
+  and the spec's native tests skip with that reason, on CI too.
+* **A core** of up to `CORE_MOST` renderers, gzipped, is uploaded as `e2e-stall-cores-<group>`
+  only when one was kept. gdb first calls `madvise(MADV_DONTDUMP)` on the mappings with no
+  resident page (`quietRanges`), or `generate-core-file` never finishes. Over `CORE_MAX_BYTES`
+  or `CORE_GZ_MAX_BYTES` the core is removed and the capture says why; a core is never asked of
+  a process in a group stop; a failed core never fails a test (`core.reason`).
+* The Playwright headless shell has no symbols (frames are `?? ()` with an offset from
+  `exeBase`); system libraries are named by libc6-dbg. debuginfod is not used (a download with
+  the process stopped has no bound).
