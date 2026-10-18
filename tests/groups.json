@@ -32,6 +32,7 @@
       "languages.spec.js",
       "math-images.spec.js",
       "places.spec.js",
+      "toc-levels.spec.js",
       "page-marks.spec.js",
       "progress.spec.js",
       "publisher.spec.js",

@@ -10,7 +10,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn panel_rules {left:nat | left >= 9877} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9877] sheet(after, false, false)
+#pub fn panel_rules {left:nat | left >= 9964} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9964] sheet(after, false, false)
 
 (* The panel frame and tabs, from .panel on *)
 fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1658} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1658] sheet(after, false, false) = let
@@ -100,13 +100,22 @@ fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1658} (sheet: sheet(left
 in sheet end
 
 (* The contents and highlights, from .pi[aria-current=true] on *)
-fn panel_rules_contents_and_highlights {left:nat | left >= 3422} (sheet: sheet(left, false, false)): [after:nat | after >= left - 3422] sheet(after, false, false) = let
+fn panel_rules_contents_and_highlights {left:nat | left >= 3509} (sheet: sheet(left, false, false)): [after:nat | after >= left - 3509] sheet(after, false, false) = let
   val sheet = rule(sheet, ".pi[aria-current=true]")
   val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = surf(S_fg_line | sheet, RoleText(), RoleLine())
   val sheet = close(sheet)
   (* a Contents row: its place in the book over the right end of the row
      (a tap on it is the row's), on the row's own ground (#383) *)
+  (* the nested lists of the levels (#690) take no room of their own: the
+     indent is the row's *)
+  val sheet = rule(sheet, ".toclist")
+  val sheet = spaced(sheet, Margin(), SpaceNone())
+  val sheet = spaced(sheet, Padding(), SpaceNone())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tocitem")
+  val sheet = lay(sheet, Display(), "block")
+  val sheet = close(sheet)
   val sheet = rule(sheet, ".tocline")
   val sheet = lay(sheet, Position(), "relative")
   val sheet = close(sheet)

@@ -635,14 +635,44 @@ end
 fn _level_class {level:nat | level <= 3} (level: int level): [class_len:pos | class_len < 256] string class_len =
   if level = 0 then "pi" else if level = 1 then "pi pi1" else if level = 2 then "pi pi2" else "pi pi3"
 
-(* A row of the list: a line toc-line<i> holding the button toc-row<i> with
-   the label label_bytes[0, label_len) and, over its right end (a tap on it
-   is the button's), where the entry is in the book (toc-place<i>); an
-   entry that leads to no chapter has none *)
-fn _row {label_loc:agz}{label_size:pos}{label_len:pos | label_len <= LABEL_MAX; label_len <= label_size}{i:nat}{level:nat | level <= 3}
-  (i: int i, level: int level, label_bytes: !$A.arr(byte, label_loc, label_size), label_len: int label_len, current: bool, chapter: Int): void = let
+(* Where entry i goes in the nested lists (#690): an entry is an item of a
+   list, and a list lies in the item of the entry it is under, so the
+   levels are in the accessibility tree as lists in lists. open_k is 0, or
+   1 + the index of the latest entry at level k, which is the last of
+   the path from the top that is still open; the entry's level is its
+   own, or one below the deepest open entry when the book skips a level.
+   Gives that level and the index of the entry whose list it is in (0
+   and nothing for a top-level entry) *)
+fn _place {level:nat | level <= 3}{open_0,open_1,open_2:nat}
+  (level: int level, open_0: int open_0, open_1: int open_1, open_2: int open_2): [placed:nat | placed <= 3][parent:nat] @(int placed, int parent) =
+  if level >= 3 then (if open_2 >= 1 then @(3, open_2 - 1) else if open_1 >= 1 then @(2, open_1 - 1) else if open_0 >= 1 then @(1, open_0 - 1) else @(0, 0))
+  else if level >= 2 then (if open_1 >= 1 then @(2, open_1 - 1) else if open_0 >= 1 then @(1, open_0 - 1) else @(0, 0))
+  else if level >= 1 then (if open_0 >= 1 then @(1, open_0 - 1) else @(0, 0))
+  else @(0, 0)
+
+(* A row of the list: the item toc-item<i> (in the list of entry parent's
+   item, or in the top list, for level 0; first says that list is made
+   with this entry) holding the line toc-line<i> and that holding the
+   button toc-row<i> with the label label_bytes[0, label_len) and, over
+   its right end (a tap on it is the button's), where the entry is in the
+   book (toc-place<i>); an entry that leads to no chapter has none *)
+fn _row {label_loc:agz}{label_size:pos}{label_len:pos | label_len <= LABEL_MAX; label_len <= label_size}{i:nat}{level:nat | level <= 3}{parent:nat}
+  (i: int i, level: int level, parent: int parent, first: bool, label_bytes: !$A.arr(byte, label_loc, label_size), label_len: int label_len, current: bool, chapter: Int): void = let
+  val () = (if level = 0 then let
+      val @(item_id, item_id_len) = nid_make("toc-item", i)
+    in ui_item_n("contents-items", item_id, item_id_len, "tocitem") end
+    else let
+      val () = (if first then let
+          val @(parent_id, parent_id_len) = nid_make("toc-item", parent)
+          val @(list_id, list_id_len) = nid_make("toc-sub", parent)
+        in ui_list_nn(parent_id, parent_id_len, list_id, list_id_len, "toclist") end
+        else ())
+      val @(list_id, list_id_len) = nid_make("toc-sub", parent)
+      val @(item_id, item_id_len) = nid_make("toc-item", i)
+    in ui_item_nn(list_id, list_id_len, item_id, item_id_len, "tocitem") end)
+  val @(item_id, item_id_len) = nid_make("toc-item", i)
   val @(line_id, line_id_len) = nid_make("toc-line", i)
-  val () = ui_add_n("contents-list", line_id, line_id_len, TDiv)
+  val () = ui_add_nn(item_id, item_id_len, line_id, line_id_len, TDiv)
   val @(line_id, line_id_len) = nid_make("toc-line", i)
   val () = ui_attr_n(line_id, line_id_len, AClass, "tocline")
   val @(line_id, line_id_len) = nid_make("toc-line", i)
@@ -669,12 +699,26 @@ in
   else ()
 end
 
-fun _rows {count:nat}{i:nat} .<count>. (entries: !toc(count), i: int i, current: int): void =
+(* The latest entry open at level at after entry i is put at level placed:
+   i + 1 at its own level, none (0) below it, the one that was open above *)
+fn _open_after {i:nat}{placed:nat | placed <= 3}{at:nat | at <= 3}{open:nat}
+  (i: int i, placed: int placed, at: int at, open: int open): [next:nat] int next =
+  if placed = at then i + 1 else if placed < at then 0 else open
+
+fun _rows {count:nat}{i:nat}{open_0,open_1,open_2,open_3:nat} .<count>.
+  (entries: !toc(count), i: int i, current: int, open_0: int open_0, open_1: int open_1, open_2: int open_2, open_3: int open_3): void =
   case+ entries of
   | toc_nil() => ()
   | @toc_cons(label_bytes, label_len, level, chapter, _, _, rest) => let
-      val () = _row(i, level, label_bytes, label_len, i = current, chapter)
-      val () = _rows(rest, i + 1, current)
+      val @(placed, parent) = _place(level, open_0, open_1, open_2)
+      val first = (if placed = 1 then open_1 = 0 else if placed = 2 then open_2 = 0 else if placed = 3 then open_3 = 0 else false): bool
+      val () = _row(i, placed, parent, first, label_bytes, label_len, i = current, chapter)
+      (* this entry is the latest at its level, and none below it is open *)
+      val next_0 = _open_after(i, placed, 0, open_0)
+      val next_1 = _open_after(i, placed, 1, open_1)
+      val next_2 = _open_after(i, placed, 2, open_2)
+      val next_3 = _open_after(i, placed, 3, open_3)
+      val () = _rows(rest, i + 1, current, next_0, next_1, next_2, next_3)
       prval () = fold@(entries)
     in end
 
@@ -690,7 +734,7 @@ fun _chapter_rows {i,chapter_count:nat} .<max(chapter_count - i, 0)>. (i: int i,
   if i >= chapter_count then ()
   else let
     val @(label_bytes, label_len) = _chapter_label(i + 1)
-    val () = _row(i, 0, label_bytes, label_len, i = current, i)
+    val () = _row(i, 0, 0, false, label_bytes, label_len, i = current, i)
     val () = $A.free<byte>(label_bytes)
   in _chapter_rows(i + 1, chapter_count, current) end
 
@@ -701,10 +745,11 @@ fun _chapter_rows {i,chapter_count:nat} .<max(chapter_count - i, 0)>. (i: int i,
 
 implement toc_render (chapter, chapter_count) = let
   val () = ui_clear("contents-list")
+  val () = ui_list("contents-list", "contents-items", "toclist")
   val cell = _contents_take()
   val+ @TocCell(entries, count) = cell
   val current = _current(entries, chapter, 0, ~1)
-  val () = (if count > 0 then _rows(entries, 0, current) else _chapter_rows(0, chapter_count, chapter))
+  val () = (if count > 0 then _rows(entries, 0, current, 0, 0, 0, 0) else _chapter_rows(0, chapter_count, chapter))
   prval () = fold@(cell)
 in _contents_put(cell) end
 

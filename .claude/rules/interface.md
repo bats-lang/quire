@@ -104,6 +104,18 @@ it (bats-lang/bats#243).
   The inline styles are `ui_place` and `ui_fixed_box_n` (numbers alone, zoom 1
   to 10000 thousandths), so no inline style can set a colour or anything else
   the stylesheet proves.
+* **Lists are made only by `ui_list`, `ui_list_nn`, `ui_item_n` and
+  `ui_item_nn`** (#690), so every `ul` states `role=list` (Safari with
+  VoiceOver drops the semantics of a list whose markers are gone) and the
+  tag type still has no list tags. The Contents' levels are lists in the items
+  of their parents (`_place`, `_rows` in `src/toc.bats`: an entry deeper than
+  one below the deepest open entry is put one level below it), the native
+  element, by the first rule of ARIA: no `role=tree` (the APG's tree asks for
+  Up/Down/Home/End/type-ahead and open/close, none of which a list of
+  buttons that always shows all has) and no `aria-level` (MDN, from the ARIA
+  spec: redundant when the nesting says it, and a risk of misinformation).
+  `e2e/toc-levels.spec.js` checks the tree with `toMatchAriaSnapshot`; what a
+  screen reader says is for quire#692 (Guidepup).
 * Listeners are registered only as one table (`regs` in `src/ui.bats`), each
   with its position as its id, and the table's length, in its type, is at most
   127: the bridge's last slot (of 128) is the media query listener's
