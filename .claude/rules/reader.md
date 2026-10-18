@@ -34,6 +34,14 @@ QLB6 opens at its stored place (`e2e/legacy-library.js`).
 * A chapter's pages are counted again as it is shown, for 3 s (`_settle`), and
   whenever a load of the page's fonts ends (`RFonts`): the reading face can
   arrive after those 3 s.
+* **A place is recorded only on a page laid out as it was shown** (quire#484).
+  A window that changed size keeps its old scroll until the debounced relayout,
+  and the first node on the screen then is not the reader's place (a record made
+  in that window took it, and the relayout kept it, pages on).
+  `_record_position` skips while the page's measured size differs from the one
+  `_show_page_down` or `_measure_pagination` recorded (`_laid_as_shown`); the
+  relayout keeps the place from before the change. Fixed-layout pages are
+  exempt.
 * **The place survives the app's bars shown or hidden** (quire#356). The app is
   drawn edge to edge, so full screen changes the reading area only through
   `env(safe-area-inset-*)`: the window does not resize and no `resize` comes.
