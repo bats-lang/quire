@@ -87,12 +87,20 @@ jobs:
   build:
     if: github.event.action != 'destroyed'
     runs-on: ubuntu-24.04
+    outputs:
+      play_signing_sha1: ${{ steps.clients.outputs.play_signing_sha1 }}
     steps:
       # Two commits deep: a pull request's checkout is the merge, and its
       # own head (its second parent) is what the version names (#219)
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 2
+
+      # The committed Play app signing SHA-1, which the android job has
+      # pwa's script compare with the upload key's
+      - name: Play signing SHA-1
+        id: clients
+        run: echo "play_signing_sha1=$(sed -n 's/^PLAY_SIGNING_SHA1=//p' scripts/sync-clients.env)" >> "$GITHUB_OUTPUT"
 
       - name: Set up bats
         uses: bats-lang/bats/.github/actions/setup@e2b86606c7f04ab43908a0820446871c1d4e0244 # the setup action (bats#280)
@@ -167,7 +175,7 @@ jobs:
       # pwa's action (quire#637). The WASM smoke tests need no browsers, which
       # are restored from the cache here
       - name: Set up Node.js and Playwright
-        uses: bats-lang/pwa/.github/actions/e2e-setup@b594790eebf7e3caab054cff1f07217dae049579
+        uses: bats-lang/pwa/.github/actions/e2e-setup@ea8a14aaaffbca00c6a740cc481e51f7d594e07d # pwa main after #124 (no release tag)
         with:
           playwright-minimum: "1.58"
 
@@ -348,7 +356,7 @@ jobs:
       # waits")
       - name: Set up Node.js and Playwright
         if: env.GROUP_RUN == 'yes'
-        uses: bats-lang/pwa/.github/actions/e2e-setup@b594790eebf7e3caab054cff1f07217dae049579
+        uses: bats-lang/pwa/.github/actions/e2e-setup@ea8a14aaaffbca00c6a740cc481e51f7d594e07d # pwa main after #124 (no release tag)
         with:
           playwright-minimum: "1.58"
 
@@ -510,11 +518,18 @@ jobs:
   android:
     needs: build
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@1618395525b76fb5fe750b9fe058af6c6ce9221c
+    uses: bats-lang/pwa/.github/workflows/android.yml@ea8a14aaaffbca00c6a740cc481e51f7d594e07d # pwa main after #124 (no release tag)
     secrets: inherit
     with:
       artifact: quire-android
       project-dir: android
+      # The upload key's fingerprints in the log and summary, and a refusal
+      # of a Play app signing SHA-1 that is the upload key's (pwa#96,
+      # quire#623; replaces sync-identity.yml's own steps). pwa-ref is the
+      # pin above (a reusable workflow cannot read the commit it was called
+      # at); the SHA-1 is the committed one (scripts/sync-clients.env)
+      pwa-ref: ea8a14aaaffbca00c6a740cc481e51f7d594e07d
+      play-signing-sha1: ${{ needs.build.outputs.play_signing_sha1 }}
       require-signed: true
       publish: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       # Above the version code (1) of the build uploaded before this workflow
@@ -544,12 +559,12 @@ jobs:
   play-internal:
     needs: [check, android]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: bats-lang/pwa/.github/workflows/play-release.yml@b594790eebf7e3caab054cff1f07217dae049579
+    uses: bats-lang/pwa/.github/workflows/play-release.yml@ea8a14aaaffbca00c6a740cc481e51f7d594e07d # pwa main after #124 (no release tag)
     permissions:
       contents: read
       id-token: write
     with:
-      pwa-ref: b594790eebf7e3caab054cff1f07217dae049579
+      pwa-ref: ea8a14aaaffbca00c6a740cc481e51f7d594e07d
       package: dev.middlefield.quire
       workload-identity-provider: projects/162611675413/locations/global/workloadIdentityPools/github/providers/quire
       service-account: quire-play-release@spring-duality-395520.iam.gserviceaccount.com

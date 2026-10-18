@@ -1,10 +1,9 @@
 # What the sync services need registered for Quire (bats-lang/quire#184):
-# the Android signing key's fingerprints, computed from the keystore
-# secrets ANDROID.md describes, and a check of the Google clients,
-# Play's signing SHA-1 and Dropbox's app key committed in
-# scripts/sync-clients.env (#200, #239).
-# Fingerprints and client IDs are public (they are in every signed APK
-# and page); the keystore and its passwords never leave the runner.
+# a check of the Google clients, Play's signing SHA-1 and Dropbox's app
+# key committed in scripts/sync-clients.env (#200, #239). The upload key's
+# fingerprints are printed, and Play's SHA-1 refused if it is the upload
+# key's, by pwa's android.yml in check.yml's android job (pwa#96, quire#623).
+# Client IDs are public (they are in every page).
 name: sync identity
 
 on:
@@ -22,45 +21,6 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      # pwa's script prints the upload key's fingerprints (log and summary)
-      # and refuses a Play app signing SHA-1 that is the upload key's
-      # (bats-lang/pwa#96, quire#623). Taken from pwa at the commit
-      # check.yml pins android.yml at (a commit, never a branch)
-      - name: Get the fingerprint script
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          repository: bats-lang/pwa
-          ref: b594790eebf7e3caab054cff1f07217dae049579
-          path: pwa
-          sparse-checkout: scripts
-          persist-credentials: false
-
-      - name: Signing key fingerprints
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "No KEYSTORE_BASE64 secret: no fingerprints." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-          PLAY_SIGNING_SHA1=$(sed -n 's/^PLAY_SIGNING_SHA1=//p' scripts/sync-clients.env) \
-            sh pwa/scripts/key-fingerprints.sh "$RUNNER_TEMP/release.jks"
-          {
-            echo
-            echo "Package: \`dev.middlefield.quire\`"
-            echo
-            echo "Register an **Android** OAuth client in Google Cloud for this package and the upload key's SHA-1."
-            echo "Apps installed from Google Play are signed with Play's app signing key instead: its SHA-1 is in \`scripts/sync-clients.env\` and needs an Android client of its own."
-            echo
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Remove the keystore
-        if: always()
-        run: rm -f "$RUNNER_TEMP/release.jks"
-
       - name: Sync client IDs
         run: |
           value() { sed -n "s/^$1=//p" scripts/sync-clients.env; }
@@ -75,7 +35,8 @@ jobs:
           test "$web" != "$android" || { echo "::error::scripts/sync-clients.env: the Web and Android client IDs are the same"; exit 1; }
           printf '%s' "$play" | grep -Eqx '([0-9A-F]{2}:){19}[0-9A-F]{2}' \
             || { echo "::error::scripts/sync-clients.env: PLAY_SIGNING_SHA1 is not a SHA-1 fingerprint (AA:BB:… in capitals)"; exit 1; }
-          # that it is not the upload key's is checked by pwa's script above
+          # that it is not the upload key's is checked by pwa's android.yml
+          # (check.yml's android job: pwa-ref, play-signing-sha1)
           printf '%s' "$dropbox" | grep -Eqx '[a-z0-9]{8,64}' \
             || { echo "::error::scripts/sync-clients.env: DROPBOX_CLIENT_ID is not a Dropbox app key"; exit 1; }
           echo "Play app signing SHA-1: $play"
@@ -94,6 +55,6 @@ jobs:
             echo "## Entries to register"
             echo
             echo "* Google, Web application client: JavaScript origins \`https://bats-lang.github.io\` and \`http://localhost:3737\`; scope \`https://www.googleapis.com/auth/drive.appdata\`."
-            echo "* Google, Android clients: package \`dev.middlefield.quire\`, one with the upload key's SHA-1 above and one with Play's."
+            echo "* Google, Android clients: package \`dev.middlefield.quire\`, one with the upload key's SHA-1 (printed in the summary of check.yml's android job) and one with Play's."
             echo "* Dropbox: redirect URIs \`https://bats-lang.github.io/quire/?oauth=dropbox\`, \`http://localhost:3737/?oauth=dropbox\`, \`quire://oauth/dropbox\`; scopes \`files.content.read\`, \`files.content.write\`; App folder; public clients (PKCE) allowed."
           } >> "$GITHUB_STEP_SUMMARY"

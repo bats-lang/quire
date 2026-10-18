@@ -126,8 +126,10 @@ sheet each time and is not used).
   key), written by `scripts/sync-clients.sh` into `sync-clients.json` beside
   the app (CI and local builds alike) and read by `src/sync_clients.bats`; a
   build with none lists neither Use Android nor Google Drive.
-  `sync-identity.yml` checks the committed values (the IDs' form, and that
-  Play's SHA-1 is not the upload key's).
+  `sync-identity.yml` checks the committed values' form; that Play's SHA-1 is
+  not the upload key's is checked by pwa's android.yml (`pwa-ref`,
+  `play-signing-sha1` in check.yml's android job), which also prints the upload
+  key's fingerprints (pwa's CLAUDE.md, "The signing key's fingerprints").
 * The e2e suite stubs Google's script (`googleStubbed`, `e2e/fixtures.js`), so
   it never reaches Google; a spec that plays a provider, or a build with no
   client, serves its own `sync-clients.json` (`clientsServed`).
