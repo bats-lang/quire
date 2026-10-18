@@ -25,6 +25,7 @@ No bats and no patsopt: it reads files (and runs git on a repository of its own)
 
 usage: python3 tests/static/affected_test.py
 """
+import importlib.util
 import json
 import os
 import re
@@ -237,6 +238,42 @@ class Workflow(unittest.TestCase):
         self.assertIn("if: toJSON(fromJSON(needs.plan.outputs.static_run)[matrix.group]) == 'null'", self.TEXT)
         step = self.TEXT.index('- name: The plan names this group')
         self.assertIn('exit 1', self.TEXT[step:step + 600])
+
+
+    def job(self, name):
+        """The text of one job of check.yml (its block under `jobs:`)."""
+        found = re.search(rf'(?ms)^  {re.escape(name)}:\n(.*?)(?=^  [a-z-]+:\n|\Z)', self.TEXT)
+        self.assertIsNotNone(found, name)
+        return found.group(1)
+
+    def test_only_the_plan_and_the_groups_and_the_check_read_the_plan(self):
+        for name in ('build', 'android', 'play-internal'):
+            with self.subTest(name):
+                self.assertNotIn('needs.plan', self.job(name))
+                self.assertNotIn('plan.outputs', self.job(name))
+
+    def test_the_build_and_the_android_job_are_never_skipped_by_the_plan(self):
+        """Android's required contexts exist only if the job runs, and it needs the
+        build's artifact: neither has an `if` but the build's `destroyed` one."""
+        self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('build')),
+                         ["    if: github.event.action != 'destroyed'"])
+        self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('android')), [])
+        self.assertIn('needs: build', self.job('android'))
+
+    def test_a_merge_group_plans_the_whole_check(self):
+        scope = self.job('plan')[self.job('plan').index('id: scope'):]
+        self.assertRegex(scope, r'merge_group\) base=\$\(git rev-parse HEAD\^1\); full=full ;;')
+        self.assertIn('scripts/ci-groups.py plan $base $full', scope)
+
+    def test_the_whole_plan_ignores_the_base(self):
+        spec = importlib.util.spec_from_file_location('ci_groups', ROOT / 'scripts' / 'ci-groups.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with patch.object(module.selection, 'git_changes', side_effect=AssertionError('the diff was read')):
+            result = module.plan(GROUPS, 'none', full=True)
+        self.assertEqual(set(result['e2e'].values()), {True})
+        groups, members = running(result)
+        self.assertEqual(members, non_mutation_members())
 
 
 class Diff(unittest.TestCase):
