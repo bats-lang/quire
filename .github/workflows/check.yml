@@ -208,6 +208,16 @@ jobs:
       GROUP_MEMBERS: ${{ fromJSON(needs.plan.outputs.static_run)[matrix.group].members }}
       GROUP_BATS: ${{ fromJSON(needs.plan.outputs.static_run)[matrix.group].bats && 'yes' || 'no' }}
     steps:
+      # A group the plan does not name has no members to run: that fails
+      # the job (and so `check`) and is never read as nothing selected (#656)
+      - name: The plan names this group
+        if: toJSON(fromJSON(needs.plan.outputs.static_run)[matrix.group]) == 'null'
+        env:
+          GROUP: ${{ matrix.group }}
+        run: |
+          echo "::error::the plan has no entry for the static group $GROUP"
+          exit 1
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         if: env.GROUP_MEMBERS != ''
         with:
@@ -291,9 +301,13 @@ jobs:
     name: e2e (${{ matrix.group }})
     # Whether the plan selected a spec of this group (#619); if not, the job
     # ends here: every step below is skipped and the job still passes, as the
-    # change was shown not to reach any of the group's specs
+    # change was shown not to reach any of the group's specs. Only the plan
+    # saying exactly false skips: a group the plan does not name is null, and
+    # `null == false` is true in an expression (loose comparison, both are
+    # the number 0), so the test is on the JSON text, 'null' is not 'false'
+    # (#656): a group with no entry runs
     env:
-      GROUP_RUN: ${{ fromJSON(needs.plan.outputs.e2e_run)[matrix.group] && 'yes' || 'no' }}
+      GROUP_RUN: ${{ toJSON(fromJSON(needs.plan.outputs.e2e_run)[matrix.group]) == 'false' && 'no' || 'yes' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         if: env.GROUP_RUN == 'yes'

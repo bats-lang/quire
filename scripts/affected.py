@@ -55,15 +55,26 @@ def pattern(glob):
     return re.compile(out + r'\Z')
 
 
+# One pass over the text, so a comment marker inside a string is not a
+# comment and a quote inside a comment starts no string: a quoted string or a
+# template literal is kept whole; a block or a line comment is the match.
+# A string cannot run over a line end, so a quote the pass misreads (inside a
+# regular expression literal) costs the rest of that line, not the file.
+COMMENTS = re.compile(
+    r"""(?P<text>'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`)"""
+    r"""|(?P<block>/\*.*?\*/)|(?P<line>//[^\n]*)""",
+    re.DOTALL)
+
+
 def strip_comments(text):
     """The text without its block and line comments (a comment may name a
-    path it does not read)."""
-    text = re.sub(r'/\*.*?\*/', ' ', text, flags=re.DOTALL)
-    return re.sub(r'(?m)(^|\s)//[^\n]*$', r'\1', text)
+    path it does not read), strings and template literals kept as they are.
+    A block comment becomes a space, a line comment nothing."""
+    return COMMENTS.sub(lambda found: found.group('text') or (' ' if found.group('block') else ''), text)
 
 
 IMPORT = re.compile(
-    r'''(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)['"](\.{1,2}/[^'"]*)['"]''')
+    r"""(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)['"`](\.{1,2}/[^'"`$]*)['"`]""")
 MODULE_SUFFIXES = ('.js', '.mjs', '.cjs')
 
 
