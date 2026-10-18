@@ -82,7 +82,7 @@ jobs:
   # The app and the PWA, built once: the Android project and the e2e
   # groups take them from here (the quire-android artifact). It reads
   # nothing of the plan and is never skipped by it: the Android jobs need its
-  # artifact, and the Android job cannot be skipped (below), so a missing or
+  # artifact, and the Android job is never skipped by the plan (below), so a missing or
   # malformed plan entry cannot make it skip (#656)
   build:
     if: github.event.action != 'destroyed'

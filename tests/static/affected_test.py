@@ -246,7 +246,7 @@ class Workflow(unittest.TestCase):
         self.assertIsNotNone(found, name)
         return found.group(1)
 
-    def test_only_the_plan_and_the_groups_and_the_check_read_the_plan(self):
+    def test_the_build_the_android_job_and_the_release_do_not_read_the_plan(self):
         for name in ('build', 'android', 'play-internal'):
             with self.subTest(name):
                 self.assertNotIn('needs.plan', self.job(name))

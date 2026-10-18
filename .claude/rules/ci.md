@@ -181,8 +181,10 @@ each kind selects) and prints each path's reason in its summary. Rules:
   skipped by a condition reports success, but "avoid requiring workflows that
   can be skipped"; community discussion 29825 has the nested context left
   unfulfilled). `android` needs the `build` artifact, so `build` runs too.
-  Skipping them waits for the required checks to be `check` alone, which
-  aggregates `android` (a change of the branch protection, an admin's);
+  Skipping them waits for the required checks to be `check` alone, and for
+  `check` to need `android` (today it needs `plan`, `build`, `static` and
+  `e2e`; only `play-internal` needs `android`), a change of the branch
+  protection that is an admin's;
   tested: `Workflow` in `tests/static/affected_test.py`.
 * **The merge queue's group runs everything, by decision (#656).** Its diff
   (against `HEAD^1`) is one PR's, so a selection by it would be the PR's own
