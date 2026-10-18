@@ -5,7 +5,7 @@
 
 import { test, expect, onAndroid } from './fixtures.js';
 import {
-  start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
+  start, epubFile, importFiles, readBook, openBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
   reload, readingSettings, openReadingSettings, openShelf, emptyTrashDialog, shelfTitle, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
@@ -595,6 +595,100 @@ test('the place stays when the reading area changes, into full screen and out of
     await page.waitForTimeout(1500);
     expect(await onPage(page, anchor), `"${anchor}" is on the page after the area changed`).toBe(true);
   }
+});
+
+// ---- split screen and foldables (#412) ----
+// The sizes are CSS pixels of real devices. A split-screen half is the
+// android project's width at half its height. Pixel Fold (Google's specs:
+// 1080x2092 outer, 2208x1840 inner, both 420 dpi, 2.625): folded 411x797,
+// unfolded 841x701. Android's window size classes (compact under 600 dp,
+// medium to 840, expanded from 840) are what an app is told to lay out by,
+// and the unfolded Fold is the first expanded one.
+const SPLIT_HALF = { width: 412, height: 450 };
+const FOLDED = { width: 411, height: 797 };
+const UNFOLDED = { width: 841, height: 701 };
+
+/** A long one-chapter book opened, the fonts and page count settled, 14
+    pages in; the paragraph at the page's head */
+async function openedDeep(page, title) {
+  await start(page);
+  await readBook(page, { title, author: 'X', rawChapters: chapters(1, 400) });
+  await expect.poll(async () => (await place(page)).t).toBeGreaterThan(10);
+  await page.waitForTimeout(3500);
+  for (let k = 0; k < 14; k++) await page.keyboard.press('ArrowRight');
+  const anchor = (await startsOnPage(page))[0];
+  expect(anchor, 'a paragraph at the page\'s head').toMatch(/^Para 1\./);
+  return anchor;
+}
+
+/** The paragraph is on the page, and still is a moment later */
+async function staysOn(page, anchor, what) {
+  await expect.poll(() => onPage(page, anchor), { message: `"${anchor}" is on the page after ${what}` }).toBe(true);
+  await page.waitForTimeout(700);
+  expect(await onPage(page, anchor), `"${anchor}" is still on the page after ${what}, settled`).toBe(true);
+}
+
+/** Chooses Auto, One or Two in Pages on screen */
+async function columnsChoice(page, name) {
+  await openReadingSettings(page, 'Page');
+  await readingSettings(page).getByRole('group', { name: 'Pages on screen' }).getByRole('button', { name, exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(readingSettings(page)).toBeHidden();
+}
+
+test('a split-screen half lays out the library and the reader without overflow', async ({ page }) => {
+  await page.setViewportSize(SPLIT_HALF);
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Half A Screen', author: 'Someone', rawChapters: chapters(2, 30) })], 1);
+  await fits(page, 'the library in a split-screen half');
+  await bookMenu(page, 'Half A Screen');
+  await fits(page, 'the book menu in a split-screen half');
+  await page.keyboard.press('Escape');
+  await openBook(page, 'Half A Screen');
+  await expect(bookPage(page)).toBeVisible();
+  await showChrome(page);
+  await fits(page, 'the reader with its bars in a split-screen half');
+  await openSettings(page);
+  for (const tab of ['Look', 'Page', 'Turning']) {
+    await openReadingSettings(page, tab);
+    await fits(page, `Reading settings, ${tab}, in a split-screen half`);
+  }
+});
+
+test('the place stays when the window goes from full to a split-screen half and back', async ({ page }) => {
+  const anchor = await openedDeep(page, 'Half And Back');
+  const full = page.viewportSize();
+  for (const [choice, label] of [['Auto', 'one page'], ['Two', 'two columns']]) {
+    if (choice !== 'Auto') await columnsChoice(page, choice);
+    await page.setViewportSize(SPLIT_HALF);
+    await staysOn(page, anchor, `the window went to a half (${label})`);
+    await page.setViewportSize(full);
+    await staysOn(page, anchor, `the window came back (${label})`);
+  }
+});
+
+test('a foldable folded and unfolded keeps the place, and shows a spread or one page by the Columns setting', async ({ page }) => {
+  await page.setViewportSize(FOLDED);
+  const anchor = await openedDeep(page, 'Folding Book');
+  const spread = async () => /pages \d+–\d+ of/.test(await indicator(page).textContent());
+  // Auto: one page at either size (a spread wants a landscape window of 60em, 960 px)
+  await page.setViewportSize(UNFOLDED);
+  await staysOn(page, anchor, 'the foldable was unfolded');
+  expect(await spread(), 'Auto shows one page unfolded, 841 px wide').toBe(false);
+  await page.setViewportSize(FOLDED);
+  await staysOn(page, anchor, 'the foldable was folded again');
+  // Two: a spread unfolded
+  await columnsChoice(page, 'Two');
+  await page.setViewportSize(UNFOLDED);
+  await staysOn(page, anchor, 'the foldable was unfolded with Two chosen');
+  await expect.poll(spread, { message: 'Two shows a spread unfolded' }).toBe(true);
+  // One: one page at the unfolded size, and the place unmoved
+  await columnsChoice(page, 'One');
+  await expect.poll(spread, { message: 'One shows one page unfolded' }).toBe(false);
+  await staysOn(page, anchor, 'One was chosen unfolded');
+  await page.setViewportSize(FOLDED);
+  await staysOn(page, anchor, 'the foldable was folded with One chosen');
+  await fits(page, 'the reader folded');
 });
 
 test('the reading settings sheet keeps its box and its tabs in place on every tab', async ({ page }) => {

@@ -137,6 +137,44 @@ sheet is as tall as its tallest tab**: the panels lie in one grid cell
 (`.tabpanels`), the ones not chosen `.unchosen` (`visibility: hidden`), so
 switching tabs moves neither the sheet nor its tabs. Their controls are one `typography_control` datatype.
 
+## Split screen and foldables (#412)
+
+* **The window is the reader's size, whatever it is.** A split-screen half
+  (412 by 450 CSS px: the android project's width at half its height) and
+  an unfolded foldable (841 by 701) lay the library, the book menu, the
+  reader with its bars and the reading settings' Look, Page and Turning
+  tabs out without overflow
+  (`fits`, `e2e/layout.spec.js`, "a split-screen half lays out ..."). The
+  place stays on the page when the window goes from full to a half and back,
+  with Auto and Two, and when a foldable goes from folded (411 by 797) to
+  unfolded and back, with Auto, Two and One (the same spec, "the place stays
+  when the window goes ..." and "a foldable folded and unfolded keeps the
+  place").
+* **Auto shows a spread only in a landscape window of 60em (960 px).** A
+  folded or unfolded foldable is one page at Auto; Two and One are the
+  reader's own choice and are kept at either size.
+* **The fold is not read (decided, #412).** Quire does not read CSS viewport
+  segments (`env(viewport-segment-*)`, `horizontal-viewport-segments`) nor
+  any fold position from the platform. Research: the segments API is listed
+  as supported from Chrome 138 (Chrome for Android), with Firefox and Safari
+  unsupported; MDN's browser-compat-data records Android WebView, which the app
+  runs in, as mirroring Chrome (so from 138; inferred from the data, not tested
+  here), so whether a WebView hands the app a fold as a segment is unknown;
+  Android's own guidance (Jetpack WindowManager's
+  `FoldingFeature`) splits content into two areas only in book posture on a
+  device that is half opened, and avoids text across a fully occluded fold
+  (dual-screen devices); today's single-screen foldables have a flat fold
+  (`OcclusionType.NONE`), so the unfolded screen is a larger window whose two
+  columns meet at the middle, where a spine would be. Kindle on a
+  Pixel Fold shows a spread on the inner screen, split at the hinge like
+  facing pages (Pocket Tactics and Android Authority, 2023), Kindle's Android spreads are in landscape only for some books, and
+  no documentation of Kobo, Apple Books or Google Play Books at a fold was
+  found. A change of the rule needs a device that has the fold as a segment
+  (a dual-screen device) and the WebView's support for the segments.
+* **The system font scale and display size of Android are not played here**
+  (see the reader rules: the WebView applies its own text zoom and desktop
+  Chromium cannot play it).
+
 ## Writing modes, fixed layout and spreads
 
 * **A book is set vertically as Readium sets it, from its OPF** (the book's CSS is
