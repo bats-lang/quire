@@ -253,3 +253,80 @@ test('a link and a noteref to a notes file that the spine does not list do nothi
   }
   expect(errors).toEqual([]);
 });
+
+/** The content node (c<N>) of the element that holds text, in the chapter shown */
+const nodeOfText = (page, text) => bookPage(page).evaluate((doc, text) => {
+  const walker = doc.ownerDocument.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    if (!t.data.includes(text)) continue;
+    for (let el = t.parentElement; el; el = el.parentElement) if (/^c\d+$/.test(el.id)) return el.id;
+  }
+  return null;
+}, text);
+
+/** The content node (c<N>) that the first painted range (a search hit or a highlight) starts in */
+const markedNode = page => page.evaluate(() => {
+  const [range] = [...CSS.highlights.values()].flatMap(h => [...h]);
+  for (let el = range.startContainer.parentElement; el; el = el.parentElement) if (/^c\d+$/.test(el.id)) return el.id;
+  return null;
+});
+
+test('ids two chapters share: a search hit and a highlight are at their own chapter\'s content node', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, folderBooks.repeated.opts);
+  await expect(chapterTitle(page)).toHaveText('Number 1');
+  const top1 = await nodeOfText(page, 'Top of 1');
+  await goToEntry(page, 'Number 2');
+  await expect(chapterTitle(page)).toHaveText('Number 2');
+  const top2 = await nodeOfText(page, 'Top of 2');
+  // the paragraph before chapter 2's heading moves the same words to other content nodes
+  expect(top1).toMatch(/^c\d+$/);
+  expect(top2).toMatch(/^c\d+$/);
+  expect(top2).not.toBe(top1);
+  // a search hit in chapter 2 is painted at chapter 2's node for its paragraph
+  await page.keyboard.press('/');
+  const panel = dialog(page, 'Search in book');
+  await page.keyboard.type('needle');
+  await expect(panel.getByRole('status')).toHaveText('2 results');
+  await panel.getByRole('region', { name: 'Results' }).getByRole('button').nth(1).click();
+  await expect(chapterTitle(page)).toHaveText('Number 2');
+  await expect.poll(() => marks(page)).toMatchObject({ size: 1, text: 'needle' });
+  expect(await markedNode(page)).toBe(await nodeOfText(page, 'Target t of chapter 2'));
+  await page.getByRole('toolbar', { name: 'Search results' }).getByRole('button', { name: 'Close search' }).click();
+  // a highlight in each chapter is painted at that chapter's node, and read back at it after the other chapter
+  await selectText(page, 0, 3);
+  await selectionButton(page, 'Highlight').click();
+  await expect.poll(() => marks(page)).toMatchObject({ size: 1, text: 'Lea' });
+  const lead2 = await markedNode(page);
+  expect(lead2).toBe(await nodeOfText(page, 'Lead of chapter 2'));
+  await goToEntry(page, 'Number 1');
+  await expect.poll(() => marks(page)).toMatchObject({ size: 0 });
+  await selectText(page, 0, 3);
+  await selectionButton(page, 'Highlight').click();
+  await expect.poll(() => marks(page)).toMatchObject({ size: 1, text: 'Top' });
+  expect(await markedNode(page)).toBe(top1);
+  await goToEntry(page, 'Number 2');
+  await expect.poll(() => marks(page)).toMatchObject({ size: 1, text: 'Lea' });
+  expect(await markedNode(page)).toBe(lead2);
+  expect(errors).toEqual([]);
+});
+
+test('a stylesheet that two chapters both link sizes the text of each', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, folderBooks.shared.opts);
+  const sizes = () => bookPage(page).evaluate(doc => {
+    const all = [...doc.querySelectorAll('p')];
+    const big = all.find(p => p.textContent.startsWith('Big in'));
+    const plain = all.find(p => /^(One|Two) /.test(p.textContent));
+    return { big: getComputedStyle(big).fontSize, plain: getComputedStyle(plain).fontSize };
+  });
+  const one = await sizes();
+  await goToEntry(page, 'Shared two');
+  await expect(chapterTitle(page)).toHaveText('Shared two');
+  const two = await sizes();
+  // the sheet's 72px rule reaches each chapter's text, held to three times the reader's size (#431)
+  expect(parseFloat(one.big)).toBe(3 * parseFloat(one.plain));
+  expect(two.big).toBe(one.big);
+  expect(two.plain).toBe(one.plain);
+  expect(errors).toEqual([]);
+});
