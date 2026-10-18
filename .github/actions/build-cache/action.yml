@@ -23,8 +23,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # A locator, and until bats-lang/bats#316 is fixed and the freshness audit
-    # (bats#317) is done, the toolchain's pins (#622). The key is the cache's
+    # A locator, and the toolchain's pins (#622). The key is the cache's
     # name, the pins and the commit (a GitHub cache is immutable, so a save
     # needs a new key), and a restore takes the newest cache of the name and
     # pins. The rest is bats's: it stamps every build/ with what made it and
@@ -32,16 +31,12 @@ runs:
     # changed, and keys each memo entry by what it read (bats's CLAUDE.md).
     # It names no version a developer bumps, no runner image, no lock, no
     # bats.toml and no hash of the sources, so a new input of those needs no
-    # new key part. What stays is the two pins that make the toolchain,
-    # because the stamp's toolchain digest was not yet complete: bats#305 (a
-    # patsopt or a toolchain directory that is a symbolic link, changed in
-    # place, was not seen; fixed in bats 77e60a55, which this pin does not
-    # contain), bats#316 (a missing toolchain root gives a shorter listing and
-    # no error; open) and bats#317 (the other freshness inputs bats reads
-    # back are not audited yet). The compiler's commit (.github/bats-version,
-    # whose compiler holds the ATS2 pin) and the commit of bats's setup action
-    # (which installs them) go when those are done and quire's pin is past
-    # them.
+    # new key part. The pins stay: bats#305 and bats#316 (the stamp's
+    # toolchain digest) are fixed in the bats this pin names, but the audit
+    # (bats#317) found holes that are still open (bats#320 to #323), so
+    # the pins leave the key when those land (.claude/rules/ci.md says which
+    # can bite here). Note bats#323: a build job that restores build/ can
+    # keep the C of a dependency's template body that a relock changed.
     - name: Name the cache
       id: key
       shell: bash
