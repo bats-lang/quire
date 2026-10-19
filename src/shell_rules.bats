@@ -30,7 +30,8 @@ fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false,
   val sheet = lay(sheet, MaxWidth(), "800px")
   val sheet = centred(sheet)
   (* the room under the last card is the Undo toast's (it stays until it
-     is dismissed, 112 px up and 56 tall): the list scrolls clear of it,
+     is dismissed, 16 px up in the library, and 56 tall or, at a large
+     font scale, three lines): the list scrolls clear of it,
      as a list leaves room for a FAB (#380) *)
   val sheet = spaced_safe(sheet, PaddingTop(), SpaceMedium(), SafeTop())
   val sheet = spaced_safe(sheet, PaddingRight(), SpaceLarge(), SafeRight())

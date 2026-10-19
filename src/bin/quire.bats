@@ -557,6 +557,7 @@ fn _library_shown (save_view: bool): void = let
   val () = aloud_stop()
   val () = ui_show("library", true)
   val () = banner_place_set(BannerInLibrary())
+  val () = toast_place_set(ToastInLibrary())
   (* a reload now comes back here *)
   val () = (if save_view then _view_save(~1, 0, 0) else ())
   val () = reader_search_stop()
@@ -674,6 +675,7 @@ fn _show_reader (cause: opening_cause): void = let
     in lib_shelf_set(OnShelf()) end else ())
   val () = ui_show("reader", true)
   val () = banner_place_set(if !_chrome then BannerUnderBars() else BannerAtTop())
+  val () = toast_place_set(ToastOverReader())
   (* A reader does not touch the screen for a page's length: it stays
      awake while the book is open *)
   val () = $WN.keep_awake(true)

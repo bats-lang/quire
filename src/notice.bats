@@ -39,6 +39,18 @@ implement banner_place_set (place) =
   | BannerInLibrary() => ui_attr("error-banner", AClass, "banner in-library")
   | BannerUnderBars() => ui_attr("error-banner", AClass, "banner under-bars")
 
+(* Where the Undo toast sits: above the reader's bottom bar, or, in the
+   library, which has no bottom bar, near the foot of the window (#412).
+   The view says it as it changes, as it does the banner's place *)
+#pub datatype toast_place = ToastOverReader | ToastInLibrary
+
+#pub fn toast_place_set (place: toast_place): void
+
+implement toast_place_set (place) =
+  case+ place of
+  | ToastOverReader() => ui_attr("undo-toast", AClass, "toast")
+  | ToastInLibrary() => ui_attr("undo-toast", AClass, "toast in-library")
+
 (* Whether the error banner is up *)
 val _banner_up = ref<bool>(false)
 

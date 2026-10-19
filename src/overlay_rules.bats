@@ -18,10 +18,10 @@ staload "declarations.sats"
 
 implement image_zoom_axes () = $GT.AxNone()
 
-#pub fn overlay_rules {left:nat | left >= 8320} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8320] sheet(after, false, false)
+#pub fn overlay_rules {left:nat | left >= 8397} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8397] sheet(after, false, false)
 
 (* The image viewer and toasts, from .imview on *)
-fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2629} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2629] sheet(after, false, false) = let
+fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2706} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2706] sheet(after, false, false) = let
   (* a book's image, full screen, on the bars' dark ground (a picture is
      best seen on a dark one, and every theme's bar is dark); the fingers
      zoom and pan it (image_viewer.bats) *)
@@ -105,6 +105,15 @@ fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2629} (sheet: sheet
   val sheet = close(sheet)
   val sheet = rule(sheet, ".toast > button")
   val sheet = lay(sheet, Flex(), "none")
+  val sheet = close(sheet)
+  (* in the library there is no bottom bar to clear (Material 3's snackbar
+     sits 8 to 16dp above the screen's foot when no bottom navigation is
+     there), so the Undo toast sits 16px up: at a large font scale its
+     words wrap to three lines, and 112px up it covered the foot of the
+     last card (#412). The reader keeps it above its bottom bar. The view
+     says it (toast_place_set in notice.bats) *)
+  val sheet = rule(sheet, ".toast.in-library")
+  val sheet = lay(sheet, Bottom(), "calc(env(safe-area-inset-bottom) + 16px)")
   val sheet = close(sheet)
   (* the copy status, above the Undo toast: text alone, with no button *)
   val sheet = rule(sheet, ".toast.tcopy")
