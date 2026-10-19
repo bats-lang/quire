@@ -10,10 +10,10 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn panel_rules {left:nat | left >= 9964} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9964] sheet(after, false, false)
+#pub fn panel_rules {left:nat | left >= 10054} (sheet: sheet(left, false, false)): [after:nat | after >= left - 10054] sheet(after, false, false)
 
 (* The panel frame and tabs, from .panel on *)
-fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1658} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1658] sheet(after, false, false) = let
+fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1690} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1690] sheet(after, false, false) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
@@ -43,13 +43,16 @@ fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1658} (sheet: sheet(left
   val sheet = rule(sheet, ".ph")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
+  (* at the system's font scale a title and its buttons do not fit one
+     line: the buttons go to the next, whole (#412) *)
+  val sheet = lay(sheet, FlexWrap(), "wrap")
   val sheet = spaced(sheet, Gap(), SpaceSmall())
   val sheet = spaced(sheet, Padding(), SpaceSmall())
   val sheet = line(sheet, BottomSide(), 1, RoleLine())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ph .grow")
   val sheet = lay(sheet, Flex(), "1")
-  val sheet = lay(sheet, MinWidth(), "0")
+  val sheet = lay(sheet, MinWidth(), "min-content")
   val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ph .ibtn")
@@ -380,7 +383,7 @@ fn panel_rules_settings_sheet {left:nat | left >= 2771} (sheet: sheet(left, fals
 in sheet end
 
 (* The setting rows, from .srow on *)
-fn panel_rules_setting_rows {left:nat | left >= 1534} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1534] sheet(after, false, false) = let
+fn panel_rules_setting_rows {left:nat | left >= 1592} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1592] sheet(after, false, false) = let
   val sheet = rule(sheet, ".srow")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
@@ -388,6 +391,9 @@ fn panel_rules_setting_rows {left:nat | left >= 1534} (sheet: sheet(left, false,
   val sheet = close(sheet)
   val sheet = rule(sheet, ".slabel")
   val sheet = lay(sheet, Width(), "7em")
+  (* never narrower than its longest word, which the system's font scale
+     makes wider than seven em (#412) *)
+  val sheet = lay(sheet, MinWidth(), "min-content")
   val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = lay(sheet, FontSize(), "14px")
   val sheet = close(sheet)
@@ -397,6 +403,7 @@ fn panel_rules_setting_rows {left:nat | left >= 1534} (sheet: sheet(left, false,
   val sheet = close(sheet)
   val sheet = rule(sheet, ".sval")
   val sheet = lay(sheet, Width(), "5em")
+  val sheet = lay(sheet, MinWidth(), "min-content")
   val sheet = lay(sheet, TextAlign(), "right")
   val sheet = lay(sheet, FontSize(), "14px")
   val sheet = close(sheet)

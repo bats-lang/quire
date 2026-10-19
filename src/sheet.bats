@@ -17,7 +17,7 @@ staload CT = "css/src/contrast.sats"
    whether a rule or an @media block is open
    ============================================================ *)
 
-#pub stadef BUDGET = 64000
+#pub stadef BUDGET = 64500
 
 (* sheet(left, media, open): left bytes left; whether an @media block is
    open, and whether a rule is *)
@@ -137,7 +137,7 @@ in Sheet(builder) end
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
   | ColumnFill | ColumnGap | ColumnWidth | BreakAfter | BreakInside | GridTemplate | AspectRatio
-  | Appearance | ContainerType | UserSelect | Transition | Visibility | GridArea | Zoom | ClipPath | WillChange
+  | Appearance | ContainerType | UserSelect | Transition | Visibility | GridArea | Zoom | ClipPath | WillChange | TextSizeAdjust
   (* the reader's own variables: the page's top and bottom paddings and
      the running footer's place, each given once (reader_rules) *)
   | PageTopVariable | PageBottomVariable | FooterBottomVariable | FooterHeightVariable
@@ -168,7 +168,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | BreakInside() => "break-inside" | Appearance() => "appearance" | ContainerType() => "container-type" | UserSelect() => "user-select"
   | Transition() => "transition" | Visibility() => "visibility"
   | GridTemplate() => "grid-template" | AspectRatio() => "aspect-ratio"
-  | GridArea() => "grid-area" | Zoom() => "zoom" | ClipPath() => "clip-path" | WillChange() => "will-change"
+  | GridArea() => "grid-area" | Zoom() => "zoom" | ClipPath() => "clip-path" | WillChange() => "will-change" | TextSizeAdjust() => "text-size-adjust"
   | PageTopVariable() => "--page-top" | PageBottomVariable() => "--page-bottom"
   | FooterBottomVariable() => "--footer-bottom" | FooterHeightVariable() => "--footer-height"
 

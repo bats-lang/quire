@@ -122,7 +122,7 @@ in sheet end
    the forward zone the accent (no text: their font size is 0); a book
    read right to left has it mirrored (.taps.rtl). The drawing and the
    line take no taps, so a tap on them is the button's *)
-#pub fn reading_settings_rules {left:nat | left >= 5954} (sheet: sheet(left, false, false)): [after:nat | after >= left - 5954] sheet(after, false, false)
+#pub fn reading_settings_rules {left:nat | left >= 5976} (sheet: sheet(left, false, false)): [after:nat | after >= left - 5976] sheet(after, false, false)
 
 implement reading_settings_rules (sheet) = let
   val sheet = rule(sheet, ".shead")
@@ -130,9 +130,12 @@ implement reading_settings_rules (sheet) = let
   val sheet = close(sheet)
   val sheet = rule(sheet, ".shead .tabs")
   val sheet = lay(sheet, Flex(), "1 0 100%")
+  (* the tabs keep their whole names: at the system's font scale they go
+     to a second line rather than shrink under their words (#412) *)
+  val sheet = lay(sheet, FlexWrap(), "wrap")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".shead .tab")
-  val sheet = lay(sheet, Flex(), "1 1 auto")
+  val sheet = lay(sheet, Flex(), "1 0 auto")
   val sheet = spaced_pair(sheet, Padding(), SpaceSmall(), SpaceSmall())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".tabpanel")

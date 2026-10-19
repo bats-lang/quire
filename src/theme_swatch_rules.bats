@@ -15,7 +15,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn theme_swatch_rules {left:nat | left >= 600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 600] sheet(after, false, false)
+#pub fn theme_swatch_rules {left:nat | left >= 622} (sheet: sheet(left, false, false)): [after:nat | after >= left - 622] sheet(after, false, false)
 
 implement theme_swatch_rules (sheet) = let
   prval _ = E_accent_card
@@ -25,6 +25,8 @@ implement theme_swatch_rules (sheet) = let
   val sheet = lay(sheet, Height(), "56px")
   val sheet = lay(sheet, BorderRadius(), "8px")
   val sheet = lay(sheet, FontSize(), "20px")
+  (* the sample is drawn at the swatch's size, not the system's font scale *)
+  val sheet = lay(sheet, TextSizeAdjust(), "none")
   val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = spaced(sheet, Padding(), SpaceTight())
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())

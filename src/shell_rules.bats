@@ -9,7 +9,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn shell_rules {left:nat | left >= 9443} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9443] sheet(after, false, false)
+#pub fn shell_rules {left:nat | left >= 9484} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9484] sheet(after, false, false)
 
 (* The library page, from body on *)
 fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1919] sheet(after, false, false) = let
@@ -30,7 +30,8 @@ fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false,
   val sheet = lay(sheet, MaxWidth(), "800px")
   val sheet = centred(sheet)
   (* the room under the last card is the Undo toast's (it stays until it
-     is dismissed, 112 px up and 56 tall): the list scrolls clear of it,
+     is dismissed, 16 px up in the library, and 56 tall or, at a large
+     font scale, three lines): the list scrolls clear of it,
      as a list leaves room for a FAB (#380) *)
   val sheet = spaced_safe(sheet, PaddingTop(), SpaceMedium(), SafeTop())
   val sheet = spaced_safe(sheet, PaddingRight(), SpaceLarge(), SafeRight())
@@ -104,7 +105,7 @@ fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false,
 in sheet end
 
 (* The fields and banners, from .btn input[type=file] on *)
-fn shell_rules_fields_and_banners {left:nat | left >= 2200} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2200] sheet(after, false, false) = let
+fn shell_rules_fields_and_banners {left:nat | left >= 2241} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2241] sheet(after, false, false) = let
   val sheet = rule(sheet, ".btn input[type=file],.ibtn input[type=file]")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Top(), "0")
@@ -120,6 +121,11 @@ fn shell_rules_fields_and_banners {left:nat | left >= 2200} (sheet: sheet(left, 
      own text colour (#295) *)
   val sheet = rule(sheet, "[data-icon]")
   val sheet = lay(sheet, FontFamily(), "'Material Symbols',Inter,system-ui,sans-serif")
+  (* a glyph is a picture the size of its button, as Android's icons are
+     (dp, not sp): the system's font scale, which a WebView applies to
+     the page's text (e2e/font-scale.spec.js), does not enlarge it past
+     its box (#412) *)
+  val sheet = lay(sheet, TextSizeAdjust(), "none")
   val sheet = close(sheet)
   (* an icon button; text it shows (Skip table) is in the app's face *)
   val sheet = rule(sheet, ".ibtn")
@@ -130,6 +136,10 @@ fn shell_rules_fields_and_banners {left:nat | left >= 2200} (sheet: sheet(left, 
   val sheet = close(sheet)
   val sheet = rule(sheet, ".sfield")
   val sheet = lay(sheet, FlexBasis(), "100%")
+  (* a flex item's least width is its content's, and a field's is its
+     size in characters, which a font scale of 200% doubles past the bar:
+     the row shrinks to the bar and its field with it (quire#705) *)
+  val sheet = lay(sheet, MinWidth(), "0")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = spaced(sheet, Gap(), SpaceTight())
@@ -295,7 +305,12 @@ fn shell_rules_import_and_book_lists {left:nat | left >= 1358} (sheet: sheet(lef
   val sheet = lay(sheet, Font(), "inherit")
   val sheet = spaced(sheet, Padding(), SpaceSmall())
   val sheet = lay(sheet, BorderRadius(), "6px")
-  val sheet = lay(sheet, MaxWidth(), "12em")
+  (* as wide as the row at most, not 12em: an em is the font size
+     before the system's text scale (text-size-adjust, Android's font
+     scale), so at 200% the cap stayed 192 px and cut the chosen
+     option's text, which grew with the scale (#412); the row wraps a
+     wider select onto a line of its own *)
+  val sheet = lay(sheet, MaxWidth(), "100%")
   val sheet = close(sheet)
   (* the hint for iOS Safari, shown (on) only there (library.bats);
      Install Quire and the storage notes are shown by their elements'

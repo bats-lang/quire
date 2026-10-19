@@ -18,10 +18,10 @@ staload "declarations.sats"
 
 implement image_zoom_axes () = $GT.AxNone()
 
-#pub fn overlay_rules {left:nat | left >= 8269} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8269] sheet(after, false, false)
+#pub fn overlay_rules {left:nat | left >= 8397} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8397] sheet(after, false, false)
 
 (* The image viewer and toasts, from .imview on *)
-fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2600] sheet(after, false, false) = let
+fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2706} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2706] sheet(after, false, false) = let
   (* a book's image, full screen, on the bars' dark ground (a picture is
      best seen on a dark one, and every theme's bar is dark); the fingers
      zoom and pan it (image_viewer.bats) *)
@@ -67,6 +67,9 @@ fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2600} (sheet: sheet
   val sheet = lay(sheet, Bottom(), "max(8px,var(--safe-bottom))")
   val sheet = centre_x(sheet)
   val sheet = lay(sheet, Display(), "flex")
+  (* its two words at the system's font scale are wider than the half
+     of the window it would be shrunk to (#412) *)
+  val sheet = lay(sheet, Width(), "max-content")
   val sheet = spaced(sheet, Gap(), SpaceSmall())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".imzoom .btn")
@@ -103,6 +106,15 @@ fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2600} (sheet: sheet
   val sheet = rule(sheet, ".toast > button")
   val sheet = lay(sheet, Flex(), "none")
   val sheet = close(sheet)
+  (* in the library there is no bottom bar to clear (Material 3's snackbar
+     sits 8 to 16dp above the screen's foot when no bottom navigation is
+     there), so the Undo toast sits 16px up: at a large font scale its
+     words wrap to three lines, and 112px up it covered the foot of the
+     last card (#412). The reader keeps it above its bottom bar. The view
+     says it (toast_place_set in notice.bats) *)
+  val sheet = rule(sheet, ".toast.in-library")
+  val sheet = lay(sheet, Bottom(), "calc(env(safe-area-inset-bottom) + 16px)")
+  val sheet = close(sheet)
   (* the copy status, above the Undo toast: text alone, with no button *)
   val sheet = rule(sheet, ".toast.tcopy")
   val sheet = lay(sheet, Bottom(), "calc(env(safe-area-inset-bottom) + 168px)")
@@ -130,7 +142,7 @@ fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2600} (sheet: sheet
 in sheet end
 
 (* The menus, from .ovl on *)
-fn overlay_rules_menus {left:nat | left >= 2293} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2293] sheet(after, false, false) = let
+fn overlay_rules_menus {left:nat | left >= 2315} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2315] sheet(after, false, false) = let
   val sheet = rule(sheet, ".ovl")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Inset(), "0")
@@ -216,6 +228,9 @@ fn overlay_rules_menus {left:nat | left >= 2293} (sheet: sheet(left, false, fals
   val sheet = close(sheet)
   val sheet = rule(sheet, ".mname")
   val sheet = lay(sheet, Font(), "inherit")
+  (* the field is as wide as the dialog, not as the twenty characters of
+     its default size, which at the system's font scale outgrow it (#412) *)
+  val sheet = lay(sheet, Width(), "100%")
   val sheet = spaced(sheet, Padding(), SpaceSmall())
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = close(sheet)
