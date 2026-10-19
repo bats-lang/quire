@@ -9,7 +9,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn shell_rules {left:nat | left >= 9465} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9465] sheet(after, false, false)
+#pub fn shell_rules {left:nat | left >= 9484} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9484] sheet(after, false, false)
 
 (* The library page, from body on *)
 fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1919] sheet(after, false, false) = let
@@ -104,7 +104,7 @@ fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false,
 in sheet end
 
 (* The fields and banners, from .btn input[type=file] on *)
-fn shell_rules_fields_and_banners {left:nat | left >= 2222} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2222] sheet(after, false, false) = let
+fn shell_rules_fields_and_banners {left:nat | left >= 2241} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2241] sheet(after, false, false) = let
   val sheet = rule(sheet, ".btn input[type=file],.ibtn input[type=file]")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Top(), "0")
@@ -135,6 +135,10 @@ fn shell_rules_fields_and_banners {left:nat | left >= 2222} (sheet: sheet(left, 
   val sheet = close(sheet)
   val sheet = rule(sheet, ".sfield")
   val sheet = lay(sheet, FlexBasis(), "100%")
+  (* a flex item's least width is its content's, and a field's is its
+     size in characters, which a font scale of 200% doubles past the bar:
+     the row shrinks to the bar and its field with it (quire#705) *)
+  val sheet = lay(sheet, MinWidth(), "0")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = spaced(sheet, Gap(), SpaceTight())
