@@ -759,14 +759,41 @@ test('a page that answers nothing costs the attempts one wait, not one before an
   }
 });
 
-test('the runner\'s samples are kept across the tests of a worker (#715)', async ({ page }) => {
+test('the runner\'s samples taken under the name of an earlier test remain after that test left (#715)', async ({ page }) => {
   const leave = sampleRunner('an earlier test');
   await page.waitForTimeout(SAMPLE_EVERY_MS + 500);
   leave();
+  // stallWatch is a user of the sampler too, so the timer runs on; the earlier test's samples must be kept, not dropped with its user
   await page.waitForTimeout(SAMPLE_EVERY_MS + 500);
   const samples = runnerLoad(60000).samples;
   expect(samples.some((each) => each.test === 'an earlier test'), 'the earlier test\'s samples are still there').toBe(true);
   expect(samples[samples.length - 1].test, 'and the later ones say no test').toBe('');
+});
+
+test('a page that stops answering for 1.5 s and recovers gets its metrics again within the probe period, not after DEAF_MS (#715)', async ({ page, browser, stallWatch }, testInfo) => {
+  desktopOnly(testInfo);
+  await page.setContent('<!doctype html><title>Recovers</title>');
+  await stallWatch.session(page);
+  const log = attemptsOf(page);
+  await attempted(page, 'before', 1, async () => 1);
+  expect(log.entries.find((each) => each.step === 'before').devtools.unavailable, 'answered while idle').toBeUndefined();
+  const pids = await rendererPids(browser);
+  // frozen (no answer to anything): the read waits its second and the page is deaf from then on; it is let go before the 5 s that make the probe capture it
+  let released = 0;
+  await frozen(pids, async () => {
+    const began = Date.now();
+    await attempted(page, 'frozen', 1, async () => 1);
+    expect(String(log.entries.find((each) => each.step === 'frozen').devtools.unavailable)).toContain('was not answered');
+    await new Promise((done) => setTimeout(done, Math.max(0, 1500 - (Date.now() - began)))); // node's timer: the frozen page cannot run Playwright's
+    released = Date.now();
+  });
+  await expect.poll(async () => {
+    await attempted(page, 'after', 1, async () => 1);
+    return log.entries.filter((each) => each.step === 'after').pop().devtools.unavailable === undefined;
+  }, { timeout: 8000, intervals: [250] }).toBe(true);
+  const waited = Date.now() - released;
+  // the probe asks every PROBE_EVERY_MS (2 s) and hears the page at once; DEAF_MS alone would have kept it deaf for about 4.5 s after the release
+  expect(waited, `metrics came back ${waited} ms after the page did`).toBeLessThan(3500);
 });
 
 test('an unarmed page notes its attempts and says the metrics are not available', async ({ page }) => {

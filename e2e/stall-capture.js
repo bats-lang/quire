@@ -54,7 +54,15 @@ const PAUSE_MS = 3000;
 const PROFILE_MS = 2000;
 const METRICS_MS = 1000;    // Performance.getMetrics, around an attempt (#600): a busy page is noted, not waited for
 const HARVEST_MS = 1000;
-const DEAF_MS = 10000;     // after a read the page did not answer, none is made for this long (#715)
+// After a read the page did not answer, none is made for this long (#715), unless the
+// probe hears from the page sooner (it asks every PROBE_EVERY_MS and resets it). 5 s,
+// by what comparable breakers do: Hystrix's circuit stays open for sleepWindowInMilliseconds
+// 5000 after calls that time out at 1000 ms, the same ratio as METRICS_MS here (the
+// Hystrix wiki, Configuration); resilience4j's waitDurationInOpenState (60 s) and Envoy's
+// outlier base_ejection_time (30 s) protect a service from load and guard a remote
+// dependency, where this guards only a diagnostic read, whose cost is a lost sample, so it
+// is the short end. It is also ANSWER_MS: a page silent that long is captured by the probe.
+const DEAF_MS = 5000;
 const LONG_TASKS_MOST = 300;
 const ATTEMPTS_MOST = 300;
 const LOAD_WINDOW_MS = 60000; // the runner's load, as far back as a capture reports it (#600)
@@ -214,6 +222,8 @@ async function watchTiming(page, armed) {
   // the same for the harvest (an evaluate in the page), which a page can refuse while it answers getMetrics
   let harvestDeafSince = 0;
   const harvestDeaf = () => harvestDeafSince !== 0 && Date.now() - harvestDeafSince < DEAF_MS;
+  // the probe had an answer from the page: it is not deaf to either read
+  timing.heardFrom = () => { deafSince = 0; harvestDeafSince = 0; };
   timing.metrics = async () => {
     if (!session || armed.error) return { unavailable: armed.error || 'the page was not armed' };
     if (deaf()) return { unavailable: `Performance.getMetrics not asked: the page did not answer one less than ${DEAF_MS} ms ago` };
@@ -1091,7 +1101,7 @@ export function stallWatch(browser, testInfo) {
         return;
       }
       const timing = ready.has(page) && ready.get(page).timing;
-      if (timing) await timing.harvest(true).catch(() => {});
+      if (timing) { timing.heardFrom(); await timing.harvest(true).catch(() => {}); }
       await delay(PROBE_EVERY_MS);
     }
   }

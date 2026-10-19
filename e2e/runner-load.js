@@ -163,7 +163,7 @@ export function sampleRunner(test = '') {
     let expected = Date.now() + SAMPLE_EVERY_MS;
     try { sample(0); } catch (error) { /* a sample is never worth a test */ }
     timer = setInterval(() => {
-      try { sample(expected); } catch (error) { samples.push({ at: new Date().toISOString(), error: unavailable(error) }); }
+      try { sample(expected); } catch (error) { samples.push({ at: new Date().toISOString(), error: unavailable(error) }); if (samples.length > SAMPLE_KEEP) samples.shift(); }
       expected = Date.now() + SAMPLE_EVERY_MS;
     }, SAMPLE_EVERY_MS);
     timer.unref();
