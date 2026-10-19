@@ -43,6 +43,8 @@
 import { execFile } from 'node:child_process';
 import { accessSync, constants, existsSync, readdirSync, readFileSync, readlinkSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, isAbsolute, join } from 'node:path';
+import { bindAttempts } from './attempt-log.js';
+import { runnerLoad, sampleRunner } from './runner-load.js';
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
 const PROBE_EVERY_MS = 2000;
@@ -50,6 +52,11 @@ const SCAN_EVERY_MS = 1000; // new contexts and pages are armed this often
 const COMMAND_MS = 2000;    // how long a DevTools command is waited for
 const PAUSE_MS = 3000;
 const PROFILE_MS = 2000;
+const METRICS_MS = 1000;    // Performance.getMetrics, around an attempt (#600): a busy page is noted, not waited for
+const HARVEST_MS = 1000;
+const LONG_TASKS_MOST = 300;
+const ATTEMPTS_MOST = 300;
+const LOAD_WINDOW_MS = 60000; // the runner's load, as far back as a capture reports it (#600)
 // a test's pages are captured this long before its timeout (a third of a shorter one)
 const TIMEOUT_MARGIN_MS = 15000;
 
@@ -142,6 +149,7 @@ export async function arm(page) {
   if (armingOff()) {
     // the capture then says the page was not armed (`armed: false`, this reason)
     armed.error = `not armed: ${NO_ARM}=${process.env[NO_ARM]} (the debugger is never enabled)`;
+    await watchTiming(page, armed);
     return armed;
   }
   try {
@@ -160,7 +168,73 @@ export async function arm(page) {
   } catch (error) {
     armed.error = String(error && error.message || error);
   }
+  await watchTiming(page, armed);
   return armed;
+}
+
+/**
+ * What decides a failure on a page that was slow to answer, not frozen (#600),
+ * kept while the page is alive, since its pages are closed before a failed
+ * test's fixtures end: DevTools' Performance metrics (read around each attempt
+ * of a helper, attempt-log.js), the long tasks and long animation frames the
+ * page's own PerformanceObserver saw (the page's script keeps them in
+ * `__quireStall`, a property nothing enumerates; the probe takes them every
+ * 2 s), and the attempts themselves. Nothing here fails: a read that cannot
+ * be made is written as "not available: why".
+ */
+const OBSERVE_LONG_TASKS = `(() => { try {
+  if (globalThis.__quireStall) return;
+  const kept = [];
+  Object.defineProperty(globalThis, '__quireStall', { value: kept });
+  const note = (entry) => { if (kept.length >= 200) return;
+    const scripts = (entry.scripts || []).slice(0, 3).map((script) => ({ source: String(script.sourceURL || '').slice(-80), invoker: String(script.invoker || '').slice(0, 80), ms: Math.round(script.duration) }));
+    kept.push({ type: entry.entryType, at: Math.round(performance.timeOrigin + entry.startTime), ms: Math.round(entry.duration),
+      ...(entry.blockingDuration !== undefined ? { blockingMs: Math.round(entry.blockingDuration) } : {}),
+      ...(entry.styleAndLayoutStart ? { styleAndLayoutStartMs: Math.round(entry.styleAndLayoutStart - entry.startTime) } : {}),
+      ...(scripts.length ? { scripts } : {}) }); };
+  for (const type of ['longtask', 'long-animation-frame']) {
+    try { new PerformanceObserver((list) => list.getEntries().forEach(note)).observe({ type, buffered: true }); } catch (unsupported) { /* this browser lacks the type */ }
+  }
+} catch (failure) { /* the page goes on without it */ } })()`;
+
+async function watchTiming(page, armed) {
+  const timing = { entries: [], longTasks: [], notes: [], unavailable: null };
+  armed.timing = timing;
+  const session = armed.session;
+  timing.push = (entry) => { timing.entries.push(entry); if (timing.entries.length > ATTEMPTS_MOST) timing.entries.shift(); };
+  timing.metrics = async () => {
+    if (!session || armed.error) return { unavailable: armed.error || 'the page was not armed' };
+    const read = await within(session.send('Performance.getMetrics'), METRICS_MS);
+    if (!read.answered) return { unavailable: `Performance.getMetrics was not answered within ${METRICS_MS} ms: the page's main thread was busy` };
+    if (read.error || !read.value) return { unavailable: read.error || 'no metrics' };
+    return Object.fromEntries(read.value.metrics.map((metric) => [metric.name, metric.value]));
+  };
+  // the long tasks seen since the last harvest: the page keeps them, this takes them
+  timing.harvest = async () => {
+    if (page.isClosed()) return;
+    const read = await within(page.evaluate(() => { const kept = globalThis.__quireStall; return kept ? kept.splice(0) : []; }), HARVEST_MS);
+    if (Array.isArray(read.value)) {
+      timing.longTasks.push(...read.value);
+      if (timing.longTasks.length > LONG_TASKS_MOST) timing.longTasks.splice(0, timing.longTasks.length - LONG_TASKS_MOST);
+    }
+  };
+  timing.snapshot = () => ({
+    note: 'long tasks are the page\'s PerformanceObserver entries (longtask: a task over 50 ms; long-animation-frame: a frame over 50 ms, with its blocking time and where style and layout began), `at` in epoch ms, the same clock as an attempt\'s startedAt; devtools is Performance.getMetrics between the attempt\'s start and end',
+    notAvailable: timing.unavailable,
+    attempts: timing.entries,
+    longTasks: timing.longTasks,
+  });
+  bindAttempts(page, timing);
+  if (!session || armed.error) { timing.unavailable = `not available: ${armed.error || 'the page was not armed'}`; return; }
+  try {
+    const enabled = await within(session.send('Performance.enable'), COMMAND_MS);
+    if (!enabled.answered || enabled.error) timing.unavailable = `not available: Performance.enable ${enabled.error || 'was not answered'}`;
+    // for the pages made later by a navigation, and the one already there
+    await within(session.send('Page.addScriptToEvaluateOnNewDocument', { source: OBSERVE_LONG_TASKS }), COMMAND_MS);
+    await within(session.send('Runtime.evaluate', { expression: OBSERVE_LONG_TASKS }), COMMAND_MS);
+  } catch (error) {
+    timing.unavailable = `not available: ${String(error && error.message || error)}`;
+  }
 }
 
 function frameOf(frame, scripts) {
@@ -851,6 +925,12 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
     result.rendererCpu = processes;
   }
   result.machine = machineState();
+  // the runner's load over the last minute, and the page's attempts and long
+  // tasks (#600): a slow page is told from a slow runner by these
+  try { result.runnerLoad = runnerLoad(LOAD_WINDOW_MS); } catch (error) { result.runnerLoad = `not available: ${String(error && error.message || error)}`; }
+  if (armed.timing) {
+    try { await armed.timing.harvest(); result.pageTiming = armed.timing.snapshot(); } catch (error) { result.pageTiming = `not available: ${String(error && error.message || error)}`; }
+  }
   result.verdict = verdict(result);
   return result;
 }
@@ -913,6 +993,12 @@ export function summary(result) {
     lines.push(`  machine: load ${result.machine.loadAverage}, ${result.machine.memoryAvailableMiB} MiB available`);
     for (const [resource, rows] of Object.entries(result.machine.pressure)) if (rows[0]) lines.push(`  pressure ${resource}: ${rows.join(' | ')}`);
   }
+  if (result.runnerLoad && result.runnerLoad.summary) lines.push(`  runner: ${result.runnerLoad.summary.reading}`);
+  if (result.pageTiming && result.pageTiming.attempts) {
+    const late = result.pageTiming.attempts.filter((entry) => entry.outcome === 'failed').slice(-3);
+    for (const entry of late) lines.push(`  attempt ${entry.step} #${entry.attempt} failed after ${entry.ms} ms: ${entry.why}${entry.devtools && entry.devtools.reading ? ` (${entry.devtools.reading})` : ''}`);
+    lines.push(`  ${result.pageTiming.attempts.length} attempts and ${result.pageTiming.longTasks.length} long tasks noted`);
+  }
   return lines.join('\n');
 }
 
@@ -936,6 +1022,7 @@ export function stallWatch(browser, testInfo) {
   const waiters = [];
   let stopped = false;
   let count = 0;
+  const leaveSampler = sampleRunner(); // the runner's load, from now on (#600)
 
   const watchPage = (page) => {
     if (stopped || armed.has(page) || page.isClosed()) return;
@@ -987,9 +1074,44 @@ export function stallWatch(browser, testInfo) {
         start(page, `page did not answer an evaluate within ${ANSWER_MS / 1000} s`);
         return;
       }
+      const timing = ready.has(page) && ready.get(page).timing;
+      if (timing) await timing.harvest().catch(() => {});
       await delay(PROBE_EVERY_MS);
     }
   }
+
+  // A test that did not end as it should have (failed, timed out) keeps the
+  // runner's load over the last minute and each page's attempts, durations and
+  // long tasks (#600), whether or not a page was captured: a page that was
+  // only slow is not. Never fails the teardown.
+  const evidence = async () => {
+    const load = (() => { try { return runnerLoad(LOAD_WINDOW_MS); } catch (error) { return `not available: ${String(error && error.message || error)}`; } })();
+    const pages = [];
+    for (const [page, pending] of armed) {
+      const arming = await within(pending, 500);
+      const timing = arming.value && arming.value.timing;
+      let url = '';
+      try { url = page.url(); } catch (gone) { url = ''; }
+      pages.push({ url, ...(timing ? timing.snapshot() : { notAvailable: 'not available: the page was still being armed' }) });
+    }
+    return { runnerLoad: load, pageTiming: pages };
+  };
+  const keepEvidence = async () => {
+    try {
+      if (!testInfo.status || testInfo.status === 'skipped' || testInfo.status === testInfo.expectedStatus) return;
+      const found = await evidence();
+      const attach = async (name, body) => {
+        const path = testInfo.outputPath(`${name}.json`);
+        writeFileSync(path, JSON.stringify(body, null, 2));
+        await testInfo.attach(name, { path, contentType: 'application/json' });
+      };
+      const load = found.runnerLoad;
+      await attach('runner-load', { status: testInfo.status, at: new Date().toISOString(), ...(typeof load === 'string' ? { notAvailable: load } : load) });
+      await attach('page-timing', { status: testInfo.status, at: new Date().toISOString(), pages: found.pageTiming });
+    } catch (error) {
+      console.error(`[stall-capture] the runner's load could not be kept: ${error && error.message || error}`);
+    }
+  };
 
   // checked at each scan, so a timeout the test changes is followed
   const started = Date.now();
@@ -1029,6 +1151,8 @@ export function stallWatch(browser, testInfo) {
   return {
     captures,
     watchContext,
+    /** What a failed test keeps (#600): the runner's load and each page's attempts and long tasks. */
+    evidence,
     async next(page, ms) {
       const found = () => { const entry = captures.find((each) => each.page === page); return entry && entry.result; };
       return waitFor(found, ms, 'no stall capture of the page');
@@ -1056,6 +1180,8 @@ export function stallWatch(browser, testInfo) {
         await within(scope.abort(), HELPER_MS);
         await within(Promise.all([...running]), 1500);
       }
+      await keepEvidence();
+      leaveSampler();
       for (const pending of armed.values()) {
         const arming = await within(pending, COMMAND_MS);
         if (arming.value && arming.value.session) arming.value.session.detach().catch(() => {});

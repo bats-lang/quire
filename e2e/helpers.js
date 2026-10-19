@@ -7,6 +7,7 @@
 
 import { expect } from '@playwright/test';
 import { createEpub, solidPng } from './create-epub.js';
+import { attempted, noted } from './attempt-log.js';
 import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -452,23 +453,33 @@ const BACK_ALLOWANCE_MS = 1000;
 export async function toLibrary(page) {
   const started = Date.now();
   let layoutMs = 0;
-  for (;;) {
+  for (let attempt = 1; ; attempt++) {
     const clickMs = Math.max(BACK_CLICK_MS, BACK_LAYOUT_TIMES * layoutMs + BACK_ALLOWANCE_MS);
     try {
-      const barsAt = Date.now();
-      await showChrome(page);
-      layoutMs = Math.max(layoutMs, Date.now() - barsAt);
-      await page.getByRole('button', { name: 'Back to library' }).click({ timeout: clickMs });
+      // each try is noted (#600): how long the bars took, the click's allowance
+      // and why it was tried again, with what the page's main thread did
+      await attempted(page, 'toLibrary', attempt, async (note) => {
+        const barsAt = Date.now();
+        await showChrome(page);
+        layoutMs = Math.max(layoutMs, Date.now() - barsAt);
+        note.set({ barsMs: Date.now() - barsAt });
+        await page.getByRole('button', { name: 'Back to library' }).click({ timeout: clickMs });
+      }, { clickAllowanceMs: clickMs, layoutMs });
       break;
     } catch (failure) {
       // a click that timed out may have been made all the same: the events
       // it sent are answered when the task the page was in has ended, so the
       // library can be there already (#600)
-      if (await libraryShown(page).isVisible()) break;
+      if (await libraryShown(page).isVisible()) {
+        noted(page, 'toLibrary', attempt, { why: 'the click failed but the library is shown: the click was made all the same' });
+        break;
+      }
       const askedAt = Date.now();
       await bareFrameMs(page);
       layoutMs = Math.max(layoutMs, Date.now() - askedAt);
-      if (Date.now() - started > BACK_TRIES_MS + BACK_LAYOUT_TIMES * layoutMs) throw failure;
+      const giveUp = Date.now() - started > BACK_TRIES_MS + BACK_LAYOUT_TIMES * layoutMs;
+      noted(page, 'toLibrary', attempt, { bareFrameMs: Date.now() - askedAt, layoutMsNow: layoutMs, sinceStartMs: Date.now() - started, why: giveUp ? 'giving up: the tries ran out' : 'tried again after the page answered a bare frame' });
+      if (giveUp) throw failure;
     }
   }
   await expect(libraryShown(page)).toBeVisible();
@@ -494,7 +505,7 @@ export async function releaseClick(page, timeout = 2000) {
   // completes (the one that completes puts its own in place and stops it)
   for (let tries = 1; ; tries++) {
     try {
-      await page.locator('html').hover({ trial: true, timeout });
+      await attempted(page, 'releaseClick', tries, () => page.locator('html').hover({ trial: true, timeout }), { timeoutMs: timeout });
       return;
     } catch (failure) {
       if (tries >= 5) throw failure;
@@ -534,23 +545,27 @@ export async function rawMouse(page, action, ...args) {
 export async function showChrome(page) {
   const prev = control(page, 'Previous page');
   // a tap while text is selected only ends the selection (quire#428), so
-  // the tap is made again when the bars did not come up
+  // the tap is made again when the bars did not come up; each tap is noted (#600)
   for (let tap = 0; tap < 2 && !(await prev.isVisible()); tap++) {
-    // a book page that is not there (a click that timed out was made, and
-    // the library is shown) is no page to tap: the wait is the click's
-    const box = await bookPage(page).boundingBox({ timeout: 2000 });
-    await rawMouse(page, 'click', box.x + box.width / 2, box.y + box.height / 2);
-    await page.waitForTimeout(150);
-    // a tap between the zones on a highlight selects it, with its toolbar
-    // (quire#428), and brings up no bars: the selection is ended and the
-    // t key, which toggles them, brings them up
-    if (!(await prev.isVisible()) && (await page.evaluate(() => getSelection().toString() !== ''))) {
-      await page.evaluate(() => getSelection().removeAllRanges());
-      await page.keyboard.press('t');
+    await attempted(page, 'showChrome', tap + 1, async (note) => {
+      // a book page that is not there (a click that timed out was made, and
+      // the library is shown) is no page to tap: the wait is the click's
+      const box = await bookPage(page).boundingBox({ timeout: 2000 });
+      await rawMouse(page, 'click', box.x + box.width / 2, box.y + box.height / 2);
       await page.waitForTimeout(150);
-    }
+      // a tap between the zones on a highlight selects it, with its toolbar
+      // (quire#428), and brings up no bars: the selection is ended and the
+      // t key, which toggles them, brings them up
+      if (!(await prev.isVisible()) && (await page.evaluate(() => getSelection().toString() !== ''))) {
+        note.set({ why: 'a selection held the tap: it was ended and the t key pressed' });
+        await page.evaluate(() => getSelection().removeAllRanges());
+        await page.keyboard.press('t');
+        await page.waitForTimeout(150);
+      }
+      if (!(await prev.isVisible())) note.set({ why: 'the bars were not up after the tap' });
+    });
   }
-  await expect(prev).toBeVisible();
+  await attempted(page, 'showChrome', 'wait', () => expect(prev).toBeVisible());
 }
 
 // ---- the app's own timers, run on the fake clock (#657) ----
@@ -604,9 +619,13 @@ export async function runUntil(page, done, { stepMs = 1000, timeout = 30000 } = 
     then lose them: bringing them up and clicking are tried again
     together until the click lands */
 export async function clickControl(page, name) {
+  let attempt = 0;
   await expect(async () => {
-    await showChrome(page);
-    await control(page, name).click({ timeout: 2000 });
+    attempt += 1;
+    await attempted(page, 'clickControl', attempt, async () => {
+      await showChrome(page);
+      await control(page, name).click({ timeout: 2000 });
+    }, { control: name });
   }).toPass({ timeout: 20000 });
 }
 

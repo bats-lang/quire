@@ -123,3 +123,36 @@ the machine's load and pressure, and native stacks and a core. The capture is
 * The Playwright headless shell has no symbols (frames are `?? ()` with an offset from
   `exeBase`); system libraries are named by libc6-dbg. debuginfod is not used (a download with
   the process stopped has no bound).
+
+* **A page that was slow, not frozen, says whether the runner or the page was slow (#600).** The
+  captures above are for a page that answers nothing; a test can also fail on a page that answered
+  late (`giant-text-highlights.spec.js`, 2026-10-14: the runner looked about twice as slow, and no
+  capture covered the click). Three records, all of them notes, none able to fail or hang a test (a
+  source that cannot be read is written as `not available: <why>`; every DevTools read has a limit,
+  `METRICS_MS`, `HARVEST_MS`):
+  * `e2e/runner-load.js` samples the worker every 2 s and keeps 45 samples: `/proc/pressure/{cpu,io,memory}`
+    (`some` and `full` averages, and the time stalled in the interval from the totals' difference),
+    `/proc/loadavg`, `/proc/stat`'s share of the interval in user, system, iowait, steal and idle (a
+    difference of the counters), the CPU seconds of each process under the worker (the browsers, with
+    their `--type`) and of the four busiest other processes, and how late the worker's own timer fired.
+    No threshold is applied: the kernel's PSI documentation and LWN give no value of `avg10` that
+    separates contention from none, and none was found for steal, so the summary (`runnerLoad().summary`,
+    with a `reading` sentence) states peaks, means and the cores' worth of CPU the browsers used, and the
+    reader judges. Every capture holds `runnerLoad` (the last minute), and a test that did not end as
+    expected (failed, timed out) attaches `runner-load.json`, captured or not.
+  * `e2e/attempt-log.js`: the helpers that try again (`toLibrary`, `showChrome` per tap, `clickControl`,
+    `releaseClick`) run each try through `attempted(page, step, attempt, work, detail)`, which notes
+    its start, duration, outcome, the first line of why it failed (and, from the helper, why it tried
+    again: `noted`), and what the main thread did meanwhile from `Performance.getMetrics` before and
+    after (`devtools`: task, script, layout and style milliseconds, and the CPU the thread and process got,
+    so a main thread that ran tasks but got little CPU is a runner that did not give it, and one that got
+    what it used is a slow page). A page with no log bound (not armed by the watch) runs the work as before.
+    `getMetrics` is answered by a busy page (measured with a script loop); when it is not, the entry says so.
+  * Long tasks: `arm` installs a `PerformanceObserver` for `longtask` and `long-animation-frame` in the
+    page (`__quireStall`, not enumerable; entries with epoch `at`, duration, blocking time, where style
+    and layout began, and the scripts), which the 2 s probe and a failed attempt take. They are kept in
+    node, since a failed test's pages are closed before its fixtures end. Work started from DevTools
+    (`Runtime.evaluate`) is not a task of the frame and is not seen; the page's own timers are.
+  A failed test attaches `page-timing.json` (each page's `attempts` and `longTasks`), and a capture has
+  `pageTiming`. The JSON of a capture only gained fields. `e2e/stall-capture.spec.js` checks the fields,
+  the attempt log, and that a stuck page or an unarmed one gives a note and no failure.
