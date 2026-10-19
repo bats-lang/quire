@@ -62,6 +62,55 @@ it does not hang on the machine's fonts.
   `chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell` links to
   the installed `headless_shell`; it does not downgrade Playwright.
 
+## A worker's machine matches CI (#713)
+
+"This machine lacks X" is never a reason for a spec to be skipped or to pass
+here and fail in CI. What CI has, and the one command each takes here:
+
+* **Speech voices: CI has none, and neither does a worker's machine, and the
+  Read aloud tab is built either way.** #713 started from the belief that the
+  tab is built only where Chromium reports voices. It is not: `aloud_offer`
+  and `reader.bats` show it when `speech_available()` is true, which is
+  bridge's `speechSynthesis && SpeechSynthesisUtterance` exist
+  (`batsJsSpeechAvailable`), not `getVoices().length`; Chromium 149's headless
+  shell has both objects with an empty voice list, here and on CI. Checked:
+  the Ubuntu 24.04 runner image lists no speech-dispatcher, espeak or
+  festival; CI's failing log of #705 (job 117771445057) shows the tab built
+  and walked; `e2e/font-scale.spec.js` without its `voicesPlayed` stub
+  passes here (android project, 7 of 7, Playwright 1.61.0, Chromium 149),
+  its walk clicking the Read aloud tab. That failure was the CSS (`.ssel` capped
+  at 12em, fixed in 8cb9f58), not the machine. `voicesPlayed` stays so the
+  walk also has options in the Voice select. A spec that needs voices stubs
+  them (`speechSynthesis` is defined by `addInitScript`, as `reader.spec.js`
+  and others do): CI has no voices to count on. For a look at real ones,
+  `apt-get install speech-dispatcher espeak-ng` and launch Chromium with
+  `--enable-speech-dispatcher` (without the flag the headless shell asks
+  speech-dispatcher for nothing, daemon or no daemon; with it, and espeak-ng's
+  modules, `getVoices()` lists some 13,000 espeak variants): that is not what
+  CI runs, so no spec is to depend on it.
+* **epubcheck 5.2.1** (`e2e/epubcheck.spec.js`, every book the specs read):
+  without `EPUBCHECK_JAR` the spec skips itself off CI, so a book that is not
+  valid passes here and fails there. Needs `java`. One step:
+  `curl -fsSL -o /tmp/epubcheck.zip https://github.com/w3c/epubcheck/releases/download/v5.2.1/epubcheck-5.2.1.zip && echo "0532f6291faa2bb729dd253f958868a2a57dbd2c32f881a97c7c980c5940309e  /tmp/epubcheck.zip" | sha256sum -c - && unzip -q /tmp/epubcheck.zip -d ~`,
+  then `EPUBCHECK_JAR=~/epubcheck-5.2.1/epubcheck.jar` in the machine's env
+  file (the same pin as `check.yml`'s "Install epubcheck"). Checked here:
+  `gen-pwa test -- e2e/epubcheck.spec.js --project=desktop -g fourLevels` is
+  skipped without the variable and passes (5.9 s) with it.
+* **A CJK font** (`fonts-noto-cjk`, `check.yml`): `two-books.spec.js` and
+  `vertical.spec.js` skip or fail without one. `fc-list | grep -i cjk` must
+  list Noto Sans CJK.
+* **gdb and elfutils** (`apt-get install gdb elfutils pstack`): the stall watch
+  (`stall-capture.spec.js`) takes native stacks, and skips with a reason when
+  it cannot (`eu-stack -p <pid>` and `pstack <pid>` are the fallbacks #712
+  names).
+* **Chromium 149 headless shell, Playwright 1.61.0**: see the pin above;
+  `PLAYWRIGHT_BROWSERS_PATH` holds `chromium_headless_shell-1228`.
+
+The skips of `e2e/` that depend on the machine and not on the project are
+`epubcheck.spec.js` (the jar), `two-books.spec.js` (the CJK font) and
+`stall-capture.spec.js` (gdb); every other `test.skip` is on the project
+(Android or a browser, touch or mouse), so it skips the same on CI.
+
 ## Nothing of one book shows in the next (#435)
 
 `e2e/two-books.spec.js` opens a book that has every per-book feature (Alpha:
