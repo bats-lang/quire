@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { test, expect } from './fixtures.js';
 import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
-import { SAMPLE_EVERY_MS } from './runner-load.js';
+import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { arm, capture, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, nativeScope, nativeStacks, NATIVE_MOST_MS, TEARDOWN_MOST_MS } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
@@ -731,6 +731,42 @@ test('taking the evidence never fails or hangs a test, and says why when it cann
   } finally {
     await endLoop(page, stallWatch);
   }
+});
+
+test('a page that answers nothing costs the attempts one wait, not one before and one after each (#715)', async ({ page, stallWatch }) => {
+  await startLoop(page, stallWatch, 'setTimeout(spinForever, 0)');
+  try {
+    await page.waitForTimeout(500);
+    const log = attemptsOf(page);
+    const took = [];
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      const began = Date.now();
+      await expect(attempted(page, 'frozen', attempt, () => { throw new Error('the click did not land'); })).rejects.toThrow('did not land');
+      took.push(Date.now() - began);
+    }
+    const entries = log.entries.filter((each) => each.step === 'frozen');
+    expect(entries).toHaveLength(4);
+    // an attempt that waited for nothing is quick: if the first read timed out, the others were not made
+    const timedOut = entries.some((each) => String(each.devtools.unavailable).includes('was not answered'));
+    if (timedOut) {
+      expect(took.slice(1).every((ms) => ms < 500), `later attempts took ${took}`).toBe(true);
+      expect(entries[1].devtools.unavailable).toContain('not asked');
+    }
+    // the four tries of a page that answers nothing take about one wait in all
+    expect(took.reduce((a, b) => a + b, 0), `took ${took}`).toBeLessThan(2500);
+  } finally {
+    await endLoop(page, stallWatch);
+  }
+});
+
+test('the runner\'s samples are kept across the tests of a worker (#715)', async ({ page }) => {
+  const leave = sampleRunner('an earlier test');
+  await page.waitForTimeout(SAMPLE_EVERY_MS + 500);
+  leave();
+  await page.waitForTimeout(SAMPLE_EVERY_MS + 500);
+  const samples = runnerLoad(60000).samples;
+  expect(samples.some((each) => each.test === 'an earlier test'), 'the earlier test\'s samples are still there').toBe(true);
+  expect(samples[samples.length - 1].test, 'and the later ones say no test').toBe('');
 });
 
 test('an unarmed page notes its attempts and says the metrics are not available', async ({ page }) => {

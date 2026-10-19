@@ -138,8 +138,14 @@ the machine's load and pressure, and native stacks and a core. The capture is
     No threshold is applied: the kernel's PSI documentation and LWN give no value of `avg10` that
     separates contention from none, and none was found for steal, so the summary (`runnerLoad().summary`,
     with a `reading` sentence) states peaks, means and the cores' worth of CPU the browsers used, and the
-    reader judges. Every capture holds `runnerLoad` (the last minute), and a test that did not end as
-    expected (failed, timed out) attaches `runner-load.json`, captured or not.
+    reader judges. The sampler runs for the worker's life, so its buffer (45 samples, 90 s) holds the tests
+    before the current one (each sample names its `test`): the load before a test is the evidence for "the
+    runner was slow" (#715; Chrome's tracing has a ring buffer, `recordContinuously`, for the same reason,
+    Playwright's trace is per test because it is a reproduction, not a history). Every capture holds
+    `runnerLoad` (the last minute), and a test that did not end as expected (failed, timed out) attaches
+    `runner-load.json`, captured or not; both it and `page-timing.json` are in the `e2e-stall-captures-<group>`
+    artifact (#715). A page that did not answer a DevTools read is not asked again for 10 s (`DEAF_MS`), so a
+    frozen page costs an attempt one wait, not one before and one after each.
   * `e2e/attempt-log.js`: the helpers that try again (`toLibrary`, `showChrome` per tap, `clickControl`,
     `releaseClick`) run each try through `attempted(page, step, attempt, work, detail)`, which notes
     its start, duration, outcome, the first line of why it failed (and, from the helper, why it tried

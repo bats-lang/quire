@@ -2,7 +2,10 @@
  * The runner's load, sampled while the suite runs (#600), so a test that
  * fails on a page that was slow to answer says whether the machine or the
  * page was slow. Every SAMPLE_EVERY_MS the worker reads, from /proc (Linux),
- * and keeps the last SAMPLE_KEEP samples (a minute and a half):
+ * and keeps the last SAMPLE_KEEP samples (a minute and a half), across the tests of
+ * one worker (#715): the sampler runs for the worker's life, so a test's capture
+ * holds the load of the tests before it, which is the evidence for "the runner was
+ * slow". Each sample says which test it was taken in (`test`, empty between tests):
  *   - /proc/pressure/{cpu,io,memory}: the "some" and "full" averages and the
  *     time stalled in the interval (the totals' difference);
  *   - /proc/loadavg and the running tasks;
@@ -96,7 +99,7 @@ function descendants(all, root) {
 let samples = [];
 let previous = null;
 let timer = null;
-let users = 0;
+let testNow = '';
 
 function sample(expectedAt) {
   const now = Date.now();
@@ -109,7 +112,7 @@ function sample(expectedAt) {
     all: processes(),
     workerCpuMs: Math.round((process.cpuUsage().user + process.cpuUsage().system) / 1000),
   };
-  const out = { at: new Date(now).toISOString(), lateMs: expectedAt ? Math.max(0, now - expectedAt) : 0, pressure: {}, loadAverage: current.loadAverage };
+  const out = { at: new Date(now).toISOString(), test: testNow, lateMs: expectedAt ? Math.max(0, now - expectedAt) : 0, pressure: {}, loadAverage: current.loadAverage };
   for (const resource of ['cpu', 'io', 'memory']) {
     const each = current.pressure[resource];
     const before = previous && previous.pressure[resource];
@@ -153,9 +156,9 @@ function sample(expectedAt) {
   if (samples.length > SAMPLE_KEEP) samples.shift();
 }
 
-/** Starts (or joins) the worker's sampler; the returned function leaves it. */
-export function sampleRunner() {
-  users += 1;
+/** Starts (or joins) the worker's sampler, naming the test; the returned function ends the test's part. */
+export function sampleRunner(test = '') {
+  testNow = test;
   if (!timer) {
     let expected = Date.now() + SAMPLE_EVERY_MS;
     try { sample(0); } catch (error) { /* a sample is never worth a test */ }
@@ -169,8 +172,9 @@ export function sampleRunner() {
   return () => {
     if (left) return;
     left = true;
-    users -= 1;
-    if (users === 0) { clearInterval(timer); timer = null; samples = []; previous = null; }
+    // the sampler and its samples stay: the next test of this worker reads them
+    // (the timer is unref'd, so it holds nothing up). A newer test's name stays.
+    if (testNow === test) testNow = '';
   };
 }
 
