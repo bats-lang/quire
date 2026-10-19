@@ -20,7 +20,9 @@ import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { test, expect } from './fixtures.js';
-import { arm, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, nativeScope, nativeStacks, NATIVE_MOST_MS, TEARDOWN_MOST_MS } from './stall-capture.js';
+import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
+import { SAMPLE_EVERY_MS } from './runner-load.js';
+import { arm, capture, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, nativeScope, nativeStacks, NATIVE_MOST_MS, TEARDOWN_MOST_MS } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
 const SPIN_MODULE = (() => {
@@ -626,4 +628,122 @@ test('every page of a test about to time out is captured', async ({ page, stallW
   expect(capture.native).toBeUndefined();
   // and the pause it asked for is dropped: the page still runs script
   expect(await page.evaluate(() => 1 + 1)).toBe(2);
+});
+
+// ---- the evidence for a page that was slow, not frozen (#600) ----
+//
+// A test that fails on a page that answered slowly keeps what tells a slow
+// runner from a slow page: the runner's load over the last minute
+// (runner-load.json), and each helper attempt's duration, why it was tried
+// again, DevTools' metrics around it, and the long tasks the page saw
+// (page-timing.json). These tests check the fields are there, and that
+// taking them never fails or hangs a test.
+
+test('a capture holds the runner\'s load over the last minute and the page\'s attempts', async ({ page, browser, stallWatch }) => {
+  await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
+  const armed = await arm(page);
+  // two samples at least, 2 s apart
+  await page.waitForTimeout(SAMPLE_EVERY_MS + 500);
+  const result = await capture(page, armed, 'a capture asked for', browser);
+  await armed.session.detach();
+  const load = result.runnerLoad;
+  expect(typeof load, `runnerLoad is ${JSON.stringify(load).slice(0, 200)}`).toBe('object');
+  expect(load.everyMs).toBe(SAMPLE_EVERY_MS);
+  expect(load.samples.length).toBeGreaterThan(0);
+  for (const field of ['cpuPressureSomeAvg10', 'ioPressureSomeAvg10', 'memoryPressureSomeAvg10', 'stealPercent', 'iowaitPercent', 'idlePercent', 'workerLateMs', 'browserCores']) {
+    expect(load.summary, field).toHaveProperty(field);
+  }
+  expect(load.summary.cores).toBeGreaterThan(0);
+  expect(load.summary.reading).toContain('CPU pressure');
+  // a source the machine lacks is a note, never a missing field
+  for (const each of load.samples) {
+    for (const resource of ['cpu', 'io', 'memory']) {
+      const pressure = each.pressure[resource];
+      expect(typeof pressure === 'string' ? pressure.startsWith('not available: ') : 'some' in pressure, `pressure ${resource}`).toBe(true);
+    }
+    expect(typeof each.loadAverage).toBe('string');
+    expect(each.lateMs).toBeGreaterThanOrEqual(0);
+  }
+  const later = load.samples.find((each) => each.intervalMs !== null && each.intervalMs !== undefined && typeof each.cpuShare === 'object');
+  if (later) for (const name of ['user', 'system', 'idle', 'iowait', 'steal']) expect(typeof later.cpuShare[name], `cpuShare.${name}`).toBe('number');
+  // the old fields are as they were
+  for (const field of ['reason', 'at', 'url', 'armed', 'rendererCpu', 'machine', 'verdict']) expect(result, field).toHaveProperty(field);
+  // the page's timing is in the capture too
+  expect(Array.isArray(result.pageTiming.attempts)).toBe(true);
+  expect(Array.isArray(result.pageTiming.longTasks)).toBe(true);
+  expect(summary(result)).toContain('runner: over the last');
+});
+
+test('an attempt is noted with its duration, DevTools metrics and the long tasks the page saw', async ({ page, stallWatch }) => {
+  await page.setContent('<!doctype html><title>Busy</title><p>Busy</p>');
+  await stallWatch.session(page);
+  const log = attemptsOf(page);
+  expect(log, 'the watch bound a log to the page').toBeTruthy();
+  await attempted(page, 'busy', 1, () => page.evaluate(() => new Promise((done) => setTimeout(() => { const began = performance.now(); while (performance.now() - began < 400); done(); }, 10))), { detail: 'kept' });
+  await expect(attempted(page, 'broken', 2, () => { throw new Error('it did not work\nsecond line'); })).rejects.toThrow('it did not work');
+  noted(page, 'busy', 3, { why: 'a note' });
+  const [busy, broken, note] = log.entries.slice(-3);
+  expect(busy).toMatchObject({ step: 'busy', attempt: 1, outcome: 'ok', detail: 'kept' });
+  expect(busy.ms).toBeGreaterThanOrEqual(390);
+  expect(busy.startedAt).toMatch(/^\d{4}-\d\d-\d\dT/);
+  expect(busy.devtools.unavailable, 'the metrics were read').toBeUndefined();
+  expect(busy.devtools.taskMs, 'the busy task shows in the main thread\'s task time').toBeGreaterThanOrEqual(300);
+  expect(busy.devtools.threadCpuMs).toBeGreaterThan(0);
+  expect(busy.devtools.reading).toContain('ran tasks for');
+  for (const field of ['scriptMs', 'layoutMs', 'recalcStyleMs', 'processCpuMs', 'layoutCount']) expect(busy.devtools, field).toHaveProperty(field);
+  expect(broken).toMatchObject({ step: 'broken', outcome: 'failed', why: 'it did not work' });
+  expect(note).toMatchObject({ outcome: 'note', why: 'a note' });
+  // the long task of the loop is seen by the page's observer and taken
+  await log.harvest();
+  const tasks = log.snapshot().longTasks;
+  expect(tasks.some((task) => task.ms >= 300), JSON.stringify(tasks)).toBe(true);
+  const kept = await stallWatch.evidence();
+  expect(kept.pageTiming.some((each) => each.attempts.length >= 3)).toBe(true);
+  expect(kept.runnerLoad.summary.samples).toBeGreaterThan(0);
+});
+
+test('taking the evidence never fails or hangs a test, and says why when it cannot', async ({ page, stallWatch }) => {
+  // no log bound to a page: the work runs as it always did
+  expect(await attempted({}, 'plain', 1, async () => 7)).toBe(7);
+  noted({}, 'plain', 1, { why: 'nothing to note in' });
+  await expect(attempted({}, 'plain', 1, () => { throw new Error('own failure'); })).rejects.toThrow('own failure');
+  // metrics that are missing are a note
+  expect(metricsBetween(null, {}, 5).unavailable).toMatch(/^not available: /);
+  expect(metricsBetween({ unavailable: 'no page' }, {}, 5).unavailable).toBe('not available: no page');
+  // a page that is stuck in a loop: the attempt ends, its metrics are given or said to be unavailable, and it all takes seconds
+  await startLoop(page, stallWatch, 'setTimeout(spinForever, 0)');
+  try {
+    await page.waitForTimeout(500); // the loop is running; the watch captures it only at 5 s
+    const began = Date.now();
+    const log = attemptsOf(page);
+    await attempted(page, 'stuck', 1, async () => 'done');
+    await log.harvest();
+    expect(Date.now() - began, 'bounded by the metrics\' and the harvest\'s limits').toBeLessThan(6000);
+    const stuck = log.entries.find((each) => each.step === 'stuck');
+    expect(stuck.outcome).toBe('ok');
+    // Performance.getMetrics may be answered by a busy page (an interrupting command, as
+    // Debugger.setBreakpointsActive is) or not; either way the entry says which
+    if (stuck.devtools.unavailable) expect(stuck.devtools.unavailable).toMatch(/^not available: /);
+    else expect(stuck.devtools.wallMs).toBeGreaterThanOrEqual(0);
+    // and the evidence is still given
+    const kept = await stallWatch.evidence();
+    expect(kept.pageTiming[0].attempts.some((each) => each.step === 'stuck')).toBe(true);
+  } finally {
+    await endLoop(page, stallWatch);
+  }
+});
+
+test('an unarmed page notes its attempts and says the metrics are not available', async ({ page }) => {
+  const kept = process.env.QUIRE_NO_STALL_ARM;
+  try {
+    process.env.QUIRE_NO_STALL_ARM = '1';
+    const unarmed = await arm(page);
+    const log = attemptsOf(page);
+    await attempted(page, 'unarmed', 1, async () => 1);
+    const entry = log.entries.find((each) => each.step === 'unarmed');
+    expect(entry.devtools.unavailable).toMatch(/^not available: /);
+    expect(unarmed.timing.snapshot().notAvailable).toMatch(/^not available: /);
+  } finally {
+    if (kept === undefined) delete process.env.QUIRE_NO_STALL_ARM; else process.env.QUIRE_NO_STALL_ARM = kept;
+  }
 });
