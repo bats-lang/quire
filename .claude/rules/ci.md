@@ -20,7 +20,8 @@ The pins and the relock are in CLAUDE.md. Specifics:
   job's `runs-on` (quire has no reusable workflow to write it once in);
   `ubuntu-latest` moves with GitHub's default. The label moves by hand, in a PR of its own,
   when GitHub announces its successor. The build cache's key does not name it: bats stamps a
-  `build/` with the C compiler's version, so a build made on another image is dropped (#622).
+  `build/` with the C compiler's version, so a build made with another clang is dropped; an
+  image's headers and libraries are not judged (bats#338, bats#380; "Not judged yet" below) (#622).
 * A publish never turns main red: until a lock names a package release, quire does not use
   it, so package releases publish first and the quire PR with the new lock follows.
 * GITHUB_TOKEN cannot change workflow files, so the relock PR lists pwa's `android.yml` pin
@@ -30,55 +31,48 @@ The pins and the relock are in CLAUDE.md. Specifics:
 
 A pull request's jobs restore what bats kept in the newest earlier run
 (`.github/actions/build-cache`, `actions/cache` pinned by commit) and save theirs once the
-job passed. **No key is relied on for correctness**: the key is a locator,
-`quire-<name>@<pins>-<hash of bats.lock>-<sha>` (a GitHub cache is immutable, so each save needs a new key), and a
-restore takes the newest cache of the name and pins (`restore-keys` `quire-<name>@<pins>-<hash of bats.lock>-`; the
-`@` ends a name, so `static` never finds `static-memo-rest@...`). It names no runner image,
-`bats.toml`, source hash or version a developer bumps, so a new input needs no new key part and
-a wrong key can only restore less useful files.
+job passed. **The key is a locator, not a judgement.** It is `quire-<name>@<commit>` (a GitHub
+cache is immutable, so each save needs a new key), and a restore takes the newest cache of the
+name (`restore-keys` `quire-<name>@`; the `@` ends a name, so `static` never finds
+`static-memo-rest@...`). It names no pin, no runner image, no hash of `bats.lock`, `bats.toml`
+or the sources, and no number a developer bumps. What a restored `build/` is trusted for is
+bats's judgement, by the mechanisms below.
 
-* **The pins stay in the key** (`<pins>` = a digest of `.github/bats-version`, which holds the
-  ATS2 pin, and of the commit of bats's setup action). bats#305 (a toolchain that is a symbolic
-  link, changed in place) and bats#316 (a missing toolchain root gave a shorter listing) are
-  fixed in the bats the pin names (99fdf6b6), but the audit of every freshness input (bats#317)
-  found four holes, still open, and a wrong cache is worse than a slow one. Which can bite
-  here (read from `check.yml`, `setup-bats` and `.gitignore`, 2026-10-18):
-  * bats#320, the profile is in no object key: cannot bite while every job runs the same
-    command (`bats build` in `build` and `deploy`, `bats check` in the static jobs, which
-    compile nothing); a workflow change to `--only` would restore the other profile's objects.
-  * bats#321, a `bats_modules` copy is not compared with the lock's sha256: cannot bite, no
-    job restores `bats_modules` (it is ignored by git and fetched at the locked sha256).
-  * bats#322, the environment clang reads (`CPATH` ...) is not in the stamp: cannot bite, no
-    workflow and not the setup action sets one. System headers are the same mechanism and
-    were not audited; the runner image is not in the key (#622).
-  * **bats#323, build mode keys a module's C on its own `.dats` and `.sats_changed`, not on
-    the dependency `.dats` it staloads: it can bite** in the `build` job, which restores
-    `build/`. quire instantiates array's templates (`$A.alloc<byte>`, `$A.get<byte>` ...
-    thousands of times), so a relock that changes the body of one of them without its `.sats`
-    leaves the old instance in the restored C. The pins are neutral to it; check mode (the static jobs) is keyed on
-    the closure and is not affected. Main builds cold and shows it, a pull request does not.
-    So `bats.lock` is in the key again (#682 had dropped it, because bats judges dependency
-    files; in build mode it does not): a relock starts a cold build cache, main's too.
-  * **Exit:** when bats#323 and bats#320 are fixed and quire's bats pin is past them, the pins
-    and `bats.lock` may both leave the key.
-  * **Research** (what others key on): Swatinem/rust-cache keys on the lockfile and the
-    toolchain; actions/cache's own examples key on `hashFiles` of the lock; ccache and sccache
-    key on the content of every input, dependency headers included. A key naming the lock is
-    the common choice wherever the tool does not itself see a dependency's content, which is
-    what bats#323 shows for build mode.
-* **bats judges what a restore holds** (bats's CLAUDE.md is the record): `build/.bats_stamp`
-  (bats's inputs, patsopt's toolchain, the C compiler's version, flags, target) drops a `build/`
-  made by another toolchain, naming what differs (bats#273); freshness is by content hash, never
-  time (bats#254, #293), and in check mode by what patsopt read for the module (#298); a
-  relocked package's files, or a restore that gives every file the restore's time, change nothing.
+* **What bats judges** (bats's CLAUDE.md and `.claude/rules/`, by mechanism):
+  * `build/.bats_stamp` (`stamp.md`): bats's own inputs, patsopt's toolchain (the cksum listing
+    of `bin/patsopt`, `prelude`, `libats`, `share`, `ccomp`), the C compiler's version, target
+    and the environment clang reads, the flags, and the target and mode. A `build/` whose stamp
+    differs is dropped at start, with a line saying what differs.
+  * Each module in build mode (`build-freshness.md`): its `.bats` source by sha256 (`<dats>.src`),
+    its closure key (the files patsopt read, as in check mode, `check-memo.md`), `build/.sats_changed`, and each object by the sha256 of its C and its
+    profile.
+  * Each module in check mode (`check-memo.md`): the files patsopt read for it, by size and
+    sha256, and the names of the `.sats` and `.hats` under `build/`. Nothing is judged by time.
+  * `bats_modules` (`lock.md`): a package copy is held only when its `.bats-version` stamp gives
+    the locked version and archive sha256; a mismatch is fetched again. The closures above see
+    the files of those packages.
+  * Validation records (`validated.md`): keyed by each file's sha256, bats's inputs, the listing
+    of `bats_modules`, the package's unsafe flag, and, for `#use` records, the file's bytes.
+* **Not judged yet.** A change to one of these is not noticed by any stamp, key or record above,
+  so a restored `build/` keeps what it made from the old one:
+  * the system headers the C includes (bats#338): the stamp's `cc` line is clang's version,
+    target and environment, not the headers;
+  * the system libraries that patsopt and the native link load, libgmp among them (the stamp's
+    `patsopt` line is the cksum of `bin/patsopt`, not of the libraries it loads; bats#380);
+  * `bats.toml`: the rules name only its version and constraints (`lock.md`), its unsafe flag
+    (validation records) and its dependencies (the listing of `bats_modules`); no rule says what
+    else in it reaches the build (bats#381).
+  A new runner image is judged only through what is listed here: clang's version, target and
+  environment are stamped, its headers and libraries are not.
 * **The fixtures' memo** (bats#303): `bats fixtures` keeps each static fixture's result, keyed by
   the toolchain's stamp, the snippet, the module with it in and every file patsopt reads for
   the module, and serves it only when all are as they were. `--cold` (run.sh's first argument,
   not `BATS_COLD`, which would also make every check cold) serves none and audits what it would
   have served.
 * **Paths**: bats takes the checkout's path out of the C (bats#250), so a cache is valid
-  anywhere. `QUIRE_STATIC_WORK` (CI: `$RUNNER_TEMP/quire-static`) is only the directory
-  `tests/static/run.sh` works in and the static jobs cache (`app/build`, `memo`).
+  anywhere. `QUIRE_STATIC_WORK` (CI: `$RUNNER_TEMP/quire-static`) is the directory
+  `tests/static/run.sh` works in. It stays a fixed directory because the save step names the
+  directory it keeps (`app/build`, `memo`), and a `mktemp` one has no name the save can know.
 * **What is cached**: the `build` job caches `build/`. A static job caches the app's `build/`
   under the one name `static` (every group checks the same app) and its memo under
   `static-memo-<group>`. `check` and `build` never share a `build/` (check is mode 2 and 3,
@@ -96,7 +90,8 @@ a wrong key can only restore less useful files.
   finish gets a warning, not a failure. Caches are immutable, 10 GB per repository, evicted
   by last access and after 7 days.
 * **Research** (what others do): Swatinem/rust-cache, ccache, sccache and Bazel key on the
-  inputs because the tool computes them; quire's keys do not try to, bats does.
+  inputs because the tool computes them. Keying on the lock is the common choice where the tool
+  does not see a dependency's content; bats does, so quire's key does not.
 * `BATS_CACHE_DIR` (bats#250) is not used in CI (#499): a PR's `build/` restore already holds
   what it would hit, cc still runs for every module on a cache of patsopt's C (a checked tree at
   another path took 229 s against 355 s cold), and it would only speed up main, which is cold on
