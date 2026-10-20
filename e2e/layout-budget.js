@@ -16,7 +16,7 @@
 // the test 19 s. Each budget is that, with headroom of a third or more, and
 // none is smaller than what the config gives.
 
-import { bareFrameMs, stepExpectMs } from './helpers.js';
+import { bareFrameMs, layoutCapped, stepExpectMs } from './helpers.js';
 
 /** The four highlights of the test, in layouts: measured 14, given 20 */
 const WORK_TIMES = 20;
@@ -33,12 +33,15 @@ export async function layoutBudget(page, testInfo, startedAt, { floorExpectMs = 
   const first = await bareFrameMs(page); // the first read includes warming up: the larger
   const warm = await bareFrameMs(page);
   const layoutMs = Math.max(first, warm);
+  // the budgets take the layout as LAYOUT_CAP_MS bounds it (helpers.js), so a
+  // reading of a minute gives the timeouts of 30 s, not of a minute
+  const cappedMs = layoutCapped(layoutMs);
   const elapsedMs = Date.now() - startedAt;
   const expectMs = stepExpectMs(layoutMs, floorExpectMs);
-  const testMs = Math.max(testInfo.timeout, elapsedMs + WORK_TIMES * layoutMs + REST_MS);
+  const testMs = Math.max(testInfo.timeout, elapsedMs + WORK_TIMES * cappedMs + REST_MS);
   testInfo.setTimeout(testMs);
   await testInfo.attach('layout-budget.json', {
-    body: JSON.stringify({ firstFrameMs: first, warmFrameMs: warm, layoutMs, expectMs, testMs, elapsedMs }, null, 2),
+    body: JSON.stringify({ firstFrameMs: first, warmFrameMs: warm, layoutMs, layoutCappedMs: cappedMs, expectMs, testMs, elapsedMs }, null, 2),
     contentType: 'application/json',
   });
   return { layoutMs, expectMs, testMs };
