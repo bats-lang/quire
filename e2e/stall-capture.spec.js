@@ -24,7 +24,7 @@ import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
 import { gunzipSync } from 'node:zlib';
-import { keepBrowserTrace, keepKernel, startBrowserTrace, startKernel, stopKernel, wanted } from './flight-recorder.js';
+import { keepBrowserTrace, keepKernel, serialRun, startBrowserTrace, startKernel, stopKernel, wanted } from './flight-recorder.js';
 import { arm, capture, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
@@ -390,6 +390,18 @@ test('with neither CI nor QUIRE_FLIGHT, or with QUIRE_NO_RECORDER, nothing is re
   expect(wanted({ QUIRE_FLIGHT: '1' })).toBe(process.platform === 'linux');
   expect(wanted({ CI: '0' })).toBe(false);
   expect(startBrowserTrace(browser, {})).toBeNull();
+});
+
+test('the run of the @serial tests is told from the other by its command line, as gen-pwa passes it (#575)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  expect(serialRun(['node', 'playwright', 'test', '--project=x', '--grep', '@serial', 'e2e/a.spec.js'])).toBe(true);
+  expect(serialRun(['test', '--grep=@serial'])).toBe(true);
+  expect(serialRun(['test', '-g', '@serial'])).toBe(true);
+  expect(serialRun(['test', '--grep-invert', '@serial'])).toBe(false);
+  expect(serialRun(['test', '--grep-invert=@serial'])).toBe(false);
+  expect(serialRun(['test', '--grep', 'dictionary'])).toBe(false);
+  expect(serialRun(['test'])).toBe(false);
+  expect(serialRun(['test', '--grep'])).toBe(false);
 });
 
 test('QUIRE_STALL_WATCH=off makes the watch inert: no probe, no capture, the test runs as it would (the hunt\'s bare arm, #575)', async ({ browser }, testInfo) => {

@@ -126,3 +126,11 @@ export async function keepBoth(browser, pathFor, env = process.env) {
   const browserTrace = await keepBrowserTrace(browser, pathFor('browser-trace.json.gz'));
   return { kernel, browserTrace };
 }
+
+/** Whether a Playwright command line is the run of the @serial tests (`--grep @serial`, as gen-pwa passes it; `--grep-invert` is the other run). */
+export function serialRun(argv = process.argv) {
+  return argv.some((argument, index) => {
+    if (argument === '--grep' || argument === '-g') return String(argv[index + 1] || '').includes('@serial');
+    return argument.startsWith('--grep=') && argument.includes('@serial');
+  });
+}
