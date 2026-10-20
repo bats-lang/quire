@@ -39,6 +39,7 @@
       "publisher.spec.js",
       "settings.spec.js",
       "stall-capture.spec.js",
+      "sanitizer.spec.js",
       "stats.spec.js",
       "sync-android-hang.spec.js",
       "stability.spec.js"
@@ -94,7 +95,8 @@
       "epub2.spec.js",
       "font-scale.spec.js",
       "settings-screen.spec.js",
-      "raw-mouse.spec.js"
+      "raw-mouse.spec.js",
+      "evidence.spec.js"
     ],
     "perf": [
       "pathological.spec.js",

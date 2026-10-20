@@ -6,13 +6,9 @@
  * Every op returns plain data and never throws.
  */
 
-import { createReadStream, existsSync, mkdirSync, readFileSync, rmdirSync, writeFileSync, chmodSync } from 'node:fs';
-import { createGzip } from 'node:zlib';
-import { createWriteStream } from 'node:fs';
-import { createInterface } from 'node:readline';
+import { chmodSync, closeSync, createWriteStream, existsSync, mkdirSync, openSync, readFileSync, readSync, rmdirSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { pipeline } from 'node:stream/promises';
-import { Readable } from 'node:stream';
 
 export const TRACEFS = '/sys/kernel/tracing';
 // What is recorded, by what the question is: who woke whom and who slept (sched), which futex a thread waited on or woke
@@ -25,6 +21,8 @@ export const EVENTS = [
   'signal/signal_generate',
   'syscalls/sys_enter_read', 'syscalls/sys_enter_write', 'syscalls/sys_enter_sendmsg', 'syscalls/sys_enter_recvmsg',
   'syscalls/sys_enter_epoll_pwait', 'syscalls/sys_enter_poll', 'syscalls/sys_enter_ppoll', 'syscalls/sys_enter_eventfd2',
+  // the disk: when a request was issued and when it completed (an I/O stall is the gap between the two)
+  'block/block_rq_issue', 'block/block_rq_complete',
 ];
 export const BUFFER_KB = 65536; // for each CPU: 4 CPUs hold about 100 s at the measured rate
 export const LINES_KEPT = 1500000;
@@ -56,28 +54,34 @@ export function pause({ instance }) {
   return bad ? { error: bad } : { paused: true };
 }
 
-/** Writes the last `lines` lines of the record, gzipped, to `out` (a file anyone can read). */
-export async function snapshot({ instance, out, lines = LINES_KEPT }) {
+/** Writes the last `lines` lines of the record, gzipped, to `out` (a file anyone can read). tail and gzip do the bulk: the kernel formats the text, and a ring of 600 MB must not pass through node's lines. */
+export async function snapshot({ instance, out, lines = LINES_KEPT, resume = false }) {
   try {
     pause({ instance });
-    const ring = new Array(lines);
-    let count = 0;
     let header = '';
-    const reader = createInterface({ input: createReadStream(`${instance}/trace`, { encoding: 'utf8' }), crlfDelay: Infinity });
-    for await (const line of reader) {
-      if (line.startsWith('#')) { if (line.includes('entries-in-buffer')) header = line; continue; }
-      ring[count % lines] = line;
-      count += 1;
-    }
-    const kept = Math.min(count, lines);
-    const first = count > lines ? count % lines : 0;
-    const body = (function* () {
-      yield `${header}\n# kept the last ${kept} of ${count} lines, clock: ${readFileSync(`${instance}/trace_clock`, 'utf8').match(/\[(\w+)\]/)?.[1] || 'unknown'}\n`;
-      for (let i = 0; i < kept; i += 1) yield `${ring[(first + i) % lines]}\n`;
-    })();
-    await pipeline(Readable.from(body), createGzip({ level: 6 }), createWriteStream(out));
+    const descriptor = openSync(`${instance}/trace`, 'r');
+    try {
+      const chunk = Buffer.alloc(4096);
+      const got = readSync(descriptor, chunk, 0, 4096, null);
+      header = chunk.toString('utf8', 0, got).split('\n').find((line) => line.includes('entries-in-buffer')) || '';
+    } finally { closeSync(descriptor); }
+    const clock = (readFileSync(`${instance}/trace_clock`, 'utf8').match(/\[(\w+)\]/) || [])[1] || 'unknown';
+    const sink = createWriteStream(out);
+    const finished = new Promise((resolve, reject) => { sink.on('finish', resolve); sink.on('error', reject); });
+    const gzip = spawn('gzip', ['-1'], { stdio: ['pipe', 'pipe', 'inherit'] });
+    gzip.stdout.pipe(sink);
+    gzip.stdin.write(`${header}\n# the last ${lines} lines at most; clock: ${clock}\n`);
+    const tail = spawn('tail', ['-n', String(lines), `${instance}/trace`], { stdio: ['ignore', 'pipe', 'inherit'] });
+    tail.stdout.pipe(gzip.stdin);
+    const ended = (child) => new Promise((resolve) => child.on('close', (code) => resolve(code)));
+    const codes = await Promise.all([ended(tail), ended(gzip), finished]);
     chmodSync(out, 0o644);
-    return { file: out, lines: kept, seen: count, header };
+    // a failure that is not a freeze goes on recording for the tests after it
+    if (resume) writeFileSync(`${instance}/tracing_on`, '1');
+    if (codes[0] !== 0 || codes[1] !== 0) return { error: `tail exited ${codes[0]}, gzip exited ${codes[1]}` };
+    const counts = header.match(/entries-in-buffer\/entries-written: (\d+)\/(\d+)/);
+    const inBuffer = counts ? Number(counts[1]) : 0;
+    return { file: out, lines: Math.min(lines, inBuffer), seen: counts ? Number(counts[2]) : 0, header };
   } catch (error) { return { error: String((error && error.stack) || error) }; }
 }
 
@@ -88,7 +92,29 @@ export function stop({ instance }) {
   return bad ? { error: bad } : { removed: true };
 }
 
-const ops = { start, pause, snapshot, stop };
+/** `length` bytes of process `pid`'s memory at `address` (a hex string): what a futex word and its neighbours hold. */
+export function readmem({ pid, address, length = 64 }) {
+  let descriptor;
+  try {
+    descriptor = openSync(`/proc/${pid}/mem`, 'r');
+    const buffer = Buffer.alloc(length);
+    const got = readSync(descriptor, buffer, 0, length, BigInt(address));
+    return { address, bytes: buffer.subarray(0, got).toString('hex') };
+  } catch (error) { return { address, error: String((error && error.code) || (error && error.message) || error) }; } finally { if (descriptor !== undefined) closeSync(descriptor); }
+}
+
+/** Starts recording again after a pause. */
+export function resume({ instance }) {
+  const bad = attempt('tracing_on', () => writeFileSync(`${instance}/tracing_on`, '1'));
+  return bad ? { error: bad } : { resumed: true };
+}
+
+/** Whether the ring is recording: { on: '1' | '0' }. */
+export function state({ instance }) {
+  try { return { on: readFileSync(`${instance}/tracing_on`, 'utf8').trim() }; } catch (error) { return { error: String((error && error.code) || error) }; }
+}
+
+const ops = { start, pause, snapshot, stop, readmem, resume, state };
 
 // `sudo -n node flight-tracefs.js <op> <json>`: the answer is one line of JSON
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

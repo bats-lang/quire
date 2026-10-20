@@ -395,6 +395,7 @@ jobs:
       # Each spec of the group, and only those: the filters must name
       # exactly as many files as the group lists
       - name: Run e2e tests
+        id: tests
         if: env.GROUP_RUN == 'yes'
         run: |
           specs=$(scripts/ci-groups.py members e2e ${{ matrix.group }})
@@ -409,6 +410,51 @@ jobs:
           ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/e2e-timings" -- --reporter=list,html,json $specs
         env:
           PLAYWRIGHT_HTML_OPEN: never
+
+      # A red whose evidence is missing is its own failure, named, and the one to fix first (#575): a test
+      # that failed with EVIDENCE MISSING (the stall watch's check), or a timeout that left no kernel ring
+      - name: Evidence check
+        if: always() && env.GROUP_RUN == 'yes'
+        run: node e2e/evidence-check.js "$RUNNER_TEMP/e2e-timings" --results test-results
+
+      # Chromium's public AddressSanitizer build (pinned by file and SHA-256; position 1705668, Chromium 156), run on
+      # the app's first screen: a memory error in the browser is named where a release build hangs or dies later
+      # (#575). A STOPGAP with the rest of the evidence tooling: it belongs in pwa's e2e-setup (bats-lang/pwa#132)
+      - name: Download Chromium's AddressSanitizer build
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        run: |
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/asan.zip" https://storage.googleapis.com/chromium-browser-asan/linux-release/asan-linux-release-1705668.zip
+          echo "e1441463cd70aacecddeb7ea8a53ff6ce130c36627c4897a67412d008ae0a54c  $RUNNER_TEMP/asan.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/asan.zip" -d "$RUNNER_TEMP/asan" 'out/f2d4-ASAN_Release/chrome' 'out/f2d4-ASAN_Release/*.pak' 'out/f2d4-ASAN_Release/icudtl.dat' 'out/f2d4-ASAN_Release/*.bin' 'out/f2d4-ASAN_Release/*.so' 'out/f2d4-ASAN_Release/*.so.1' 'out/f2d4-ASAN_Release/chrome_crashpad_handler' 'out/f2d4-ASAN_Release/vk_swiftshader_icd.json' 'out/f2d4-ASAN_Release/locales/*'
+          rm "$RUNNER_TEMP/asan.zip"
+          sudo apt-get install -y -q libpci3
+
+      - name: Run the app's first screen under AddressSanitizer
+        id: sanitizer
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        run: |
+          mkdir -p "$QUIRE_SANITIZER_LOGS"
+          ./dist/debug/gen-pwa test -- --output=test-results-sanitizer e2e/sanitizer.spec.js
+        env:
+          PLAYWRIGHT_HTML_OPEN: never
+          QUIRE_BROWSER_EXECUTABLE: ${{ runner.temp }}/asan/out/f2d4-ASAN_Release/chrome
+          QUIRE_SANITIZER_LOGS: ${{ runner.temp }}/sanitizer-reports
+          QUIRE_REQUIRE_SANITIZER: '1'
+
+      - name: Sanitizer reports
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        run: node e2e/evidence-check.js --sanitizer "$QUIRE_SANITIZER_LOGS"
+        env:
+          QUIRE_SANITIZER_LOGS: ${{ runner.temp }}/sanitizer-reports
+
+      - name: Upload sanitizer reports
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-sanitizer-reports
+          path: ${{ runner.temp }}/sanitizer-reports/
+          if-no-files-found: ignore
+          retention-days: 30
 
       # Each test's time per project and spec (#461), kept for every run
       # so the groups are balanced by measurement, not guessing: sum
@@ -443,7 +489,10 @@ jobs:
             test-results/**/runner-load-*.json
             test-results/**/page-timing-*.json
             test-results/**/flight-*.gz
-          if-no-files-found: ignore
+            test-results/**/crash-*.json
+            flight-watchdog/**
+          # a job with a failed test has its record: none is the evidence missing (#575)
+          if-no-files-found: ${{ steps.tests.outcome == 'failure' && 'error' || 'ignore' }}
           retention-days: 30
 
       # The core of a renderer that froze (e2e/stall-capture.js): written, gzipped
@@ -466,6 +515,7 @@ jobs:
           name: e2e-screenshots-${{ matrix.group }}
           path: |
             test-results/
+            test-results-sanitizer/
             !test-results/**/stall-core-*
           retention-days: 14
 

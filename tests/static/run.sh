@@ -160,10 +160,6 @@ else echo "FAIL mutation_test:"; cat "$TMP/mutation_test.log"; fail=1; fi
 if python3 "$ROOT/tests/static/affected_test.py" > "$TMP/affected_test.log" 2>&1; then echo "ok   affected_test: $(tail -1 "$TMP/affected_test.log")"
 else echo "FAIL affected_test:"; cat "$TMP/affected_test.log"; fail=1; fi
 
-# The hunt's plan, verdict and bound (scripts/hunt.py, quire#575)
-if python3 "$ROOT/tests/static/hunt_test.py" > "$TMP/hunt_test.log" 2>&1; then echo "ok   hunt_test: $(tail -1 "$TMP/hunt_test.log")"
-else echo "FAIL hunt_test:"; cat "$TMP/hunt_test.log"; fail=1; fi
-
 # The solver's 32 bits (literals.py) and the library's keys (keys.py)
 if python3 "$ROOT/tests/static/literals.py" "$ROOT/src" > "$TMP/literals.log" 2>&1; then echo "ok   literals: $(tail -1 "$TMP/literals.log")"
 else echo "FAIL literals:"; cat "$TMP/literals.log"; fail=1; fi

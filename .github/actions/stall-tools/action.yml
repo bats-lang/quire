@@ -1,6 +1,6 @@
 # The stall capture's native tools (quire#575, #591): gdb for the renderer's stacks and core, elfutils
 # (eu-stack, its fallback when gdb cannot attach) and libc6-dbg (which names libc's internal
-# functions). Called by check.yml's e2e jobs and by hunt.yml, so the two install the same tools.
+# functions). Called by check.yml's e2e jobs.
 #
 # A STOPGAP: pwa's e2e-setup action should install these and keep the runner's passwordless sudo
 # (bats-lang/pwa#109); this action goes when that lands. A diagnostic for a rare freeze must not

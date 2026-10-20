@@ -239,12 +239,11 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
   `pageTiming`. The JSON of a capture only gained fields. `e2e/stall-capture.spec.js` checks the fields,
   the attempt log, and that a stuck page or an unarmed one gives a note and no failure.
 
-## The flight recorder and the hunt (#575)
+## The flight recorder and the evidence of a red (#575)
 
 Keyword: flight recorder. The freeze of #575 (a fresh job's renderer, main thread in an untimed futex wait, about
 1 in 900 fresh jobs) is not waited for: the history is recorded in rings during every CI e2e job and written out
-only for a frozen renderer, and the hunt (`hunt.yml`) makes N fresh jobs so it arrives. The design, with the research and what
-each means cannot find, is on quire#575.
+only for a red. The design, with the research and what each means cannot find, is on quire#575.
 
 * **Kernel ring** (`e2e/flight-tracefs.js`, `e2e/flight-recorder.js`): `globalSetup` makes an ftrace instance of its
   own (`/sys/kernel/tracing/instances/quire-<pid>`, root: in-process as root, else `sudo -n node`), scoped to the run's process
@@ -259,15 +258,33 @@ each means cannot find, is on quire#575.
   a frozen renderer (`flight-<n>-browser-trace.json.gz`). Measured with one thread of a renderer stopped: `Tracing.end` answers in 79 ms
   and the trace holds the renderer's events up to the freeze, so a frozen main thread does not take the renderer's trace with it.
   A renderer with every thread stopped (SIGSTOP) answers nothing more: the browser's, GPU's and network's events are what is then in it.
-* **When it records**: CI, or `QUIRE_FLIGHT=1`, on Linux. `QUIRE_NO_RECORDER=1` turns it off, and `QUIRE_STALL_WATCH=off` makes the whole
-  watch inert (no probe, no arming); both are the hunt's bare arm and nothing else sets them. Without tracefs or sudo the capture says
-  `not available: <why>`; nothing fails a test.
-* **The hunt** (`.github/workflows/hunt.yml`, dispatch only; `scripts/hunt.py`; `.github/actions/hunt-job`): `jobs_per_arm` (100) fresh
-  jobs in each of three arms, `full` (as CI), `noarm` (`QUIRE_NO_STALL_ARM=1`) and `bare`, each running the start of the desktop project of
-  one of the four groups of the recurrences (relaunch, settings, extras, reader), in `check.yml`'s order and with its steps, for `seconds`
-  (150) of each `gen-pwa test` run. The arms differ only in the environment of one step. Only a job that hit uploads
-  (`hunt-hit-<arm>-<n>`, cores in `hunt-core-<arm>-<n>`); the report gives, per arm, the hits and, with none, the 95% upper bound of the rate
-  (`1 - 0.05^(1/N)`) and the chance that N jobs would have seen a 1-in-900 event. Two matrices of at most 256 (GitHub's limit), 20 jobs
-  of each running at a time. The dispatcher checks `qsweep pressure` first.
-* **A stopgap**: the recorder, the gdb install and the hunt are what a second Playwright app would copy; they belong in pwa's
+* **When it records**: CI, or `QUIRE_FLIGHT=1`, on Linux, never in the run of the `@serial` tests (they assert timings). `QUIRE_NO_RECORDER=1` turns it off. Without
+  tracefs or sudo a red says `EVIDENCE MISSING` (below); a local run without the variable records nothing and owes nothing.
+* **Every red has its record.** A test that fails with nothing frozen writes both rings too (`flight-failed-*`), and they go on for the tests after it. A renderer that
+  crashes or a browser that goes away writes `crash-<n>.json` (the reason, both rings, dmesg, the disk, a sanitizer's reports); the kernel ring holds the signal and the exit.
+* **The watchdog** (`e2e/flight-watchdog.js`, started as root by global setup, outside every worker and browser): every second it looks at the renderers of the run; one whose
+  main thread has been in an untimed futex wait with no CPU used for 10 s is written out to `flight-watchdog/` (the threads, the word and its neighbours, the ring's view of the word,
+  stacks), whatever the stall watch does (off, unarmed, dead or stuck). It also keeps every tick of its own that came late by 300 ms or more, with the steal time that passed
+  (`host-stalls-*.json`): a stall of the machine shows as a gap of everything at once.
+* **A red without its record is its own failure.** A test that timed out, or whose renderer froze or crashed, and has no kernel ring (written and with events) or no
+  browser trace (unless the browser itself is gone) fails its teardown with `EVIDENCE MISSING: <field>`; `e2e/evidence-check.js` (the job's `Evidence check` step) turns that into the
+  job's named error and also fails a job whose tests timed out with no flight file at all; the stall artifact's upload fails when a test failed and there is nothing to upload.
+  That failure is the bug to fix, ahead of the test's own.
+* **What identifies each class, and the test that induces it** (`e2e/evidence.spec.js`, and `sanitizer.spec.js`): an untimed futex wait in a renderer's main thread (sync XHR to a
+  server that never answers): the word's address and 64 bytes around it, the waker candidates (the process's other threads), the ring's waits and wakes on the word and who woke the waiter
+  last, the browser trace with the renderer's events, the symbols' state; a script spin: the paused frame's function; a renderer crash and a killed browser: the signal and the exit in the ring,
+  the trace or why there is none; a frozen compositor (GPU process stopped): the page answers but `frames.answered` is false and the process is `T`; a service worker that never answers a
+  fetch: its state in the capture and the request in the trace (`pendingRequests`, since it reaches no network layer and no page request event shows it); a full disk: `disk` and the
+  block requests in the ring; a missing symbol file: `symbols.state` and the module and offset of each frame; a recorder that does not start and a red with no record:
+  `EVIDENCE MISSING`; a sanitizer's report: in the crash capture; a stall of the machine: the watchdog's late ticks with the steal time.
+* **Not seen by the record, and the means that sees it** (decided): (1) A bug that vanishes under any recording: the kernel ring is outside every process and cost no
+  measurable time, and the watchdog works with the stall watch off, so a freeze leaves a record without the debugger enabled, the DevTools probe or the page's session. (2) Memory
+  corruption in Chromium: the `sanitizer` step of the `reading-tools` job runs the app's first screen on Chromium's public AddressSanitizer build (file and SHA-256 pinned), and any
+  report fails it; Chrome for Testing has no sanitizer build, and building one is hours. (3) The ordering of a race that rr would replay: impossible on a hosted runner (measured on
+  ubuntu-24.04, image 20261018.339.1: no PMU, `perf stat -e cycles` fails as root, rr 5.7.0 dies on the CPU model; `rr.soft` needs Ubuntu 24.10 and does not instrument V8's
+  JIT); the substitute is the ring, which orders every futex wait and wake, wakeup and switch with CLOCK_MONOTONIC timestamps. (4) The hypervisor's own reasons for a stall:
+  invisible from the guest by nature; the observable part is the gap in all tasks and the steal time. (5) Symbols: Chrome for Testing 149's headless shell is stripped and no public
+  symbol file exists for it (every name tried in its bucket is a 404; Playwright 1.61 downloads the same build); the substitute is the thread names, the Mojo interfaces and tasks of
+  Chrome's trace, and the module and offset of each frame to resolve against a build that has symbols if one appears (`QUIRE_SYMBOLS_DIR`).
+* **A stopgap**: the recorder, the watchdog, the evidence check, the sanitizer step and the gdb install are what a second Playwright app would copy; they belong in pwa's
   `e2e-setup` and `gen-pwa test` (bats-lang/pwa#132 for the evidence, #109 for the tools), and this is quire's until they move.

@@ -6,7 +6,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { serialRun, startKernel, stopKernel } from './flight-recorder.js';
+import { serialRun, startKernel, startWatchdog, stopKernel, stopWatchdog } from './flight-recorder.js';
 
 export default async function globalSetup() {
   const directory = dirname(fileURLToPath(import.meta.url));
@@ -20,5 +20,7 @@ export default async function globalSetup() {
   // not in the run of the @serial tests, which assert timings (a recorder perturbs them: #741 measured +6% for a trace)
   const kernel = serialRun() ? null : await startKernel();
   if (kernel) console.error(`[flight-recorder] kernel ring: ${kernel.instance ? `${kernel.instance}${kernel.skipped && kernel.skipped.length ? `, skipped ${kernel.skipped.join('; ')}` : ''}` : `not started: ${kernel.error}`}`);
-  return () => stopKernel(kernel);
+  // and the watchdog outside every worker and browser, which sees a freeze whatever the stall watch does
+  const watchdog = serialRun() ? null : startWatchdog(kernel && kernel.instance);
+  return async () => { stopWatchdog(watchdog); await stopKernel(kernel); };
 }

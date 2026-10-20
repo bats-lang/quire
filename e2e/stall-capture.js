@@ -50,7 +50,8 @@ import { accessSync, closeSync, constants, existsSync, openSync, readdirSync, re
 import { delimiter, isAbsolute, join } from 'node:path';
 import { bindAttempts } from './attempt-log.js';
 import { keepHistory } from './page-history.js';
-import { keepBoth, startBrowserTrace, ROOT_MOST_MS, TRACE_END_MS } from './flight-recorder.js';
+import { keepBoth, startBrowserTrace, wanted, ROOT_MOST_MS, TRACE_END_MS } from './flight-recorder.js';
+import { diskEvidence, futexEvidence, missingEvidence, pageProbes, sanitizerReports, symbolEvidence } from './evidence.js';
 import { runnerLoad, sampleRunner } from './runner-load.js';
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
@@ -1041,6 +1042,14 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
   }
   if (!result.kernel) result.kernel = await kernelOf(processes);
   result.machine = machineState();
+  // what identifies each class (evidence.js): the futex word and its candidates for a signaller, the symbols,
+  // the disk, and for a page that answers its service worker and whether it produces frames
+  try {
+    result.futex = await futexEvidence(result.native, result.flight && result.flight.kernel && result.flight.kernel.file);
+    result.symbols = symbolEvidence(result.native);
+    result.disk = diskEvidence();
+    if (answers) Object.assign(result, await pageProbes(page));
+  } catch (error) { result.evidenceError = String(error && error.stack || error); }
   // the runner's load over the last minute, and the page's attempts and long
   // tasks (#600): a slow page is told from a slow runner by these
   try { result.runnerLoad = runnerLoad(LOAD_WINDOW_MS); } catch (error) { result.runnerLoad = `not available: ${String(error && error.message || error)}`; }
@@ -1083,6 +1092,16 @@ export function summary(result) {
       if (process.channels) lines.push(`  renderer ${process.pid} open: ${process.channels.join(', ')}`);
     }
   }
+  for (const each of result.futex || []) {
+    if (each.notInFutex) { lines.push(`  futex: renderer ${each.pid} ${each.notInFutex}`); continue; }
+    const ring = each.ring && each.ring.waiter ? each.ring : null;
+    lines.push(`  futex: renderer ${each.pid} main thread waits on 0x${each.address} (op ${each.op}, ${each.untimed ? 'NO timeout' : 'with a timeout'}); word and neighbours ${each.memory && (each.memory.bytes || each.memory.error)}`);
+    if (ring) lines.push(`    ring: ${ring.onAddress.events} events on the word, wakers ${ring.onAddress.wakers.map((w) => `${w.task}-${w.tid}`).join(', ') || 'none'}; waiter slept ${ring.waiter.sleepingMs} ms, woken last ${ring.waiter.wokenLast ? `by ${ring.waiter.wokenLast.by} ${ring.waiter.silentMs} ms before the end` : 'never in the ring'}`);
+    lines.push(`    candidates: ${(each.candidates || []).map((c) => `${c.comm}/${c.tid} ${c.state} ${c.wchan}`).join('; ')}`);
+  }
+  for (const each of result.symbols || []) lines.push(`  symbols: renderer ${each.pid}: ${each.state}; ${each.named} of ${each.frames} main-thread frames named`);
+  if (result.serviceWorker) lines.push(`  service worker: ${JSON.stringify(result.serviceWorker).slice(0, 300)}; frames: ${JSON.stringify(result.frames)}`);
+  if (result.disk) lines.push(`  disk: ${result.disk.map((d) => `${d.path} ${d.error || `${Math.round(d.freeBytes / 1048576)} MiB free, ${d.freeInodes} inodes free`}`).join('; ')}`);
   if (result.flight) {
     const { kernel, browserTrace, error } = result.flight;
     if (error) lines.push(`  flight recorder: ${error}`);
@@ -1147,11 +1166,6 @@ export function summary(result) {
   return lines.join('\n');
 }
 
-function inertWatch() {
-  const unavailable = async () => { throw new Error('the stall watch is off (QUIRE_STALL_WATCH=off)'); };
-  return { captures: [], watchContext() {}, evidence: async () => ({}), next: unavailable, started: unavailable, session: async () => null, async stop() {} };
-}
-
 /**
  * The watch over one test's pages: arms each page as it is made (a
  * context's 'page' event; a context made with browser.newContext, or
@@ -1162,11 +1176,10 @@ function inertWatch() {
  * `started(page, ms)` for one to begin.
  */
 export function stallWatch(browser, testInfo) {
-  // the hunt's bare arm (#575): no probe, no arming, no recorder; a test that times out is all there is to see
-  if (process.env.QUIRE_STALL_WATCH === 'off') return inertWatch();
   const armed = new Map();     // page -> its armed session (a promise)
   const ready = new Map();     // page -> its armed session, once armed
   const seen = new Map();      // page -> when the watch first saw it, and how long arming took
+  const state = { frozen: false, captureFile: null, flight: null, browserGone: false }; // what the failure check reads (missingEvidence)
   const watchedContexts = new Set();
   const running = new Set();   // captures in progress
   const scope = nativeScope(); // what they run outside node
@@ -1182,6 +1195,7 @@ export function stallWatch(browser, testInfo) {
     const pending = arm(page);
     armed.set(page, pending);
     seen.set(page, { at: Date.now() });
+    page.on('crash', () => crashed(`page crashed (its renderer died)`));
     pending.then((done) => { ready.set(page, done); seen.get(page).armedAfterMs = Date.now() - seen.get(page).at; });
     probe(page);
   };
@@ -1207,8 +1221,9 @@ export function stallWatch(browser, testInfo) {
     const save = (partial) => { try { writeFileSync(path, JSON.stringify({ ...identity, ...partial }, null, 2)); } catch (error) { /* the output directory is gone: the test is over */ } };
     const number = count;
     const result = await capture(page, armedPage, reason, browser, save, scope, (pid) => testInfo.outputPath(`stall-core-${count}-${pid}.core`),
-      () => keepBoth(browser, (name) => testInfo.outputPath(`flight-${number}-${name}`)));
+      async () => { const kept = await keepBoth(browser, (name) => testInfo.outputPath(`flight-${number}-${name}`)); state.flight = kept; return kept; });
     Object.assign(result, identity);
+    if (result.flight) { state.frozen = true; state.captureFile = path; }
     save(result);
     await testInfo.attach(`stall-capture-${count}`, { path, contentType: 'application/json' }).catch(() => {});
     console.error(summary(result));
@@ -1216,6 +1231,28 @@ export function stallWatch(browser, testInfo) {
     for (const waiter of waiters.splice(0)) waiter();
     return result;
   };
+  // A renderer or the browser died (#599-class: a crash is not a freeze, and the record is the kernel's: the signal, the exit, dmesg)
+  const crashed = (reason, browserGone = false) => {
+    if (stopped && !browserGone) return;
+    const job = (async () => {
+      count += 1;
+      const number = count;
+      const path = testInfo.outputPath(`crash-${number}.json`);
+      state.browserGone = state.browserGone || browserGone;
+      const flight = await keepBoth(browser, (name) => testInfo.outputPath(`flight-${number}-${name}`));
+      state.flight = flight;
+      state.frozen = true;
+      state.captureFile = path;
+      const log = await kernelLog(scope).catch((error) => ({ unavailable: String(error) }));
+      const body = { reason, at: new Date().toISOString(), test: testInfo.title, project: testInfo.project.name, flight, kernelLog: log, disk: diskEvidence(), sanitizer: sanitizerReports() };
+      try { writeFileSync(path, JSON.stringify(body, null, 2)); } catch (gone) { /* the output directory is gone */ }
+      await testInfo.attach(`crash-${number}`, { path, contentType: 'application/json' }).catch(() => {});
+      console.error(`[stall-capture] ${reason}: kernel ring ${flight.kernel.file || flight.kernel.unavailable || flight.kernel.error}; browser trace ${flight.browserTrace.file || flight.browserTrace.unavailable || flight.browserTrace.error}`);
+    })().catch((error) => console.error(`[stall-capture] crash evidence failed: ${error && error.stack || error}`));
+    running.add(job);
+    job.finally(() => running.delete(job));
+  };
+  const onDisconnected = () => crashed('the browser process went away while the test ran (crash or kill)', true);
   const start = (page, reason) => {
     starts.push(page);
     for (const waiter of waiters.splice(0)) waiter();
@@ -1295,6 +1332,7 @@ export function stallWatch(browser, testInfo) {
 
   // a @serial test asserts timings, which a trace perturbs (#741 measured +6%): it records nothing
   if (!(testInfo.tags || []).includes('@serial')) startBrowserTrace(browser);
+  browser.on('disconnected', onDisconnected);
   scan();
   const scanTimer = setInterval(() => { scan(); nearTimeout(); }, SCAN_EVERY_MS);
 
@@ -1343,11 +1381,27 @@ export function stallWatch(browser, testInfo) {
         await within(Promise.all([...running]), 1500);
       }
       await keepEvidence();
+      browser.off('disconnected', onDisconnected);
+      // a test that failed with no frozen page leaves the rings too: any red has its history (a timeout with the page
+      // answering, a network or service worker stall, a harness error), and the rings go on for the tests after it
+      const failed = testInfo.status && testInfo.status !== 'skipped' && testInfo.status !== testInfo.expectedStatus;
+      if (failed && !state.flight && wanted()) {
+        state.browserGone = !browser.isConnected();
+        state.flight = await keepBoth(browser, (name) => testInfo.outputPath(`flight-failed-${name}`), process.env, true).catch((error) => ({ kernel: { error: String(error) }, browserTrace: { error: String(error) } }));
+      }
       leaveSampler();
       for (const pending of armed.values()) {
         const arming = await within(pending, COMMAND_MS);
         if (arming.value && arming.value.session) arming.value.session.detach().catch(() => {});
       }
+      // a red whose evidence is missing is its own failure, named, and the one to fix first
+      const missing = await this.verify();
+      if (missing.length) throw new Error(`EVIDENCE MISSING: ${missing.join('; ')}`);
     },
+    /** What a failing test is missing of its evidence (the fields, named); none when it passed. */
+    async verify() {
+      return missingEvidence({ status: testInfo.status, frozen: state.frozen, captureFile: state.captureFile, flight: state.flight, browserGone: state.browserGone });
+    },
+    state,
   };
 }

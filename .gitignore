@@ -6,3 +6,5 @@ e2e/screenshots/
 test-results/
 playwright-report/
 __pycache__/
+flight-watchdog/
+test-results-sanitizer/

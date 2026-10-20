@@ -362,7 +362,7 @@ test('the kernel ring starts for a process tree, keeps its futex calls and wakeu
     expect(kept.error, JSON.stringify(kept)).toBeUndefined();
     expect(kept.lines).toBeGreaterThan(0);
     const text = gunzipSync(readFileSync(out)).toString();
-    expect(text).toContain('# kept the last');
+    expect(text).toContain('# the last');
     expect(text).toMatch(/sys_futex|sched_switch|sched_wakeup/);
     expect(text, 'timestamps are CLOCK_MONOTONIC (the clock of Chrome\'s trace)').toContain('clock: mono');
   } finally {
@@ -402,27 +402,6 @@ test('the run of the @serial tests is told from the other by its command line, a
   expect(serialRun(['test', '--grep', 'dictionary'])).toBe(false);
   expect(serialRun(['test'])).toBe(false);
   expect(serialRun(['test', '--grep'])).toBe(false);
-});
-
-test('QUIRE_STALL_WATCH=off makes the watch inert: no probe, no capture, the test runs as it would (the hunt\'s bare arm, #575)', async ({ browser }, testInfo) => {
-  desktopOnly(testInfo);
-  const kept = process.env.QUIRE_STALL_WATCH;
-  process.env.QUIRE_STALL_WATCH = 'off';
-  try {
-    const { stallWatch: makeWatch } = await import('./stall-capture.js');
-    const watch = makeWatch(browser, testInfo);
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    watch.watchContext(context);
-    await page.setContent('<p>bare</p>');
-    await new Promise((resolve) => setTimeout(resolve, 3500));   // longer than one probe period (2 s)
-    expect(watch.captures).toEqual([]);
-    await expect(watch.next(page, 100)).rejects.toThrow(/stall watch is off/);
-    await watch.stop();
-    await context.close();
-  } finally {
-    if (kept === undefined) delete process.env.QUIRE_STALL_WATCH; else process.env.QUIRE_STALL_WATCH = kept;
-  }
 });
 
 /**
