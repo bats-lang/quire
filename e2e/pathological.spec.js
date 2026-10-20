@@ -593,7 +593,7 @@ test.describe('a single-file book of 5 MB', { tag: '@serial' }, () => {
 
 test.describe('a thousand nested elements', () => {
   // render, search and the script read aloud are each a walk of the tree
-  // (.claude/rules/book-memory.md names them): a recursion that goes one frame a level, with
+  // (keyword: book memory): a recursion that goes one frame a level, with
   // a thousand levels in a paragraph, would blow the wasm stack and leave
   // the page with an error, or with no chapter at all
   for (const mode of MODES) {

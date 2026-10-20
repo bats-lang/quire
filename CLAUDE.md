@@ -32,6 +32,10 @@ live in the one package that owns the platform, state what they assume,
 and are tested there; nothing in quire uses `praxi`, `assume` or
 `$UNSAFE` to skip a proof.
 
+## Comments name their area by keyword
+
+A comment states its reason in one line and names the area by keyword; the detail lives in `.claude/rules/*.md`: search them for the keyword before changing the code.
+
 ## Names are words
 
 Element ids, numbered-id prefixes (up to 16 bytes), variables, static indices and
