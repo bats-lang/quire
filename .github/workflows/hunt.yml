@@ -8,13 +8,18 @@ name: hunt
 # Each shard repeats the specs with Playwright's own --repeat-each, through
 # gen-pwa test (as the e2e groups do), and stops at its first failing test
 # (--max-failures=1: a hit is a test that times out with an unresponsive page). A
-# shard that hits uploads its stall captures (e2e/stall-capture.js) and the failed
-# tests' traces; the job summary says whether a capture arrived.
+# shard that hits uploads its stall captures and the failed tests' traces; the job
+# summary says whether a capture arrived.
+
+# Reads the repository only: no token write, no statuses, no artifacts' API use
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
       specs:
-        description: 'Spec files in e2e/, space separated (each must match name.spec.js)'
+        description: 'Spec files in e2e/, space separated (each must match name.spec.js; at least one)'
         required: true
         default: 'dictionary.spec.js containers.spec.js encodings.spec.js icons.spec.js'
         type: string
@@ -24,18 +29,15 @@ on:
         default: '100'
         type: string
       project:
-        description: 'The Playwright project the specs run on (desktop is where the flake hit)'
+        description: 'The Playwright project (a name of playwright.config.js: desktop, mobile-portrait, narrow, android, mobile-landscape, tablet, wide)'
         required: true
         default: 'desktop'
         type: string
 
-concurrency:
-  group: hunt-${{ github.run_id }}
-  cancel-in-progress: false
-
 jobs:
-  # The app and the PWA, built once for the shards: the same steps as check.yml's build job,
-  # without its caches, checks and Android parts (the hunt needs the web app only)
+  # The app and the PWA, built once for the shards. This is check.yml's build job without its
+  # caches, Android and checks: the hunt needs the web app only (a copy, by decision: see the PR
+  # body of quire#748, why check.yml's job is not called as a reusable workflow)
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -85,17 +87,25 @@ jobs:
       HUNT_REPEAT: ${{ inputs.repeat }}
       HUNT_PROJECT: ${{ inputs.project }}
     steps:
-      # The inputs name files and a number: anything else fails the shard before a browser starts
+      # The checkout comes first: the input check reads e2e/ (the specs must exist)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # The inputs name files, a number and a project: anything else fails the shard before a browser
+      # starts. Shell, not bats: no compiler exists before the build, and this runs ahead of it
       - name: Check the inputs
         run: |
+          set -- $HUNT_SPECS
+          [ "$#" -gt 0 ] || { echo "::error::specs is empty: name at least one spec file in e2e/ (an empty list would run every e2e test)"; exit 1; }
           for spec in $HUNT_SPECS; do
             printf '%s\n' "$spec" | grep -Eq '^[a-z0-9-]+\.spec\.js$' || { echo "::error::not a spec file in e2e/: $spec"; exit 1; }
             test -f "e2e/$spec" || { echo "::error::no such spec: e2e/$spec"; exit 1; }
           done
           printf '%s\n' "$HUNT_REPEAT" | grep -Eq '^([1-9][0-9]{0,2}|1000)$' || { echo "::error::repeat must be from 1 to 1000: $HUNT_REPEAT"; exit 1; }
-          printf '%s\n' "$HUNT_PROJECT" | grep -Eq '^[a-z-]+$' || { echo "::error::not a project name: $HUNT_PROJECT"; exit 1; }
-
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+          # the names of the projects in playwright.config.js (its projects[].name)
+          case "$HUNT_PROJECT" in
+            desktop|mobile-portrait|narrow|android|mobile-landscape|tablet|wide) ;;
+            *) echo "::error::not a project of playwright.config.js: $HUNT_PROJECT"; exit 1 ;;
+          esac
 
       - name: Download the PWA
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -118,23 +128,15 @@ jobs:
         with:
           playwright-minimum: "1.58"
 
-      # The same diagnostic install as the e2e jobs (check.yml, quire#575): gdb and eu-stack for the stall
-      # capture's native stacks, libc6-dbg for libc's names. Never fails the shard.
+      # gdb, eu-stack and libc6-dbg for the stall capture (quire#575), the same step as the e2e jobs
+      # (.github/actions/stall-tools; a stopgap until bats-lang/pwa#109). Never fails the shard.
       - name: Install gdb
         continue-on-error: true
-        run: |
-          installed=no
-          for attempt in 1 2 3; do
-            if sudo apt-get update -q && sudo apt-get install -y -q gdb elfutils; then installed=yes; break; fi
-            [ "$attempt" -lt 3 ] && sleep $((attempt * 5))
-          done
-          libc_version=$(dpkg-query -W -f='${Version}' libc6)
-          sudo apt-get install -y -q --no-upgrade "libc6-dbg=$libc_version" \
-            || echo "libc6-dbg $libc_version is not available: libc's internal functions stay unnamed"
-          echo "Install gdb: installed=$installed"
+        uses: ./.github/actions/stall-tools
 
-      # The shard: the specs repeated, on one project, through gen-pwa test. The run's name is `hunt`, so its
-      # outputs (test-results/hunt/, including each stall capture) are kept apart from any other run
+      # The shard: the specs repeated, on one project, through gen-pwa test. Its run is named
+      # `hunt` by the timings directory, so outputs (test-results/hunt/, each stall capture) are
+      # kept apart from any other run
       - name: Repeat the specs
         id: repeat
         run: |
@@ -174,9 +176,19 @@ jobs:
           name: hunt-captures-${{ matrix.shard }}
           path: |
             test-results/**/stall-capture-*.json
-            test-results/**/stall-core-*.core.gz
             test-results/**/runner-load-*.json
             test-results/**/page-timing-*.json
             test-results/**/*.zip
           if-no-files-found: ignore
           retention-days: 30
+
+      # The core of a renderer that froze (e2e/stall-capture.js), kept 7 days as check.yml keeps
+      # its cores: a core holds the renderer's memory (the e2e fixtures' pages and books, never a user's)
+      - name: Upload stall cores
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hunt-stall-cores-${{ matrix.shard }}
+          path: test-results/**/stall-core-*.core.gz
+          if-no-files-found: ignore
+          retention-days: 7
