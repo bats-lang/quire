@@ -22,7 +22,7 @@ import { delimiter, join } from 'node:path';
 import { test, expect } from './fixtures.js';
 import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
-import { arm, capture, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, nativeScope, nativeStacks, NATIVE_MOST_MS, TEARDOWN_MOST_MS } from './stall-capture.js';
+import { arm, capture, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
 const SPIN_MODULE = (() => {
@@ -267,6 +267,10 @@ test('a renderer that is frozen (no CPU, no answer) has its native stacks captur
   expect(capture.answers.task.answered).toBe(false);
   expect(Math.max(...capture.rendererCpu.map((process) => process.cpuSeconds))).toBeLessThan(FROZEN_CPU_SECONDS);
   expectNativeStacks(capture, pids);
+  // the kernel's record is in the capture too: every renderer's cgroup (or the reason), and the kernel's log
+  expect(capture.kernel.error).toBeUndefined();
+  expect(capture.kernel.cgroups.map((each) => each.pid)).toEqual(expect.arrayContaining(pids));
+  expect(capture.kernel.kernelLog).toBeTruthy();
   await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
 });
 
@@ -422,6 +426,61 @@ test('the real eu-stack and pstack give the stacks of a hung process when gdb do
   } finally {
     hung.kill('SIGKILL');
     if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
+  }
+});
+
+test('a renderer\'s cgroup files and the kernel\'s log lines are read, and say why when they cannot be (#575)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const root = mkdtempSync(join(tmpdir(), 'stall-cgroup-'));
+  const kept = process.env.PATH;
+  try {
+    // a stand-in /proc and cgroup tree: a process whose cgroup is named, and the files of that cgroup, all but one
+    const procRoot = join(root, 'proc');
+    const cgroupRoot = join(root, 'cgroup');
+    const directory = join(cgroupRoot, 'user.slice', 'renderer.scope');
+    mkdirSync(directory, { recursive: true });
+    mkdirSync(join(procRoot, '4242'), { recursive: true });
+    writeFileSync(join(procRoot, '4242', 'cgroup'), '0::/user.slice/renderer.scope\n');
+    writeFileSync(join(directory, 'memory.events'), 'low 0\nhigh 0\nmax 0\noom 1\noom_kill 1\n');
+    writeFileSync(join(directory, 'memory.current'), '123456\n');
+    writeFileSync(join(directory, 'cpu.stat'), `usage_usec 9\nnr_throttled 3\nthrottled_usec 700\n${'x'.repeat(READ_MOST)}`);
+    writeFileSync(join(directory, 'cgroup.freeze'), '1\n');
+    const found = cgroupEvidence(4242, { proc: procRoot, cgroup: cgroupRoot });
+    expect(found.path).toBe('/user.slice/renderer.scope');
+    expect(found.files['memory.events']).toContain('oom_kill 1');
+    expect(found.files['memory.current']).toBe('123456');
+    expect(found.files['cgroup.freeze']).toBe('1');
+    expect(found.files['memory.max']).toMatch(/^unavailable: ENOENT/);
+    expect(found.files['cpu.stat'].length, 'a file is read to READ_MOST bytes at most').toBeLessThanOrEqual(READ_MOST);
+    // a process with only a cgroup v1 line, and a process that is gone: each says why
+    mkdirSync(join(procRoot, '4243'), { recursive: true });
+    writeFileSync(join(procRoot, '4243', 'cgroup'), '1:cpu:/\n');
+    expect(cgroupEvidence(4243, { proc: procRoot, cgroup: cgroupRoot }).unavailable).toMatch(/^unavailable: no cgroup v2 line/);
+    expect(cgroupEvidence(4244, { proc: procRoot, cgroup: cgroupRoot }).unavailable).toMatch(/^unavailable: \/proc\/4244\/cgroup: ENOENT/);
+    // this process's own cgroup, on this machine: read, or said why not
+    const real = cgroupEvidence(process.pid);
+    expect(real.unavailable || typeof real.path, 'the real cgroup is read or its reason is said').toBeTruthy();
+    if (!real.unavailable) for (const value of Object.values(real.files)) expect(typeof value).toBe('string');
+    // the kernel's log: the matching lines, the last KERNEL_LOG_LINES of them, through a stand-in dmesg
+    const logFile = join(root, 'dmesg.txt');
+    writeFileSync(logFile, [
+      ...Array.from({ length: 230 }, (_, index) => `[${index}.0] Out of memory: Killed process ${index} (renderer)`),
+      '[300.0] an ordinary line',
+      '[301.0] INFO: task x:9 blocked for more than 120 seconds.',
+      '',
+    ].join('\n'));
+    const log = await withTools({ dmesg: `cat ${logFile}` }, () => kernelLog(nativeScope()));
+    if (log.unavailable) unavailable(log.unavailable);
+    expect(log.matched).toBe(231);
+    expect(log.lines.length).toBe(KERNEL_LOG_LINES);
+    expect(log.lines[0]).toContain('Killed process 31 ');
+    expect(log.lines.at(-1)).toContain('blocked for more than 120 seconds');
+    // the real log, read as this user can read it (as root, or through sudo): its lines or the reason
+    const realLog = await kernelLog(nativeScope());
+    expect(realLog.unavailable || Array.isArray(realLog.lines), 'the real kernel log is read or its reason is said').toBeTruthy();
+  } finally {
+    process.env.PATH = kept;
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

@@ -38,6 +38,12 @@
  *   - the kernel's view of the other browser processes too (the browser
  *     process, the GPU process: `native.browserProcesses`), which a frozen
  *     renderer may wait on, never attached to;
+ *   - the kernel's record (`kernel`): each renderer's cgroup (v2, from
+ *     /proc/<pid>/cgroup: memory.events, memory.current, memory.max, cpu.stat,
+ *     cgroup.freeze) and the last 200 lines of dmesg that match an OOM kill,
+ *     a hung task or a blocked one (as root or through sudo, `unavailable:
+ *     <why>` where denied). Read-only and bounded: a frozen cgroup, an OOM
+ *     kill or throttling looks like a hung renderer at no CPU;
  *   - what the page did before it stopped (`history`, e2e/page-history.js,
  *     kept in node from the page's events, since its script cannot record
  *     them): the last 100 console messages, uncaught errors, requests,
@@ -46,7 +52,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { accessSync, constants, existsSync, readdirSync, readFileSync, readlinkSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { accessSync, closeSync, constants, existsSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, isAbsolute, join } from 'node:path';
 import { bindAttempts } from './attempt-log.js';
 import { keepHistory } from './page-history.js';
@@ -116,11 +122,11 @@ export const TEARDOWN_MOST_MS = TEARDOWN_MS + HELPER_MS + 1500;
  * Debugger.pause (3); the pause itself (PAUSE_MS); the debugger
  * disabled, enabled and its breakpoints made inactive again (3);
  * Profiler.enable and Profiler.start (2); the profile (PROFILE_MS);
- * Profiler.stop (1). The renderers' CPU time (a session, two reads and
- * 1 s between them) is taken alongside, and is shorter.
- * 10 x 2 s + 3 s + 2 s = 25 s.
+ * Profiler.stop (1); the kernel's log (dmesg, HELPER_MS). The renderers' CPU
+ * time (a session, two reads and 1 s between them) is taken alongside, and is
+ * shorter. 10 x 2 s + 3 s + 2 s + 5 s = 30 s.
  */
-export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS;
+export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS + HELPER_MS;
 
 /**
  * What the native stacks of a frozen page add, every wait run out: an
@@ -369,6 +375,75 @@ function machineState() {
   const pressure = {};
   for (const resource of ['cpu', 'io', 'memory']) pressure[resource] = text(`/proc/pressure/${resource}`).trim().split('\n');
   return { loadAverage: text('/proc/loadavg').trim(), memoryAvailableMiB: free ? Math.round(+free[1] / 1024) : null, pressure };
+}
+
+// Kernel evidence (#575): each renderer's cgroup (v2) and the kernel's log of what stalled or
+// killed a task. A frozen cgroup, an OOM kill or throttling looks like a hung renderer at no
+// CPU. Every read is bounded (READ_MOST bytes a file) and read-only, and each failure is
+// written as `unavailable: <why>`, never a failure of the test
+export const CGROUP_FILES = ['memory.events', 'memory.current', 'memory.max', 'cpu.stat', 'cgroup.freeze'];
+export const KERNEL_LOG_PATTERN = /oom|killed process|out of memory|hung task|blocked for more than/i;
+export const KERNEL_LOG_LINES = 200;
+export const READ_MOST = 16384;
+
+/** A file's text, at most READ_MOST bytes of it, trimmed. Throws as a read does. */
+function readBounded(file) {
+  const descriptor = openSync(file, 'r');
+  try {
+    const buffer = Buffer.alloc(READ_MOST);
+    const bytes = readSync(descriptor, buffer, 0, READ_MOST, 0);
+    return buffer.subarray(0, bytes).toString('utf8').trim();
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+/**
+ * One process's cgroup (v2), as /proc/<pid>/cgroup names it, and the files
+ * CGROUP_FILES names in that cgroup's directory. `roots` replaces /proc and
+ * /sys/fs/cgroup (the tests' stand-in trees).
+ */
+export function cgroupEvidence(pid, roots = {}) {
+  const procRoot = roots.proc || '/proc';
+  const cgroupRoot = roots.cgroup || '/sys/fs/cgroup';
+  let text;
+  try {
+    text = readBounded(join(procRoot, String(pid), 'cgroup'));
+  } catch (error) {
+    return { pid, unavailable: `unavailable: /proc/${pid}/cgroup: ${error.code || error.message}` };
+  }
+  const v2 = text.split('\n').find((line) => line.startsWith('0::'));
+  if (!v2) return { pid, unavailable: 'unavailable: no cgroup v2 line in /proc/<pid>/cgroup (cgroup v1 only, or none)' };
+  const path = v2.slice(3);
+  const directory = join(cgroupRoot, path);
+  const files = {};
+  for (const name of CGROUP_FILES) {
+    try {
+      files[name] = readBounded(join(directory, name));
+    } catch (error) {
+      files[name] = `unavailable: ${error.code || error.message}`;
+    }
+  }
+  return { pid, path, directory, files };
+}
+
+/**
+ * The last KERNEL_LOG_LINES lines of the kernel's log that match
+ * KERNEL_LOG_PATTERN (`dmesg`, as root or through sudo, as the gdb path
+ * runs its commands): { lines, matched } or { unavailable }.
+ */
+export async function kernelLog(scope) {
+  const path = whichExecutable('dmesg');
+  if (!path) return { unavailable: 'unavailable: dmesg is not installed' };
+  const out = await runPrivileged([path], HELPER_MS, undefined, scope);
+  if (!out.ok) return { unavailable: `unavailable: ${(cap((out.stderr || '').trim(), 200) || out.error || 'dmesg gave no output').replace(/\s+/g, ' ')}` };
+  const matched = out.stdout.split('\n').filter((line) => KERNEL_LOG_PATTERN.test(line));
+  return { lines: matched.slice(-KERNEL_LOG_LINES), matched: matched.length };
+}
+
+/** The cgroups of these processes and the kernel's log, never throws. */
+export async function kernelEvidence(pids, scope = nativeScope(), roots = {}) {
+  return { cgroups: pids.map((pid) => cgroupEvidence(pid, roots)), kernelLog: await kernelLog(scope) };
 }
 
 /** Each renderer process's CPU time (s) over `ms`, from the browser's own session. */
@@ -963,6 +1038,9 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
   } else {
     result.rendererCpu = processes;
   }
+  // the kernel's record (#575): each renderer's cgroup and the kernel's log of what stalled or killed a task
+  const rendererPids = Array.isArray(processes) ? processes.filter((process) => process.type === 'renderer').map((process) => process.pid) : [];
+  result.kernel = await kernelEvidence(rendererPids, scope).catch((error) => ({ error: String(error && error.stack || error) }));
   result.machine = machineState();
   // the runner's load over the last minute, and the page's attempts and long
   // tasks (#600): a slow page is told from a slow runner by these
@@ -1027,6 +1105,17 @@ export function summary(result) {
   }
   if (Array.isArray(result.otherProcesses)) for (const process of result.otherProcesses) {
     lines.push(`  ${process.type} ${process.pid}: CPU ${process.cpuSeconds}s over 1 s; threads: ${process.threads.join('; ')}`);
+  }
+  if (result.kernel && result.kernel.cgroups) {
+    for (const each of result.kernel.cgroups) {
+      if (each.unavailable) lines.push(`  renderer ${each.pid} cgroup: ${each.unavailable}`);
+      else lines.push(`  renderer ${each.pid} cgroup ${each.path}: ${Object.entries(each.files).map(([name, value]) => `${name} ${value.replace(/\s+/g, ' ')}`).join(' | ').slice(0, 400)}`);
+    }
+  }
+  if (result.kernel && result.kernel.kernelLog) {
+    const log = result.kernel.kernelLog;
+    if (log.unavailable) lines.push(`  kernel log: ${log.unavailable}`);
+    else lines.push(`  kernel log: ${log.matched} matching lines${log.lines.length ? `, the last: ${log.lines[log.lines.length - 1].slice(0, 200)}` : ''}`);
   }
   if (result.machine) {
     lines.push(`  machine: load ${result.machine.loadAverage}, ${result.machine.memoryAvailableMiB} MiB available`);
