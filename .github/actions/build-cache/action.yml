@@ -23,14 +23,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # A locator (#622). The key is the cache's name and the commit (a GitHub
-    # cache is immutable, so a save needs a new key), and a restore takes the
-    # newest cache of the name. The "@" ends the name, so "static" never finds
-    # "static-memo-rest@...". The key holds no pin, runner image, lock or
-    # source hash: what a restore is trusted for is bats's judgement (bats's
-    # CLAUDE.md and .claude/rules/). The inputs that judgement does not reach
-    # yet (system headers, system libraries, bats.toml) are listed in
-    # .claude/rules/ci.md, "The compiler's cache".
+    # A locator, not a judge: what a restore is trusted for is bats's (.claude/rules/ci.md).
     - name: Name the cache
       id: key
       shell: bash

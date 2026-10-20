@@ -20,7 +20,8 @@ The pins and the relock are in CLAUDE.md. Specifics:
   job's `runs-on` (quire has no reusable workflow to write it once in);
   `ubuntu-latest` moves with GitHub's default. The label moves by hand, in a PR of its own,
   when GitHub announces its successor. The build cache's key does not name it: bats stamps a
-  `build/` with the C compiler's version, so a build made on another image is dropped (#622).
+  `build/` with the C compiler's version, so a build made with another clang is dropped; an
+  image's headers and libraries are not judged (bats#338, bats#380; "Not judged yet" below) (#622).
 * A publish never turns main red: until a lock names a package release, quire does not use
   it, so package releases publish first and the quire PR with the new lock follows.
 * GITHUB_TOKEN cannot change workflow files, so the relock PR lists pwa's `android.yml` pin
@@ -43,7 +44,7 @@ bats's judgement, by the mechanisms below.
     and the environment clang reads, the flags, and the target and mode. A `build/` whose stamp
     differs is dropped at start, with a line saying what differs.
   * Each module in build mode (`build-freshness.md`): its `.bats` source by sha256 (`<dats>.src`),
-    its closure key below, `build/.sats_changed`, and each object by the sha256 of its C and its
+    its closure key (the files patsopt read, as in check mode, `check-memo.md`), `build/.sats_changed`, and each object by the sha256 of its C and its
     profile.
   * Each module in check mode (`check-memo.md`): the files patsopt read for it, by size and
     sha256, and the names of the `.sats` and `.hats` under `build/`. Nothing is judged by time.
@@ -60,7 +61,7 @@ bats's judgement, by the mechanisms below.
     `patsopt` line is the cksum of `bin/patsopt`, not of the libraries it loads; bats#380);
   * `bats.toml`: the rules name only its version and constraints (`lock.md`), its unsafe flag
     (validation records) and its dependencies (the listing of `bats_modules`); no rule says what
-    else in it reaches the build.
+    else in it reaches the build (bats#381).
   A new runner image is judged only through what is listed here: clang's version, target and
   environment are stamped, its headers and libraries are not.
 * **The fixtures' memo** (bats#303): `bats fixtures` keeps each static fixture's result, keyed by
