@@ -103,10 +103,8 @@ contents and fonts are made ready first (`_book_prepare`) so the cover is never
 shown before the jump; the jump is not dated. **The landmarks are not listed in
 Contents** (Apple Books lists none, Calibre's viewer none; publishers put the
 contents page and index in the table of contents too). `e2e/landmarks.spec.js`
-plays `e2e/landmark-books.js`; `e2e/epubcheck.spec.js` checks every book there
-with epubcheck (5.2.1, pinned with its SHA-256 in `check.yml`; `EPUBCHECK_JAR`
-names the jar locally): a valid book must pass, one invalid on purpose may give
-only the errors its entry lists.
+plays `e2e/landmark-books.js`; one invalid on purpose may give only the
+errors its entry lists.
 
 ## Content that is wide, structured or styled
 

@@ -4,7 +4,7 @@
 // (the whole text in one spine item), converters that nest a thousand
 // elements, ten thousand short paragraphs and one paragraph of a megabyte
 // without a space. Each is a small book made by code
-// (e2e/pathological-books.js, each checked by epubcheck), read paged, scrolled
+// (e2e/pathological-books.js), read paged, scrolled
 // and in two columns.
 //
 // Budgets are relative, as page-turn.spec.js's are (#307): a turn is

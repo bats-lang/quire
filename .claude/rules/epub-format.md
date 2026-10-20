@@ -9,7 +9,6 @@ paths:
   - src/toc.bats
   - e2e/containers*
   - e2e/epub2*
-  - e2e/epubcheck*
   - e2e/landmarks*
   - e2e/pagelist*
   - e2e/publisher*

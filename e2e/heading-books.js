@@ -1,5 +1,4 @@
-// An EPUB 3 book of headings and relative sizes (#422), checked by
-// epubcheck (e2e/epubcheck.spec.js).
+// An EPUB 3 book of headings and relative sizes (#422).
 
 const filler = 'lorem ipsum dolor sit amet '.repeat(8);
 

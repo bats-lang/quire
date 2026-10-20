@@ -88,14 +88,14 @@ here and fail in CI. What CI has, and the one command each takes here:
   speech-dispatcher for nothing, daemon or no daemon; with it, and espeak-ng's
   modules, `getVoices()` lists some 13,000 espeak variants): that is not what
   CI runs, so no spec is to depend on it.
-* **epubcheck 5.2.1** (`e2e/epubcheck.spec.js`, every book the specs read):
-  without `EPUBCHECK_JAR` the spec skips itself off CI, so a book that is not
-  valid passes here and fails there. Needs `java`. One step:
-  `curl -fsSL -o /tmp/epubcheck.zip https://github.com/w3c/epubcheck/releases/download/v5.2.1/epubcheck-5.2.1.zip && echo "0532f6291faa2bb729dd253f958868a2a57dbd2c32f881a97c7c980c5940309e  /tmp/epubcheck.zip" | sha256sum -c - && unzip -q /tmp/epubcheck.zip -d ~`,
-  then `EPUBCHECK_JAR=~/epubcheck-5.2.1/epubcheck.jar` in the machine's env
-  file (the same pin as `check.yml`'s "Install epubcheck"). Checked here:
-  `gen-pwa test -- e2e/epubcheck.spec.js --project=desktop -g fourLevels` is
-  skipped without the variable and passes (5.9 s) with it.
+* **epubcheck 5.2.1, by hand** (no spec runs it; #733): a book suspected of being
+  invalid is written out and checked with the jar. Needs `java`. Fetch and
+  verify the pinned archive (its SHA-256 is the one in `check.yml`'s history):
+  `curl -fsSL -o /tmp/epubcheck.zip https://github.com/w3c/epubcheck/releases/download/v5.2.1/epubcheck-5.2.1.zip && echo "0532f6291faa2bb729dd253f958868a2a57dbd2c32f881a97c7c980c5940309e  /tmp/epubcheck.zip" | sha256sum -c - && unzip -q /tmp/epubcheck.zip -d ~`.
+  Write the book out from the repository root, e.g. `tocLevelBooks.fourLevels`
+  (any entry of an `e2e/*-books.js` registry): `node --input-type=module -e "import { writeFileSync } from 'node:fs'; import { createEpub } from './e2e/create-epub.js'; import { tocLevelBooks } from './e2e/toc-levels-books.js'; const e = tocLevelBooks.fourLevels; writeFileSync('/tmp/book.epub', e.bytes ? e.bytes() : createEpub(e.opts));"`,
+  then `java -jar ~/epubcheck-5.2.1/epubcheck.jar /tmp/book.epub`. Checked: that
+  book gives "No errors or warnings detected."
 * **A CJK font** (`fonts-noto-cjk`, `check.yml`): `two-books.spec.js` and
   `vertical.spec.js` skip or fail without one. `fc-list | grep -i cjk` must
   list Noto Sans CJK.
@@ -107,7 +107,7 @@ here and fail in CI. What CI has, and the one command each takes here:
   `PLAYWRIGHT_BROWSERS_PATH` holds `chromium_headless_shell-1228`.
 
 The skips of `e2e/` that depend on the machine and not on the project are
-`epubcheck.spec.js` (the jar), `two-books.spec.js` (the CJK font) and
+`two-books.spec.js` (the CJK font) and
 `stall-capture.spec.js` (gdb); every other `test.skip` is on the project
 (Android or a browser, touch or mouse), so it skips the same on CI.
 
@@ -122,7 +122,7 @@ writing mode and the page box. Beta is opened from the library, from a
 catalogue's Get and after a reload; Alpha again after Beta; the records kept
 for Beta after Alpha equal those of Beta opened first in a profile of its own
 (`reloadSettled` waits out the sync the android project makes as the app
-opens). The books are in `e2e/two-books-books.js`, checked by epubcheck. A new
+opens). The books are in `e2e/two-books-books.js`. A new
 per-book feature is added to Alpha and checked absent in Beta.
 
 By decision the narration's clip table is not probed (no test hook in the

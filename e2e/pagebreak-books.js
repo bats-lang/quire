@@ -1,6 +1,5 @@
 // Small EPUB 3 books whose page breaks (epub:type pagebreak, role
-// doc-pagebreak) hold text or sit inside words (#421). Each is checked by
-// epubcheck (e2e/epubcheck.spec.js).
+// doc-pagebreak) hold text or sit inside words (#421).
 
 const filler = 'lorem ipsum dolor sit amet '.repeat(10);
 const pages = [1, 2].map(i => ({ href: `chapter1.xhtml#p${i}0`, label: `${i}0` }));

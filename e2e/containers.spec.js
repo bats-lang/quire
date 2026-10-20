@@ -1,7 +1,7 @@
 // Real-world containers (#433): the archives and container.xml files that
 // tools write and e2e/create-epub.js does not. Each book is made by
 // container-books.js (create-epub.js's book written again by zip-writer.js
-// with the quirk in it) and checked by epubcheck.spec.js.
+// with the quirk in it).
 //
 // Decided (issue 433) from the specifications and what readers do:
 // * ZIP: a reader finds an entry by the central directory and its data by

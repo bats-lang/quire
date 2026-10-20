@@ -3,8 +3,7 @@
 // volumes 2 and 3, 0 a prequel) and as FBReader writes it: the card and
 // Book info show it as it was written without a trailing zero, the library
 // sorts a series by it, and a book of the series with no number comes
-// after those that have one. The books are in series-books.js, checked by
-// epubcheck.spec.js.
+// after those that have one. The books are in series-books.js.
 
 import { test, expect } from './fixtures.js';
 import {

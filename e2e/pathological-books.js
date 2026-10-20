@@ -3,7 +3,7 @@
 // a table cell holding many paragraphs that spans dozens of pages, a
 // single-file book (the whole text in one spine item), converters that
 // nest a thousand elements, and a chapter without breaks. Each book is a
-// valid EPUB 3 (e2e/epubcheck.spec.js checks every entry of `pathologicalBooks`).
+// valid EPUB 3.
 //
 // Every chapter ends in a paragraph that holds a marker word found nowhere
 // else (`TAIL_WORD`), so a test can search for a word on the last page and
@@ -105,7 +105,7 @@ export const shortParagraphsBook = () => book('Short Paragraphs', [manyParagraph
 /** One paragraph of 1 MB without a space */
 export const unbrokenBook = (bytes = UNBROKEN_BYTES) => book('Unbroken Paragraph', [longParagraphChapter(bytes)]);
 
-/** The registry e2e/epubcheck.spec.js walks */
+/** The books the pathological spec reads */
 export const pathologicalBooks = {
   table: { valid: true, opts: tableBook() },
   novel: { valid: true, opts: novelBook() },

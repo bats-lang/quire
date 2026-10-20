@@ -4,9 +4,8 @@
 // written wrongly, a container.xml with two rootfiles or an odd full-path,
 // extra META-INF files, and OPF variants. Each is made by create-epub.js, read
 // back as entries and written again by zip-writer.js with the quirk in it, so
-// the book is the same one. Checked by epubcheck (e2e/epubcheck.spec.js):
-// `valid` ones must pass; an invalid one is invalid on purpose, and `errors`
-// names the only messages it may give.
+// the book is the same one. `errors` names the messages an invalid one
+// gives on purpose.
 
 import { createEpub } from './create-epub.js';
 import { readZip, writeZip, extraField, timestampExtra, unixExtra, zip64Extra } from './zip-writer.js';

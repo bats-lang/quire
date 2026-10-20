@@ -4,8 +4,7 @@
 // encryption.xml that names an algorithm nobody knows. What is not
 // protection is not refused: fonts that are only obfuscated, and a
 // book that is damaged and declares nothing, which stays damaged.
-// The books are made by e2e/drm-books.js, and checked by epubcheck in
-// e2e/epubcheck.spec.js.
+// The books are made by e2e/drm-books.js.
 
 import { test, expect } from './fixtures.js';
 import {

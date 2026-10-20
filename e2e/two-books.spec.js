@@ -3,7 +3,7 @@
 // table, its back button, its search, its marks, the text read aloud), and
 // this opens a book that has every one of them, uses each, and then opens
 // one that has none, and checks that what is shown is the second's. The
-// books are in two-books-books.js (checked by epubcheck): Alpha has five
+// books are in two-books-books.js: Alpha has five
 // chapters, a nested contents, a page list, a note, a ruby, a narration,
 // reads left to right and is Japanese; Beta has two chapters and none of
 // that, and is Hebrew read right to left; Gamma is set vertically.

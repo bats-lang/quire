@@ -2,8 +2,7 @@
 // a byte order mark, UTF-16 either way round, and the single-byte
 // encodings EPUB 2 files are in (ISO-8859-1, windows-1252, windows-1255),
 // with the faults those files have (no declaration, a wrong one), and the
-// character references a text may hold. Each is checked by epubcheck
-// (e2e/epubcheck.spec.js) where it is legal (EPUB 3 requires UTF-8 or
+// character references a text may hold. Each is EPUB 3 where the encoding allows it (EPUB 3 requires UTF-8 or
 // UTF-16; the others are EPUB 2 files, as the old ones were) and read by
 // e2e/encodings.spec.js. The first word of a chapter is its own, so that
 // a search for it says the chapter was read.

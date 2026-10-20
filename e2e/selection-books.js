@@ -1,5 +1,4 @@
-// Small EPUBs for the selection specs (e2e/touch-selection.spec.js). Each is
-// checked by epubcheck (e2e/epubcheck.spec.js) and must be valid.
+// Small EPUBs for the selection specs (e2e/touch-selection.spec.js).
 
 import { solidPng } from './create-epub.js';
 

@@ -1,9 +1,8 @@
 // EPUB 3 books whose publishers chose different sizes for the same text and
 // structure (#431): the reader's Size setting means the reading size in every
 // book, and every other size in a book keeps its proportion to its body text.
-// Each is checked by epubcheck (e2e/epubcheck.spec.js); `valid` ones must
-// pass, the legacy one (an obsolete <font size>, by its entry) may give only
-// the errors it lists.
+// The legacy one (an obsolete <font size>) may give only
+// the errors its entry lists.
 //
 // Book A sets its body text in a two step relative chain, the usual "62.5%
 // rem trick": html{font-size:62.5%} makes 1rem 10px and p{font-size:1.6rem}

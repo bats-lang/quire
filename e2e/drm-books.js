@@ -1,9 +1,7 @@
 // Small EPUBs that declare their protection (quire#427): Adobe ADEPT,
 // Readium LCP, Apple FairPlay, Kobo, an algorithm nobody knows; and
 // the two that are not refused, a book whose fonts are only obfuscated
-// and a book that is damaged and declares nothing. Each is checked by
-// epubcheck (e2e/epubcheck.spec.js): `valid` ones must pass it; an
-// invalid one is invalid on purpose, and `errors` names the only
+// and a book that is damaged and declares nothing. An invalid one is invalid on purpose, and `errors` names the only
 // messages it may give. The chapters of a protected book are random
 // bytes, as an encrypted chapter's are.
 
