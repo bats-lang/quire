@@ -42,9 +42,11 @@ const giantBook = {
   toc: [{ label: 'Chapter 1', href: 'chapter1.xhtml' }],
 };
 
-/** The reading arrangement: Pages, Scroll, or Two columns */
+/** The reading arrangement: Pages, Scroll, or Two columns. The steps follow
+    the layout of the chapter the book was opened at (`budget`, measured
+    before this runs), so the Reading settings click waits as long as it. */
 async function arrange(page, mode) {
-  await openReadingSettings(page, 'Page');
+  await openReadingSettings(page, 'Page', { layoutMs: budget.layoutMs });
   if (mode === 'pages') {
     await readingSettings(page).getByRole('group', { name: 'Pages on screen' }).getByRole('button', { name: 'One', exact: true }).click();
   } else if (mode === 'scrolled') {
@@ -53,9 +55,9 @@ async function arrange(page, mode) {
     await readingSettings(page).getByRole('group', { name: 'Pages on screen' }).getByRole('button', { name: 'Two', exact: true }).click();
   }
   await page.keyboard.press('Escape');
-  await expect(page.locator('#typography-panel')).toHaveAttribute('data-hide', '1');
-  await expect(readingSettings(page)).toBeHidden();
-  await expect.poll(() => indicator(page).textContent()).toMatch(mode === 'scrolled' ? /% of chapter/ : mode === 'columns' ? /pages 1–2 of/ : / page 1 of/);
+  await following()(page.locator('#typography-panel')).toHaveAttribute('data-hide', '1');
+  await following()(readingSettings(page)).toBeHidden();
+  await following().poll(() => indicator(page).textContent()).toMatch(mode === 'scrolled' ? /% of chapter/ : mode === 'columns' ? /pages 1–2 of/ : / page 1 of/);
 }
 
 /** A book opened from the library, whatever the arrangement (scrolled, the
@@ -184,8 +186,10 @@ for (const mode of MODES) {
     const file = epubFile(giantBook);
     await importFiles(page, [file], 1);
     await openBook(page, 'Giant Text');
-    await arrange(page, mode);
+    // measured before the arrangement is set: the Reading settings click
+    // already follows the chapter's layout
     Object.assign(budget, await layoutBudget(page, testInfo, startedAt));
+    await arrange(page, mode);
     const cuts = await pieces(page);
     // three pieces or more, each under 64 KiB and cut where white space is
     expect(cuts.length).toBeGreaterThanOrEqual(3);
@@ -195,13 +199,13 @@ for (const mode of MODES) {
     await expectPainted(page, quotes);
 
     // the chapter shown again
-    await toLibrary(page);
+    await toLibrary(page, { layoutMs: budget.layoutMs });
     await reload(page);
     await openBook(page, 'Giant Text');
     await expectPainted(page, quotes);
 
     // the backup restored on a device that has the book
-    await toLibrary(page);
+    await toLibrary(page, { layoutMs: budget.layoutMs });
     await librarySettings(page);
     const backup = await exportedBackup(page);
     await settingsButton(page, 'Back').click();
@@ -237,8 +241,8 @@ for (const mode of MODES) {
       await store.join(d, server);
     }
     await openBook(a.page, 'Giant Text');
-    await arrange(a.page, mode);
     Object.assign(budget, await layoutBudget(a.page, testInfo, startedAt));
+    await arrange(a.page, mode);
     const cuts = await pieces(a.page);
     const quotes = await highlightAll(a.page, cuts);
     await hiddenSync(store, server, a);
@@ -247,7 +251,7 @@ for (const mode of MODES) {
     await hiddenSync(store, server, b);
     await expectPainted(b.page, quotes);
     // and opened again from the library
-    await toLibrary(b.page);
+    await toLibrary(b.page, { layoutMs: budget.layoutMs });
     await openBook(b.page, 'Giant Text');
     await expectPainted(b.page, quotes);
     expect(unexpected(a)).toEqual([]);

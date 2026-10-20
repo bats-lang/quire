@@ -16,16 +16,12 @@
 // the test 19 s. Each budget is that, with headroom of a third or more, and
 // none is smaller than what the config gives.
 
-import { bareFrameMs } from './helpers.js';
+import { bareFrameMs, stepExpectMs } from './helpers.js';
 
-/** A step of the page, in layouts: measured 3.6 at most, given 5 */
-const STEP_TIMES = 5;
 /** The four highlights of the test, in layouts: measured 14, given 20 */
 const WORK_TIMES = 20;
 /** What the test does besides: measured 19 s, given twice that */
 const REST_MS = 40000;
-/** What a step needs besides the layout */
-const STEP_ALLOWANCE_MS = 5000;
 
 /** Measures the layout the page is in and makes the test's budgets from it:
     the test's timeout (set once, never lowered) and the timeout of an
@@ -38,7 +34,7 @@ export async function layoutBudget(page, testInfo, startedAt, { floorExpectMs = 
   const warm = await bareFrameMs(page);
   const layoutMs = Math.max(first, warm);
   const elapsedMs = Date.now() - startedAt;
-  const expectMs = Math.max(floorExpectMs, STEP_TIMES * layoutMs + STEP_ALLOWANCE_MS);
+  const expectMs = stepExpectMs(layoutMs, floorExpectMs);
   const testMs = Math.max(testInfo.timeout, elapsedMs + WORK_TIMES * layoutMs + REST_MS);
   testInfo.setTimeout(testMs);
   await testInfo.attach('layout-budget.json', {

@@ -450,9 +450,10 @@ const BACK_CLICK_MS = 2000;
 const BACK_TRIES_MS = 20000;
 const BACK_LAYOUT_TIMES = 3;
 const BACK_ALLOWANCE_MS = 1000;
-export async function toLibrary(page) {
+export async function toLibrary(page, { layoutMs: known = 0 } = {}) {
   const started = Date.now();
-  let layoutMs = 0;
+  // `known` is the layout the page is in, when the caller measured it (#600)
+  let layoutMs = known;
   for (let attempt = 1; ; attempt++) {
     const clickMs = Math.max(BACK_CLICK_MS, BACK_LAYOUT_TIMES * layoutMs + BACK_ALLOWANCE_MS);
     try {
@@ -460,7 +461,7 @@ export async function toLibrary(page) {
       // and why it was tried again, with what the page's main thread did
       await attempted(page, 'toLibrary', attempt, async (note) => {
         const barsAt = Date.now();
-        await showChrome(page);
+        await showChrome(page, { layoutMs });
         layoutMs = Math.max(layoutMs, Date.now() - barsAt);
         note.set({ barsMs: Date.now() - barsAt });
         await page.getByRole('button', { name: 'Back to library' }).click({ timeout: clickMs });
@@ -542,7 +543,7 @@ export async function rawMouse(page, action, ...args) {
 }
 
 /** Opens the reader's bars when they are hidden */
-export async function showChrome(page) {
+export async function showChrome(page, { layoutMs = 0 } = {}) {
   const prev = control(page, 'Previous page');
   // a tap while text is selected only ends the selection (quire#428), so
   // the tap is made again when the bars did not come up; each tap is noted (#600)
@@ -569,7 +570,19 @@ export async function showChrome(page) {
       }
     });
   }
-  await attempted(page, 'showChrome', 'wait', () => expect(prev).toBeVisible());
+  // the bars come up when the page's task ends, so the wait is the layout's (#600)
+  await attempted(page, 'showChrome', 'wait', () => expect(prev).toBeVisible({ timeout: stepExpectMs(layoutMs) }));
+}
+
+/** The time a step that follows a layout may take: the layout's measured
+    length in STEP_TIMES, plus STEP_ALLOWANCE_MS for what is not layout, and
+    never less than the floor (the 15 s of the expect config). Measured
+    (#600): one search and selection took 2.4 to 3.6 times the bare frame
+    of the giant text in columns on a phone, so 5 times and 5 s is headroom. */
+export const STEP_TIMES = 5;
+export const STEP_ALLOWANCE_MS = 5000;
+export function stepExpectMs(layoutMs, floorMs = 15000) {
+  return Math.max(floorMs, STEP_TIMES * layoutMs + STEP_ALLOWANCE_MS);
 }
 
 // ---- the app's own timers, run on the fake clock (#657) ----
@@ -622,20 +635,26 @@ export async function runUntil(page, done, { stepMs = 1000, timeout = 30000 } = 
     before the click (an audit, a loaded machine) can see them up and
     then lose them: bringing them up and clicking are tried again
     together until the click lands */
-export async function clickControl(page, name) {
+export async function clickControl(page, name, { layoutMs = 0 } = {}) {
+  // a click waits as long as the layout the page is in (#600, as toLibrary's
+  // does): a click made behind a columns layout is answered when the layout
+  // ends, and one that timed out was made all the same, so a retry of it is
+  // covered by the sheet it opened and never clicks. With no layout given the
+  // click waits 2 s and the tries 20 s, as before.
+  const clickMs = Math.max(BACK_CLICK_MS, BACK_LAYOUT_TIMES * layoutMs + BACK_ALLOWANCE_MS);
   let attempt = 0;
   await expect(async () => {
     attempt += 1;
     await attempted(page, 'clickControl', attempt, async () => {
       await showChrome(page);
-      await control(page, name).click({ timeout: 2000 });
-    }, { control: name });
-  }).toPass({ timeout: 20000 });
+      await control(page, name).click({ timeout: clickMs });
+    }, { control: name, clickAllowanceMs: clickMs, layoutMs });
+  }).toPass({ timeout: BACK_TRIES_MS + BACK_LAYOUT_TIMES * layoutMs });
 }
 
 /** Opens the reading settings' sheet */
-export async function openSettings(page) {
-  await clickControl(page, 'Reading settings');
+export async function openSettings(page, { layoutMs = 0 } = {}) {
+  await clickControl(page, 'Reading settings', { layoutMs });
   await expect(dialog(page, 'Reading settings')).toBeVisible();
 }
 
@@ -646,9 +665,9 @@ export function readingSettings(page) {
 
 /** The reading settings' sheet open on its tab named tab (Look, Page,
     Turning or Read aloud) */
-export async function openReadingSettings(page, tab) {
+export async function openReadingSettings(page, tab, { layoutMs = 0 } = {}) {
   if (!tab) throw new Error('openReadingSettings: which tab?');
-  if (!(await readingSettings(page).isVisible())) await openSettings(page);
+  if (!(await readingSettings(page).isVisible())) await openSettings(page, { layoutMs });
   const named = readingSettings(page).getByRole('tab', { name: tab, exact: true });
   await named.click();
   await expect(named).toHaveAttribute('aria-selected', 'true');
