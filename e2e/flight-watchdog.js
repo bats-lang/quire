@@ -130,6 +130,8 @@ export class Watchdog {
       body.kernelRing = kept;
       if (kept.file) body.futex.ring = await futexAnalysis(ring, { address: call.address, tid: pid }).catch((error) => ({ error: String(error && error.message || error) }));
     } else body.kernelRing = { unavailable: 'no ring was started' };
+    // written now and again with the stacks, which take up to STACK_MS: what is known is not held back by them
+    writeFileSync(join(this.out, `${name}.json`), JSON.stringify(body, null, 2));
     if (this.stacks) {
       const stacks = await run('eu-stack', ['-p', String(pid), '-m', '-n', '40'], STACK_MS);
       body.userSpaceStacks = /#\d+\s/.test(stacks.stdout) ? stacks.stdout.slice(0, 20000) : `not available: ${stacks.error || stacks.stderr.slice(0, 200) || 'no frames'}`;

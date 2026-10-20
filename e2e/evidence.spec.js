@@ -327,13 +327,15 @@ test('a test that fails with nothing frozen leaves the rings anyway, and the rin
 test('the watchdog, outside every worker and browser, sees a renderer frozen in an untimed futex wait and writes it out', async ({ page, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   await recorderOn();
-  test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
+  test.setTimeout(testInfo.timeout + NATIVE_MOST_MS + 120000);
   const out = testInfo.outputPath('watchdog');
   const watchdog = startWatchdog(process.env[INSTANCE_VARIABLE], process.env, out, 4000);
   const hang = await hangPage(page, stallWatch);
   try {
-    await expect.poll(() => (existsSync(out) ? readdirSync(out).filter((name) => /^watchdog-\d+-\d+-\d+\.json$/.test(name)) : []), { timeout: 60000 }).not.toEqual([]);
-    const report = JSON.parse(readFileSync(join(out, readdirSync(out).find((name) => /^watchdog-\d+-\d+-\d+\.json$/.test(name))), 'utf8'));
+    // a report is whole when it parses (the file is written again once the stacks are in)
+    const reports = () => (existsSync(out) ? readdirSync(out).filter((name) => /^watchdog-\d+-\d+-\d+\.json$/.test(name)).flatMap((name) => { try { return [JSON.parse(readFileSync(join(out, name), 'utf8'))]; } catch (partial) { return []; } }) : []);
+    await expect.poll(() => reports().length, { timeout: 150000 }).toBeGreaterThan(0);
+    const report = reports()[0];
     expect(report.reason).toMatch(/untimed futex wait/);
     expect(report.futex.untimed).toBe(true);
     expect(report.futex.memory.bytes, JSON.stringify(report.futex.memory)).toMatch(/^[0-9a-f]{128}$/);

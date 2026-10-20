@@ -425,7 +425,7 @@ jobs:
         run: |
           curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/asan.zip" https://storage.googleapis.com/chromium-browser-asan/linux-release/asan-linux-release-1705668.zip
           echo "e1441463cd70aacecddeb7ea8a53ff6ce130c36627c4897a67412d008ae0a54c  $RUNNER_TEMP/asan.zip" | sha256sum -c -
-          unzip -q "$RUNNER_TEMP/asan.zip" -d "$RUNNER_TEMP/asan" 'out/f2d4-ASAN_Release/chrome' 'out/f2d4-ASAN_Release/*.pak' 'out/f2d4-ASAN_Release/icudtl.dat' 'out/f2d4-ASAN_Release/*.bin' 'out/f2d4-ASAN_Release/*.so' 'out/f2d4-ASAN_Release/*.so.1' 'out/f2d4-ASAN_Release/chrome_crashpad_handler' 'out/f2d4-ASAN_Release/vk_swiftshader_icd.json' 'out/f2d4-ASAN_Release/locales/*'
+          unzip -q "$RUNNER_TEMP/asan.zip" -d "$RUNNER_TEMP/asan" 'out/f2d4-ASAN_Release/chrome' 'out/f2d4-ASAN_Release/*.pak' 'out/f2d4-ASAN_Release/icudtl.dat' 'out/f2d4-ASAN_Release/*.bin' 'out/f2d4-ASAN_Release/*.so' 'out/f2d4-ASAN_Release/*.so.1' 'out/f2d4-ASAN_Release/chrome_crashpad_handler' 'out/f2d4-ASAN_Release/vk_swiftshader_icd.json'
           rm "$RUNNER_TEMP/asan.zip"
           sudo apt-get install -y -q libpci3
 
