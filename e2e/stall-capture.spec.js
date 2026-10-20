@@ -356,10 +356,13 @@ test('without gdb the capture of a frozen renderer says so and carries on', asyn
       expect(renderer.fallbackStacks.tried.map((each) => each.tool)).toEqual(expect.arrayContaining(['eu-stack']));
       expect(renderer.userSpaceStacks).toMatch(/^(eu-stack|pstack|not available: .+)$/);
       for (const each of renderer.fallbackStacks.tried) if (!each.ok) expect(each.note).toMatch(/^not available: /);
-      // the real eu-stack (measured: all 9 threads of a SIGSTOPped renderer in 2.5 s) gives one stack per kernel thread
+      // the real eu-stack (measured: all 9 threads of a SIGSTOPped renderer in 2.5 s) gives one stack per kernel
+      // thread, or fewer when it could not unwind one (its exit status is 1 then): never more, and the main thread always
       if (renderer.userSpaceStacks === 'eu-stack') {
         const text = renderer.fallbackStacks.tried.find((each) => each.ok).text;
-        expect((text.match(/^TID \d+:/mg) || []).length).toBe(renderer.kernel.tasks.length);
+        const blocks = text.match(/^TID \d+:/mg) || [];
+        expect(blocks.length, `eu-stack gave ${blocks.length} thread blocks for ${renderer.kernel.tasks.length} kernel threads`).toBeLessThanOrEqual(renderer.kernel.tasks.length);
+        expect(blocks, 'the main thread (TID = pid) has a block').toContain(`TID ${renderer.pid}:`);
         expect(text).toMatch(/^#0\s+0x[0-9a-f]+ \S+/m);
       }
     }
