@@ -265,6 +265,26 @@ test('a very long console message, error and URL are kept as their first 300 cha
   expect(snap.requestfinished[0].url).toBe(longUrl.slice(0, 300));
 });
 
+test('the history takes its listeners off when its page closes (#575)', async ({ browser }) => {
+  const events = ['console', 'pageerror', 'request', 'requestfinished', 'requestfailed', 'close'];
+  const listeners = (page) => events.reduce((count, event) => count + page.listenerCount(event), 0);
+  const other = await browser.newPage();
+  const before = listeners(other);
+  keepHistory(other);
+  // six of them: one for each of the five events kept, and the close that takes them off
+  expect(listeners(other)).toBe(before + 6);
+  // Playwright clears a closed page's listeners itself, and a count after it says nothing, so the
+  // page's off is recorded instead: the close is emitted here, which runs the history's own listener
+  // (the page is closed normally after the check)
+  const removed = [];
+  const off = other.off.bind(other);
+  other.off = (event, listener) => { removed.push(event); return off(event, listener); };
+  other.emit('close');
+  // each event is recorded more than once (Node's off calls the page's off again), so the distinct events are compared
+  expect([...new Set(removed)].sort()).toEqual(['console', 'pageerror', 'request', 'requestfailed', 'requestfinished']);
+  await other.close();
+});
+
 test('a page busy for 12 s that then recovers is captured, not attached to, and runs on', async ({ page, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   await page.setContent('<!doctype html><title>Busy</title>');

@@ -51,9 +51,13 @@ export function keepHistory(page) {
   };
   // request object -> its entry in `request`, until it finishes or fails
   const inFlight = new Map();
+  // each listener as it was attached, so the page's close can take it off again
+  const attached = [];
   const listen = (event, listener) => {
     try {
-      page.on(event, (...args) => { try { listener(...args); } catch (failure) { /* evidence only: never fail the page's events */ } });
+      const wrapped = (...args) => { try { listener(...args); } catch (failure) { /* evidence only: never fail the page's events */ } };
+      page.on(event, wrapped);
+      attached.push([event, wrapped]);
     } catch (failure) { /* a page that cannot be listened to keeps no history */ }
   };
   listen('console', (message) => {
@@ -82,6 +86,13 @@ export function keepHistory(page) {
     const failure = request.failure();
     kept.requestfailed.push({ at: Date.now(), method: request.method(), url: cut(request.url()), ms: began ? Date.now() - began.at : null, failure: cut(failure && failure.errorText) });
   });
+  // The page's close takes the listeners off (the rings and the snapshot stay readable).
+  try {
+    page.once('close', () => {
+      for (const [event, wrapped] of attached) page.off(event, wrapped);
+      attached.length = 0;
+    });
+  } catch (failure) { /* a page that cannot say it closed keeps its listeners, as the page does */ }
   return {
     snapshot() {
       const now = Date.now();
