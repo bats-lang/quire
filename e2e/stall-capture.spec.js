@@ -372,8 +372,10 @@ test('the window: a process over its bound keeps its newest events and says what
 test('with QUIRE_NO_STALL_ARM a real watch starts no Mojo trace and a capture says why (#737)', async ({ browser }, testInfo) => {
   desktopOnly(testInfo);
   const kept = process.env.QUIRE_NO_STALL_ARM;
+  const keptTrace = process.env.QUIRE_MOJO_TRACE;
   const own = await browser.browserType().launch({ args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'], env: { ...process.env, FC_FONTATIONS: '1' } });
   try {
+    process.env.QUIRE_MOJO_TRACE = '1'; // opted in, so only arming decides
     process.env.QUIRE_NO_STALL_ARM = '1';
     const watch = watchOf(own, testInfo);
     expect(mojoTraceOf(own), 'no trace while arming is off').toBeUndefined();
@@ -389,6 +391,7 @@ test('with QUIRE_NO_STALL_ARM a real watch starts no Mojo trace and a capture sa
     expect(mojoTraceOf(own), 'and its stop lets it go').toBeUndefined();
   } finally {
     if (kept === undefined) delete process.env.QUIRE_NO_STALL_ARM; else process.env.QUIRE_NO_STALL_ARM = kept;
+    if (keptTrace === undefined) delete process.env.QUIRE_MOJO_TRACE; else process.env.QUIRE_MOJO_TRACE = keptTrace;
     await own.close();
   }
 });
