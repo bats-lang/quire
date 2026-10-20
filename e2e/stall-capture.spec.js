@@ -835,12 +835,13 @@ test('every page of a test about to time out is captured', async ({ page, stallW
   // The capture begins TIMEOUT_MARGIN_MS before the timeout (a third of
   // a shorter one), at the watch's next scan: here at 30 s - min(15 s,
   // 30 s / 3) = 20 s, by 20 s + SCAN_EVERY_MS = 21 s on an idle runner.
-  // It can then take up to CAPTURE_MOST_MS (25 s), more than the 9 s
-  // left, as it can in any test (whose capture is evidence for a test
-  // failing anyway). So the test waits for the capture to begin (for as
-  // long as its timeout, which bounds that wait anyway), then puts its
-  // timeout off by twice CAPTURE_MOST_MS, 50 s, as headroom for a loaded
-  // runner, and waits for the capture itself for at most that long.
+  // It can then take up to CAPTURE_MOST_MS (the longest a capture of an
+  // answering page takes, summed from its waits in stall-capture.js),
+  // more than the time left, as it can in any test (whose capture is
+  // evidence for a test failing anyway). So the test waits for the capture
+  // to begin (for as long as its timeout, which bounds that wait anyway),
+  // then puts its timeout off by twice CAPTURE_MOST_MS, as headroom for a
+  // loaded runner, and waits for the capture itself for at most that long.
   test.setTimeout(NEAR_TIMEOUT_MS);
   await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
   await stallWatch.started(page, NEAR_TIMEOUT_MS);
