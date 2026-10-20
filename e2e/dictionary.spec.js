@@ -306,6 +306,7 @@ test('a dictionary is kept across a reload', async ({ page }) => {
   await expect(entry(page)).toContainText('Une demeure');
 });
 
+// Context for a failure seen in this test: quire#575 and quire#591.
 test('a dictionary without its .idx, or whose .idx is not the size its .ifo gives, is refused', async ({ page }) => {
   await start(page);
   const refusal = dialog(page, 'Dictionary not imported');

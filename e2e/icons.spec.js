@@ -90,6 +90,7 @@ async function iconsDrawn(page, screen) {
   return found;
 }
 
+// Context for a failure seen in this test: quire#575 and quire#591.
 test('every icon of the library, its search, its menu, Settings and a catalogue is drawn by the icon face', async ({ page }) => {
   const host = 'https://catalogue.test';
   await page.route(url => url.hostname !== 'localhost', route => route.abort());

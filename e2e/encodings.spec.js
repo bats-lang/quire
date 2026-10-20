@@ -105,6 +105,7 @@ for (const order of ['utf16le', 'utf16be']) {
   });
 }
 
+// Context for a failure seen in this test: quire#575 and quire#591.
 test('a chapter declared ISO-8859-1 (an EPUB 2 file) is decoded by its declaration, no mojibake', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, encodingBooks.latin1.opts);
