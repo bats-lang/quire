@@ -282,6 +282,12 @@ test('without gdb the capture of a frozen renderer says so and carries on', asyn
       expect(renderer.fallbackStacks.tried.map((each) => each.tool)).toEqual(expect.arrayContaining(['eu-stack']));
       expect(renderer.userSpaceStacks).toMatch(/^(eu-stack|pstack|not available: .+)$/);
       for (const each of renderer.fallbackStacks.tried) if (!each.ok) expect(each.note).toMatch(/^not available: /);
+      // the real eu-stack (measured: all 9 threads of a SIGSTOPped renderer in 2.5 s) gives one stack per kernel thread
+      if (renderer.userSpaceStacks === 'eu-stack') {
+        const text = renderer.fallbackStacks.tried.find((each) => each.ok).text;
+        expect((text.match(/^TID \d+:/mg) || []).length).toBe(renderer.kernel.tasks.length);
+        expect(text).toMatch(/^#0\s+0x[0-9a-f]+ \S+/m);
+      }
     }
   } finally {
     if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
@@ -332,6 +338,58 @@ test('without gdb the stacks come from eu-stack, else pstack, else the capture s
     expect(third.renderers[0].kernel.tasks.length).toBeGreaterThan(0);
     expect(third.renderers[0].mapsError).toBeUndefined();
     expect(third.renderers[0].modules.length).toBeGreaterThan(0);
+  } finally {
+    hung.kill('SIGKILL');
+    if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
+  }
+});
+
+/** Whether this machine has the tool: the tests of the real ones skip, saying so, where it does not. */
+const installed = (tool) => spawnSync('sh', ['-c', `command -v ${tool}`]).status === 0;
+
+// What the real tools print was read from the real tools (#575): eu-stack gives "#0  0x... function - module"
+// for every thread, and exits 1 when it could not unwind one of them (V8's code is in memory no file maps)
+// after printing the others; pstack (Ubuntu's package) gives the main thread only, in "0x7fed83cecbdf: ????"
+// lines, no "#0", and cannot unwind a Chromium renderer at all ("ptrace: Input/output error").
+test('a stack tool that prints frames and exits 1, or prints pstack\'s lines, has given its stacks', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const hung = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const kept = process.env.QUIRE_STALL_GDB;
+  process.env.QUIRE_STALL_GDB = NO_GDB;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const UNWOUND = 'echo "TID $2:"; echo "#0  0x00007f0000001000 nanosleep - /lib/libc.so.6"; echo "eu-stack: tid 9: no matching address range" >&2; exit 1';
+    const partial = await withTools({ 'eu-stack': UNWOUND, pstack: 'echo "#0 pstack should not run"' }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
+    expect(partial.renderers[0].userSpaceStacks, 'frames with exit code 1 are stacks').toBe('eu-stack');
+    expect(partial.renderers[0].fallbackStacks.tried[0].exitCode).toBe(1);
+    const PSTACK = 'echo ""; echo "$1: sleep 300"; echo "(No symbols found)"; echo "0x7effb28ecb7a: ????"; echo "0x7effb28f9b27: ???? (c000, 100000010600000) + 60"';
+    const lines = await withTools({ 'eu-stack': 'exit 3', pstack: PSTACK }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
+    expect(lines.renderers[0].userSpaceStacks, 'pstack\'s own frame lines are stacks').toBe('pstack');
+    // a tool that prints no frame at all still gives none
+    const none = await withTools({ 'eu-stack': 'exit 3', pstack: 'echo "(No symbols found)"; echo "ptrace: Input/output error can\'t read target." >&2; exit 1' }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
+    expect(none.renderers[0].userSpaceStacks).toMatch(/^not available: gdb .*pstack gave no stacks: ptrace: Input\/output error/);
+  } finally {
+    hung.kill('SIGKILL');
+    if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
+  }
+});
+
+test('the real eu-stack and pstack give the stacks of a hung process when gdb does not', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  test.skip(!installed('eu-stack') || !installed('pstack'), 'eu-stack (elfutils) and pstack are not both installed on this machine');
+  const hung = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const kept = process.env.QUIRE_STALL_GDB;
+  process.env.QUIRE_STALL_GDB = NO_GDB;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const real = await nativeStacks([{ pid: hung.pid }], nativeScope());
+    if (real.renderers[0].userSpaceStacks.startsWith('not available') && CANNOT_ATTACH.test(real.renderers[0].fallbackStacks.tried.map((each) => each.stderr).join('\n'))) unavailable('the kernel does not let this user attach');
+    expect(real.renderers[0].userSpaceStacks).toBe('eu-stack');
+    expect(real.renderers[0].fallbackStacks.tried[0].text).toMatch(/^#0\s+0x[0-9a-f]+ \S*nanosleep/m);
+    // eu-stack failing hands over to the real pstack, whose frames carry no "#"
+    const handed = await withTools({ 'eu-stack': 'exit 3' }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
+    expect(handed.renderers[0].userSpaceStacks).toBe('pstack');
+    expect(handed.renderers[0].fallbackStacks.tried[1].text).toMatch(/^0x[0-9a-f]+: /m);
   } finally {
     hung.kill('SIGKILL');
     if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;

@@ -528,6 +528,7 @@ export const CANNOT_ATTACH = /ptrace: (Operation not permitted|Permission denied
 // allowed to attach), tried in this order and the first that answers is kept. eu-stack is
 // elfutils' (Ubuntu's `elfutils`; `-m` names the module of each frame), pstack is the old
 // script (`pstack` of Red Hat's, absent on Ubuntu)
+const FRAME_LINE = /^(#0\s|0x[0-9a-f]+: )/m;
 const FALLBACK_TOOLS = [
   { tool: 'eu-stack', args: (pid) => ['-p', String(pid), '-m', '-n', String(STACK_FRAMES)] },
   { tool: 'pstack', args: (pid) => [String(pid)] },
@@ -544,8 +545,11 @@ async function fallbackStacks(pid, scope) {
     const path = whichExecutable(tool);
     if (!path) { tried.push({ tool, available: false, note: `not available: ${tool} is not installed` }); continue; }
     const out = await runPrivileged([path, ...args(pid)], FALLBACK_MS, undefined, scope);
-    // a stack has frames, "#0  0x... "; a tool that attached to nothing prints none
-    const ok = out.ok && /^#0\s/m.test(out.stdout);
+    // A stack has frames. Read from the real tools (#575): eu-stack prints "#0  0x... function - module",
+    // pstack "0x7fed83cecbdf: ????" (no "#"), and eu-stack exits 1 after printing the stacks it could
+    // unwind when it could not unwind another thread (V8's code is in memory no file maps), so the
+    // frames decide, whatever the exit code. A tool that attached to nothing prints none
+    const ok = FRAME_LINE.test(out.stdout);
     const why = (cap(out.stderr.trim(), 200) || out.error || 'it printed no frames').replace(/\s+/g, ' ');
     tried.push({ tool, available: true, path, ok, exitCode: out.code, ms: out.ms, stderr: cap(out.stderr, 2000), text: cap(out.stdout, 100000), note: ok ? undefined : `not available: ${tool} gave no stacks: ${why}` });
     if (ok) break;
