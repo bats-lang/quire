@@ -83,7 +83,7 @@ for (const order of ['utf16le', 'utf16be']) {
   // Flake: on desktop, 2026-10-15 (run 38675441720, attempt 1, e2e (reader)), the renderer
   // answered no DevTools command at about zero CPU and this test timed out at 90 s.
   // Captures: the job's e2e-stall-captures-<group> artifact.
-  // context: quire#575 (cause unknown; closed 2026-10-18), #591.
+  // context: quire#575 and #591 (cause unknown when this was written).
   test(`a chapter in UTF-16 (${order === 'utf16le' ? 'little' : 'big'} endian, with its byte order mark) is read as text, searched and read aloud`, async ({ page }) => {
     await fakeSpeech(page);
     const errors = await start(page);

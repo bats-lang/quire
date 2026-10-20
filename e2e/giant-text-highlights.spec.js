@@ -170,7 +170,7 @@ const GOLDEN = [
 ];
 
 for (const mode of MODES) {
-  // Slow runner (quire#600, open): on 2026-10-14 the columns test on mobile-portrait
+  // Slow runner (see quire#600): on 2026-10-14 the columns test on mobile-portrait
   // failed with the Back to library click (toLibrary) still pending after 20 s; no capture of it exists.
   // A 2026-10-15 failure of this test had another signature (the bars never came up): see quire#600.
   test(`${mode}: highlights at, across and after the cuts of a text over 64 KiB paint their own text, after a reload and a restored backup`, async ({ browser, page }, testInfo) => {

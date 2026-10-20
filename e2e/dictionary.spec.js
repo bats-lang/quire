@@ -309,7 +309,7 @@ test('a dictionary is kept across a reload', async ({ page }) => {
 // Flake: on desktop, 2026-10-14 (run 38486415472, e2e (settings)), the renderer answered no
 // DevTools command at about zero CPU and the test timed out at 90 s, at More options.
 // Captures: the job's e2e-stall-captures-<group> artifact.
-// context: quire#575 (cause unknown; closed 2026-10-18), #591.
+// context: quire#575 and #591 (cause unknown when this was written).
 test('a dictionary without its .idx, or whose .idx is not the size its .ifo gives, is refused', async ({ page }) => {
   await start(page);
   const refusal = dialog(page, 'Dictionary not imported');
