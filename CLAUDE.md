@@ -59,7 +59,15 @@ Order: p0 first, then p1, then p2, and within a priority the oldest
 opened ticket first, so none starves. A PR already started finishes
 before a new one is started. Downgrading a ticket to p3 on judgement
 (minor impact, high cost) needs the owner's approval; the tickets that
-are p3 today are approved.
+are p3 today are approved. An issue's priority is the owner's call: a
+worker that thinks it is wrong says so on the issue, and does not change
+the label.
+
+The Android release is not a priority. Priority is the order in which tickets
+are worked, and p2 means user-visible features and developer experience, not
+"held for the release". If the owner holds the Android release for an issue,
+that hold is a rule on top of the order: it is recorded on the issue, and it
+does not move the issue to another priority.
 
 
 ## Pipeline and tooling improvements belong in bats or pwa

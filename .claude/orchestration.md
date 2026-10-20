@@ -2,19 +2,17 @@
 
 This file is for the orchestrator (the session that spawns workers, reviews and merges), not for the workers: it is not under `.claude/rules/` or `.claude/skills/`, so nothing loads it by itself. The orchestrator rereads it at the start of every session and after every compaction. The owner's words are the authority; when a rule here and the owner's last word differ, the owner's last word wins and this file is changed the same day.
 
-## Priorities (owner, 2026-10-16 and 2026-10-17)
+## Priorities
 
-* **p0:** anything that makes CI faster or more reliable, or makes development faster or more reliable (a wrong cache is p0: it is what makes people run a clean "just in case"; a cost of the agent sessions that lowers what the work costs is p0). All open p0s, in flight or not, come before any p1.
-* **p1:** correctness.
-* **p2:** quire's user-visible features and the developer experience of other bats app developers (shell tools count).
-* **p3:** everything else; a session may file p3 issues and does not work on them.
-* No downgrades without the owner's word. An issue's priority is the owner's call; a worker that thinks it is wrong says so on the issue.
+The priorities (p0 to p3), the order of work, the owner's rule on downgrades and the Android-release hold are defined once, in quire's `CLAUDE.md`, section "Priorities". This file does not restate them. The orchestrator works tickets in that order.
 
 ## Agents and slots
 
-* **At most two agents run at any time, reviewers included** (owner, 2026-10-18). A review takes a slot like any work. When a slot frees, a queued review of a finished PR comes before a new ticket (it unblocks a merge). Never a third agent beside two busy slots.
+* **At most two agents run at any time, reviewers included** (owner, 2026-10-18). A review takes a slot like any work. Never a third agent beside two busy slots.
+* **A queued review of a finished PR comes first.** When a slot frees, a PR whose author is done and is waiting for its review takes the slot before any new ticket, because the review unblocks a merge.
+* **A reviewer for a PR in progress is the last resort.** A PR whose author is still working is reviewed only when no review is queued and no ticket fits the free slot. A ticket always comes before it.
 * The ledger is the `slots` command (`slots`, `slots set SLOT AGENT TASK`, `slots free SLOT`); `qsweep` ends with it. Slots now: one sonnet and one haiku (the owner's word, quota, 2026-10-17); it changes only when the owner says.
-* **Never an empty slot** (owner, hard rule). Never, under any circumstances, is an empty worker slot acceptable. The moment a slot frees (a worker hands back, a reviewer finishes), the next piece of work starts in it in the same turn: the oldest fitting p0, else p1, else p2, else (only if nothing else exists) a reviewer for a PR in progress. "Nothing fits" is not an answer: break a ticket up, take a conflicted PR, or take a p1/p2. Record it with `slots set` and start the worker; setting the ledger does not start one, calling Agent does. A scheduled hourly slot check fills any empty slot by these rules.
+* **Never an empty slot** (owner, hard rule). Never, under any circumstances, is an empty worker slot acceptable. The moment a slot frees (a worker hands back, a reviewer finishes), the next piece of work starts in it in the same turn: a queued review of a finished PR first, else the oldest fitting p0, else p1, else p2, else (only if nothing else exists) a reviewer for a PR in progress. "Nothing fits" is not an answer: break a ticket up, take a conflicted PR, or take a p1/p2. Record it with `slots set` and start the worker; setting the ledger does not start one, calling Agent does. A scheduled hourly slot check fills any empty slot by these rules.
 * Every agent, haiku included, takes the highest-priority, oldest ticket it can fix. A haiku takes the oldest p0 when unsure; it is never asked whether it can. Judge by the outcome: a diff that is totally off, or a worker that stops midway, is enough to decide it cannot; then the ticket goes to a sonnet and the haiku takes the next p0. A haiku takes a p1 or lower only when no p0 exists that it can accomplish (a p0 that would touch the files of an open PR is not available: no stacked PRs).
 * Reviewers are separate agents from the author, one at a time, briefed with the repository's own rules, the issue's goal and the kind of change. No invented threat models. Never say "human review".
 
@@ -42,6 +40,11 @@ This file is for the orchestrator (the session that spawns workers, reviews and 
 * At most 2 merge-queue entries. Cancel superseded runs (the queue's `supersede.yml` does it). No stacked PRs. No hooks. Many small PRs (repins) go in batches of about six with a pressure check before each; avoid bursts: CI capacity is the constraint.
 * A PR merges only after an independent review comment for its head. Gated repositories (bridge, pwa, capacitor-plugins) need the exact form their CLAUDE.md gives; a push, an update-branch or a merge of main voids an approval. Use merge, not squash. quire merges through the queue (`enable_pr_auto_merge` MERGE); the others by `merge_pull_request`.
 * A PR that adopts new package versions runs `bats lock --repository <dir>` and commits `bats.lock`.
+
+## Published APIs
+
+* **API changes are additive** (owner, 2026-10-19). A change to a published package's API keeps the old signatures and adds the new ones beside them, named in words. Dependents move one at a time, in PRs of their own, under their normal CI; removal of the old form is a separate ticket once every dependent has moved. No lockstep publish, and no archive built outside a dependent's CI. Reason: process#62 replaced `spawn*`, pwa's published archive then failed repository-prototype `verify` in #359, and the fix was process#65, which is additive.
+* **Breaking changes have at least one version of overlap** (owner, standing rule). A breaking change to a published API is made in at least two published versions: the first adds the new form beside the old one (both work), and a later one removes the old form once no dependent uses it. No single version may leave a dependent's newest archive unable to type-check. Every brief that touches a published package says so.
 
 ## How decisions are made
 
