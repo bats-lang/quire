@@ -80,10 +80,6 @@ test('a book with a UTF-8 byte order mark on its chapter, package and navigation
 });
 
 for (const order of ['utf16le', 'utf16be']) {
-  // Flake: on desktop, 2026-10-15 (run 38675441720, attempt 1, e2e (reader)), the renderer
-  // answered no DevTools command at about zero CPU and this test timed out at 90 s.
-  // Captures: the job's e2e-stall-captures-<group> artifact.
-  // context: quire#575 and #591 (cause unknown when this was written).
   test(`a chapter in UTF-16 (${order === 'utf16le' ? 'little' : 'big'} endian, with its byte order mark) is read as text, searched and read aloud`, async ({ page }) => {
     await fakeSpeech(page);
     const errors = await start(page);
@@ -109,6 +105,7 @@ for (const order of ['utf16le', 'utf16be']) {
   });
 }
 
+// Context for a failure seen in this test: quire#575 and quire#591.
 test('a chapter declared ISO-8859-1 (an EPUB 2 file) is decoded by its declaration, no mojibake', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, encodingBooks.latin1.opts);

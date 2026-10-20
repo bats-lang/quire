@@ -170,9 +170,7 @@ const GOLDEN = [
 ];
 
 for (const mode of MODES) {
-  // Slow-runner failure (see quire#600; the reason it was slow is not established): on 2026-10-14 the columns
-  // test on mobile-portrait timed out in toLibrary, the Back to library click retried for 20 s. No stall capture
-  // covers that click. A 2026-10-15 failure of this test had another signature (the bars never came up).
+  // Context for a failure seen in this test: quire#600.
   test(`${mode}: highlights at, across and after the cuts of a text over 64 KiB paint their own text, after a reload and a restored backup`, async ({ browser, page }, testInfo) => {
     const errors = await start(page);
     const file = epubFile(giantBook);

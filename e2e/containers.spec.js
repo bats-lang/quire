@@ -83,6 +83,7 @@ const opensAndReads = {
   descriptors: 'entries with data descriptors (bit 3)',
   descriptorsBare: 'entries with data descriptors that have no signature',
   extras: 'an archive comment and the timestamp, unix and ZIP64 extra fields',
+  // Context for a failure seen in this test: quire#575 and quire#591.
   localNameDiffers: 'a local header whose name is not the central directory\'s',
   localExtraDiffers: 'a local header whose extra field is longer than the central directory\'s',
   mimetypeDeflated: 'a mimetype entry that is deflated',
@@ -101,10 +102,6 @@ const opensAndReads = {
   rootfileSlash: 'a rootfile full-path with a leading slash',
 };
 
-// Flake: on desktop, 2026-10-14 (run 38501176394, e2e (extras)), the renderer answered no
-// DevTools command at about zero CPU and this test timed out at 90 s, waiting for the
-// imported book's card. Captures: the job's e2e-stall-captures-<group> artifact.
-// context: quire#575 and #591 (cause unknown when this was written).
 for (const [name, what] of Object.entries(opensAndReads)) {
   test(`${what}: the book opens with no banner and every chapter reads`, async ({ page }) => {
     const errors = await start(page);

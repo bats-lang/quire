@@ -90,10 +90,7 @@ async function iconsDrawn(page, screen) {
   return found;
 }
 
-// Flake: on desktop, 2026-10-11 (push to main, run 38145605411, e2e (relaunch)), the
-// renderer answered no DevTools command at about zero CPU and page.evaluate in this test
-// timed out at 90 s. Captures: the job's e2e-stall-captures-<group> artifact.
-// context: quire#575 and #591 (cause unknown when this was written).
+// Context for a failure seen in this test: quire#575 and quire#591.
 test('every icon of the library, its search, its menu, Settings and a catalogue is drawn by the icon face', async ({ page }) => {
   const host = 'https://catalogue.test';
   await page.route(url => url.hostname !== 'localhost', route => route.abort());
