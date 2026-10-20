@@ -2,8 +2,9 @@
 // (#436): Hebrew and Japanese text in a book that names no language, a
 // book that says English whose chapter says Hebrew, the forms a
 // dc:language is written in (EN-us, en_US, eng, heb, zh-Hant-TW, two of
-// them), and a French phrase in an English book. A package with no dc:language, or with en_US, is invalid in the one way
-// its entry says; each is read by e2e/languages.spec.js.
+// them), and a French phrase in an English book. A package with no
+// dc:language, or with en_US, is invalid in the one way its entry says;
+// each is read by e2e/languages.spec.js.
 
 const hebrew = 'שלום עולם, זהו ספר קצר בעברית. הוא נכתב כדי לבדוק את הכיוון של הטקסט. עוד משפט אחד כאן.';
 const japanese = '吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。';

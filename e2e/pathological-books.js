@@ -2,8 +2,8 @@
 // is committed as a file. KOReader's notes on slow books name the shapes:
 // a table cell holding many paragraphs that spans dozens of pages, a
 // single-file book (the whole text in one spine item), converters that
-// nest a thousand elements, and a chapter without breaks. Each book is a
-// valid EPUB 3.
+// nest a thousand elements, and a chapter without breaks. Every book
+// is a valid EPUB 3.
 //
 // Every chapter ends in a paragraph that holds a marker word found nowhere
 // else (`TAIL_WORD`), so a test can search for a word on the last page and

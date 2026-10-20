@@ -1,6 +1,7 @@
 // Small EPUB 3 books with print page lists (#415): duplicate and
 // out-of-order labels, targets that are missing, very long lists, odd
-// labels, and page breaks in the text with and without a list. An invalid one is invalid on purpose, and `errors` names the only
+// labels, and page breaks in the text with and without a list. An
+// invalid one is invalid on purpose, and `errors` names the only
 // messages it may give.
 
 const filler = 'lorem ipsum dolor sit amet '.repeat(12);
