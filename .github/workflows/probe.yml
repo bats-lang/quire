@@ -1,0 +1,89 @@
+name: probe
+on:
+  push:
+    branches: ['claude/q575-runner-probe']
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: facts
+        continue-on-error: true
+        run: |
+          set +e
+          uname -a; head -3 /etc/os-release; echo "ImageVersion=$ImageVersion ImageOS=$ImageOS"
+          lscpu | grep -E 'Model name|Hypervisor|Vendor|Thread|Core|Socket|^CPU\(s\)'
+          lscpu | grep -o -E ' (pmu|arch_perfmon|hypervisor|constant_tsc)' | sort -u
+          nproc; free -m | head -2
+          for f in perf_event_paranoid yama/ptrace_scope unprivileged_bpf_disabled kptr_restrict dmesg_restrict; do echo "$f=$(cat /proc/sys/kernel/$f 2>&1)"; done
+          echo "sudo: $(sudo -n id 2>&1)"
+          grep -E 'Cap(Eff|Bnd)|Seccomp' /proc/self/status
+          mount | grep -E 'tracefs|debugfs|bpf' ; echo "--- tracefs:"; sudo ls /sys/kernel/tracing | head -5; sudo ls /sys/kernel/tracing/events/syscalls | grep -c . ; sudo ls /sys/kernel/tracing/events/sched | head -30
+          ls -l /sys/kernel/btf/vmlinux
+          grep -E 'CONFIG_(FTRACE_SYSCALLS|USER_STACKTRACE_SUPPORT|BPF_SYSCALL|DEBUG_INFO_BTF|UPROBES|KPROBES|PERF_EVENTS|HW_PERF)=' /boot/config-$(uname -r)
+          df -h / /tmp | cat
+      - name: perf and rr
+        continue-on-error: true
+        run: |
+          set +e
+          sudo apt-get update -q >/dev/null 2>&1
+          sudo apt-get install -y -q linux-tools-common linux-tools-$(uname -r) 2>&1 | tail -3
+          sudo apt-get install -y -q linux-tools-azure 2>&1 | tail -2
+          which perf; perf --version
+          echo "--- perf stat hardware:"; perf stat -e cycles,instructions,branches,cpu-clock,task-clock true 2>&1 | head -20
+          echo "--- perf stat sudo:"; sudo perf stat -e cycles,instructions,r5101c4,r5100d1 true 2>&1 | head -20
+          sudo apt-get install -y -q rr 2>&1 | tail -3
+          which rr; rr --version
+          mkdir -p $RUNNER_TEMP/rr && export _RR_TRACE_DIR=$RUNNER_TEMP/rr
+          echo "--- rr record:"; rr record /bin/true 2>&1 | head -20
+          echo "--- rr cpufeatures:"; rr cpufeatures 2>&1 | head
+          echo "--- sudo rr record:"; sudo _RR_TRACE_DIR=$RUNNER_TEMP/rr rr record /bin/true 2>&1 | head -20
+      - name: bpftrace and strace
+        continue-on-error: true
+        run: |
+          set +e
+          sudo apt-get install -y -q bpftrace strace gdb elfutils 2>&1 | tail -2
+          bpftrace --version
+          sudo timeout 20 bpftrace -e 'tracepoint:syscalls:sys_enter_futex { @[comm] = count(); } interval:s:3 { exit(); }' 2>&1 | head -20 &
+          sleep 1; for i in 1 2 3; do python3 -c "import threading,time;l=threading.Lock();[threading.Thread(target=lambda:time.sleep(1)).start() for _ in range(5)]"; done; wait
+          echo "--- bpftrace ustack:"; sudo timeout 20 bpftrace -e 'tracepoint:syscalls:sys_enter_futex /comm=="python3"/ { @[ustack(3)] = count(); } interval:s:3 { exit(); }' 2>&1 | head -12 &
+          sleep 1; python3 -c "import threading,time;[threading.Thread(target=lambda:time.sleep(1)).start() for _ in range(5)]"; wait
+          echo "--- gdb attach / ptrace:"; sleep 30 & p=$!; timeout 20 gdb -batch -p $p -ex 'thread apply all bt 3' 2>&1 | tail -5; sudo timeout 20 gdb -batch -p $p -ex 'bt 3' 2>&1 | tail -3; kill $p
+          echo "--- strace overhead:"
+          cat > $RUNNER_TEMP/loop.py <<'PY'
+          import os, time
+          t=time.time()
+          for i in range(300000): os.getppid()
+          print("300k getppid: %.3f s" % (time.time()-t))
+          PY
+          python3 $RUNNER_TEMP/loop.py
+          strace -f -ttt -o $RUNNER_TEMP/s.out python3 $RUNNER_TEMP/loop.py
+          sudo strace -f -ttt -o $RUNNER_TEMP/s2.out python3 $RUNNER_TEMP/loop.py
+      - name: ftrace flight recorder
+        continue-on-error: true
+        run: |
+          set +e
+          T=/sys/kernel/tracing
+          sudo mkdir $T/instances/q575 && I=$T/instances/q575
+          sudo ls $I | head -80 | tr '\n' ' '; echo
+          echo 65536 | sudo tee $I/buffer_size_kb
+          for e in syscalls/sys_enter_futex syscalls/sys_exit_futex sched/sched_wakeup sched/sched_switch sched/sched_process_fork sched/sched_process_exit signal/signal_generate; do echo 1 | sudo tee $I/events/$e/enable; done
+          echo 1 | sudo tee $I/options/event-fork
+          echo 1 | sudo tee $I/options/userstacktrace
+          cat > $RUNNER_TEMP/work.py <<'PY'
+          import os, threading, time
+          t=time.time()
+          def w():
+              l=threading.Event()
+              for _ in range(20000): 
+                  e=threading.Event(); threading.Timer(0, e.set).start(); e.wait()
+          ts=[threading.Thread(target=w) for _ in range(2)]
+          [x.start() for x in ts]; [x.join() for x in ts]
+          print("work %.3f s" % (time.time()-t))
+          PY
+          echo "no tracing:"; python3 $RUNNER_TEMP/work.py
+          sudo bash -c "echo \$\$ > $I/set_event_pid; echo 1 > $I/tracing_on; python3 $RUNNER_TEMP/work.py; echo 0 > $I/tracing_on"
+          echo "events:"; sudo cat $I/trace | grep -c -v '^#'
+          sudo cat $I/trace | head -30
+          sudo cat $I/trace_stat/cpu0 2>&1 | head
+          sudo rmdir $I
