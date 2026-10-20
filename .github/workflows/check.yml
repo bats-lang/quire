@@ -450,13 +450,17 @@ jobs:
           retention-days: 14
 
       # What a page that stopped answering was doing (#244, #254): also
-      # in the screenshots, apart here so it is found at once
+      # in the screenshots, apart here so it is found at once; a failed test's
+      # runner-load.json and page-timing.json (#600) are here too (#715)
       - name: Upload stall captures
         if: always() && env.GROUP_RUN == 'yes'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-stall-captures-${{ matrix.group }}
-          path: test-results/**/stall-capture-*.json
+          path: |
+            test-results/**/stall-capture-*.json
+            test-results/**/runner-load-*.json
+            test-results/**/page-timing-*.json
           if-no-files-found: ignore
           retention-days: 30
 

@@ -54,6 +54,15 @@ const PAUSE_MS = 3000;
 const PROFILE_MS = 2000;
 const METRICS_MS = 1000;    // Performance.getMetrics, around an attempt (#600): a busy page is noted, not waited for
 const HARVEST_MS = 1000;
+// After a read the page did not answer, none is made for this long (#715), unless the
+// probe hears from the page sooner (it asks every PROBE_EVERY_MS and resets it). 5 s,
+// by what comparable breakers do: Hystrix's circuit stays open for sleepWindowInMilliseconds
+// 5000 after calls that time out at 1000 ms, the same ratio as METRICS_MS here (the
+// Hystrix wiki, Configuration); resilience4j's waitDurationInOpenState (60 s) and Envoy's
+// outlier base_ejection_time (30 s) protect a service from load and guard a remote
+// dependency, where this guards only a diagnostic read, whose cost is a lost sample, so it
+// is the short end. It is also ANSWER_MS: a page silent that long is captured by the probe.
+const DEAF_MS = 5000;
 const LONG_TASKS_MOST = 300;
 const ATTEMPTS_MOST = 300;
 const LOAD_WINDOW_MS = 60000; // the runner's load, as far back as a capture reports it (#600)
@@ -202,17 +211,34 @@ async function watchTiming(page, armed) {
   armed.timing = timing;
   const session = armed.session;
   timing.push = (entry) => { timing.entries.push(entry); if (timing.entries.length > ATTEMPTS_MOST) timing.entries.shift(); };
+  // A page that did not answer a read just now will not answer the next one
+  // (#715): waiting METRICS_MS before and after every attempt, and HARVEST_MS
+  // after a failed one, came out of toLibrary's tries and clickControl's 20 s
+  // for a frozen page. The first read that times out pays METRICS_MS; the reads
+  // in the DEAF_MS after it are not made and say so. Any read that is answered
+  // ends it.
+  let deafSince = 0;
+  const deaf = () => deafSince !== 0 && Date.now() - deafSince < DEAF_MS;
+  // the same for the harvest (an evaluate in the page), which a page can refuse while it answers getMetrics
+  let harvestDeafSince = 0;
+  const harvestDeaf = () => harvestDeafSince !== 0 && Date.now() - harvestDeafSince < DEAF_MS;
+  // the probe had an answer from the page: it is not deaf to either read
+  timing.heardFrom = () => { deafSince = 0; harvestDeafSince = 0; };
   timing.metrics = async () => {
     if (!session || armed.error) return { unavailable: armed.error || 'the page was not armed' };
+    if (deaf()) return { unavailable: `Performance.getMetrics not asked: the page did not answer one less than ${DEAF_MS} ms ago` };
     const read = await within(session.send('Performance.getMetrics'), METRICS_MS);
+    deafSince = read.answered ? 0 : Date.now();
     if (!read.answered) return { unavailable: `Performance.getMetrics was not answered within ${METRICS_MS} ms: the page's main thread was busy` };
     if (read.error || !read.value) return { unavailable: read.error || 'no metrics' };
     return Object.fromEntries(read.value.metrics.map((metric) => [metric.name, metric.value]));
   };
   // the long tasks seen since the last harvest: the page keeps them, this takes them
-  timing.harvest = async () => {
-    if (page.isClosed()) return;
+  // `answering`: the probe has just had an answer from the page, whatever the last read did
+  timing.harvest = async (answering = false) => {
+    if (page.isClosed() || (!answering && harvestDeaf())) return;
     const read = await within(page.evaluate(() => { const kept = globalThis.__quireStall; return kept ? kept.splice(0) : []; }), HARVEST_MS);
+    harvestDeafSince = read.answered ? 0 : Date.now();
     if (Array.isArray(read.value)) {
       timing.longTasks.push(...read.value);
       if (timing.longTasks.length > LONG_TASKS_MOST) timing.longTasks.splice(0, timing.longTasks.length - LONG_TASKS_MOST);
@@ -1022,7 +1048,7 @@ export function stallWatch(browser, testInfo) {
   const waiters = [];
   let stopped = false;
   let count = 0;
-  const leaveSampler = sampleRunner(); // the runner's load, from now on (#600)
+  const leaveSampler = sampleRunner(testInfo.title); // the runner's load, from now on (#600), kept across the worker's tests (#715)
 
   const watchPage = (page) => {
     if (stopped || armed.has(page) || page.isClosed()) return;
@@ -1075,7 +1101,7 @@ export function stallWatch(browser, testInfo) {
         return;
       }
       const timing = ready.has(page) && ready.get(page).timing;
-      if (timing) await timing.harvest().catch(() => {});
+      if (timing) { timing.heardFrom(); await timing.harvest(true).catch(() => {}); }
       await delay(PROBE_EVERY_MS);
     }
   }

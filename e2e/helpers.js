@@ -546,7 +546,12 @@ export async function showChrome(page) {
   const prev = control(page, 'Previous page');
   // a tap while text is selected only ends the selection (quire#428), so
   // the tap is made again when the bars did not come up; each tap is noted (#600)
-  for (let tap = 0; tap < 2 && !(await prev.isVisible()); tap++) {
+  // The note of a tap that did not bring the bars up is made from the read the
+  // loop makes anyway before the next tap (#715): the original's reads, no
+  // more, and a note cannot throw. After the second tap the expect below reads.
+  for (let tap = 0; tap < 2; tap++) {
+    if (await prev.isVisible()) break;
+    if (tap > 0) noted(page, 'showChrome', tap, { why: 'the bars were not up after the tap' });
     await attempted(page, 'showChrome', tap + 1, async (note) => {
       // a book page that is not there (a click that timed out was made, and
       // the library is shown) is no page to tap: the wait is the click's
@@ -562,7 +567,6 @@ export async function showChrome(page) {
         await page.keyboard.press('t');
         await page.waitForTimeout(150);
       }
-      if (!(await prev.isVisible())) note.set({ why: 'the bars were not up after the tap' });
     });
   }
   await attempted(page, 'showChrome', 'wait', () => expect(prev).toBeVisible());
