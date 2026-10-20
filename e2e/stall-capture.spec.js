@@ -842,6 +842,12 @@ test('every page of a test about to time out is captured', async ({ page, stallW
   // to begin (for as long as its timeout, which bounds that wait anyway),
   // then puts its timeout off by twice CAPTURE_MOST_MS, as headroom for a
   // loaded runner, and waits for the capture itself for at most that long.
+  // This test covers the capture of an answering page only: CAPTURE_MOST_MS,
+  // with no native step. A frozen page's capture can take up to
+  // NATIVE_MOST_MS, which is longer (its fallback tools for the browser and
+  // GPU processes add to it); the frozen-page tests give that path
+  // NATIVE_MOST_MS once, as headroom on their own timeout, and this test
+  // does not cover that path.
   test.setTimeout(NEAR_TIMEOUT_MS);
   await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
   await stallWatch.started(page, NEAR_TIMEOUT_MS);
