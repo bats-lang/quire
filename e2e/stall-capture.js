@@ -912,7 +912,7 @@ export async function nativeStacks(renderers, scope, corePathFor, others = []) {
   const gdb = await findGdb(scope);
   result.gdb = gdb;
   const taken = renderers.slice(0, NATIVE_MOST);
-  // the other browser processes (the browser's, the GPU's): what the kernel says of their threads, never attached to
+  // the other browser processes (the browser's, the GPU's): what the kernel says of their threads; their stacks come after the renderers'
   const aside = Promise.all(others.slice(0, NATIVE_MOST).map(async (other) => ({ pid: other.pid, type: other.type, cpuSeconds: other.cpuSeconds, kernel: await kernelTasks(other.pid, scope) })));
   result.renderers = await Promise.all(taken.map(async (renderer, index) => {
     // the kernel's view and the addresses first: gdb stops the process
@@ -965,7 +965,7 @@ export async function capture(page, armed, reason, browser, save = () => {}, sco
 async function captureArmed(page, armed, reason, browser, save, scope, corePathFor) {
   const result = { reason, at: new Date().toISOString(), url: page.url(), armed: !armed.error, armError: armed.error };
   // what the page did before this capture, read first so the requests in flight are those of the stall (#575)
-  result.history = armed.history ? armed.history.snapshot() : 'not available: the page was not watched yet';
+  result.history = armed.history ? armed.history.snapshot() : 'not available: the page was not watched';
   const session = armed.session;
   const cpu = browser ? rendererCpu(browser, CPU_WINDOW_MS) : Promise.resolve(null);
   // Does the page's main thread run a task? Asked of the armed session; a page

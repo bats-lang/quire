@@ -69,7 +69,7 @@ export function keepHistory(page) {
     inFlight.delete(request);
     const entry = { at: Date.now(), method: request.method(), url: cut(request.url()), ms: began ? Date.now() - began.at : null, status: null };
     kept.requestfinished.push(entry);
-    // the status is a value the response already has: nothing is awaited for it, and a status not yet known stays null
+    // the status is a value the response holds: nothing is awaited for it, and a status that is not known when the entry is read stays null
     request.response().then((response) => { if (response) entry.status = response.status(); }).catch(() => {});
   });
   listen('requestfailed', (request) => {

@@ -137,7 +137,7 @@ session of its own (debugger enabled, breakpoints inactive: a page already stuck
 can no longer be attached to), asks it to evaluate `1` every 2 s, and captures a page that
 does not answer within 5 s, and every page of a test 15 s before its timeout: the frames
 `Debugger.pause` stops in, a CPU profile, the renderers' CPU time, threads and `/proc` state,
-the machine's load and pressure, and native stacks and a core. The capture is
+the machine's load and pressure, native stacks and a core, each renderer's cgroup and the kernel's log, and the page's recent events. The capture is
 `stall-capture-<n>.json` in the test's output (CI's `e2e-stall-captures-<group>` artifact).
 `e2e/stall-capture.spec.js` checks it; its long tests run in the desktop project only.
 `QUIRE_NO_STALL_ARM=1` skips arming (to compare stall rates); nothing sets it.
@@ -161,9 +161,28 @@ the machine's load and pressure, and native stacks and a core. The capture is
   user-space stacks, and each renderer's `userSpaceStacks` says which answered (`gdb`, `eu-stack`,
   `pstack`) or `not available: <why for each tool>` (`fallbackStacks.tried` has each tool's text,
   exit code and note). The kernel's view of the other browser processes (the browser's, the GPU's)
-  is `native.browserProcesses`: their threads, wait channels and syscalls, never attached to.
+  is `native.browserProcesses`: their threads, wait channels and syscalls, and, with a frozen renderer,
+  their user-space stacks by the fallback tools (below). gdb is never attached to them.
   `ptraceScope`, `root`, the maps, the build id and the kernel stack of every thread are always
   recorded. Pure fallback: a step that fails is a note in the capture, never a red test.
+* **The browser's and the GPU's user-space stacks** (`native.browserProcesses[].userSpaceStacks`)
+  are asked of the fallback tools only, eu-stack then pstack, never gdb. They are taken only when a
+  renderer is frozen, after the renderers' stacks, each tool bounded by `FALLBACK_MS`. A process of
+  another type (a utility, the network service) is not asked.
+* **Kernel evidence** (`kernel`): for each renderer, its cgroup v2 path from `/proc/<pid>/cgroup` and
+  the files of that cgroup named by `CGROUP_FILES` (each read to at most `READ_MOST` bytes; a file
+  that cannot be read is `unavailable: <code>`), and the last `KERNEL_LOG_LINES` lines of `dmesg` that
+  match `KERNEL_LOG_PATTERN` (as root or through sudo; `unavailable: <why>` where denied or missing).
+  Read-only.
+* **Page history** (`history`, `e2e/page-history.js`): per watched page, the last 100 console messages,
+  uncaught errors, requests, finished requests and failed requests, each with its time and URL (and
+  its status, or its failure text), texts cut to 300 characters, no body read and nothing awaited;
+  and the requests in flight with their age. It is kept from `arm()`, so an unarmed page has it too.
+* **The browser's own stderr is not captured.** Playwright 1.61's `logger` launch option receives
+  only `api` messages, not the browser's process lines; a `Browser` has no `process()`; Chromium's
+  `--log-file` writes no file in the headless shell; `DEBUG=pw:browser` prints the lines to the
+  worker's stderr, from which no spec can read them (what was tried is in the pull request that
+  added the history).
 * **A core** of up to `CORE_MOST` renderers, gzipped, is uploaded as `e2e-stall-cores-<group>`
   only when one was kept. gdb first calls `madvise(MADV_DONTDUMP)` on the mappings with no
   resident page (`quietRanges`), or `generate-core-file` never finishes. Over `CORE_MAX_BYTES`
