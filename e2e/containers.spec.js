@@ -101,6 +101,10 @@ const opensAndReads = {
   rootfileSlash: 'a rootfile full-path with a leading slash',
 };
 
+// Flake: on desktop, 2026-10-14 (run 38501176394, e2e (extras)), the renderer answered no
+// DevTools command at about zero CPU and this test timed out at 90 s, waiting for the
+// imported book's card. Captures: the job's e2e-stall-captures-<group> artifact.
+// context: quire#575 (cause unknown; closed 2026-10-18), #591.
 for (const [name, what] of Object.entries(opensAndReads)) {
   test(`${what}: the book opens with no banner and every chapter reads`, async ({ page }) => {
     const errors = await start(page);
