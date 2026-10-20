@@ -26,6 +26,7 @@ import {
   start, epubFile, importFiles, card, toLibrary, reload, bookPage, dialog, marks, selectionButton,
   librarySettings, settingsButton, restoreInput, exportedBackup, openReadingSettings, readingSettings, indicator,
 } from './helpers.js';
+import { layoutBudget } from './layout-budget.js';
 import { stores, NOON, minutesLater, hiddenSync, unexpected, painted } from './sync-devices.js';
 
 const MODES = ['pages', 'scrolled', 'columns'];
@@ -65,6 +66,10 @@ async function openBook(page, title) {
   await expect(indicator(page)).toContainText(/ page \d|pages \d|% of chapter/);
 }
 
+/** The assertions that follow a layout wait as long as the layout does (#600):
+    set by each test from its measure (layoutBudget), 15 s until then */
+const budget = { expectMs: 15000 };
+const following = () => expect.configure({ timeout: budget.expectMs });
 const searchPanel = page => dialog(page, 'Search in book');
 const searchBar = page => page.getByRole('toolbar', { name: 'Search results' });
 
@@ -72,16 +77,16 @@ const searchBar = page => page.getByRole('toolbar', { name: 'Search results' });
 async function goTo(page, target) {
   await page.keyboard.press('/');
   const box = searchPanel(page).getByRole('searchbox', { name: 'Search in book' });
-  await expect(box).toBeFocused();
+  await following()(box).toBeFocused();
   await box.fill(target);
-  await expect(searchPanel(page).getByRole('status')).toHaveText('1 result');
+  await following()(searchPanel(page).getByRole('status')).toHaveText('1 result');
   await searchPanel(page).getByRole('region', { name: 'Results' }).getByRole('button').first().click();
-  await expect(searchPanel(page)).toBeHidden();
-  await expect.poll(async () => (await marks(page)).size).toBe(expectedMarks.count + 1);
+  await following()(searchPanel(page)).toBeHidden();
+  await following().poll(async () => (await marks(page)).size).toBe(expectedMarks.count + 1);
   await searchBar(page).getByRole('button', { name: 'Close search' }).click();
-  await expect(searchBar(page)).toBeHidden();
+  await following()(searchBar(page)).toBeHidden();
   // the search's own mark is gone, so the marks left are highlights
-  await expect.poll(async () => (await marks(page)).size).toBe(await expectedMarks.count);
+  await following().poll(async () => (await marks(page)).size).toBe(await expectedMarks.count);
 }
 const expectedMarks = { count: 0 };
 
@@ -138,10 +143,10 @@ async function highlightAll(page, cuts) {
   for (const target of targets(cuts)) {
     await goTo(page, target.from);
     quotes.push(await selectWords(page, target.from, target.to));
-    await expect(selectionButton(page, 'Highlight')).toBeVisible();
+    await following()(selectionButton(page, 'Highlight')).toBeVisible();
     await selectionButton(page, 'Highlight').click();
     expectedMarks.count++;
-    await expect.poll(async () => (await marks(page)).size).toBe(expectedMarks.count);
+    await following().poll(async () => (await marks(page)).size).toBe(expectedMarks.count);
   }
   return quotes;
 }
@@ -150,7 +155,7 @@ async function highlightAll(page, cuts) {
 const paintedTexts = async page => (await painted(page)).map(line => line.replace(/^[^:]*: /, '')).sort();
 
 async function expectPainted(page, quotes) {
-  await expect.poll(() => paintedTexts(page)).toEqual([...quotes].sort());
+  await following().poll(() => paintedTexts(page)).toEqual([...quotes].sort());
 }
 
 const restoredDialog = page => dialog(page, 'Backup restored');
@@ -171,11 +176,16 @@ const GOLDEN = [
 
 for (const mode of MODES) {
   test(`${mode}: highlights at, across and after the cuts of a text over 64 KiB paint their own text, after a reload and a restored backup`, async ({ browser, page }, testInfo) => {
+    // #600: this test failed on a runner twice as slow as usual, 71 s where it
+    // takes 24 s; what each step may take follows the layout measured below
+    const startedAt = Date.now();
+    Object.assign(budget, { expectMs: 15000 });
     const errors = await start(page);
     const file = epubFile(giantBook);
     await importFiles(page, [file], 1);
     await openBook(page, 'Giant Text');
     await arrange(page, mode);
+    Object.assign(budget, await layoutBudget(page, testInfo, startedAt));
     const cuts = await pieces(page);
     // three pieces or more, each under 64 KiB and cut where white space is
     expect(cuts.length).toBeGreaterThanOrEqual(3);
@@ -214,7 +224,9 @@ for (const mode of MODES) {
     expect(secondErrors).toEqual([]);
   });
 
-  test(`${mode}: highlights at, across and after the cuts of a text over 64 KiB are painted as made on the other device after a sync`, async ({ browser }) => {
+  test(`${mode}: highlights at, across and after the cuts of a text over 64 KiB are painted as made on the other device after a sync`, async ({ browser }, testInfo) => {
+    const startedAt = Date.now();
+    Object.assign(budget, { expectMs: 15000 });
     const store = stores.webdav;
     const server = store.make();
     const a = await store.device(browser, server, NOON);
@@ -226,6 +238,7 @@ for (const mode of MODES) {
     }
     await openBook(a.page, 'Giant Text');
     await arrange(a.page, mode);
+    Object.assign(budget, await layoutBudget(a.page, testInfo, startedAt));
     const cuts = await pieces(a.page);
     const quotes = await highlightAll(a.page, cuts);
     await hiddenSync(store, server, a);
