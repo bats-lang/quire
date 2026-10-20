@@ -165,6 +165,9 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
   their user-space stacks by the fallback tools (below). gdb is never attached to them. eu-stack and
   pstack are: each attaches to the process with ptrace and stops its threads while it reads their stacks,
   at most `FALLBACK_MS` each; this runs only when a renderer is frozen, the one case native stacks are taken.
+  What the real tools print: eu-stack "#0  0x... function - module" per thread, exit 1 when it could not unwind
+  one (V8's code is in memory no file maps); pstack "0x...: ????" for the main thread only, no "#0" (so such a
+  line counts as a stack, whatever it says), and it cannot unwind a Chromium renderer. The frames decide, not the exit code.
   `ptraceScope`, `root`, the maps, the build id and the kernel stack of every thread are always
   recorded. Pure fallback: a step that fails is a note in the capture, never a red test.
 * **The browser's and the GPU's user-space stacks** (`native.browserProcesses[].userSpaceStacks`)
@@ -175,11 +178,14 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
   the files of that cgroup named by `CGROUP_FILES` (each read to at most `READ_MOST` bytes; a file
   that cannot be read is `unavailable: <code>`), and the last `KERNEL_LOG_LINES` lines of `dmesg` that
   match `KERNEL_LOG_PATTERN` (as root or through sudo; `unavailable: <why>` where denied or missing).
-  Read-only.
+  Read-only, and read before the native stacks and saved, so a teardown that cuts the native step keeps it.
 * **Page history** (`history`, `e2e/page-history.js`): per watched page, the last 100 console messages,
   uncaught errors, requests, finished requests and failed requests, each with its time and URL (and
   its status, or its failure text), texts cut to 300 characters, no body read and nothing awaited;
-  and the requests in flight with their age. It is kept from `arm()`, so an unarmed page has it too.
+  and the requests in flight with their age. It is kept from `arm()`, except under `QUIRE_NO_STALL_ARM=1`
+  (no listener on the page then, so a comparison of stall rates differs only by the debugger). A kept text is a
+  copy, not a slice (V8 keeps a slice's whole parent alive: 100 slices of 10 MB messages held 1000 MB on node
+  22.22, 100 copies held 0).
 * **The browser's own stderr is not captured.** Playwright 1.61's `logger` launch option receives
   only `api` messages, not the browser's process lines; a `Browser` has no `process()`; Chromium's
   `--log-file` writes no file in the headless shell; `DEBUG=pw:browser` prints the lines to the

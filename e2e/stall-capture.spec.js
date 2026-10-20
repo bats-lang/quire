@@ -217,7 +217,6 @@ test('a page in an endless wasm loop is captured in that loop, and gdb is not at
 });
 
 test('a page\'s recent console messages, errors and requests are in its capture, with the requests in flight (#575)', async ({ page, stallWatch }) => {
-  // one request that is never answered (in flight at the stall) and one that Playwright fails
   await page.route('**/history-never-answered', () => {});
   await page.route('**/history-refused', (route) => route.abort('failed'));
   await page.setContent('<!doctype html><title>History</title><p>History</p>');
@@ -235,12 +234,10 @@ test('a page\'s recent console messages, errors and requests are in its capture,
   expect(history.console.some((each) => each.type === 'warning' && each.text === 'history-marker')).toBe(true);
   expect(history.pageerror.some((each) => each.message === 'history-error')).toBe(true);
   expect(history.requestfailed.some((each) => /\/history-refused$/.test(each.url) && /ERR_FAILED/.test(each.failure))).toBe(true);
-  // the one never answered is in flight, with its age; the one that failed is not
   const flying = history.inFlight.map((each) => each.url);
   expect(flying.some((url) => /\/history-never-answered$/.test(url))).toBe(true);
   expect(flying.some((url) => /\/history-refused$/.test(url))).toBe(false);
   expect(history.inFlight.every((each) => each.ageMs >= 0)).toBe(true);
-  // every entry has its time, and the kinds are the ones the capture says it keeps
   expect(history.request.every((each) => typeof each.at === 'number' && each.method === 'GET')).toBe(true);
   expect(Object.keys(history).sort()).toEqual(['console', 'inFlight', 'note', 'pageerror', 'request', 'requestfailed', 'requestfinished']);
 });
@@ -271,16 +268,12 @@ test('the history takes its listeners off when its page closes (#575)', async ({
   const other = await browser.newPage();
   const before = listeners(other);
   keepHistory(other);
-  // six of them: one for each of the five events kept, and the close that takes them off
   expect(listeners(other)).toBe(before + 6);
-  // Playwright clears a closed page's listeners itself, and a count after it says nothing, so the
-  // page's off is recorded instead: the close is emitted here, which runs the history's own listener
-  // (the page is closed normally after the check)
+  // Playwright clears a closed page's listeners itself, so the page's off calls are recorded instead
   const removed = [];
   const off = other.off.bind(other);
   other.off = (event, listener) => { removed.push(event); return off(event, listener); };
   other.emit('close');
-  // each event is recorded more than once (Node's off calls the page's off again), so the distinct events are compared
   expect([...new Set(removed)].sort()).toEqual(['console', 'pageerror', 'request', 'requestfailed', 'requestfinished']);
   await other.close();
 });
@@ -308,7 +301,6 @@ test('a renderer that is frozen (no CPU, no answer) has its native stacks captur
   expect(capture.answers.task.answered).toBe(false);
   expect(Math.max(...capture.rendererCpu.map((process) => process.cpuSeconds))).toBeLessThan(FROZEN_CPU_SECONDS);
   expectNativeStacks(capture, pids);
-  // the kernel's record is in the capture too: every renderer's cgroup (or the reason), and the kernel's log
   expect(capture.kernel.error).toBeUndefined();
   expect(capture.kernel.cgroups.map((each) => each.pid)).toEqual(expect.arrayContaining(pids));
   expect(capture.kernel.kernelLog).toBeTruthy();
@@ -356,8 +348,7 @@ test('without gdb the capture of a frozen renderer says so and carries on', asyn
       expect(renderer.fallbackStacks.tried.map((each) => each.tool)).toEqual(expect.arrayContaining(['eu-stack']));
       expect(renderer.userSpaceStacks).toMatch(/^(eu-stack|pstack|not available: .+)$/);
       for (const each of renderer.fallbackStacks.tried) if (!each.ok) expect(each.note).toMatch(/^not available: /);
-      // the real eu-stack (measured: all 9 threads of a SIGSTOPped renderer in 2.5 s) gives one stack per kernel
-      // thread, or fewer when it could not unwind one (its exit status is 1 then): never more, and the main thread always
+      // one stack per kernel thread at most
       if (renderer.userSpaceStacks === 'eu-stack') {
         const text = renderer.fallbackStacks.tried.find((each) => each.ok).text;
         const blocks = text.match(/^TID \d+:/mg) || [];
@@ -424,10 +415,6 @@ test('without gdb the stacks come from eu-stack, else pstack, else the capture s
 /** Whether this machine has the tool: the tests of the real ones skip, saying so, where it does not. */
 const installed = (tool) => whichExecutable(tool) !== null;
 
-// What the real tools print was read from the real tools (#575): eu-stack gives "#0  0x... function - module"
-// for every thread, and exits 1 when it could not unwind one of them (V8's code is in memory no file maps)
-// after printing the others; pstack (Ubuntu's package) gives the main thread only, in "0x7fed83cecbdf: ????"
-// lines, no "#0", and cannot unwind a Chromium renderer at all ("ptrace: Input/output error").
 test('a stack tool that prints frames and exits 1, or prints pstack\'s lines, has given its stacks', async ({}, testInfo) => {
   desktopOnly(testInfo);
   const hung = spawn('sleep', ['300'], { stdio: 'ignore' });
@@ -442,7 +429,6 @@ test('a stack tool that prints frames and exits 1, or prints pstack\'s lines, ha
     const PSTACK = 'echo ""; echo "$1: sleep 300"; echo "(No symbols found)"; echo "0x7effb28ecb7a: ????"; echo "0x7effb28f9b27: ???? (c000, 100000010600000) + 60"';
     const lines = await withTools({ 'eu-stack': 'exit 3', pstack: PSTACK }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
     expect(lines.renderers[0].userSpaceStacks, 'pstack\'s own frame lines are stacks').toBe('pstack');
-    // a tool that prints no frame at all still gives none
     const none = await withTools({ 'eu-stack': 'exit 3', pstack: 'echo "(No symbols found)"; echo "ptrace: Input/output error can\'t read target." >&2; exit 1' }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
     expect(none.renderers[0].userSpaceStacks).toMatch(/^not available: gdb .*pstack gave no stacks: ptrace: Input\/output error/);
   } finally {
@@ -463,7 +449,6 @@ test('the real eu-stack and pstack give the stacks of a hung process when gdb do
     if (real.renderers[0].userSpaceStacks.startsWith('not available') && CANNOT_ATTACH.test(real.renderers[0].fallbackStacks.tried.map((each) => each.stderr).join('\n'))) unavailable('the kernel does not let this user attach');
     expect(real.renderers[0].userSpaceStacks).toBe('eu-stack');
     expect(real.renderers[0].fallbackStacks.tried[0].text).toMatch(/^#0\s+0x[0-9a-f]+ \S*nanosleep/m);
-    // eu-stack failing hands over to the real pstack, whose frames carry no "#"
     const handed = await withTools({ 'eu-stack': 'exit 3' }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
     expect(handed.renderers[0].userSpaceStacks).toBe('pstack');
     expect(handed.renderers[0].fallbackStacks.tried[1].text).toMatch(/^0x[0-9a-f]+: /m);
@@ -498,7 +483,6 @@ test('the browser and GPU processes are asked for their stacks by the fallback t
     expect(entry(gpu.pid).fallbackStacks.tried[0].text).toContain('nanosleep');
     expect(entry(utility.pid).userSpaceStacks, 'a utility process is not asked').toBeUndefined();
     expect(entry(utility.pid).fallbackStacks).toBeUndefined();
-    // the tools give none: the process says why, with each tool's note, and nothing throws
     const none = await withTools({ 'eu-stack': 'exit 3', pstack: 'echo nothing to show' }, () => nativeStacks([], nativeScope(), null, others.slice(0, 1)));
     expect(none.error).toBeUndefined();
     expect(none.browserProcesses[0].userSpaceStacks).toMatch(/^not available: eu-stack gave no stacks.*; not available: pstack gave no stacks/);
@@ -540,7 +524,6 @@ test('a renderer\'s cgroup files and the kernel\'s log lines are read, and say w
   const root = mkdtempSync(join(tmpdir(), 'stall-cgroup-'));
   const kept = process.env.PATH;
   try {
-    // a stand-in /proc and cgroup tree: a process whose cgroup is named, and the files of that cgroup, all but one
     const procRoot = join(root, 'proc');
     const cgroupRoot = join(root, 'cgroup');
     const directory = join(cgroupRoot, 'user.slice', 'renderer.scope');
@@ -558,16 +541,13 @@ test('a renderer\'s cgroup files and the kernel\'s log lines are read, and say w
     expect(found.files['cgroup.freeze']).toBe('1');
     expect(found.files['memory.max']).toMatch(/^unavailable: ENOENT/);
     expect(found.files['cpu.stat'].length, 'a file is read to READ_MOST bytes at most').toBeLessThanOrEqual(READ_MOST);
-    // a process with only a cgroup v1 line, and a process that is gone: each says why
     mkdirSync(join(procRoot, '4243'), { recursive: true });
     writeFileSync(join(procRoot, '4243', 'cgroup'), '1:cpu:/\n');
     expect(cgroupEvidence(4243, { proc: procRoot, cgroup: cgroupRoot }).unavailable).toMatch(/^unavailable: no cgroup v2 line/);
     expect(cgroupEvidence(4244, { proc: procRoot, cgroup: cgroupRoot }).unavailable).toMatch(/^unavailable: \/proc\/4244\/cgroup: ENOENT/);
-    // this process's own cgroup, on this machine: read, or said why not
     const real = cgroupEvidence(process.pid);
     expect(real.unavailable || typeof real.path, 'the real cgroup is read or its reason is said').toBeTruthy();
     if (!real.unavailable) for (const value of Object.values(real.files)) expect(typeof value).toBe('string');
-    // the kernel's log: the matching lines, the last KERNEL_LOG_LINES of them, through a stand-in dmesg
     const logFile = join(root, 'dmesg.txt');
     writeFileSync(logFile, [
       ...Array.from({ length: 230 }, (_, index) => `[${index}.0] Out of memory: Killed process ${index} (renderer)`),
@@ -581,7 +561,6 @@ test('a renderer\'s cgroup files and the kernel\'s log lines are read, and say w
     expect(log.lines.length).toBe(KERNEL_LOG_LINES);
     expect(log.lines[0]).toContain('Killed process 31 ');
     expect(log.lines.at(-1)).toContain('blocked for more than 120 seconds');
-    // the real log, read as this user can read it (as root, or through sudo): its lines or the reason
     const realLog = await kernelLog(nativeScope());
     expect(realLog.unavailable || Array.isArray(realLog.lines), 'the real kernel log is read or its reason is said').toBeTruthy();
   } finally {
@@ -821,6 +800,21 @@ test('teardown does not wait for a native capture to end: stop() returns within 
   });
 });
 
+test('the kernel evidence is saved before the native step, which a teardown can cut off (#575)', async ({ page, browser }, testInfo) => {
+  desktopOnly(testInfo);
+  test.setTimeout(testInfo.timeout + CAPTURE_MOST_MS + NATIVE_MOST_MS);
+  await page.setContent('<!doctype html><title>Frozen</title><p>Frozen</p>');
+  const armed = await arm(page);
+  const pids = await rendererPids(browser);
+  const saved = [];
+  const result = await frozen(pids, () => capture(page, armed, 'a capture asked for', browser, (partial) => saved.push({ kernel: partial.kernel, native: partial.native })));
+  await armed.session.detach().catch(() => {});
+  expect(result.native, 'the renderer was frozen, so the native step ran').toBeDefined();
+  expect(saved[0].native, 'the first save is before the native step').toBeUndefined();
+  expect(saved[0].kernel.cgroups.length).toBeGreaterThan(0);
+  expect(saved[saved.length - 1].native).toBeDefined();
+});
+
 test('a page that answers is not captured', async ({ page, stallWatch }) => {
   await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
   // longer than a probe's limit, so a page that answers has been probed
@@ -843,7 +837,10 @@ test('QUIRE_NO_STALL_ARM skips arming and nothing else sets it', async ({ page }
       await stillArmed.session.detach();
     }
     process.env.QUIRE_NO_STALL_ARM = '1';
+    const listening = ['console', 'pageerror', 'request', 'requestfinished', 'requestfailed'].map((event) => page.listenerCount(event));
     const notArmed = await arm(page);
+    expect(['console', 'pageerror', 'request', 'requestfinished', 'requestfailed'].map((event) => page.listenerCount(event)), 'no listener when arming is off').toEqual(listening);
+    expect(notArmed.history).toBeNull();
     expect(notArmed.session, 'no DevTools session, so no debugger').toBeNull();
     expect(notArmed.error).toContain('QUIRE_NO_STALL_ARM=1');
   } finally {
@@ -851,26 +848,10 @@ test('QUIRE_NO_STALL_ARM skips arming and nothing else sets it', async ({ page }
   }
 });
 
-// The timeout this test starts with, short so the capture begins soon
 const NEAR_TIMEOUT_MS = 30000;
 
 test('every page of a test about to time out is captured', async ({ page, stallWatch }, testInfo) => {
-  // The capture begins TIMEOUT_MARGIN_MS before the timeout (a third of
-  // a shorter one), at the watch's next scan: here at 30 s - min(15 s,
-  // 30 s / 3) = 20 s, by 20 s + SCAN_EVERY_MS = 21 s on an idle runner.
-  // It can then take up to CAPTURE_MOST_MS (the longest a capture of an
-  // answering page takes, summed from its waits in stall-capture.js),
-  // more than the time left, as it can in any test (whose capture is
-  // evidence for a test failing anyway). So the test waits for the capture
-  // to begin (for as long as its timeout, which bounds that wait anyway),
-  // then puts its timeout off by twice CAPTURE_MOST_MS, as headroom for a
-  // loaded runner, and waits for the capture itself for at most that long.
-  // This test covers the capture of an answering page only: CAPTURE_MOST_MS,
-  // with no native step. A frozen page's capture can take up to
-  // NATIVE_MOST_MS, which is longer (its fallback tools for the browser and
-  // GPU processes add to it); the frozen-page tests give that path
-  // NATIVE_MOST_MS once, as headroom on their own timeout, and this test
-  // does not cover that path.
+  // the answering page's capture (CAPTURE_MOST_MS) must end within twice that, once it has begun
   test.setTimeout(NEAR_TIMEOUT_MS);
   await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
   await stallWatch.started(page, NEAR_TIMEOUT_MS);

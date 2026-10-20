@@ -1,14 +1,4 @@
-/**
- * What a page did just before it stopped answering (#575): its recent console
- * messages, uncaught errors and network requests, each with its time, kept in
- * node. A frozen page's script cannot record anything, but Playwright's events
- * still arrive here, so the capture can say which requests were in flight when
- * the page froze (a request begun and not yet finished or failed).
- *
- * Cheap by design: no body is read, no request is awaited, and each text is cut.
- * Each kind keeps its last HISTORY_EACH entries (a ring), and the requests in
- * flight are at most IN_FLIGHT_MOST (the oldest is dropped past that).
- */
+/** A page's recent console, errors and requests, kept in node: a frozen page's script cannot record them. */
 
 /** The last this many entries of each kind (console, pageerror, request, requestfinished, requestfailed). */
 export const HISTORY_EACH = 100;
@@ -25,22 +15,14 @@ function ring(most) {
       entries.push(entry);
       if (entries.length > most) entries.shift();
     },
-    list() { return entries.slice(); },
+    list() { return entries.map((entry) => ({ ...entry })); },
   };
 }
 
-// A kept text is a copy of at most TEXT_MOST characters, not a slice. In V8 a slice of 13 characters or
-// more is a sliced string that still refers to the whole parent, so a kept slice keeps its message alive.
-// Measured on node 22.22 (--expose-gc): 100 slices of 10 MB messages, the messages dropped, held 1000 MB;
-// 100 copies made by JSON.parse(JSON.stringify(...)) held 0 MB. JSON keeps lone surrogates as they were.
+// a copy, not a slice: V8 keeps a slice's whole parent alive
 const cut = (text) => JSON.parse(JSON.stringify(String(text === undefined || text === null ? '' : text).slice(0, TEXT_MOST)));
 
-/**
- * Listens to the page's events for the rest of its life and returns
- * `{ snapshot() }`, which says what was kept so far (a copy, safe to write).
- * It never throws into Playwright's event dispatch: a listener that fails is
- * silent, since the history is evidence and must not fail a test.
- */
+/** Listens for the rest of the page's life; `snapshot()` says what was kept. A failing listener is silent. */
 export function keepHistory(page) {
   const kept = {
     console: ring(HISTORY_EACH),
@@ -49,9 +31,7 @@ export function keepHistory(page) {
     requestfinished: ring(HISTORY_EACH),
     requestfailed: ring(HISTORY_EACH),
   };
-  // request object -> its entry in `request`, until it finishes or fails
   const inFlight = new Map();
-  // each listener as it was attached, so the page's close can take it off again
   const attached = [];
   const listen = (event, listener) => {
     try {
@@ -77,7 +57,6 @@ export function keepHistory(page) {
     inFlight.delete(request);
     const entry = { at: Date.now(), method: request.method(), url: cut(request.url()), ms: began ? Date.now() - began.at : null, status: null };
     kept.requestfinished.push(entry);
-    // the status is a value the response holds: nothing is awaited for it, and a status that is not known when the entry is read stays null
     request.response().then((response) => { if (response) entry.status = response.status(); }).catch(() => {});
   });
   listen('requestfailed', (request) => {
@@ -86,7 +65,6 @@ export function keepHistory(page) {
     const failure = request.failure();
     kept.requestfailed.push({ at: Date.now(), method: request.method(), url: cut(request.url()), ms: began ? Date.now() - began.at : null, failure: cut(failure && failure.errorText) });
   });
-  // The page's close takes the listeners off (the rings and the snapshot stay readable).
   try {
     page.once('close', () => {
       for (const [event, wrapped] of attached) page.off(event, wrapped);
