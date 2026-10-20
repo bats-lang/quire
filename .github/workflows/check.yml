@@ -109,7 +109,7 @@ jobs:
           echo "play_signing_sha1=$sha1" >> "$GITHUB_OUTPUT"
 
       - name: Set up bats
-        uses: bats-lang/bats/.github/actions/setup@2ea56e16919a87077b793f2b08201de4fbc509bd # the setup action (bats#280)
+        uses: bats-lang/bats/.github/actions/setup@3f8a5ea3b0e50cc2c565147d3c376c050ee93eb7 # the setup action (bats#280)
 
       # A pull request and the merge queue's group start from the newest
       # build of the same toolchain (main's, or the pull request's own earlier
@@ -263,7 +263,7 @@ jobs:
 
       - name: Set up bats
         if: env.GROUP_BATS == 'yes'
-        uses: bats-lang/bats/.github/actions/setup@2ea56e16919a87077b793f2b08201de4fbc509bd # the setup action (bats#280)
+        uses: bats-lang/bats/.github/actions/setup@3f8a5ea3b0e50cc2c565147d3c376c050ee93eb7 # the setup action (bats#280)
 
       # What bats keeps of the static run, in the directory run.sh works in
       # (QUIRE_STATIC_WORK): the app's build/, which every group shares, and
@@ -506,7 +506,7 @@ jobs:
       # not a pass, and a job missing from needs fails (repository-prototype's
       # check-aggregate, #328, called by commit)
       - name: Every group passed
-        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@fdae440e85022bcc6dc1faae85cbd04992e73f29 # check-aggregate at repository-prototype main (#345, #347)
+        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@3873e585a3a47c3326a53f6c81e0af47032708e8 # check-aggregate at repository-prototype main (#345, #347)
         with:
           jobs: plan build static e2e
           results: ${{ toJSON(needs) }}
@@ -525,7 +525,7 @@ jobs:
   android:
     needs: build
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@ea8a14aaaffbca00c6a740cc481e51f7d594e07d # pwa main after #124 (no release tag)
+    uses: bats-lang/pwa/.github/workflows/android.yml@6abfac186c4d4bf23cc56779e4f4c3df19d48797 # pwa main after #124 (no release tag)
     secrets: inherit
     with:
       artifact: quire-android
