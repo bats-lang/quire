@@ -162,7 +162,9 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
   `pstack`) or `not available: <why for each tool>` (`fallbackStacks.tried` has each tool's text,
   exit code and note). The kernel's view of the other browser processes (the browser's, the GPU's)
   is `native.browserProcesses`: their threads, wait channels and syscalls, and, with a frozen renderer,
-  their user-space stacks by the fallback tools (below). gdb is never attached to them.
+  their user-space stacks by the fallback tools (below). gdb is never attached to them. eu-stack and
+  pstack are: each attaches to the process with ptrace and stops its threads while it reads their stacks,
+  at most `FALLBACK_MS` each; this runs only when a renderer is frozen, the one case native stacks are taken.
   `ptraceScope`, `root`, the maps, the build id and the kernel stack of every thread are always
   recorded. Pure fallback: a step that fails is a note in the capture, never a red test.
 * **The browser's and the GPU's user-space stacks** (`native.browserProcesses[].userSpaceStacks`)

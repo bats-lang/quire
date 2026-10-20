@@ -34,12 +34,17 @@
  *   - when gdb gives no stacks (not installed, or the kernel will not let it
  *     attach) the user-space stacks are asked of `eu-stack` and then `pstack`,
  *     and what none could give is said as `not available: <why>`
- *     (`userSpaceStacks`, `fallbackStacks`), never a failure of the test;
+ *     (`userSpaceStacks`, `fallbackStacks`), never a failure of the test.
+ *     eu-stack and pstack attach to the process with ptrace and stop its
+ *     threads while they read its stacks, each tool for at most FALLBACK_MS.
+ *     They run only when a renderer is frozen, as gdb does;
  *   - the kernel's view of the other browser processes too (the browser
  *     process, the GPU process: `native.browserProcesses`), which a frozen
  *     renderer may wait on; when a renderer is frozen their user-space
  *     stacks are asked of the fallback tools only (eu-stack, then pstack:
- *     `userSpaceStacks` on each entry, never gdb), after the renderers';
+ *     `userSpaceStacks` on each entry, never gdb), after the renderers'; those
+ *     tools attach to these processes with ptrace and stop their threads while
+ *     they read them, each tool for at most FALLBACK_MS;
  *     they are not stopped for longer than those tools take;
  *   - the kernel's record (`kernel`): each renderer's cgroup (v2, from
  *     /proc/<pid>/cgroup: memory.events, memory.current, memory.max, cpu.stat,
