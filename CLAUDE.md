@@ -52,14 +52,27 @@ may stay short within a few lines.
 * **p2:** quire's user-visible features, and the developer experience of other
   bats app developers. Shell tools count under this rule, since changing them
   means scripting shell instead of implementing bats.
-* **p3:** everything else; not held for. A session may file p3 issues but does
-  not work on them.
+* **p3:** everything else; a session may file p3 issues but does not work on
+  them.
 
 Order: p0 first, then p1, then p2, and within a priority the oldest
-opened ticket first, so none starves. A PR already started finishes
-before a new one is started. Downgrading a ticket to p3 on judgement
-(minor impact, high cost) needs the owner's approval; the tickets that
-are p3 today are approved.
+opened ticket first, so none starves. All open p0s, in flight or not, come
+before any p1: a p1 is not started while a p0 is open, whether or not a
+worker has the p0 in hand. Within one priority, a PR already started finishes
+before a new one is started, so a started p1 PR finishes, and no new p1 starts
+while a p0 is open.
+
+No downgrades without the owner's word. Downgrading a ticket to p3 on
+judgement (minor impact, high cost), or to any other priority, needs the
+owner's approval; the tickets that are p3 today are approved. An issue's
+priority is the owner's call: a worker that thinks it is wrong says so on the
+issue, and does not change the label.
+
+The Android release is not a priority. Priority is the order in which tickets
+are worked, and p2 means user-visible features and developer experience, not
+"held for the release". If the owner holds the Android release for an issue,
+that hold is a rule on top of the order: it is recorded on the issue, and it
+does not move the issue to another priority.
 
 
 ## Pipeline and tooling improvements belong in bats or pwa
