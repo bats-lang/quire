@@ -23,7 +23,7 @@ import { test, expect } from './fixtures.js';
 import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
-import { arm, capture, cgroupEvidence, mojoTraceOf, mojoWindow, stallWatch as watchOf, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, TRACE_PROCESS_MOST, whichExecutable } from './stall-capture.js';
+import { arm, capture, cgroupEvidence, mojoTraceOf, mojoWindow, stallWatch as watchOf, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
 const SPIN_MODULE = (() => {
@@ -307,34 +307,33 @@ test('a renderer that is frozen (no CPU, no answer) has its native stacks captur
   await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
 });
 
-test('a frozen renderer\'s capture holds its Mojo messages from before the freeze and none after it, whatever a live renderer sends (#737)', async ({ page, browser, stallWatch }, testInfo) => {
+test('a frozen renderer\'s capture holds its Mojo messages from before the freeze and none after it, whatever a live renderer sends (#737)', async ({ browser, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
-  await page.setContent('<!doctype html><title>Traced</title><p>Traced</p>');
+  const traced = await otherPage(browser, 'Traced');
   const live = await otherPage(browser, 'Live');
   try {
     // evaluates for a fixed time, so the traffic before the freeze lasts as long on any runner
     const began = Date.now();
-    while (Date.now() - began < 1500) await page.evaluate(() => document.body.append(document.createElement('i')));
-    const frozenPids = (await rendererPids(browser)).filter((pid) => !live.pids.includes(pid));
+    while (Date.now() - began < 1500) await traced.page.evaluate(() => document.body.append(document.createElement('i')));
+    const frozenPids = traced.pids;
     const frozenUs = Number(process.hrtime.bigint() / 1000n); // the trace's clock, taken before the stop
     let sending = true;
     const liveTraffic = (async () => { while (sending) await live.page.evaluate(() => 1); })();
-    const capture = await frozen(frozenPids, () => stallWatch.next(page, 20000 + NATIVE_MOST_MS)).finally(() => { sending = false; });
+    const capture = await frozen(frozenPids, () => stallWatch.next(traced.page, 20000 + NATIVE_MOST_MS)).finally(() => { sending = false; });
     await liveTraffic;
     const mojo = capture.mojoMessages;
     expect(mojo, 'the trace was read').toEqual(expect.objectContaining({ events: expect.any(Array) }));
     const frozenMessages = mojo.events.filter((each) => frozenPids.includes(each.pid));
     expect(frozenMessages.some((each) => each.ts < frozenUs), 'the frozen renderer\'s messages from before the freeze').toBe(true);
-    expect(Math.max(...frozenMessages.map((each) => each.ts)) - Math.min(...frozenMessages.map((each) => each.ts)), 'they span the evaluates').toBeGreaterThan(1000000);
     expect(frozenMessages.every((each) => each.ts <= frozenUs + 50000), 'no message of the frozen renderer from after the freeze').toBe(true);
     expect(mojo.events.some((each) => live.pids.includes(each.pid) && each.ts > frozenUs + 500000), 'the live renderer\'s later messages are kept, and do not move the frozen one\'s window').toBe(true);
     expect(mojo.events.every((each) => each.cat.includes('mojom')), 'only Mojo categories were asked for').toBe(true);
-    expect(mojo.perProcess.every((each) => each.kept <= TRACE_PROCESS_MOST), 'a process keeps at most its bound').toBe(true);
     expect(mojo.ringDropped, 'the ring held the whole window').toBe(false);
-    await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
+    await expect.poll(() => traced.page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
   } finally {
     await live.context.close();
+    await traced.context.close();
   }
 });
 

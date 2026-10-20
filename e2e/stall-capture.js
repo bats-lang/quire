@@ -127,9 +127,10 @@ export const TEARDOWN_MOST_MS = TEARDOWN_MS + HELPER_MS + 1500 + MOJO_END_MOST_M
  * Profiler.enable and Profiler.start (2); the profile (PROFILE_MS);
  * Profiler.stop (1); the kernel's log (dmesg, HELPER_MS). The renderers' CPU
  * time (a session, two reads and 1 s between them) is taken alongside, and is
- * shorter. The Mojo trace ends alongside and is awaited last, at most TRACE_END_MS.
+ * shorter.
  * 10 x 2 s + 3 s + 2 s + 5 s + 8 s = 38 s.
  */
+// Its Mojo trace ends alongside the steps and is awaited last (up to MOJO_END_MOST_MS; its TRACE_END_MS is the 8 s above).
 export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS + HELPER_MS + TRACE_END_MS;
 
 /**
@@ -208,11 +209,7 @@ export function mojoTraceOf(browser) {
   return mojoTraces.get(browser);
 }
 
-/**
- * The window of each process: a renderer's 10 s before its own last message (a frozen one stops
- * where it froze, whatever the other renderers do), and the messages of the others (the browser's)
- * from the earliest of those starts to the capture; at most `most` newest events of each process.
- */
+/** Each renderer's 10 s before its own last message, the other processes' from the earliest of those to the capture; at most `most` newest of each. */
 export function mojoWindow(received, startedUs, capturedUs, windowUs = TRACE_WINDOW_US, most = TRACE_PROCESS_MOST) {
   const processes = {};
   for (const each of received) if (each.processName !== undefined) processes[each.pid] = each.processName;
