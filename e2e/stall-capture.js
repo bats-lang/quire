@@ -186,7 +186,10 @@ const keepTraceEvent = (event) => ({
   ...(event.ph !== 'M' && event.args ? { args: JSON.stringify(event.args).slice(0, TRACE_ARGS_CHARS) } : {}),
 });
 
-/** Starts the browser's Mojo trace for a test's watch; none with QUIRE_NO_STALL_ARM. */
+/** Opt-in (QUIRE_MOJO_TRACE=1, #737): a test's watch traces its browser unless it is @serial. */
+export const traceWantedFor = (testInfo) => process.env.QUIRE_MOJO_TRACE === '1' && !testInfo.tags.includes('@serial');
+
+/** Starts the browser's Mojo trace; none with QUIRE_NO_STALL_ARM. */
 export function startMojoTrace(browser) {
   if (armingOff() || mojoTraces.has(browser)) return;
   const trace = { session: null, received: [], ready: null, error: null, taken: null, startedUs: null };
@@ -270,7 +273,7 @@ async function endMojoTrace(trace, capturedUs) {
 /** The browser's Mojo window for a capture: the first capture of a test ends the trace, and later ones read the same window. */
 function takeMojoTrace(browser, capturedUs) {
   const trace = browser && mojoTraces.get(browser);
-  if (!trace) return Promise.resolve(armingOff() ? `not available: not armed: ${NO_ARM}=${process.env[NO_ARM]} starts no Mojo trace` : 'not available: no Mojo trace was started on this browser (a @serial test, which asserts timings, is not traced)');
+  if (!trace) return Promise.resolve(armingOff() ? `not available: not armed: ${NO_ARM}=${process.env[NO_ARM]} starts no Mojo trace` : 'not available: no Mojo trace was started on this browser (QUIRE_MOJO_TRACE is not 1, or a @serial test, which asserts timings, is not traced)');
   if (!trace.taken) trace.taken = endMojoTrace(trace, capturedUs);
   return trace.taken;
 }
@@ -1289,7 +1292,7 @@ export function stallWatch(browser, testInfo) {
   let stopped = false;
   let count = 0;
   const leaveSampler = sampleRunner(testInfo.title); // the runner's load, from now on (#600), kept across the worker's tests (#715)
-  if (!testInfo.tags.includes('@serial')) startMojoTrace(browser); // a timed test is not traced: the trace costs it 8% (#737)
+  if (traceWantedFor(testInfo)) startMojoTrace(browser); // opt-in: QUIRE_MOJO_TRACE=1 and not @serial (#737)
 
   const watchPage = (page) => {
     if (stopped || armed.has(page) || page.isClosed()) return;

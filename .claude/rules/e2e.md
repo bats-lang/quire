@@ -187,7 +187,8 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
   copy, not a slice (V8 keeps a slice's whole parent alive: 100 slices of 10 MB messages held 1000 MB on node
   22.22, 100 copies held 0).
 * **Mojo messages** (`mojoMessages`, #737): the browser's Chromium trace of `disabled-by-default-mojom`, started by
-  each test's watch (`startMojoTrace`) on the browser (a tracing session is one per browser) and ended by the
+  a test's watch with `QUIRE_MOJO_TRACE=1` (`startMojoTrace` on the browser; a tracing session is one per browser), or
+  by a test that reads it (the freeze test), and ended by the
   test's first capture (`takeMojoTrace`, bounded by `TRACE_END_MS`: a stopped renderer's flush takes about 5 s) or,
   with no capture, by the watch's stop (`MOJO_END_MOST_MS`, part of `TEARDOWN_MOST_MS`). Chromium gives its events
   only at the end, from a ring of 16 MB in the browser, so no window can be streamed. The window (`mojoWindow`) is
@@ -197,9 +198,11 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
   events of a process are kept; the 10 s is the most, and `perProcess[].retainedMs` says the time really kept
   (a busy renderer sends several thousand events a second, so its 10,000 events can be 2 s). Only the Mojo
   category is asked for (`excludedCategories: ['*']`: with Chromium's defaults too, 60 MB came in 2 s). The trace
-  clock is the monotonic one (as `process.hrtime`, checked on Linux). A `@serial` test (it asserts timings) is not traced: the trace made the page-turn and pathological specs 8% slower
-  (summed test time of 4 runs, 261.8 s against 243.1 s). Flushing it at a test's end took 30 ms idle, 0.2 s after 2 s of
-  dense IPC and 0.6 to 1.3 s after 10 to 30 s of it. Off with `QUIRE_NO_STALL_ARM`. Chromium's documentation names no Mojo category; `disabled-by-default-mojom` is the one
+  clock is the monotonic one (as `process.hrtime`, checked on Linux). **Opt-in, off by default:** `QUIRE_MOJO_TRACE=1` starts it (`traceWantedFor`; never for a `@serial` test). Why: on
+  `library.spec.js` (desktop, `--workers=2`, trace on against off, same machine, two rounds) the summed test time was
+  95.0 s against 80.9 s, about 17% (wall about 15%): a material slowdown of ordinary tests. `Tracing.start` takes 3 to
+  11 ms; the flush takes 14 to 29 ms idle and 0.2 s after 2 s of dense IPC. The hunt for #575 (quire#736) sets
+  `QUIRE_MOJO_TRACE=1`. Off with `QUIRE_NO_STALL_ARM`, which also turns off the arming (so that comparison bounds the trace's cost from above). Chromium's documentation names no Mojo category; `disabled-by-default-mojom` is the one
   headless shell 149 emits.
 * **The browser's own stderr is not captured.** Playwright 1.61's `logger` launch option receives
   only `api` messages, not the browser's process lines; a `Browser` has no `process()`; Chromium's

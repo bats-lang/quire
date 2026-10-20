@@ -23,7 +23,7 @@ import { test, expect } from './fixtures.js';
 import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
-import { arm, capture, cgroupEvidence, mojoTraceOf, mojoWindow, stallWatch as watchOf, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
+import { arm, capture, cgroupEvidence, mojoTraceOf, mojoWindow, startMojoTrace, stallWatch as watchOf, traceWantedFor, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
 const SPIN_MODULE = (() => {
@@ -310,6 +310,7 @@ test('a renderer that is frozen (no CPU, no answer) has its native stacks captur
 test('a frozen renderer\'s capture holds its Mojo messages from before the freeze and none after it, whatever a live renderer sends (#737)', async ({ browser, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
+  startMojoTrace(browser); // opt-in (QUIRE_MOJO_TRACE): this test reads the trace, so it starts it
   const traced = await otherPage(browser, 'Traced');
   const live = await otherPage(browser, 'Live');
   try {
@@ -392,8 +393,34 @@ test('with QUIRE_NO_STALL_ARM a real watch starts no Mojo trace and a capture sa
   }
 });
 
-test('a @serial test, which asserts timings, starts no Mojo trace (#737)', { tag: '@serial' }, async ({ browser }) => {
+test('a @serial test, which asserts timings, starts no Mojo trace even opted in (#737)', { tag: '@serial' }, async ({ browser }, testInfo) => {
+  const kept = process.env.QUIRE_MOJO_TRACE;
+  process.env.QUIRE_MOJO_TRACE = '1';
+  try { expect(traceWantedFor(testInfo), 'opted in, but a @serial test is not traced').toBe(false); } finally { if (kept === undefined) delete process.env.QUIRE_MOJO_TRACE; else process.env.QUIRE_MOJO_TRACE = kept; }
   expect(mojoTraceOf(browser)).toBeUndefined();
+});
+
+test('a real watch starts no Mojo trace unless QUIRE_MOJO_TRACE=1 (#737)', async ({ browser }, testInfo) => {
+  desktopOnly(testInfo);
+  const kept = process.env.QUIRE_MOJO_TRACE;
+  const keptArm = process.env.QUIRE_NO_STALL_ARM;
+  const own = await browser.browserType().launch({ args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'], env: { ...process.env, FC_FONTATIONS: '1' } });
+  try {
+    delete process.env.QUIRE_NO_STALL_ARM;
+    delete process.env.QUIRE_MOJO_TRACE;
+    const off = watchOf(own, testInfo);
+    expect(mojoTraceOf(own), 'no trace by default').toBeUndefined();
+    await off.stop();
+    process.env.QUIRE_MOJO_TRACE = '1';
+    const on = watchOf(own, testInfo);
+    expect(mojoTraceOf(own), 'QUIRE_MOJO_TRACE=1 starts it').toBeDefined();
+    await on.stop();
+    expect(mojoTraceOf(own), 'and its stop lets it go').toBeUndefined();
+  } finally {
+    if (kept === undefined) delete process.env.QUIRE_MOJO_TRACE; else process.env.QUIRE_MOJO_TRACE = kept;
+    if (keptArm === undefined) delete process.env.QUIRE_NO_STALL_ARM; else process.env.QUIRE_NO_STALL_ARM = keptArm;
+    await own.close();
+  }
 });
 
 /**
@@ -707,7 +734,7 @@ test('the core of a really hung renderer is bounded, kept compressed and opens i
   // its LWP), and it gives the stack the live gdb gave
   const raw = testInfo.outputPath('opened.core');
   const unpacked = spawnSync('sh', ['-c', 'gzip -dc "$1" > "$2"', 'sh', renderer.core.file, raw], { timeout: 300000 });
-  expect(unpacked.status).toBe(0);
+  expect(unpacked.status, String(unpacked.stderr)).toBe(0);
   const opened = spawnSync('gdb', ['-batch', '-nx', '-q', '-iex', 'set debuginfod enabled off', '-ex', 'thread 1', '-ex', 'info threads', '-ex', 'bt 3', renderer.exe, raw], { encoding: 'utf8', timeout: 300000 });
   unlinkSync(raw);
   expect(opened.stdout + opened.stderr).toContain('#0');
@@ -755,8 +782,9 @@ async function otherPage(browser, title) {
   const context = await browser.newContext();   // watched at once, like the test's
   const page = await context.newPage();
   await page.setContent(`<!doctype html><title>${title}</title><p>${title}</p>`);
-  const pids = (await rendererPids(browser)).filter((pid) => !before.includes(pid));
-  expect(pids.length, 'a renderer of its own').toBe(1);
+  const after = await rendererPids(browser);
+  const pids = after.filter((pid) => !before.includes(pid));
+  expect(pids.length, `a renderer of its own (${before.length} before, ${after.length} after)`).toBe(1);
   return { context, page, pids };
 }
 
