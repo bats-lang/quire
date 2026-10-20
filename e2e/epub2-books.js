@@ -1,7 +1,6 @@
 // Small EPUB 2 books (OPF 2.0, XHTML 1.1, an NCX, no nav document), made
-// by create-epub.js's `epub2`. Each is checked by epubcheck
-// (e2e/epubcheck.spec.js): `valid` ones must pass it; an invalid one is
-// invalid on purpose, and `errors` names the only messages it may give.
+// by create-epub.js's `epub2`. An invalid one is invalid on purpose, and `errors` names the only
+// messages it may give.
 
 const filler = 'lorem ipsum dolor sit amet '.repeat(10);
 const part = (i, extra = '') => ({ body: `<h1 id="part${i}">Part ${i}</h1>\n<p>Part ${i} text. ${extra}${filler}</p>` });

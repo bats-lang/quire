@@ -8,7 +8,7 @@
 // a note whose chapter or nodes the new file has not is kept in the list,
 // under "Not found in this version", with its text and its note; Add as
 // new book makes a book of its own. The books are those of
-// replace-books.js (all checked by epubcheck).
+// replace-books.js.
 
 import { test, expect } from './fixtures.js';
 import {

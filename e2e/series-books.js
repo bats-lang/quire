@@ -2,8 +2,7 @@
 // numbers of a series, a novella between two volumes (2.5), a prequel
 // numbered 0, a negative number, a comma as some locales write the
 // point, a number that is not one, a book of two series and a book of a
-// series with no number. Each is checked by epubcheck
-// (e2e/epubcheck.spec.js) and read by e2e/series.spec.js. A book's
+// series with no number. Each is read by e2e/series.spec.js. A book's
 // series is written the way EPUB 3 does (belongs-to-collection and the
 // group-position that refines it) or the way Calibre does
 // (calibre:series and calibre:series_index).

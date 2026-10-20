@@ -1,6 +1,5 @@
 // Wide and structured content (#413): a table wider or taller than the
-// page, preformatted text, verse. The books are in wide-books.js, checked
-// by epubcheck.spec.js.
+// page, preformatted text, verse. The books are in wide-books.js.
 //
 // Decided (issue 413), from what readers do: Readium CSS (Thorium) leaves a
 // wide table to overflow its column and lets the reader scroll in scrolled

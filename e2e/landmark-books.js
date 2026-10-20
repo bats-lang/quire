@@ -1,7 +1,6 @@
 // Small EPUBs whose landmarks (EPUB 3.3 5.4.1.2, or EPUB 2's <guide>) say
-// where reading starts. Each is checked by epubcheck (e2e/epubcheck.spec.js):
-// `valid` ones must pass it; an invalid one is invalid on purpose, and
-// `errors` names the only messages it may give.
+// where reading starts. An invalid one is invalid on purpose, and `errors` names the only
+// messages it may give.
 
 const section = (id, text) => ({ body: `<h1 id="${id}">${text}</h1>\n<p>${text} ` + 'lorem ipsum dolor sit amet '.repeat(8) + '</p>' });
 

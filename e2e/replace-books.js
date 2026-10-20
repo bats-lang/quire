@@ -1,7 +1,6 @@
 // The books the replace specs import (replace.spec.js and
 // replace-corrected.spec.js, quire#425), all one book to the reader: the
-// title "Replace Me" by "Replace Tests". Checked by epubcheck
-// (e2e/epubcheck.spec.js) as the other fixture books are.
+// title "Replace Me" by "Replace Tests".
 //
 // The first is the book as it was first got: three chapters of sixty
 // paragraphs, so the places in it are far apart, and a cover, so a

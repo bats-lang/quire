@@ -2,7 +2,7 @@
 // book has (#415): duplicate, out-of-order and odd labels, targets that
 // are missing, a very long list, breaks without a list and a list without
 // breaks. The numeric, in-order list is in navigation.spec.js. The books
-// are in pagelist-books.js, checked by epubcheck.spec.js.
+// are in pagelist-books.js.
 
 import { test, expect } from './fixtures.js';
 import { start, readBook, place, showChrome, control, dialog } from './helpers.js';

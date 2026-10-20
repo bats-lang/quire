@@ -1,6 +1,6 @@
 // True EPUB 2 packages (#416): OPF 2.0, XHTML 1.1, an NCX and no nav
-// document. The books are in epub2-books.js (create-epub.js's `epub2`),
-// checked by epubcheck.spec.js; `guide` references are played by
+// document. The books are in epub2-books.js (create-epub.js's `epub2`);
+// `guide` references are played by
 // landmarks.spec.js, and a 3.0 package with only an NCX (what `ncx: true`
 // makes) by navigation.spec.js.
 

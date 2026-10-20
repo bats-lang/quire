@@ -1,8 +1,7 @@
 // The books of e2e/w3c-epub-tests.spec.js: each a small EPUB made for one
 // statement of the W3C's EPUB 3 test suite (https://github.com/w3c/epub-tests,
 // quire#419), named by the suite's test it reproduces. A book is a valid
-// EPUB (checked by epubcheck.spec.js) or invalid only in the way the test
-// is about (`errors` names epubcheck's ids for it).
+// EPUB, or invalid only in the way the test is about (`errors` names epubcheck's ids for it).
 //
 // create-epub.js makes the books whose package is Quire's own usual one;
 // these need a package of their own (a manifest fallback, a package

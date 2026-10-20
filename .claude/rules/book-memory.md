@@ -72,7 +72,7 @@ by ranges; only a book got from a catalogue passes through, in a piece).
 
 ## Pathological structure (#423)
 
-`e2e/pathological.spec.js` (`e2e/pathological-books.js`, each checked by epubcheck) walks
+`e2e/pathological.spec.js` (`e2e/pathological-books.js`) walks
 KOReader's slow shapes: a table cell of many pages, a 5 MB single-file book, a thousand
 nested elements, ten thousand short paragraphs, a megabyte without a space. It measures a
 pathological chapter against a plain one of the same length in the same page, so a slower

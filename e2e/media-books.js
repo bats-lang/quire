@@ -1,7 +1,5 @@
-// EPUB 3 books with audio and video elements in a chapter (#424), checked
-// by epubcheck (e2e/epubcheck.spec.js). Only the mp3 is a real clip; the
-// others are a few bytes of the right type: epubcheck checks the type, not
-// the stream.
+// EPUB 3 books with audio and video elements in a chapter (#424). Only the
+// mp3 is a real clip; the others are a few bytes of the right type.
 
 import { readFileSync } from 'node:fs';
 

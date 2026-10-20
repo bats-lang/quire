@@ -1,5 +1,4 @@
-// The book the sync specs' devices hold (sync-idempotent.spec.js): checked
-// by epubcheck (e2e/epubcheck.spec.js) as the landmark books are.
+// The book the sync specs' devices hold (sync-idempotent.spec.js).
 
 import { chapters } from './helpers.js';
 

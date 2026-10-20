@@ -4,7 +4,7 @@
 // headings flatten. Quire drops the book's CSS and sets one size on the
 // page, so the elements' own relative sizes (the browser's default sheet
 // and the rules of the stylesheet) must scale with it. The books are in
-// heading-books.js, checked by epubcheck.spec.js.
+// heading-books.js.
 
 import { test, expect } from './fixtures.js';
 import { start, readBook, bookPage, openReadingSettings, readingSettings } from './helpers.js';

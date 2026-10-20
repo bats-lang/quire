@@ -1,6 +1,6 @@
 // Native MathML (#408): an equation of a chapter is drawn by the browser
 // (#514), and sits in the page as text does. The fixtures are in
-// math-books.js, one concern each, checked by epubcheck.
+// math-books.js, one concern each.
 //
 // Inline math stands on the text's baseline and, when tall, does not run
 // into the lines beside it; a display equation is a block of its own; one

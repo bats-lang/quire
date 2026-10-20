@@ -4,8 +4,7 @@
 // the book's text ends (the landmarks' back matter weighs nothing), and a
 // fixed-layout book counts its spine items as the page indicator does. The
 // footer's "% of book", the scrubber, the library card and Book info say
-// the same number. The books are in progress-books.js, checked by
-// epubcheck.spec.js.
+// the same number. The books are in progress-books.js.
 
 import { test, expect } from './fixtures.js';
 import {

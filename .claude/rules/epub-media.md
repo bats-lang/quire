@@ -133,7 +133,7 @@ copied by `_font_locate`). Which algorithm a font has comes from
   whose `CipherReference` is a font file (`.otf`, `.ttf`, `.ttc`, `.woff`, `.woff2`)
   whatever its algorithm. Anything else under an unknown algorithm is refused
   (`e2e/drm.spec.js`), and a namespace of ADEPT, LCP or Kobo anywhere in the file still is.
-* `e2e/fonts.spec.js` plays `e2e/font-books.js` (checked by epubcheck; the font
+* `e2e/fonts.spec.js` plays `e2e/font-books.js` (the font
   `e2e/marker-font.ttf` has one glyph no system has, U+E000, so the page's face is told by
   measuring it; `create-epub.js` has `obfuscatedFonts`, `identifier`, `manifestOnly` and
   `obfuscateFont`, written apart from the app's).
@@ -194,8 +194,7 @@ makes none and its children go to its parent; elements and texts take content-no
 as everywhere. A token's (`mi`, `mn`, `mo`, `ms`, `mtext`) text is its own; text elsewhere
 in a math element is not shown. Every reader on a browser engine leaves MathML to the
 engine; Chromium has MathML Core since 109. `e2e/math-native.spec.js`,
-`math-fallbacks.spec.js`, `math-layout.spec.js` (books in `e2e/math-books.js`, checked by
-epubcheck).
+`math-fallbacks.spec.js`, `math-layout.spec.js` (books in `e2e/math-books.js`).
 
 * **A display equation scrolls along its width only**: `math[display=block]` is
   `overflow: auto hidden` with .3em above and below, since Chromium counts a glyph's font
@@ -208,7 +207,7 @@ epubcheck).
 * **Unsupported and broken MathML degrades where it stands**: an element dom does not make
   (`maction`, `annotation-xml`, `mstack`, `mglyph`) makes none and its children go to its
   parent; a broken tree is drawn by the browser as it can (the broken book is not valid
-  MathML, so epubcheck refuses it by `RSC-005`, which its entry lists).
+  MathML, so the book is invalid by `RSC-005`, which its entry lists).
 
 ## Equations as pictures (#408)
 

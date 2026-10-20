@@ -1,6 +1,5 @@
 // EPUB 3 books of wide and structured content (#413): tables wider and
-// taller than the page, preformatted blocks and verse. Each is checked by
-// epubcheck (e2e/epubcheck.spec.js).
+// taller than the page, preformatted blocks and verse.
 
 const cell = (c, text = 'wide cell text') => `<td>Column ${c} ${text}</td>`;
 const headRow = n => `<tr>${Array.from({ length: n }, (_, c) => `<th scope="col">Head ${c}</th>`).join('')}</tr>`;

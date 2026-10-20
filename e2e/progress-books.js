@@ -1,7 +1,6 @@
 // Small EPUBs for how far through the book the reader is (#426): chapters
 // of equal and of very unequal length, back matter after the text, front
-// matter before it, and fixed pages. Each is checked by epubcheck
-// (e2e/epubcheck.spec.js) and read by e2e/progress.spec.js. A chapter's
+// matter before it, and fixed pages. Each is read by e2e/progress.spec.js. A chapter's
 // text is made of paragraphs of one size, so a chapter's bytes are a
 // number of paragraphs, and the weights the reader uses (the entries'
 // sizes in the archive; the specs store the chapters) are known.
