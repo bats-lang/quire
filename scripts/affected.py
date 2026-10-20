@@ -229,9 +229,11 @@ RULES = [
         '.github/workflows/sync-providers.yml', '.github/workflows/supersede.yml',
     ], NONE, NONE),
     # Tests of the build job (vitest on the wasm, the codec, the CSS reader, the
-    # version) and the home page, which the e2e groups serve beside the app
+    # layout cap's node check, the version) and the home page, which the e2e
+    # groups serve beside the app
     Rule('the build job\'s tests', [
-        'test/*.js', 'vitest.config.js', 'tests/codec/**', 'tests/css-size/**', 'tests/version/**',
+        'test/*.js', 'vitest.config.js', 'tests/codec/**', 'tests/css-size/**',
+        'tests/layout-cap/**', 'tests/version/**',
     ], NONE, NONE),
     Rule('test books', ['test/fixtures/**'], e2e_by_name, NONE),
     Rule('home page', ['homepage/**'], ALL, NONE),

@@ -198,6 +198,11 @@ jobs:
       - name: CSS size tests
         run: tests/css-size/run.sh $BATS_REPOSITORY
 
+      # The capped layout waits of the e2e helpers, in node with a fake page
+      # (tests/layout-cap/check.mjs, #600): node is set up above by e2e-setup
+      - name: Layout cap tests
+        run: node tests/layout-cap/check.mjs
+
       # Only after everything above passed: a cache holds no failed build
       - name: Save the compiler cache
         if: github.event_name == 'pull_request' || github.event_name == 'push'
