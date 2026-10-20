@@ -23,7 +23,7 @@ import { test, expect } from './fixtures.js';
 import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
-import { arm, capture, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
+import { arm, capture, cgroupEvidence, mojoTraceOf, startMojoTrace, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, TRACE_MOST, whichExecutable } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
 const SPIN_MODULE = (() => {
@@ -305,6 +305,46 @@ test('a renderer that is frozen (no CPU, no answer) has its native stacks captur
   expect(capture.kernel.cgroups.map((each) => each.pid)).toEqual(expect.arrayContaining(pids));
   expect(capture.kernel.kernelLog).toBeTruthy();
   await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
+});
+
+test('a frozen renderer\'s capture holds its Mojo messages from the 10 s before the freeze, and none after it (#737)', async ({ page, browser, stallWatch }, testInfo) => {
+  desktopOnly(testInfo);
+  test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
+  await page.setContent('<!doctype html><title>Traced</title><p>Traced</p>');
+  // about 300 evaluates take about 2 s, so the renderer's messages span that long before the freeze
+  for (let turn = 0; turn < 300; turn += 1) await page.evaluate(() => document.body.append(document.createElement('i')));
+  const pids = await rendererPids(browser);
+  const frozenUs = Number(process.hrtime.bigint() / 1000n); // the trace's clock, taken before the stop
+  const capture = await frozen(pids, () => stallWatch.next(page, 20000 + NATIVE_MOST_MS));
+  const mojo = capture.mojoMessages;
+  expect(mojo, 'the trace was read').toEqual(expect.objectContaining({ events: expect.any(Array) }));
+  const renderers = Object.keys(mojo.processes).filter((pid) => mojo.processes[pid] === 'Renderer').map(Number);
+  expect(renderers.some((pid) => pids.includes(pid)), 'the trace names the frozen renderer').toBe(true);
+  const rendererMessages = mojo.events.filter((each) => renderers.includes(each.pid));
+  const rendererTimes = rendererMessages.map((each) => each.ts);
+  expect(Math.max(...rendererTimes) - Math.min(...rendererTimes), 'the messages span the evaluates before the freeze').toBeGreaterThan(1000000);
+  expect(rendererMessages.some((each) => each.ts < frozenUs && each.ts >= frozenUs - 10000000), 'messages from the 10 s before the freeze').toBe(true);
+  expect(rendererMessages.every((each) => each.ts <= frozenUs + 50000), 'no renderer message from after the freeze').toBe(true);
+  expect(mojo.events.every((each) => each.cat.includes('mojom')), 'only Mojo categories were asked for').toBe(true);
+  expect(mojo.events.every((each) => each.ts >= mojo.rendererLastUs - 10000000), 'every kept message is in the window').toBe(true);
+  expect(mojo.events.length).toBeLessThanOrEqual(TRACE_MOST);
+  expect(mojo.silentMs).toBeGreaterThanOrEqual(0);
+  expect(mojo.ringDropped, 'the ring held the whole window').toBe(false);
+  await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
+});
+
+test('the Mojo trace is started by a watch unless QUIRE_NO_STALL_ARM is set (#737)', async ({ browser }) => {
+  const kept = process.env.QUIRE_NO_STALL_ARM;
+  try {
+    process.env.QUIRE_NO_STALL_ARM = '1';
+    const unwatched = {}; // nothing is asked of a browser while arming is off
+    startMojoTrace(unwatched);
+    expect(mojoTraceOf(unwatched), 'no trace while arming is off').toBeUndefined();
+    delete process.env.QUIRE_NO_STALL_ARM;
+    expect(mojoTraceOf(browser), 'this test\'s watch started its trace').toBeDefined();
+  } finally {
+    if (kept === undefined) delete process.env.QUIRE_NO_STALL_ARM; else process.env.QUIRE_NO_STALL_ARM = kept;
+  }
 });
 
 /**

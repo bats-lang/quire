@@ -40,7 +40,9 @@
  *     user-space stacks from the fallback tools when a renderer is frozen;
  *   - the kernel's record (`kernel`): each renderer's cgroup and the OOM and
  *     hung-task lines of dmesg, read before the native stacks;
- *   - what the page did before it stopped (`history`, e2e/page-history.js).
+ *   - what the page did before it stopped (`history`, e2e/page-history.js);
+ *   - the browser's Mojo messages of the 10 s before the renderer's last one
+ *     (`mojoMessages`, a Chromium trace of the test, #737).
  */
 
 import { execFile } from 'node:child_process';
@@ -101,6 +103,13 @@ const NATIVE_MOST = 6;                  // renderers whose stacks are taken, at 
 const CORE_MOST = 2;                    // and whose core is written too (a core is up to CORE_MAX_BYTES of disk until it is gzipped)
 const STACK_FRAMES = 40;
 const FALLBACK_MS = 10000;              // eu-stack, pstack: each, when gdb gave no stacks
+const TRACE_CATEGORIES = ['disabled-by-default-mojom'];
+const TRACE_BUFFER_KB = 16384;
+const TRACE_WINDOW_US = 10000000;
+export const TRACE_MOST = 20000;
+const TRACE_ARGS_CHARS = 160;
+const TRACE_TEXT_CHARS = 120;
+const TRACE_END_MS = 8000; // a frozen renderer's flush takes about 5 s (measured, #737)
 // stop() waits this long for captures still running (the native step can
 // outlast the test); what they found by then is already written (`save`)
 export const TEARDOWN_MS = 10000;
@@ -116,9 +125,10 @@ export const TEARDOWN_MOST_MS = TEARDOWN_MS + HELPER_MS + 1500;
  * Profiler.enable and Profiler.start (2); the profile (PROFILE_MS);
  * Profiler.stop (1); the kernel's log (dmesg, HELPER_MS). The renderers' CPU
  * time (a session, two reads and 1 s between them) is taken alongside, and is
- * shorter. 10 x 2 s + 3 s + 2 s + 5 s = 30 s.
+ * shorter. The Mojo trace ends alongside and is awaited last, at most TRACE_END_MS.
+ * 10 x 2 s + 3 s + 2 s + 5 s + 8 s = 38 s.
  */
-export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS + HELPER_MS;
+export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS + HELPER_MS + TRACE_END_MS;
 
 /**
  * What the native stacks of a frozen page add, every wait run out: an
@@ -153,6 +163,108 @@ async function within(promise, ms) {
 // Nothing sets it: it is for a run someone chooses to make.
 const NO_ARM = 'QUIRE_NO_STALL_ARM';
 const armingOff = () => !['', '0'].includes(process.env[NO_ARM] || '');
+
+// One Mojo trace per browser and test (#737): Chromium gives its events only at the end, so it is ended once.
+const mojoTraces = new WeakMap(); // browser -> { session, received, ready, error, taken }
+
+// the trace's clock: CLOCK_MONOTONIC in microseconds on Linux, as process.hrtime
+const traceNow = () => Number(process.hrtime.bigint() / 1000n);
+
+/** One event as a capture keeps it, its args and names cut. */
+const keepTraceEvent = (event) => ({
+  ts: event.ts,
+  ph: event.ph,
+  pid: event.pid,
+  tid: event.tid,
+  cat: event.cat,
+  name: String(event.name).slice(0, TRACE_TEXT_CHARS),
+  ...(event.dur === undefined ? {} : { dur: event.dur }),
+  ...(event.ph === 'M' && event.name === 'process_name' ? { processName: String(event.args && event.args.name || '').slice(0, TRACE_TEXT_CHARS) } : {}),
+  ...(event.ph !== 'M' && event.args ? { args: JSON.stringify(event.args).slice(0, TRACE_ARGS_CHARS) } : {}),
+});
+
+/** Starts the browser's Mojo trace for a test's watch; none with QUIRE_NO_STALL_ARM. */
+export function startMojoTrace(browser) {
+  if (armingOff() || mojoTraces.has(browser)) return;
+  const trace = { session: null, received: [], ready: null, error: null, taken: null, startedUs: null };
+  mojoTraces.set(browser, trace);
+  trace.ready = (async () => {
+    trace.session = await browser.newBrowserCDPSession();
+    trace.session.on('Tracing.dataCollected', (event) => { for (const each of event.value) trace.received.push(keepTraceEvent(each)); });
+    trace.startedUs = traceNow();
+    await trace.session.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: {
+      recordMode: 'recordContinuously',
+      traceBufferSizeInKb: TRACE_BUFFER_KB,
+      includedCategories: TRACE_CATEGORIES,
+      excludedCategories: ['*'],
+    } });
+  })().catch((error) => { trace.error = String(error && error.message || error).slice(0, 300); });
+}
+
+/** The trace of a browser, if its watch started one (for the tests of this file). */
+export function mojoTraceOf(browser) {
+  return mojoTraces.get(browser);
+}
+
+/** The events of the window: the 10 s before the renderer's last message, and everything after it, to the capture. */
+function mojoWindow(trace, capturedUs) {
+  const processes = {};
+  for (const each of trace.received) if (each.processName !== undefined) processes[each.pid] = each.processName;
+  const timed = trace.received.filter((each) => each.ph !== 'M' && each.cat !== '__metadata');
+  const renderers = new Set(Object.keys(processes).filter((pid) => processes[pid] === 'Renderer').map(Number));
+  const rendererTimes = timed.filter((each) => renderers.has(each.pid)).map((each) => each.ts);
+  const times = rendererTimes.length ? rendererTimes : timed.map((each) => each.ts);
+  if (!times.length) return { processes, received: trace.received.length, note: 'no Mojo message was traced' };
+  const lastUs = times.reduce((most, ts) => Math.max(most, ts), 0);
+  const fromUs = lastUs - TRACE_WINDOW_US;
+  const oldestUs = timed.reduce((least, each) => Math.min(least, each.ts), Infinity);
+  const inWindow = timed.filter((each) => each.ts >= fromUs).sort((a, b) => a.ts - b.ts);
+  const kept = inWindow.slice(-TRACE_MOST);
+  return {
+    categories: TRACE_CATEGORIES,
+    note: `Mojo messages of the browser: the ${TRACE_WINDOW_US / 1000000} s before the renderer's last one and after it, up to the capture; ts is the monotonic clock in microseconds, as process.hrtime`,
+    processes,
+    rendererLastUs: rendererTimes.length ? lastUs : null,
+    silentMs: rendererTimes.length ? Math.round((capturedUs - lastUs) / 1000) : null,
+    ringDropped: trace.startedUs < fromUs && oldestUs > fromUs, // the ring dropped messages the window reaches
+    received: trace.received.length,
+    inWindow: inWindow.length,
+    dropped: inWindow.length - kept.length,
+    events: kept.map(({ processName, ...rest }) => rest),
+  };
+}
+
+/** Ends the trace and reads its window; what it cannot give is said as `not available`. */
+async function endMojoTrace(trace, capturedUs) {
+  try {
+    await trace.ready;
+    if (trace.error) return `not available: Tracing did not start: ${trace.error}`;
+    const ended = new Promise((resolve) => trace.session.once('Tracing.tracingComplete', resolve));
+    await trace.session.send('Tracing.end');
+    if (!(await within(ended, TRACE_END_MS)).answered) return `not available: the trace did not end within ${TRACE_END_MS} ms (a stopped renderer does not flush)`;
+    return mojoWindow(trace, capturedUs);
+  } catch (error) {
+    return `not available: ${String(error && error.message || error).slice(0, 300)}`;
+  }
+}
+
+/** The browser's Mojo window for a capture: the first capture of a test ends the trace, and later ones read the same window. */
+function takeMojoTrace(browser, capturedUs) {
+  const trace = browser && mojoTraces.get(browser);
+  if (!trace) return Promise.resolve(armingOff() ? `not available: not armed: ${NO_ARM}=${process.env[NO_ARM]} starts no Mojo trace` : 'not available: no Mojo trace was started on this browser');
+  if (!trace.taken) trace.taken = endMojoTrace(trace, capturedUs);
+  return trace.taken;
+}
+
+/** The watch's end: a trace no capture took is ended and dropped, and the session is let go. */
+async function releaseMojoTrace(browser) {
+  const trace = mojoTraces.get(browser);
+  if (!trace) return;
+  mojoTraces.delete(browser);
+  if (!trace.taken) trace.taken = endMojoTrace(trace, traceNow());
+  await within(trace.taken, TEARDOWN_MS);
+  if (trace.session) trace.session.detach().catch(() => {});
+}
 
 /**
  * A page's DevTools session, made while the page still answers, with
@@ -942,6 +1054,8 @@ export async function capture(page, armed, reason, browser, save = () => {}, sco
 async function captureArmed(page, armed, reason, browser, save, scope, corePathFor) {
   const result = { reason, at: new Date().toISOString(), url: page.url(), armed: !armed.error, armError: armed.error };
   result.history = armed.history ? armed.history.snapshot() : 'not available: the page was not watched';
+  const capturedUs = traceNow();
+  const mojo = takeMojoTrace(browser, capturedUs); // ends alongside the capture, awaited below (#737)
   const session = armed.session;
   const cpu = browser ? rendererCpu(browser, CPU_WINDOW_MS) : Promise.resolve(null);
   // Does the page's main thread run a task? Asked of the armed session; a page
@@ -1041,6 +1155,7 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
   if (armed.timing) {
     try { await armed.timing.harvest(); result.pageTiming = armed.timing.snapshot(); } catch (error) { result.pageTiming = `not available: ${String(error && error.message || error)}`; }
   }
+  result.mojoMessages = await mojo;
   result.verdict = verdict(result);
   return result;
 }
@@ -1119,6 +1234,8 @@ export function summary(result) {
     for (const [resource, rows] of Object.entries(result.machine.pressure)) if (rows[0]) lines.push(`  pressure ${resource}: ${rows.join(' | ')}`);
   }
   if (result.runnerLoad && result.runnerLoad.summary) lines.push(`  runner: ${result.runnerLoad.summary.reading}`);
+  const mojo = result.mojoMessages;
+  if (mojo) lines.push(`  Mojo messages: ${mojo.events ? `${mojo.events.length} kept of ${mojo.inWindow} in the window; the renderer's last one ${mojo.silentMs} ms before the capture` : mojo}`);
   if (result.history && result.history.inFlight) {
     const history = result.history;
     const flying = history.inFlight.slice(0, 3).map((each) => `${each.method} ${each.url} for ${each.ageMs} ms`).join('; ');
@@ -1153,6 +1270,7 @@ export function stallWatch(browser, testInfo) {
   let stopped = false;
   let count = 0;
   const leaveSampler = sampleRunner(testInfo.title); // the runner's load, from now on (#600), kept across the worker's tests (#715)
+  startMojoTrace(browser);
 
   const watchPage = (page) => {
     if (stopped || armed.has(page) || page.isClosed()) return;
@@ -1311,6 +1429,7 @@ export function stallWatch(browser, testInfo) {
         await within(Promise.all([...running]), 1500);
       }
       await keepEvidence();
+      await releaseMojoTrace(browser);
       leaveSampler();
       for (const pending of armed.values()) {
         const arming = await within(pending, COMMAND_MS);

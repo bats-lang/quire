@@ -186,6 +186,15 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
   (no listener on the page then, so a comparison of stall rates differs only by the debugger). A kept text is a
   copy, not a slice (V8 keeps a slice's whole parent alive: 100 slices of 10 MB messages held 1000 MB on node
   22.22, 100 copies held 0).
+* **Mojo messages** (`mojoMessages`, #737): the browser's Chromium trace of `disabled-by-default-mojom`, started by
+  each test's watch (`startMojoTrace`) on the browser (a tracing session is one per browser) and ended by the
+  test's first capture (`takeMojoTrace`, bounded by `TRACE_END_MS`: a stopped renderer's flush takes about 5 s).
+  Chromium gives its events only at the end, from a ring of 16 MB in the browser, so no window can be streamed:
+  the window is the 10 s before the renderer's last message and the browser's messages after it, up to the capture,
+  at most `TRACE_MOST` events. Only the Mojo category is asked for (`excludedCategories: ['*']`: with Chromium's
+  defaults too, 60 MB came in 2 s). The trace clock is the monotonic one (as `process.hrtime`, checked on Linux). Its
+  cost is measured: 300 evaluates took 2.07 s without it and 2.77 s with it. Off with `QUIRE_NO_STALL_ARM`. Chromium's
+  documentation names no Mojo category; `disabled-by-default-mojom` is the one headless shell 149 emits.
 * **The browser's own stderr is not captured.** Playwright 1.61's `logger` launch option receives
   only `api` messages, not the browser's process lines; a `Browser` has no `process()`; Chromium's
   `--log-file` writes no file in the headless shell; `DEBUG=pw:browser` prints the lines to the
