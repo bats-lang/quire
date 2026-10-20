@@ -266,6 +266,30 @@ test('a full disk and a disk that is slow: the free space is in the capture, and
   }
 });
 
+test('the ring is read in both forms the kernel prints a futex call in (6.18 with 0x, 7.0 on the runners without)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const { gzipSync } = await import('node:zlib');
+  for (const [name, call, wake] of [
+    ['with 0x', 'sys_futex(uaddr: 0x7ffe33dd6610, op: 0x189, val: 0, utime: 0, uaddr2: 0, val3: 0xffffffff)', 'sys_futex(uaddr: 0x7ffe33dd6610, op: 0x81, val: 1, utime: 0, uaddr2: 0, val3: 0)'],
+    ['without', 'sys_futex(uaddr: 7ffe33dd6610, op: 189, val: 0, utime: 0, uaddr2: 0, val3: ffffffff)', 'sys_futex(uaddr: 7ffe33dd6610, op: 81, val: 1, utime: 0, uaddr2: 0, val3: 0)'],
+  ]) {
+    const file = testInfo.outputPath(`ring-${name.replace(' ', '-')}.txt.gz`);
+    writeFileSync(file, gzipSync([
+      '# entries-in-buffer/entries-written: 4/4   #P:4',
+      `  chrome-headless-3289    [003] .....   239.953428: ${call}`,
+      `  Chrome_ChildIOT-3293    [001] .....   241.000000: ${wake}`,
+      '  Chrome_ChildIOT-3293    [001] d....   241.000100: sched_wakeup: comm=chrome-headless pid=3289 prio=120 target_cpu=003',
+      '  chrome-headless-3289    [003] d....   250.000000: sched_switch: prev_comm=chrome-headless prev_pid=3289 prev_prio=120 prev_state=S ==> next_comm=swapper/3 next_pid=0 next_prio=120',
+    ].join('\n')));
+    const { futexAnalysis } = await import('./flight-recorder.js');
+    const found = await futexAnalysis(file, { address: '7ffe33dd6610', tid: 3289 });
+    expect(found.waiter.lastWait, name).toMatchObject({ untimed: true, kind: 'wait' });
+    expect(found.onAddress.wakers.map((each) => each.task), name).toEqual(['Chrome_ChildIOT']);
+    expect(found.waiter.wokenLast.by, name).toBe('Chrome_ChildIOT-3293');
+    expect(found.waiter.sleepingMs, name).toBe(0);
+  }
+});
+
 test('a missing symbol file: the frames stay unnamed, and the capture says why and keeps what resolves them later', async ({}, testInfo) => {
   desktopOnly(testInfo);
   const id = 'c97a9c1daed9622d2d0f626ce0e85170e6e105f2';

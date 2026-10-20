@@ -154,7 +154,8 @@ export function readMemory(pid, address, length = 64) { return asRoot('readmem',
 const FUTEX_WAITS = new Set([0, 9, 11, 13]);
 const FUTEX_WAKES = new Set([1, 3, 4, 5, 10, 12]);
 const RING_LINE = /^\s*(.+)-(\d+)\s+\[\d+\]\s+\S+\s+(\d+\.\d+):\s+(.*)$/;
-const FUTEX_CALL = /sys_futex\(uaddr: 0x([0-9a-f]+), op: 0x([0-9a-f]+), val: (\S+), utime: (\S+?),/;
+// the kernel prints the arguments in hex with a 0x on some versions (6.18) and without on others (7.0, the runners'): both are read
+const FUTEX_CALL = /sys_futex\(uaddr: (?:0x)?([0-9a-f]+), op: (?:0x)?([0-9a-f]+), val: (\S+), utime: (\S+?),/;
 
 /**
  * What the kernel ring says of one futex word and the thread that waits on it (#575): the waiter's last wait
