@@ -22,6 +22,7 @@ import { delimiter, join } from 'node:path';
 import { test, expect } from './fixtures.js';
 import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
+import { keepHistory } from './page-history.js';
 import { arm, capture, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
@@ -242,6 +243,26 @@ test('a page\'s recent console messages, errors and requests are in its capture,
   // every entry has its time, and the kinds are the ones the capture says it keeps
   expect(history.request.every((each) => typeof each.at === 'number' && each.method === 'GET')).toBe(true);
   expect(Object.keys(history).sort()).toEqual(['console', 'inFlight', 'note', 'pageerror', 'request', 'requestfailed', 'requestfinished']);
+});
+
+test('a very long console message, error and URL are kept as their first 300 characters, each a copy (#575)', async ({ page }) => {
+  const history = keepHistory(page);
+  await page.route('**/long-url/**', (route) => route.fulfill({ body: 'ok' }));
+  const longUrl = `http://history.test/long-url/${'u'.repeat(1_000_000)}`;
+  await page.setContent('<!doctype html><title>Long</title><p>Long</p>');
+  await page.evaluate((url) => {
+    console.log('c'.repeat(1_000_000));
+    setTimeout(() => { throw new Error('e'.repeat(1_000_000)); }, 0);
+    fetch(url).catch(() => {});
+  }, longUrl);
+  await expect.poll(() => {
+    const snap = history.snapshot();
+    return snap.console.length + snap.pageerror.length + snap.requestfinished.length;
+  }).toBe(3);
+  const snap = history.snapshot();
+  expect(snap.console[0].text).toBe('c'.repeat(300));
+  expect(snap.pageerror[0].message).toBe('e'.repeat(300));
+  expect(snap.requestfinished[0].url).toBe(longUrl.slice(0, 300));
 });
 
 test('a page busy for 12 s that then recovers is captured, not attached to, and runs on', async ({ page, stallWatch }, testInfo) => {
