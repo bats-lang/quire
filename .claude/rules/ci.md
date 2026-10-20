@@ -30,22 +30,39 @@ The pins and the relock are in CLAUDE.md. Specifics:
 
 A pull request's jobs restore what bats kept in the newest earlier run
 (`.github/actions/build-cache`, `actions/cache` pinned by commit) and save theirs once the
-job passed. **No key is relied on for correctness.** The key is a locator,
-`quire-<name>@<commit>` (a GitHub cache is immutable, so each save needs a new key), and a
-restore takes the newest cache of the name (`restore-keys` `quire-<name>@`; the `@` ends a
-name, so `static` never finds `static-memo-rest@...`). It names no pin, no runner image, no
-hash of `bats.lock`, `bats.toml` or the sources, and no number a developer bumps. A wrong
-restore costs time, never a wrong result, because bats judges what it holds.
+job passed. **The key is a locator, not a judgement.** It is `quire-<name>@<commit>` (a GitHub
+cache is immutable, so each save needs a new key), and a restore takes the newest cache of the
+name (`restore-keys` `quire-<name>@`; the `@` ends a name, so `static` never finds
+`static-memo-rest@...`). It names no pin, no runner image, no hash of `bats.lock`, `bats.toml`
+or the sources, and no number a developer bumps. What a restored `build/` is trusted for is
+bats's judgement, by the mechanisms below.
 
-* **What bats judges** (bats's CLAUDE.md is the record): `build/.bats_stamp` names what made a
-  `build/`: bats's own inputs, patsopt's toolchain, the C compiler's version and environment,
-  the flags and the target. A `build/` whose stamp differs from the running bats's is dropped at
-  start, with a line saying what differs. Freshness is by content hash, never by time: a
-  dependency's `.dats` that a module staloads counts (bats#323, in the pinned bats since #331),
-  and the profile is in each object's key (bats#320, #326). In check mode a module is fresh by
-  what patsopt read for it (bats#298). So a pin move, a relock, a new runner image or a restore
-  that gives every file the restore's time changes what is built and checked with no key
-  changing.
+* **What bats judges** (bats's CLAUDE.md and `.claude/rules/`, by mechanism):
+  * `build/.bats_stamp` (`stamp.md`): bats's own inputs, patsopt's toolchain (the cksum listing
+    of `bin/patsopt`, `prelude`, `libats`, `share`, `ccomp`), the C compiler's version, target
+    and the environment clang reads, the flags, and the target and mode. A `build/` whose stamp
+    differs is dropped at start, with a line saying what differs.
+  * Each module in build mode (`build-freshness.md`): its `.bats` source by sha256 (`<dats>.src`),
+    its closure key below, `build/.sats_changed`, and each object by the sha256 of its C and its
+    profile.
+  * Each module in check mode (`check-memo.md`): the files patsopt read for it, by size and
+    sha256, and the names of the `.sats` and `.hats` under `build/`. Nothing is judged by time.
+  * `bats_modules` (`lock.md`): a package copy is held only when its `.bats-version` stamp gives
+    the locked version and archive sha256; a mismatch is fetched again. The closures above see
+    the files of those packages.
+  * Validation records (`validated.md`): keyed by each file's sha256, bats's inputs, the listing
+    of `bats_modules`, the package's unsafe flag, and, for `#use` records, the file's bytes.
+* **Not judged yet.** A change to one of these is not noticed by any stamp, key or record above,
+  so a restored `build/` keeps what it made from the old one:
+  * the system headers the C includes (bats#338): the stamp's `cc` line is clang's version,
+    target and environment, not the headers;
+  * the system libraries that patsopt and the native link load, libgmp among them (the stamp's
+    `patsopt` line is the cksum of `bin/patsopt`, not of the libraries it loads; bats#380);
+  * `bats.toml`: the rules name only its version and constraints (`lock.md`), its unsafe flag
+    (validation records) and its dependencies (the listing of `bats_modules`); no rule says what
+    else in it reaches the build.
+  A new runner image is judged only through what is listed here: clang's version, target and
+  environment are stamped, its headers and libraries are not.
 * **The fixtures' memo** (bats#303): `bats fixtures` keeps each static fixture's result, keyed by
   the toolchain's stamp, the snippet, the module with it in and every file patsopt reads for
   the module, and serves it only when all are as they were. `--cold` (run.sh's first argument,
