@@ -1,0 +1,182 @@
+name: hunt
+
+# quire#575 (and #736): repeat the specs of a flake whose cause is not known, on CI's
+# runner, with the stall capture armed, to make its next hit arrive with its evidence.
+# Dispatch only: never on a push, a pull request, a schedule or the merge queue. The
+# dispatcher checks `qsweep pressure` first (the runners are the scarce resource).
+#
+# Each shard repeats the specs with Playwright's own --repeat-each, through
+# gen-pwa test (as the e2e groups do), and stops at its first failing test
+# (--max-failures=1: a hit is a test that times out with an unresponsive page). A
+# shard that hits uploads its stall captures (e2e/stall-capture.js) and the failed
+# tests' traces; the job summary says whether a capture arrived.
+on:
+  workflow_dispatch:
+    inputs:
+      specs:
+        description: 'Spec files in e2e/, space separated (each must match name.spec.js)'
+        required: true
+        default: 'dictionary.spec.js containers.spec.js encodings.spec.js icons.spec.js'
+        type: string
+      repeat:
+        description: 'Repetitions of each test, in each shard (a number from 1 to 1000)'
+        required: true
+        default: '100'
+        type: string
+      project:
+        description: 'The Playwright project the specs run on (desktop is where the flake hit)'
+        required: true
+        default: 'desktop'
+        type: string
+
+concurrency:
+  group: hunt-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  # The app and the PWA, built once for the shards: the same steps as check.yml's build job,
+  # without its caches, checks and Android parts (the hunt needs the web app only)
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up bats
+        uses: bats-lang/bats/.github/actions/setup@2ea56e16919a87077b793f2b08201de4fbc509bd # the setup action (bats#280)
+
+      - name: Build the app and the PWA generator
+        run: bats build
+
+      - name: Generate PWA
+        run: ./dist/debug/gen-pwa
+
+      - name: Sync clients
+        run: scripts/sync-clients.sh dist/pwa
+
+      - name: Add the home page
+        run: cp -R homepage dist/pwa/homepage
+
+      - name: Upload the PWA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hunt-pwa
+          path: dist/pwa
+          retention-days: 1
+
+      - name: Upload the PWA generator
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hunt-gen-pwa
+          path: dist/debug/gen-pwa
+          retention-days: 1
+
+  hunt:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    name: hunt (shard ${{ matrix.shard }})
+    env:
+      HUNT_SPECS: ${{ inputs.specs }}
+      HUNT_REPEAT: ${{ inputs.repeat }}
+      HUNT_PROJECT: ${{ inputs.project }}
+    steps:
+      # The inputs name files and a number: anything else fails the shard before a browser starts
+      - name: Check the inputs
+        run: |
+          for spec in $HUNT_SPECS; do
+            printf '%s\n' "$spec" | grep -Eq '^[a-z0-9-]+\.spec\.js$' || { echo "::error::not a spec file in e2e/: $spec"; exit 1; }
+            test -f "e2e/$spec" || { echo "::error::no such spec: e2e/$spec"; exit 1; }
+          done
+          printf '%s\n' "$HUNT_REPEAT" | grep -Eq '^([1-9][0-9]{0,2}|1000)$' || { echo "::error::repeat must be from 1 to 1000: $HUNT_REPEAT"; exit 1; }
+          printf '%s\n' "$HUNT_PROJECT" | grep -Eq '^[a-z-]+$' || { echo "::error::not a project name: $HUNT_PROJECT"; exit 1; }
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Download the PWA
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: hunt-pwa
+          path: dist/pwa
+
+      - name: Download the PWA generator
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: hunt-gen-pwa
+          path: dist/debug
+
+      - name: Make the generator runnable
+        run: chmod +x dist/debug/gen-pwa
+
+      # Node's packages and the Playwright browsers, as the e2e groups get them (pwa's action, quire#637)
+      - name: Set up Node.js and Playwright
+        uses: bats-lang/pwa/.github/actions/e2e-setup@ea8a14aaaffbca00c6a740cc481e51f7d594e07d # pwa main after #124 (no release tag)
+        with:
+          playwright-minimum: "1.58"
+
+      # The same diagnostic install as the e2e jobs (check.yml, quire#575): gdb and eu-stack for the stall
+      # capture's native stacks, libc6-dbg for libc's names. Never fails the shard.
+      - name: Install gdb
+        continue-on-error: true
+        run: |
+          installed=no
+          for attempt in 1 2 3; do
+            if sudo apt-get update -q && sudo apt-get install -y -q gdb elfutils; then installed=yes; break; fi
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 5))
+          done
+          libc_version=$(dpkg-query -W -f='${Version}' libc6)
+          sudo apt-get install -y -q --no-upgrade "libc6-dbg=$libc_version" \
+            || echo "libc6-dbg $libc_version is not available: libc's internal functions stay unnamed"
+          echo "Install gdb: installed=$installed"
+
+      # The shard: the specs repeated, on one project, through gen-pwa test. The run's name is `hunt`, so its
+      # outputs (test-results/hunt/, including each stall capture) are kept apart from any other run
+      - name: Repeat the specs
+        id: repeat
+        run: |
+          mkdir -p "$RUNNER_TEMP/hunt-timings"
+          specs=""
+          for spec in $HUNT_SPECS; do specs="$specs e2e/$spec"; done
+          ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/hunt-timings" -- \
+            --project="$HUNT_PROJECT" --repeat-each="$HUNT_REPEAT" --max-failures=1 \
+            --reporter=list,json $specs
+        env:
+          PLAYWRIGHT_HTML_OPEN: never
+
+      - name: Say what the shard found
+        if: always()
+        run: |
+          captures=$(find test-results -name 'stall-capture-*.json' 2>/dev/null | sort)
+          count=$(printf '%s' "$captures" | grep -c . || true)
+          {
+            echo "## Hunt shard ${{ matrix.shard }}: ${HUNT_PROJECT}, repeat ${HUNT_REPEAT}"
+            echo ""
+            echo "Specs: ${HUNT_SPECS}"
+            echo ""
+            echo "Repeat step outcome: ${{ steps.repeat.outcome }}"
+            echo ""
+            if [ "$count" -gt 0 ]; then
+              echo "**A stall capture arrived** ($count). The spec files hold no deliberate freeze, so each one is a real page that did not answer:"
+              printf '%s\n' "$captures" | while read -r file; do echo "- $file"; done
+            else
+              echo "No stall capture in this shard."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload stall captures and traces
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hunt-captures-${{ matrix.shard }}
+          path: |
+            test-results/**/stall-capture-*.json
+            test-results/**/stall-core-*.core.gz
+            test-results/**/runner-load-*.json
+            test-results/**/page-timing-*.json
+            test-results/**/*.zip
+          if-no-files-found: ignore
+          retention-days: 30
