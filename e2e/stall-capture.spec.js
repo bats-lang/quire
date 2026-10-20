@@ -22,7 +22,8 @@ import { delimiter, join } from 'node:path';
 import { test, expect } from './fixtures.js';
 import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
-import { arm, capture, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, nativeScope, nativeStacks, NATIVE_MOST_MS, TEARDOWN_MOST_MS } from './stall-capture.js';
+import { keepHistory } from './page-history.js';
+import { arm, capture, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
 const SPIN_MODULE = (() => {
@@ -215,6 +216,68 @@ test('a page in an endless wasm loop is captured in that loop, and gdb is not at
   expectBusyNotFrozen(capture);
 });
 
+test('a page\'s recent console messages, errors and requests are in its capture, with the requests in flight (#575)', async ({ page, stallWatch }) => {
+  await page.route('**/history-never-answered', () => {});
+  await page.route('**/history-refused', (route) => route.abort('failed'));
+  await page.setContent('<!doctype html><title>History</title><p>History</p>');
+  await page.evaluate(async () => {
+    console.warn('history-marker');
+    setTimeout(() => { throw new Error('history-error'); }, 0);
+    await fetch('http://history.test/history-refused').catch(() => {});
+    fetch('http://history.test/history-never-answered').catch(() => {});
+  });
+  await new Promise((done) => setTimeout(done, 500));
+  await startLoop(page, stallWatch, 'setTimeout(spinForever, 0)');
+  const capture = await stallWatch.next(page, 20000);
+  await endLoop(page, stallWatch);
+  const history = capture.history;
+  expect(history.console.some((each) => each.type === 'warning' && each.text === 'history-marker')).toBe(true);
+  expect(history.pageerror.some((each) => each.message === 'history-error')).toBe(true);
+  expect(history.requestfailed.some((each) => /\/history-refused$/.test(each.url) && /ERR_FAILED/.test(each.failure))).toBe(true);
+  const flying = history.inFlight.map((each) => each.url);
+  expect(flying.some((url) => /\/history-never-answered$/.test(url))).toBe(true);
+  expect(flying.some((url) => /\/history-refused$/.test(url))).toBe(false);
+  expect(history.inFlight.every((each) => each.ageMs >= 0)).toBe(true);
+  expect(history.request.every((each) => typeof each.at === 'number' && each.method === 'GET')).toBe(true);
+  expect(Object.keys(history).sort()).toEqual(['console', 'inFlight', 'note', 'pageerror', 'request', 'requestfailed', 'requestfinished']);
+});
+
+test('a very long console message, error and URL are kept as their first 300 characters, each a copy (#575)', async ({ page }) => {
+  const history = keepHistory(page);
+  await page.route('**/long-url/**', (route) => route.fulfill({ body: 'ok' }));
+  const longUrl = `http://history.test/long-url/${'u'.repeat(1_000_000)}`;
+  await page.setContent('<!doctype html><title>Long</title><p>Long</p>');
+  await page.evaluate((url) => {
+    console.log('c'.repeat(1_000_000));
+    setTimeout(() => { throw new Error('e'.repeat(1_000_000)); }, 0);
+    fetch(url).catch(() => {});
+  }, longUrl);
+  await expect.poll(() => {
+    const snap = history.snapshot();
+    return snap.console.length + snap.pageerror.length + snap.requestfinished.length;
+  }).toBe(3);
+  const snap = history.snapshot();
+  expect(snap.console[0].text).toBe('c'.repeat(300));
+  expect(snap.pageerror[0].message).toBe('e'.repeat(300));
+  expect(snap.requestfinished[0].url).toBe(longUrl.slice(0, 300));
+});
+
+test('the history takes its listeners off when its page closes (#575)', async ({ browser }) => {
+  const events = ['console', 'pageerror', 'request', 'requestfinished', 'requestfailed', 'close'];
+  const listeners = (page) => events.reduce((count, event) => count + page.listenerCount(event), 0);
+  const other = await browser.newPage();
+  const before = listeners(other);
+  keepHistory(other);
+  expect(listeners(other)).toBe(before + 6);
+  // Playwright clears a closed page's listeners itself, so the page's off calls are recorded instead
+  const removed = [];
+  const off = other.off.bind(other);
+  other.off = (event, listener) => { removed.push(event); return off(event, listener); };
+  other.emit('close');
+  expect([...new Set(removed)].sort()).toEqual(['console', 'pageerror', 'request', 'requestfailed', 'requestfinished']);
+  await other.close();
+});
+
 test('a page busy for 12 s that then recovers is captured, not attached to, and runs on', async ({ page, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   await page.setContent('<!doctype html><title>Busy</title>');
@@ -238,6 +301,9 @@ test('a renderer that is frozen (no CPU, no answer) has its native stacks captur
   expect(capture.answers.task.answered).toBe(false);
   expect(Math.max(...capture.rendererCpu.map((process) => process.cpuSeconds))).toBeLessThan(FROZEN_CPU_SECONDS);
   expectNativeStacks(capture, pids);
+  expect(capture.kernel.error).toBeUndefined();
+  expect(capture.kernel.cgroups.map((each) => each.pid)).toEqual(expect.arrayContaining(pids));
+  expect(capture.kernel.kernelLog).toBeTruthy();
   await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
 });
 
@@ -282,6 +348,14 @@ test('without gdb the capture of a frozen renderer says so and carries on', asyn
       expect(renderer.fallbackStacks.tried.map((each) => each.tool)).toEqual(expect.arrayContaining(['eu-stack']));
       expect(renderer.userSpaceStacks).toMatch(/^(eu-stack|pstack|not available: .+)$/);
       for (const each of renderer.fallbackStacks.tried) if (!each.ok) expect(each.note).toMatch(/^not available: /);
+      // one stack per kernel thread at most
+      if (renderer.userSpaceStacks === 'eu-stack') {
+        const text = renderer.fallbackStacks.tried.find((each) => each.ok).text;
+        const blocks = text.match(/^TID \d+:/mg) || [];
+        expect(blocks.length, `eu-stack gave ${blocks.length} thread blocks for ${renderer.kernel.tasks.length} kernel threads`).toBeLessThanOrEqual(renderer.kernel.tasks.length);
+        expect(blocks, 'the main thread (TID = pid) has a block').toContain(`TID ${renderer.pid}:`);
+        expect(text).toMatch(/^#0\s+0x[0-9a-f]+ \S+/m);
+      }
     }
   } finally {
     if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
@@ -335,6 +409,163 @@ test('without gdb the stacks come from eu-stack, else pstack, else the capture s
   } finally {
     hung.kill('SIGKILL');
     if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
+  }
+});
+
+/** Whether this machine has the tool: the tests of the real ones skip, saying so, where it does not. */
+const installed = (tool) => whichExecutable(tool) !== null;
+
+test('a stack tool that prints frames and exits 1, or prints pstack\'s lines, has given its stacks', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const hung = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const kept = process.env.QUIRE_STALL_GDB;
+  process.env.QUIRE_STALL_GDB = NO_GDB;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const UNWOUND = 'echo "TID $2:"; echo "#0  0x00007f0000001000 nanosleep - /lib/libc.so.6"; echo "eu-stack: tid 9: no matching address range" >&2; exit 1';
+    const partial = await withTools({ 'eu-stack': UNWOUND, pstack: 'echo "#0 pstack should not run"' }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
+    expect(partial.renderers[0].userSpaceStacks, 'frames with exit code 1 are stacks').toBe('eu-stack');
+    expect(partial.renderers[0].fallbackStacks.tried[0].exitCode).toBe(1);
+    const PSTACK = 'echo ""; echo "$1: sleep 300"; echo "(No symbols found)"; echo "0x7effb28ecb7a: ????"; echo "0x7effb28f9b27: ???? (c000, 100000010600000) + 60"';
+    const lines = await withTools({ 'eu-stack': 'exit 3', pstack: PSTACK }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
+    expect(lines.renderers[0].userSpaceStacks, 'pstack\'s own frame lines are stacks').toBe('pstack');
+    const none = await withTools({ 'eu-stack': 'exit 3', pstack: 'echo "(No symbols found)"; echo "ptrace: Input/output error can\'t read target." >&2; exit 1' }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
+    expect(none.renderers[0].userSpaceStacks).toMatch(/^not available: gdb .*pstack gave no stacks: ptrace: Input\/output error/);
+  } finally {
+    hung.kill('SIGKILL');
+    if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
+  }
+});
+
+test('the real eu-stack and pstack give the stacks of a hung process when gdb does not', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  test.skip(!installed('eu-stack') || !installed('pstack'), 'eu-stack (elfutils) and pstack are not both installed on this machine');
+  const hung = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const kept = process.env.QUIRE_STALL_GDB;
+  process.env.QUIRE_STALL_GDB = NO_GDB;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const real = await nativeStacks([{ pid: hung.pid }], nativeScope());
+    if (real.renderers[0].userSpaceStacks.startsWith('not available') && CANNOT_ATTACH.test(real.renderers[0].fallbackStacks.tried.map((each) => each.stderr).join('\n'))) unavailable('the kernel does not let this user attach');
+    expect(real.renderers[0].userSpaceStacks).toBe('eu-stack');
+    expect(real.renderers[0].fallbackStacks.tried[0].text).toMatch(/^#0\s+0x[0-9a-f]+ \S*nanosleep/m);
+    const handed = await withTools({ 'eu-stack': 'exit 3' }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
+    expect(handed.renderers[0].userSpaceStacks).toBe('pstack');
+    expect(handed.renderers[0].fallbackStacks.tried[1].text).toMatch(/^0x[0-9a-f]+: /m);
+  } finally {
+    hung.kill('SIGKILL');
+    if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
+  }
+});
+
+test('the browser and GPU processes are asked for their stacks by the fallback tools, and a utility process is not (#575)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const hung = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const browser = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const gpu = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const utility = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const kept = process.env.QUIRE_STALL_GDB;
+  process.env.QUIRE_STALL_GDB = NO_GDB;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const FRAMES = 'echo "TID $2:"; echo "#0  0x00007f0000001000 nanosleep - /lib/libc.so.6"; echo "#1  0x0000555500002000 main - /usr/bin/sleep"';
+    const others = [
+      { pid: browser.pid, type: 'browser', cpuSeconds: 0 },
+      { pid: gpu.pid, type: 'GPU', cpuSeconds: 0 },
+      { pid: utility.pid, type: 'utility', cpuSeconds: 0 },
+    ];
+    const found = await withTools({ 'eu-stack': FRAMES, pstack: 'echo "#0 pstack should not run"' }, () => nativeStacks([{ pid: hung.pid }], nativeScope(), null, others));
+    const entry = (pid) => found.browserProcesses.find((each) => each.pid === pid);
+    expect(found.renderers[0].userSpaceStacks).toBe('eu-stack');
+    expect(entry(browser.pid).userSpaceStacks, 'the browser process: eu-stack answered').toBe('eu-stack');
+    expect(entry(gpu.pid).userSpaceStacks, 'the GPU process: eu-stack answered').toBe('eu-stack');
+    expect(entry(gpu.pid).fallbackStacks.tried.map((each) => each.tool)).toEqual(['eu-stack']);
+    expect(entry(gpu.pid).fallbackStacks.tried[0].text).toContain('nanosleep');
+    expect(entry(utility.pid).userSpaceStacks, 'a utility process is not asked').toBeUndefined();
+    expect(entry(utility.pid).fallbackStacks).toBeUndefined();
+    const none = await withTools({ 'eu-stack': 'exit 3', pstack: 'echo nothing to show' }, () => nativeStacks([], nativeScope(), null, others.slice(0, 1)));
+    expect(none.error).toBeUndefined();
+    expect(none.browserProcesses[0].userSpaceStacks).toMatch(/^not available: eu-stack gave no stacks.*; not available: pstack gave no stacks/);
+  } finally {
+    hung.kill('SIGKILL');
+    browser.kill('SIGKILL');
+    gpu.kill('SIGKILL');
+    utility.kill('SIGKILL');
+    if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
+  }
+});
+
+test('the real eu-stack gives a browser or GPU process\'s stacks, and leaves the process running (#575)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  test.skip(!installed('eu-stack'), 'eu-stack (elfutils) is not installed on this machine');
+  const browser = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const gpu = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const kept = process.env.QUIRE_STALL_GDB;
+  process.env.QUIRE_STALL_GDB = NO_GDB;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const found = await nativeStacks([], nativeScope(), null, [{ pid: browser.pid, type: 'browser', cpuSeconds: 0 }, { pid: gpu.pid, type: 'GPU', cpuSeconds: 0 }]);
+    expect(found.browserProcesses.length).toBe(2);
+    for (const other of found.browserProcesses) {
+      if (other.userSpaceStacks.startsWith('not available') && CANNOT_ATTACH.test(other.fallbackStacks.tried.map((each) => each.stderr).join('\n'))) unavailable('the kernel does not let this user attach');
+      expect(other.userSpaceStacks).toBe('eu-stack');
+      expect(other.fallbackStacks.tried[0].text).toMatch(/^#0\s+0x[0-9a-f]+ \S*nanosleep/m);
+      expect(stateOf(other.pid), 'the process is left running, not stopped').toMatch(/^[SR]$/);
+    }
+  } finally {
+    browser.kill('SIGKILL');
+    gpu.kill('SIGKILL');
+    if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
+  }
+});
+
+test('a renderer\'s cgroup files and the kernel\'s log lines are read, and say why when they cannot be (#575)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const root = mkdtempSync(join(tmpdir(), 'stall-cgroup-'));
+  const kept = process.env.PATH;
+  try {
+    const procRoot = join(root, 'proc');
+    const cgroupRoot = join(root, 'cgroup');
+    const directory = join(cgroupRoot, 'user.slice', 'renderer.scope');
+    mkdirSync(directory, { recursive: true });
+    mkdirSync(join(procRoot, '4242'), { recursive: true });
+    writeFileSync(join(procRoot, '4242', 'cgroup'), '0::/user.slice/renderer.scope\n');
+    writeFileSync(join(directory, 'memory.events'), 'low 0\nhigh 0\nmax 0\noom 1\noom_kill 1\n');
+    writeFileSync(join(directory, 'memory.current'), '123456\n');
+    writeFileSync(join(directory, 'cpu.stat'), `usage_usec 9\nnr_throttled 3\nthrottled_usec 700\n${'x'.repeat(READ_MOST)}`);
+    writeFileSync(join(directory, 'cgroup.freeze'), '1\n');
+    const found = cgroupEvidence(4242, { proc: procRoot, cgroup: cgroupRoot });
+    expect(found.path).toBe('/user.slice/renderer.scope');
+    expect(found.files['memory.events']).toContain('oom_kill 1');
+    expect(found.files['memory.current']).toBe('123456');
+    expect(found.files['cgroup.freeze']).toBe('1');
+    expect(found.files['memory.max']).toMatch(/^unavailable: ENOENT/);
+    expect(found.files['cpu.stat'].length, 'a file is read to READ_MOST bytes at most').toBeLessThanOrEqual(READ_MOST);
+    mkdirSync(join(procRoot, '4243'), { recursive: true });
+    writeFileSync(join(procRoot, '4243', 'cgroup'), '1:cpu:/\n');
+    expect(cgroupEvidence(4243, { proc: procRoot, cgroup: cgroupRoot }).unavailable).toMatch(/^unavailable: no cgroup v2 line/);
+    expect(cgroupEvidence(4244, { proc: procRoot, cgroup: cgroupRoot }).unavailable).toMatch(/^unavailable: \/proc\/4244\/cgroup: ENOENT/);
+    const real = cgroupEvidence(process.pid);
+    expect(real.unavailable || typeof real.path, 'the real cgroup is read or its reason is said').toBeTruthy();
+    if (!real.unavailable) for (const value of Object.values(real.files)) expect(typeof value).toBe('string');
+    const logFile = join(root, 'dmesg.txt');
+    writeFileSync(logFile, [
+      ...Array.from({ length: 230 }, (_, index) => `[${index}.0] Out of memory: Killed process ${index} (renderer)`),
+      '[300.0] an ordinary line',
+      '[301.0] INFO: task x:9 blocked for more than 120 seconds.',
+      '',
+    ].join('\n'));
+    const log = await withTools({ dmesg: `cat ${logFile}` }, () => kernelLog(nativeScope()));
+    if (log.unavailable) unavailable(log.unavailable);
+    expect(log.matched).toBe(231);
+    expect(log.lines.length).toBe(KERNEL_LOG_LINES);
+    expect(log.lines[0]).toContain('Killed process 31 ');
+    expect(log.lines.at(-1)).toContain('blocked for more than 120 seconds');
+    const realLog = await kernelLog(nativeScope());
+    expect(realLog.unavailable || Array.isArray(realLog.lines), 'the real kernel log is read or its reason is said').toBeTruthy();
+  } finally {
+    process.env.PATH = kept;
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -569,6 +800,21 @@ test('teardown does not wait for a native capture to end: stop() returns within 
   });
 });
 
+test('the kernel evidence is saved before the native step, which a teardown can cut off (#575)', async ({ page, browser }, testInfo) => {
+  desktopOnly(testInfo);
+  test.setTimeout(testInfo.timeout + CAPTURE_MOST_MS + NATIVE_MOST_MS);
+  await page.setContent('<!doctype html><title>Frozen</title><p>Frozen</p>');
+  const armed = await arm(page);
+  const pids = await rendererPids(browser);
+  const saved = [];
+  const result = await frozen(pids, () => capture(page, armed, 'a capture asked for', browser, (partial) => saved.push({ kernel: partial.kernel, native: partial.native })));
+  await armed.session.detach().catch(() => {});
+  expect(result.native, 'the renderer was frozen, so the native step ran').toBeDefined();
+  expect(saved[0].native, 'the first save is before the native step').toBeUndefined();
+  expect(saved[0].kernel.cgroups.length).toBeGreaterThan(0);
+  expect(saved[saved.length - 1].native).toBeDefined();
+});
+
 test('a page that answers is not captured', async ({ page, stallWatch }) => {
   await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
   // longer than a probe's limit, so a page that answers has been probed
@@ -591,7 +837,10 @@ test('QUIRE_NO_STALL_ARM skips arming and nothing else sets it', async ({ page }
       await stillArmed.session.detach();
     }
     process.env.QUIRE_NO_STALL_ARM = '1';
+    const listening = ['console', 'pageerror', 'request', 'requestfinished', 'requestfailed'].map((event) => page.listenerCount(event));
     const notArmed = await arm(page);
+    expect(['console', 'pageerror', 'request', 'requestfinished', 'requestfailed'].map((event) => page.listenerCount(event)), 'no listener when arming is off').toEqual(listening);
+    expect(notArmed.history).toBeNull();
     expect(notArmed.session, 'no DevTools session, so no debugger').toBeNull();
     expect(notArmed.error).toContain('QUIRE_NO_STALL_ARM=1');
   } finally {
@@ -599,19 +848,10 @@ test('QUIRE_NO_STALL_ARM skips arming and nothing else sets it', async ({ page }
   }
 });
 
-// The timeout this test starts with, short so the capture begins soon
 const NEAR_TIMEOUT_MS = 30000;
 
 test('every page of a test about to time out is captured', async ({ page, stallWatch }, testInfo) => {
-  // The capture begins TIMEOUT_MARGIN_MS before the timeout (a third of
-  // a shorter one), at the watch's next scan: here at 30 s - min(15 s,
-  // 30 s / 3) = 20 s, by 20 s + SCAN_EVERY_MS = 21 s on an idle runner.
-  // It can then take up to CAPTURE_MOST_MS (25 s), more than the 9 s
-  // left, as it can in any test (whose capture is evidence for a test
-  // failing anyway). So the test waits for the capture to begin (for as
-  // long as its timeout, which bounds that wait anyway), then puts its
-  // timeout off by twice CAPTURE_MOST_MS, 50 s, as headroom for a loaded
-  // runner, and waits for the capture itself for at most that long.
+  // the answering page's capture (CAPTURE_MOST_MS) must end within twice that, once it has begun
   test.setTimeout(NEAR_TIMEOUT_MS);
   await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
   await stallWatch.started(page, NEAR_TIMEOUT_MS);

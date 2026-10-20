@@ -36,14 +36,18 @@
  *     and what none could give is said as `not available: <why>`
  *     (`userSpaceStacks`, `fallbackStacks`), never a failure of the test;
  *   - the kernel's view of the other browser processes too (the browser
- *     process, the GPU process: `native.browserProcesses`), which a frozen
- *     renderer may wait on, never attached to.
+ *     process, the GPU process: `native.browserProcesses`), with their
+ *     user-space stacks from the fallback tools when a renderer is frozen;
+ *   - the kernel's record (`kernel`): each renderer's cgroup and the OOM and
+ *     hung-task lines of dmesg, read before the native stacks;
+ *   - what the page did before it stopped (`history`, e2e/page-history.js).
  */
 
 import { execFile } from 'node:child_process';
-import { accessSync, constants, existsSync, readdirSync, readFileSync, readlinkSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { accessSync, closeSync, constants, existsSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, isAbsolute, join } from 'node:path';
 import { bindAttempts } from './attempt-log.js';
+import { keepHistory } from './page-history.js';
 import { runnerLoad, sampleRunner } from './runner-load.js';
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
@@ -110,11 +114,11 @@ export const TEARDOWN_MOST_MS = TEARDOWN_MS + HELPER_MS + 1500;
  * Debugger.pause (3); the pause itself (PAUSE_MS); the debugger
  * disabled, enabled and its breakpoints made inactive again (3);
  * Profiler.enable and Profiler.start (2); the profile (PROFILE_MS);
- * Profiler.stop (1). The renderers' CPU time (a session, two reads and
- * 1 s between them) is taken alongside, and is shorter.
- * 10 x 2 s + 3 s + 2 s = 25 s.
+ * Profiler.stop (1); the kernel's log (dmesg, HELPER_MS). The renderers' CPU
+ * time (a session, two reads and 1 s between them) is taken alongside, and is
+ * shorter. 10 x 2 s + 3 s + 2 s + 5 s = 30 s.
  */
-export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS;
+export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS + HELPER_MS;
 
 /**
  * What the native stacks of a frozen page add, every wait run out: an
@@ -122,10 +126,11 @@ export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS;
  * (the browser session, two reads and CPU_WINDOW_MS: 3 commands and the
  * window, all of it counted, though it began alongside the probes above);
  * gdb's version; per renderer (side by side) readelf (the binary's
- * notes, sections and version, the system libraries' notes, dpkg), `sudo tail` for the kernel stacks, gdb (backtraces and core), the two fallback stack tools when gdb gave none, and gzip. A capture of a frozen page takes at most
+ * notes, sections and version, the system libraries' notes, dpkg), `sudo tail` for the kernel stacks, gdb (backtraces and core), the two fallback stack tools when gdb gave none, the two fallback tools again for the browser and GPU processes (after the renderers'), and gzip. A capture of a frozen page takes at most
  * CAPTURE_MOST_MS and this.
  */
-export const NATIVE_MOST_MS = COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 8 * HELPER_MS + GDB_MS + GZIP_MS + 2 * FALLBACK_MS;
+export const NATIVE_MOST_MS = COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 8 * HELPER_MS + GDB_MS + GZIP_MS + 2 * FALLBACK_MS
+  + 2 * FALLBACK_MS; // the browser's and the GPU's fallback tools
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -154,7 +159,7 @@ const armingOff = () => !['', '0'].includes(process.env[NO_ARM] || '');
  * the debugger enabled; `scripts` maps a script id to its URL.
  */
 export async function arm(page) {
-  const armed = { session: null, scripts: new Map(), error: null, pausing: false };
+  const armed = { session: null, scripts: new Map(), error: null, pausing: false, history: armingOff() ? null : keepHistory(page) };
   if (armingOff()) {
     // the capture then says the page was not armed (`armed: false`, this reason)
     armed.error = `not armed: ${NO_ARM}=${process.env[NO_ARM]} (the debugger is never enabled)`;
@@ -364,6 +369,72 @@ function machineState() {
   return { loadAverage: text('/proc/loadavg').trim(), memoryAvailableMiB: free ? Math.round(+free[1] / 1024) : null, pressure };
 }
 
+// Kernel evidence: read-only, bounded, and a failure is written as `unavailable: <why>`.
+export const CGROUP_FILES = ['memory.events', 'memory.current', 'memory.max', 'cpu.stat', 'cgroup.freeze'];
+export const KERNEL_LOG_PATTERN = /oom|killed process|out of memory|hung task|blocked for more than/i;
+export const KERNEL_LOG_LINES = 200;
+export const READ_MOST = 16384;
+
+/** A file's text, at most READ_MOST bytes of it, trimmed. Throws as a read does. */
+function readBounded(file) {
+  const descriptor = openSync(file, 'r');
+  try {
+    const buffer = Buffer.alloc(READ_MOST);
+    const bytes = readSync(descriptor, buffer, 0, READ_MOST, 0);
+    return buffer.subarray(0, bytes).toString('utf8').trim();
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+/**
+ * One process's cgroup (v2), as /proc/<pid>/cgroup names it, and the files
+ * CGROUP_FILES names in that cgroup's directory. `roots` replaces /proc and
+ * /sys/fs/cgroup (the tests' stand-in trees).
+ */
+export function cgroupEvidence(pid, roots = {}) {
+  const procRoot = roots.proc || '/proc';
+  const cgroupRoot = roots.cgroup || '/sys/fs/cgroup';
+  let text;
+  try {
+    text = readBounded(join(procRoot, String(pid), 'cgroup'));
+  } catch (error) {
+    return { pid, unavailable: `unavailable: /proc/${pid}/cgroup: ${error.code || error.message}` };
+  }
+  const v2 = text.split('\n').find((line) => line.startsWith('0::'));
+  if (!v2) return { pid, unavailable: 'unavailable: no cgroup v2 line in /proc/<pid>/cgroup (cgroup v1 only, or none)' };
+  const path = v2.slice(3);
+  const directory = join(cgroupRoot, path);
+  const files = {};
+  for (const name of CGROUP_FILES) {
+    try {
+      files[name] = readBounded(join(directory, name));
+    } catch (error) {
+      files[name] = `unavailable: ${error.code || error.message}`;
+    }
+  }
+  return { pid, path, directory, files };
+}
+
+/**
+ * The last KERNEL_LOG_LINES lines of the kernel's log that match
+ * KERNEL_LOG_PATTERN (`dmesg`, as root or through sudo, as the gdb path
+ * runs its commands): { lines, matched } or { unavailable }.
+ */
+export async function kernelLog(scope) {
+  const path = whichExecutable('dmesg');
+  if (!path) return { unavailable: 'unavailable: dmesg is not installed' };
+  const out = await runPrivileged([path], HELPER_MS, undefined, scope);
+  if (!out.ok) return { unavailable: `unavailable: ${(cap((out.stderr || '').trim(), 200) || out.error || 'dmesg gave no output').replace(/\s+/g, ' ')}` };
+  const matched = out.stdout.split('\n').filter((line) => KERNEL_LOG_PATTERN.test(line));
+  return { lines: matched.slice(-KERNEL_LOG_LINES), matched: matched.length };
+}
+
+/** The cgroups of these processes and the kernel's log, never throws. */
+export async function kernelEvidence(pids, scope = nativeScope(), roots = {}) {
+  return { cgroups: pids.map((pid) => cgroupEvidence(pid, roots)), kernelLog: await kernelLog(scope) };
+}
+
 /** Each renderer process's CPU time (s) over `ms`, from the browser's own session. */
 async function rendererCpu(browser, ms) {
   let session;
@@ -495,7 +566,7 @@ const cap = (text, most) => (text.length > most ? `${text.slice(0, most)}\n... (
 const GDB_PATH_VARIABLE = 'QUIRE_STALL_GDB';
 
 /** The absolute path of an executable on this process's PATH, or null. */
-function whichExecutable(name) {
+export function whichExecutable(name) {
   if (isAbsolute(name)) { try { accessSync(name, constants.X_OK); return name; } catch (missing) { return null; } }
   for (const directory of (process.env.PATH || '').split(delimiter)) {
     if (!directory) continue;
@@ -528,6 +599,8 @@ export const CANNOT_ATTACH = /ptrace: (Operation not permitted|Permission denied
 // allowed to attach), tried in this order and the first that answers is kept. eu-stack is
 // elfutils' (Ubuntu's `elfutils`; `-m` names the module of each frame), pstack is the old
 // script (`pstack` of Red Hat's, absent on Ubuntu)
+// eu-stack prints "#0  0x...", pstack "0x...: ????"
+const FRAME_LINE = /^(#0\s|0x[0-9a-f]+: )/m;
 const FALLBACK_TOOLS = [
   { tool: 'eu-stack', args: (pid) => ['-p', String(pid), '-m', '-n', String(STACK_FRAMES)] },
   { tool: 'pstack', args: (pid) => [String(pid)] },
@@ -544,8 +617,8 @@ async function fallbackStacks(pid, scope) {
     const path = whichExecutable(tool);
     if (!path) { tried.push({ tool, available: false, note: `not available: ${tool} is not installed` }); continue; }
     const out = await runPrivileged([path, ...args(pid)], FALLBACK_MS, undefined, scope);
-    // a stack has frames, "#0  0x... "; a tool that attached to nothing prints none
-    const ok = out.ok && /^#0\s/m.test(out.stdout);
+    // the frames decide, whatever the exit code (eu-stack exits 1 after printing some)
+    const ok = FRAME_LINE.test(out.stdout);
     const why = (cap(out.stderr.trim(), 200) || out.error || 'it printed no frames').replace(/\s+/g, ' ');
     tried.push({ tool, available: true, path, ok, exitCode: out.code, ms: out.ms, stderr: cap(out.stderr, 2000), text: cap(out.stdout, 100000), note: ok ? undefined : `not available: ${tool} gave no stacks: ${why}` });
     if (ok) break;
@@ -821,7 +894,6 @@ export async function nativeStacks(renderers, scope, corePathFor, others = []) {
   const gdb = await findGdb(scope);
   result.gdb = gdb;
   const taken = renderers.slice(0, NATIVE_MOST);
-  // the other browser processes (the browser's, the GPU's): what the kernel says of their threads, never attached to
   const aside = Promise.all(others.slice(0, NATIVE_MOST).map(async (other) => ({ pid: other.pid, type: other.type, cpuSeconds: other.cpuSeconds, kernel: await kernelTasks(other.pid, scope) })));
   result.renderers = await Promise.all(taken.map(async (renderer, index) => {
     // the kernel's view and the addresses first: gdb stops the process
@@ -847,6 +919,12 @@ export async function nativeStacks(renderers, scope, corePathFor, others = []) {
     return entry;
   }));
   result.browserProcesses = await aside;
+  // the browser's and the GPU's stacks, by the fallback tools only (never gdb)
+  await Promise.all(result.browserProcesses.filter((other) => /^(browser|gpu)$/i.test(other.type)).map(async (other) => {
+    other.fallbackStacks = await fallbackStacks(other.pid, scope);
+    const used = other.fallbackStacks.tried.find((each) => each.ok);
+    other.userSpaceStacks = used ? used.tool : other.fallbackStacks.tried.map((each) => each.note).join('; ');
+  }));
   // no gdb, or none that may attach: the capture carries on without the stacks, and says so
   if (!gdb.available) result.unavailable = `native capture unavailable: ${gdb.error}`;
   else if (result.renderers.length && result.renderers.every((renderer) => !renderer.gdbStacks.ok && CANNOT_ATTACH.test(`${renderer.gdbStacks.stderr}\n${renderer.gdbStacks.text}\n${renderer.gdbStacks.error}`))) {
@@ -863,6 +941,7 @@ export async function capture(page, armed, reason, browser, save = () => {}, sco
 
 async function captureArmed(page, armed, reason, browser, save, scope, corePathFor) {
   const result = { reason, at: new Date().toISOString(), url: page.url(), armed: !armed.error, armError: armed.error };
+  result.history = armed.history ? armed.history.snapshot() : 'not available: the page was not watched';
   const session = armed.session;
   const cpu = browser ? rendererCpu(browser, CPU_WINDOW_MS) : Promise.resolve(null);
   // Does the page's main thread run a task? Asked of the armed session; a page
@@ -885,6 +964,7 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
     answers = evaluated.answered;
   }
   let processes = null;
+  const kernelOf = (list) => kernelEvidence(Array.isArray(list) ? list.filter((process) => process.type === 'renderer').map((process) => process.pid) : [], scope).catch((error) => ({ error: String(error && error.stack || error) }));
   if (!answers) {
     // No answer, and only then: the renderers that also used (almost) no CPU
     // are frozen, as #575 and #591 were. One that used a second a second is
@@ -906,6 +986,9 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
       if (busy.length) {
         result.presumedBusy = `renderer ${busy.map((process) => `${process.pid} used ${process.cpuSeconds} s of CPU`).join(', ')} over ${CPU_WINDOW_MS / 1000} s, so the page is presumed busy, not frozen, and nothing is attached`;
       } else if (renderers.length) {
+        // before the stacks, which a teardown can cut off
+        result.kernel = await kernelOf(processes);
+        save(result);
         result.native = await nativeStacks(renderers, scope, corePathFor, processes.filter((process) => process.type !== 'renderer' && process.cpuSeconds !== null)).catch((error) => ({ error: String(error && error.stack || error) }));
         save(result);
       }
@@ -950,6 +1033,7 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
   } else {
     result.rendererCpu = processes;
   }
+  if (!result.kernel) result.kernel = await kernelOf(processes);
   result.machine = machineState();
   // the runner's load over the last minute, and the page's attempts and long
   // tasks (#600): a slow page is told from a slow runner by these
@@ -1011,15 +1095,35 @@ export function summary(result) {
   if (result.native && Array.isArray(result.native.browserProcesses)) for (const other of result.native.browserProcesses) {
     const tasks = other.kernel.tasks || [];
     lines.push(`  ${other.type} ${other.pid}: ${tasks.length} threads by the kernel${other.kernel.error ? ` (${other.kernel.error})` : ''}, main thread syscall ${(tasks.find((task) => task.tid === other.pid) || {}).syscall}`);
+    if (other.userSpaceStacks) {
+      lines.push(`    ${other.type} ${other.pid} user-space stacks: ${other.userSpaceStacks}`);
+      if (other.fallbackStacks) for (const each of other.fallbackStacks.tried) if (each.ok) lines.push(...each.text.split('\n').slice(0, 14).map((line) => `    ${each.tool}: ${line}`));
+    }
   }
   if (Array.isArray(result.otherProcesses)) for (const process of result.otherProcesses) {
     lines.push(`  ${process.type} ${process.pid}: CPU ${process.cpuSeconds}s over 1 s; threads: ${process.threads.join('; ')}`);
+  }
+  if (result.kernel && result.kernel.cgroups) {
+    for (const each of result.kernel.cgroups) {
+      if (each.unavailable) lines.push(`  renderer ${each.pid} cgroup: ${each.unavailable}`);
+      else lines.push(`  renderer ${each.pid} cgroup ${each.path}: ${Object.entries(each.files).map(([name, value]) => `${name} ${value.replace(/\s+/g, ' ')}`).join(' | ').slice(0, 400)}`);
+    }
+  }
+  if (result.kernel && result.kernel.kernelLog) {
+    const log = result.kernel.kernelLog;
+    if (log.unavailable) lines.push(`  kernel log: ${log.unavailable}`);
+    else lines.push(`  kernel log: ${log.matched} matching lines${log.lines.length ? `, the last: ${log.lines[log.lines.length - 1].slice(0, 200)}` : ''}`);
   }
   if (result.machine) {
     lines.push(`  machine: load ${result.machine.loadAverage}, ${result.machine.memoryAvailableMiB} MiB available`);
     for (const [resource, rows] of Object.entries(result.machine.pressure)) if (rows[0]) lines.push(`  pressure ${resource}: ${rows.join(' | ')}`);
   }
   if (result.runnerLoad && result.runnerLoad.summary) lines.push(`  runner: ${result.runnerLoad.summary.reading}`);
+  if (result.history && result.history.inFlight) {
+    const history = result.history;
+    const flying = history.inFlight.slice(0, 3).map((each) => `${each.method} ${each.url} for ${each.ageMs} ms`).join('; ');
+    lines.push(`  page history: ${history.console.length} console, ${history.pageerror.length} errors, ${history.requestfailed.length} failed requests; ${history.inFlight.length} requests in flight${flying ? `: ${flying}` : ''}`);
+  }
   if (result.pageTiming && result.pageTiming.attempts) {
     const late = result.pageTiming.attempts.filter((entry) => entry.outcome === 'failed').slice(-3);
     for (const entry of late) lines.push(`  attempt ${entry.step} #${entry.attempt} failed after ${entry.ms} ms: ${entry.why}${entry.devtools && entry.devtools.reading ? ` (${entry.devtools.reading})` : ''}`);
