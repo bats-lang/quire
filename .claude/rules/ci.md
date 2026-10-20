@@ -30,55 +30,31 @@ The pins and the relock are in CLAUDE.md. Specifics:
 
 A pull request's jobs restore what bats kept in the newest earlier run
 (`.github/actions/build-cache`, `actions/cache` pinned by commit) and save theirs once the
-job passed. **No key is relied on for correctness**: the key is a locator,
-`quire-<name>@<pins>-<hash of bats.lock>-<sha>` (a GitHub cache is immutable, so each save needs a new key), and a
-restore takes the newest cache of the name and pins (`restore-keys` `quire-<name>@<pins>-<hash of bats.lock>-`; the
-`@` ends a name, so `static` never finds `static-memo-rest@...`). It names no runner image,
-`bats.toml`, source hash or version a developer bumps, so a new input needs no new key part and
-a wrong key can only restore less useful files.
+job passed. **No key is relied on for correctness.** The key is a locator,
+`quire-<name>@<commit>` (a GitHub cache is immutable, so each save needs a new key), and a
+restore takes the newest cache of the name (`restore-keys` `quire-<name>@`; the `@` ends a
+name, so `static` never finds `static-memo-rest@...`). It names no pin, no runner image, no
+hash of `bats.lock`, `bats.toml` or the sources, and no number a developer bumps. A wrong
+restore costs time, never a wrong result, because bats judges what it holds.
 
-* **The pins stay in the key** (`<pins>` = a digest of `.github/bats-version`, which holds the
-  ATS2 pin, and of the commit of bats's setup action). bats#305 (a toolchain that is a symbolic
-  link, changed in place) and bats#316 (a missing toolchain root gave a shorter listing) are
-  fixed in the bats the pin names (99fdf6b6), but the audit of every freshness input (bats#317)
-  found four holes, still open, and a wrong cache is worse than a slow one. Which can bite
-  here (read from `check.yml`, `setup-bats` and `.gitignore`, 2026-10-18):
-  * bats#320, the profile is in no object key: cannot bite while every job runs the same
-    command (`bats build` in `build` and `deploy`, `bats check` in the static jobs, which
-    compile nothing); a workflow change to `--only` would restore the other profile's objects.
-  * bats#321, a `bats_modules` copy is not compared with the lock's sha256: cannot bite, no
-    job restores `bats_modules` (it is ignored by git and fetched at the locked sha256).
-  * bats#322, the environment clang reads (`CPATH` ...) is not in the stamp: cannot bite, no
-    workflow and not the setup action sets one. System headers are the same mechanism and
-    were not audited; the runner image is not in the key (#622).
-  * **bats#323, build mode keys a module's C on its own `.dats` and `.sats_changed`, not on
-    the dependency `.dats` it staloads: it can bite** in the `build` job, which restores
-    `build/`. quire instantiates array's templates (`$A.alloc<byte>`, `$A.get<byte>` ...
-    thousands of times), so a relock that changes the body of one of them without its `.sats`
-    leaves the old instance in the restored C. The pins are neutral to it; check mode (the static jobs) is keyed on
-    the closure and is not affected. Main builds cold and shows it, a pull request does not.
-    So `bats.lock` is in the key again (#682 had dropped it, because bats judges dependency
-    files; in build mode it does not): a relock starts a cold build cache, main's too.
-  * **Exit:** when bats#323 and bats#320 are fixed and quire's bats pin is past them, the pins
-    and `bats.lock` may both leave the key.
-  * **Research** (what others key on): Swatinem/rust-cache keys on the lockfile and the
-    toolchain; actions/cache's own examples key on `hashFiles` of the lock; ccache and sccache
-    key on the content of every input, dependency headers included. A key naming the lock is
-    the common choice wherever the tool does not itself see a dependency's content, which is
-    what bats#323 shows for build mode.
-* **bats judges what a restore holds** (bats's CLAUDE.md is the record): `build/.bats_stamp`
-  (bats's inputs, patsopt's toolchain, the C compiler's version, flags, target) drops a `build/`
-  made by another toolchain, naming what differs (bats#273); freshness is by content hash, never
-  time (bats#254, #293), and in check mode by what patsopt read for the module (#298); a
-  relocked package's files, or a restore that gives every file the restore's time, change nothing.
+* **What bats judges** (bats's CLAUDE.md is the record): `build/.bats_stamp` names what made a
+  `build/`: bats's own inputs, patsopt's toolchain, the C compiler's version and environment,
+  the flags and the target. A `build/` whose stamp differs from the running bats's is dropped at
+  start, with a line saying what differs. Freshness is by content hash, never by time: a
+  dependency's `.dats` that a module staloads counts (bats#323, in the pinned bats since #331),
+  and the profile is in each object's key (bats#320, #326). In check mode a module is fresh by
+  what patsopt read for it (bats#298). So a pin move, a relock, a new runner image or a restore
+  that gives every file the restore's time changes what is built and checked with no key
+  changing.
 * **The fixtures' memo** (bats#303): `bats fixtures` keeps each static fixture's result, keyed by
   the toolchain's stamp, the snippet, the module with it in and every file patsopt reads for
   the module, and serves it only when all are as they were. `--cold` (run.sh's first argument,
   not `BATS_COLD`, which would also make every check cold) serves none and audits what it would
   have served.
 * **Paths**: bats takes the checkout's path out of the C (bats#250), so a cache is valid
-  anywhere. `QUIRE_STATIC_WORK` (CI: `$RUNNER_TEMP/quire-static`) is only the directory
-  `tests/static/run.sh` works in and the static jobs cache (`app/build`, `memo`).
+  anywhere. `QUIRE_STATIC_WORK` (CI: `$RUNNER_TEMP/quire-static`) is the directory
+  `tests/static/run.sh` works in. It stays a fixed directory because the save step names the
+  directory it keeps (`app/build`, `memo`), and a `mktemp` one has no name the save can know.
 * **What is cached**: the `build` job caches `build/`. A static job caches the app's `build/`
   under the one name `static` (every group checks the same app) and its memo under
   `static-memo-<group>`. `check` and `build` never share a `build/` (check is mode 2 and 3,
@@ -96,7 +72,8 @@ a wrong key can only restore less useful files.
   finish gets a warning, not a failure. Caches are immutable, 10 GB per repository, evicted
   by last access and after 7 days.
 * **Research** (what others do): Swatinem/rust-cache, ccache, sccache and Bazel key on the
-  inputs because the tool computes them; quire's keys do not try to, bats does.
+  inputs because the tool computes them. Keying on the lock is the common choice where the tool
+  does not see a dependency's content; bats does, so quire's key does not.
 * `BATS_CACHE_DIR` (bats#250) is not used in CI (#499): a PR's `build/` restore already holds
   what it would hit, cc still runs for every module on a cache of patsopt's C (a checked tree at
   another path took 229 s against 355 s cold), and it would only speed up main, which is cold on

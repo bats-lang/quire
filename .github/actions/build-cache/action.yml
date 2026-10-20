@@ -23,28 +23,20 @@ inputs:
 runs:
   using: composite
   steps:
-    # A locator, the toolchain's pins and the lock (#622). The key is the
-    # cache's name, the pins, the hash of bats.lock and the commit (a GitHub
+    # A locator (#622). The key is the cache's name and the commit (a GitHub
     # cache is immutable, so a save needs a new key), and a restore takes the
-    # newest cache of the name, pins and lock. The rest is bats's: it stamps
-    # every build/ with what made it and drops one whose stamp differs,
-    # rebuilds a module whose source hash changed, and keys each memo entry by
-    # what it read (bats's CLAUDE.md). It names no version a developer bumps,
-    # no runner image, no bats.toml and no hash of the sources.
-    # The pins stay, and so does the lock: bats#323 (build mode keys a
-    # module's C on its own .dats, not on the dependency .dats it staloads, so
-    # a relock that changes a template body only is not noticed) and bats#320
-    # (the profile is in no object key) are open. #682 had dropped the lock
-    # because bats judges dependency files; in build mode it does not. Both
-    # the pins and bats.lock may leave the key when bats#323 and bats#320 are
-    # fixed and quire's bats pin is past them (.claude/rules/ci.md).
+    # newest cache of the name. The "@" ends the name, so "static" never finds
+    # "static-memo-rest@...". No pin, runner image, lock or source hash is in
+    # it: bats judges what a restore holds (bats's CLAUDE.md). It stamps every
+    # build/ with what made it and drops one whose stamp differs, rebuilds a
+    # module whose content changed, and keys each memo entry by what it read.
+    # A restore that is wrong costs time, never a wrong result.
     - name: Name the cache
       id: key
       shell: bash
       run: |
-        pins=$( { cat .github/bats-version; grep -rhoE 'bats-lang/bats/\.github/actions/setup@[0-9a-f]{40}' .github/workflows | sort -u; } | sha256sum | cut -c1-16)
-        echo "prefix=quire-${{ inputs.name }}@${pins}-${{ hashFiles('bats.lock') }}-" >> "$GITHUB_OUTPUT"
-        echo "key=quire-${{ inputs.name }}@${pins}-${{ hashFiles('bats.lock') }}-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+        echo "prefix=quire-${{ inputs.name }}@" >> "$GITHUB_OUTPUT"
+        echo "key=quire-${{ inputs.name }}@${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
     - name: Restore the compiler cache
       if: inputs.mode == 'restore'
