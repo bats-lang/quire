@@ -106,15 +106,17 @@ const FALLBACK_MS = 10000;              // eu-stack, pstack: each, when gdb gave
 const TRACE_CATEGORIES = ['disabled-by-default-mojom'];
 const TRACE_BUFFER_KB = 16384;
 const TRACE_WINDOW_US = 10000000;
-export const TRACE_MOST = 20000;
+export const TRACE_PROCESS_MOST = 10000; // events of one process (about 2 MB)
 const TRACE_ARGS_CHARS = 160;
 const TRACE_TEXT_CHARS = 120;
 const TRACE_END_MS = 8000; // a frozen renderer's flush takes about 5 s (measured, #737)
+// the trace's start awaited, Tracing.end, and the flush: the longest the watch's end waits for it
+const MOJO_END_MOST_MS = 2 * COMMAND_MS + TRACE_END_MS;
 // stop() waits this long for captures still running (the native step can
 // outlast the test); what they found by then is already written (`save`)
 export const TEARDOWN_MS = 10000;
-// and stop() then ends their commands (at most HELPER_MS) and waits 1.5 s more
-export const TEARDOWN_MOST_MS = TEARDOWN_MS + HELPER_MS + 1500;
+// and stop() then ends their commands (at most HELPER_MS), waits 1.5 s more, and waits for the Mojo trace to end
+export const TEARDOWN_MOST_MS = TEARDOWN_MS + HELPER_MS + 1500 + MOJO_END_MOST_MS;
 
 /**
  * The longest a capture of a page that answers can take, every wait in
@@ -206,43 +208,63 @@ export function mojoTraceOf(browser) {
   return mojoTraces.get(browser);
 }
 
-/** The events of the window: the 10 s before the renderer's last message, and everything after it, to the capture. */
-function mojoWindow(trace, capturedUs) {
+/**
+ * The window of each process: a renderer's 10 s before its own last message (a frozen one stops
+ * where it froze, whatever the other renderers do), and the messages of the others (the browser's)
+ * from the earliest of those starts to the capture; at most `most` newest events of each process.
+ */
+export function mojoWindow(received, startedUs, capturedUs, windowUs = TRACE_WINDOW_US, most = TRACE_PROCESS_MOST) {
   const processes = {};
-  for (const each of trace.received) if (each.processName !== undefined) processes[each.pid] = each.processName;
-  const timed = trace.received.filter((each) => each.ph !== 'M' && each.cat !== '__metadata');
-  const renderers = new Set(Object.keys(processes).filter((pid) => processes[pid] === 'Renderer').map(Number));
-  const rendererTimes = timed.filter((each) => renderers.has(each.pid)).map((each) => each.ts);
-  const times = rendererTimes.length ? rendererTimes : timed.map((each) => each.ts);
-  if (!times.length) return { processes, received: trace.received.length, note: 'no Mojo message was traced' };
-  const lastUs = times.reduce((most, ts) => Math.max(most, ts), 0);
-  const fromUs = lastUs - TRACE_WINDOW_US;
+  for (const each of received) if (each.processName !== undefined) processes[each.pid] = each.processName;
+  const timed = received.filter((each) => each.ph !== 'M' && each.cat !== '__metadata');
+  if (!timed.length) return { processes, received: received.length, note: 'no Mojo message was traced' };
+  const lastOf = new Map();
+  for (const each of timed) lastOf.set(each.pid, Math.max(lastOf.get(each.pid) || 0, each.ts));
+  const rendererPids = [...lastOf.keys()].filter((pid) => processes[pid] === 'Renderer');
+  const newestUs = [...lastOf.values()].reduce((latest, ts) => Math.max(latest, ts), 0);
+  const othersFromUs = (rendererPids.length ? rendererPids.map((pid) => lastOf.get(pid)).reduce((least, ts) => Math.min(least, ts), Infinity) : newestUs) - windowUs;
   const oldestUs = timed.reduce((least, each) => Math.min(least, each.ts), Infinity);
-  const inWindow = timed.filter((each) => each.ts >= fromUs).sort((a, b) => a.ts - b.ts);
-  const kept = inWindow.slice(-TRACE_MOST);
+  const perProcess = [];
+  const events = [];
+  for (const [pid, lastUs] of lastOf) {
+    const fromUs = rendererPids.includes(pid) ? lastUs - windowUs : othersFromUs;
+    const inWindow = timed.filter((each) => each.pid === pid && each.ts >= fromUs).sort((a, b) => a.ts - b.ts);
+    const kept = inWindow.slice(-most);
+    events.push(...kept);
+    perProcess.push({
+      pid,
+      name: processes[pid] || null,
+      lastUs,
+      silentMs: Math.round((capturedUs - lastUs) / 1000),
+      inWindow: inWindow.length,
+      kept: kept.length,
+      retainedMs: kept.length ? Math.round((kept[kept.length - 1].ts - kept[0].ts) / 1000) : 0,
+    });
+  }
+  const reachedUs = Math.min(othersFromUs, ...rendererPids.map((pid) => lastOf.get(pid) - windowUs));
   return {
     categories: TRACE_CATEGORIES,
-    note: `Mojo messages of the browser: the ${TRACE_WINDOW_US / 1000000} s before the renderer's last one and after it, up to the capture; ts is the monotonic clock in microseconds, as process.hrtime`,
+    note: `Mojo messages of the browser: each renderer's ${windowUs / 1000000} s before its own last message, the other processes' from the earliest of those to the capture, at most ${most} newest of each (retainedMs is the time kept); ts is the monotonic clock in microseconds, as process.hrtime`,
     processes,
-    rendererLastUs: rendererTimes.length ? lastUs : null,
-    silentMs: rendererTimes.length ? Math.round((capturedUs - lastUs) / 1000) : null,
-    ringDropped: trace.startedUs < fromUs && oldestUs > fromUs, // the ring dropped messages the window reaches
-    received: trace.received.length,
-    inWindow: inWindow.length,
-    dropped: inWindow.length - kept.length,
-    events: kept.map(({ processName, ...rest }) => rest),
+    perProcess,
+    ringDropped: startedUs < reachedUs && oldestUs > reachedUs, // the ring dropped messages the windows reach
+    received: received.length,
+    inWindow: perProcess.reduce((sum, each) => sum + each.inWindow, 0),
+    dropped: perProcess.reduce((sum, each) => sum + each.inWindow - each.kept, 0),
+    events: events.sort((a, b) => a.ts - b.ts).map(({ processName, ...rest }) => rest),
   };
 }
 
 /** Ends the trace and reads its window; what it cannot give is said as `not available`. */
 async function endMojoTrace(trace, capturedUs) {
   try {
-    await trace.ready;
-    if (trace.error) return `not available: Tracing did not start: ${trace.error}`;
+    await within(trace.ready, COMMAND_MS);
+    if (!trace.session || trace.error) return `not available: Tracing did not start: ${trace.error || 'no answer'}`;
     const ended = new Promise((resolve) => trace.session.once('Tracing.tracingComplete', resolve));
-    await trace.session.send('Tracing.end');
+    const ending = await within(trace.session.send('Tracing.end'), COMMAND_MS);
+    if (!ending.answered) return 'not available: Tracing.end was not answered';
     if (!(await within(ended, TRACE_END_MS)).answered) return `not available: the trace did not end within ${TRACE_END_MS} ms (a stopped renderer does not flush)`;
-    return mojoWindow(trace, capturedUs);
+    return mojoWindow(trace.received, trace.startedUs, capturedUs);
   } catch (error) {
     return `not available: ${String(error && error.message || error).slice(0, 300)}`;
   }
@@ -251,7 +273,7 @@ async function endMojoTrace(trace, capturedUs) {
 /** The browser's Mojo window for a capture: the first capture of a test ends the trace, and later ones read the same window. */
 function takeMojoTrace(browser, capturedUs) {
   const trace = browser && mojoTraces.get(browser);
-  if (!trace) return Promise.resolve(armingOff() ? `not available: not armed: ${NO_ARM}=${process.env[NO_ARM]} starts no Mojo trace` : 'not available: no Mojo trace was started on this browser');
+  if (!trace) return Promise.resolve(armingOff() ? `not available: not armed: ${NO_ARM}=${process.env[NO_ARM]} starts no Mojo trace` : 'not available: no Mojo trace was started on this browser (a @serial test, which asserts timings, is not traced)');
   if (!trace.taken) trace.taken = endMojoTrace(trace, capturedUs);
   return trace.taken;
 }
@@ -262,7 +284,7 @@ async function releaseMojoTrace(browser) {
   if (!trace) return;
   mojoTraces.delete(browser);
   if (!trace.taken) trace.taken = endMojoTrace(trace, traceNow());
-  await within(trace.taken, TEARDOWN_MS);
+  await within(trace.taken, MOJO_END_MOST_MS);
   if (trace.session) trace.session.detach().catch(() => {});
 }
 
@@ -1235,7 +1257,7 @@ export function summary(result) {
   }
   if (result.runnerLoad && result.runnerLoad.summary) lines.push(`  runner: ${result.runnerLoad.summary.reading}`);
   const mojo = result.mojoMessages;
-  if (mojo) lines.push(`  Mojo messages: ${mojo.events ? `${mojo.events.length} kept of ${mojo.inWindow} in the window; the renderer's last one ${mojo.silentMs} ms before the capture` : mojo}`);
+  if (mojo) lines.push(`  Mojo messages: ${mojo.events ? `${mojo.events.length} kept of ${mojo.inWindow} in the windows; ${mojo.perProcess.filter((each) => each.name === 'Renderer').map((each) => `renderer ${each.pid} silent ${each.silentMs} ms, ${each.retainedMs} ms kept`).join('; ')}` : mojo}`);
   if (result.history && result.history.inFlight) {
     const history = result.history;
     const flying = history.inFlight.slice(0, 3).map((each) => `${each.method} ${each.url} for ${each.ageMs} ms`).join('; ');
@@ -1270,7 +1292,7 @@ export function stallWatch(browser, testInfo) {
   let stopped = false;
   let count = 0;
   const leaveSampler = sampleRunner(testInfo.title); // the runner's load, from now on (#600), kept across the worker's tests (#715)
-  startMojoTrace(browser);
+  if (!testInfo.tags.includes('@serial')) startMojoTrace(browser); // a timed test is not traced: the trace costs it 8% (#737)
 
   const watchPage = (page) => {
     if (stopped || armed.has(page) || page.isClosed()) return;

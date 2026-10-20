@@ -188,13 +188,19 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
   22.22, 100 copies held 0).
 * **Mojo messages** (`mojoMessages`, #737): the browser's Chromium trace of `disabled-by-default-mojom`, started by
   each test's watch (`startMojoTrace`) on the browser (a tracing session is one per browser) and ended by the
-  test's first capture (`takeMojoTrace`, bounded by `TRACE_END_MS`: a stopped renderer's flush takes about 5 s).
-  Chromium gives its events only at the end, from a ring of 16 MB in the browser, so no window can be streamed:
-  the window is the 10 s before the renderer's last message and the browser's messages after it, up to the capture,
-  at most `TRACE_MOST` events. Only the Mojo category is asked for (`excludedCategories: ['*']`: with Chromium's
-  defaults too, 60 MB came in 2 s). The trace clock is the monotonic one (as `process.hrtime`, checked on Linux). Its
-  cost is measured: 300 evaluates took 2.07 s without it and 2.77 s with it. Off with `QUIRE_NO_STALL_ARM`. Chromium's
-  documentation names no Mojo category; `disabled-by-default-mojom` is the one headless shell 149 emits.
+  test's first capture (`takeMojoTrace`, bounded by `TRACE_END_MS`: a stopped renderer's flush takes about 5 s) or,
+  with no capture, by the watch's stop (`MOJO_END_MOST_MS`, part of `TEARDOWN_MOST_MS`). Chromium gives its events
+  only at the end, from a ring of 16 MB in the browser, so no window can be streamed. The window (`mojoWindow`) is
+  per process, because the page's own renderer is not known to the capture: each renderer keeps the 10 s before its
+  own last message (a frozen one stops where it froze, whatever another renderer sends), the browser and the other
+  processes keep the span from the earliest of those starts to the capture. At most `TRACE_PROCESS_MOST` newest
+  events of a process are kept; the 10 s is the most, and `perProcess[].retainedMs` says the time really kept
+  (a busy renderer sends several thousand events a second, so its 10,000 events can be 2 s). Only the Mojo
+  category is asked for (`excludedCategories: ['*']`: with Chromium's defaults too, 60 MB came in 2 s). The trace
+  clock is the monotonic one (as `process.hrtime`, checked on Linux). A `@serial` test (it asserts timings) is not traced: the trace made the page-turn and pathological specs 8% slower
+  (summed test time of 4 runs, 261.8 s against 243.1 s). Flushing it at a test's end took 30 ms idle, 0.2 s after 2 s of
+  dense IPC and 0.6 to 1.3 s after 10 to 30 s of it. Off with `QUIRE_NO_STALL_ARM`. Chromium's documentation names no Mojo category; `disabled-by-default-mojom` is the one
+  headless shell 149 emits.
 * **The browser's own stderr is not captured.** Playwright 1.61's `logger` launch option receives
   only `api` messages, not the browser's process lines; a `Browser` has no `process()`; Chromium's
   `--log-file` writes no file in the headless shell; `DEBUG=pw:browser` prints the lines to the
