@@ -582,7 +582,7 @@ const cap = (text, most) => (text.length > most ? `${text.slice(0, most)}\n... (
 const GDB_PATH_VARIABLE = 'QUIRE_STALL_GDB';
 
 /** The absolute path of an executable on this process's PATH, or null. */
-function whichExecutable(name) {
+export function whichExecutable(name) {
   if (isAbsolute(name)) { try { accessSync(name, constants.X_OK); return name; } catch (missing) { return null; } }
   for (const directory of (process.env.PATH || '').split(delimiter)) {
     if (!directory) continue;

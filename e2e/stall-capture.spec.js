@@ -23,7 +23,7 @@ import { test, expect } from './fixtures.js';
 import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
-import { arm, capture, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS } from './stall-capture.js';
+import { arm, capture, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
 const SPIN_MODULE = (() => {
@@ -422,7 +422,7 @@ test('without gdb the stacks come from eu-stack, else pstack, else the capture s
 });
 
 /** Whether this machine has the tool: the tests of the real ones skip, saying so, where it does not. */
-const installed = (tool) => spawnSync('sh', ['-c', `command -v ${tool}`]).status === 0;
+const installed = (tool) => whichExecutable(tool) !== null;
 
 // What the real tools print was read from the real tools (#575): eu-stack gives "#0  0x... function - module"
 // for every thread, and exits 1 when it could not unwind one of them (V8's code is in memory no file maps)
