@@ -2,8 +2,7 @@
 // EPUB OCF names (section 4.1.2; quire#410), and books whose font cannot be
 // had. The font (marker-font.ttf, made with fontTools) has one glyph no
 // system or bundled font has, U+E000, 1.7 em wide, so a test tells the
-// book's face from a fallback by measuring that one character. Each book is
-// checked by epubcheck (e2e/epubcheck.spec.js).
+// book's face from a fallback by measuring that one character.
 
 import { readFileSync } from 'node:fs';
 import { randomBytes } from './create-epub.js';

@@ -1,6 +1,6 @@
 // The reader's text size is the reading size in every book, and the
 // publisher's other sizes keep their proportion to the body text (#431).
-// The books are in size-books.js, checked by epubcheck.spec.js: A sets its
+// The books are in size-books.js: A sets its
 // text in a rem chain (html 62.5%, 1.6rem), B in points, a class and an inline
 // style; the others put the size on body, on a div, by html and rem, by
 // calc() (not read), in a part title page of headings, in 1px and 400% rules,

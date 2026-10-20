@@ -1,5 +1,4 @@
-// A book whose contents are nested to four levels (#690), checked by
-// epubcheck (e2e/epubcheck.spec.js): the Contents panel must give the
+// A book whose contents are nested to four levels (#690): the Contents panel must give the
 // levels to assistive technology, not only to the eye.
 
 const body = chapter => `<h1>Chapter ${chapter}</h1>\n<p>${'Text of the chapter. '.repeat(20)}</p>`;

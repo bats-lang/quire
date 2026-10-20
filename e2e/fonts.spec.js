@@ -1,13 +1,13 @@
 // A book's own font, plain or masked by the obfuscations the EPUB OCF
 // requires a reading system to undo (section 4.1.2; quire#410): IDPF's
-// (the key the SHA-1 of the package's unique identifier) and Adobe's (the
-// key the identifier's UUID). The books are in font-books.js (checked by
-// epubcheck); their font has one glyph no system font has, U+E000, 1.7 em
-// wide, so the book's face is told from a fallback by measuring that one
-// character. A font in an algorithm Quire has no client for, one the
-// archive lacks, one that is noise and one shorter than the masked bytes
-// degrade where they are: the text is read in the reader's own face, and
-// the book raises no banner.
+// (the key the SHA-1 of the package's unique identifier) and Adobe's
+// (the key the identifier's UUID). The books are in font-books.js; their
+// font has one glyph no system font has, U+E000, 1.7 em wide, so the
+// book's face is told from a fallback by measuring that one character.
+// A font in an algorithm Quire has no client for, one the archive lacks,
+// one that is noise and one shorter than the masked bytes degrade where
+// they are: the text is read in the reader's own face, and the book
+// raises no banner.
 
 import { test, expect } from './fixtures.js';
 import { start, importFiles, epubFile, openBook, openSettings, bookPage, reload } from './helpers.js';

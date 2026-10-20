@@ -1,6 +1,6 @@
 // Two small EPUB 3 books that differ in every feature the reader keeps per
 // book (#435), so a test that opens one after the other can tell whose
-// each thing shown is. Each is checked by epubcheck (e2e/epubcheck.spec.js).
+// each thing shown is.
 //
 // Alpha: five chapters, a nested contents, a page list with breaks in the
 // text, a note, a ruby, a Media Overlays narration, left to right,

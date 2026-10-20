@@ -1,7 +1,7 @@
 // Note popups beyond the basics of reader.spec.js (#414): links in a
 // note, nested notes, notes marked other ways, long and hidden notes, and
 // links that look like notes but are not marked. The book is in
-// note-books.js, checked by epubcheck.spec.js.
+// note-books.js.
 //
 // Decided (issue 414) from what readers do. The EPUB spec defines
 // "footnote" and "noteref" and nothing of a popup (EDRLab). Apple's asset

@@ -2,9 +2,8 @@
 // document, chapters, images, styles and navigation in different
 // directories, hrefs with "./", "../", percent-encoding and non-ASCII
 // names, links between chapters of different folders, and ids that two
-// chapters share. Each is checked by epubcheck (e2e/epubcheck.spec.js):
-// `valid` ones must pass; an invalid one is invalid on purpose, and
-// `errors` names the only messages it may give.
+// chapters share. An invalid one is invalid on purpose, and `errors` names the only
+// messages it may give.
 
 import { TINY_PNG } from './create-epub.js';
 

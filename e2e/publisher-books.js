@@ -1,9 +1,8 @@
 // EPUB 3 books whose publisher styling fights the reader's settings
 // (#411): the book's own CSS is dropped, and nothing in it, in a style
 // attribute or in an obsolete presentational attribute may reach the page.
-// Each is checked by epubcheck (e2e/epubcheck.spec.js); `valid` ones must
-// pass, an invalid one (obsolete attributes, by its entry) may give only
-// the errors it lists.
+// An invalid one (obsolete attributes) may give only
+// the errors its entry lists.
 
 const filler = 'lorem ipsum dolor sit amet '.repeat(10);
 const chapter = (head, body) => ({ head, body });

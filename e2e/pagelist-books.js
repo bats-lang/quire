@@ -1,9 +1,8 @@
 // Small EPUB 3 books with print page lists (#415): duplicate and
 // out-of-order labels, targets that are missing, very long lists, odd
-// labels, and page breaks in the text with and without a list. Each is
-// checked by epubcheck (e2e/epubcheck.spec.js): `valid` ones must pass; an
-// invalid one is invalid on purpose, and `errors` names the only messages
-// it may give.
+// labels, and page breaks in the text with and without a list. An
+// invalid one is invalid on purpose, and `errors` names the only
+// messages it may give.
 
 const filler = 'lorem ipsum dolor sit amet '.repeat(12);
 const para = (tag, k) => `<p>${tag} ${k} ${filler}</p>`;

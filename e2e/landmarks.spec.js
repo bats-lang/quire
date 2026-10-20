@@ -2,7 +2,7 @@
 // landmarks name (EPUB 3.3 5.4.1.2: bodymatter, "start reading"), or its
 // guide's text reference (EPUB 2), else its first spine item. A book
 // that has been read opens at its kept place. The books are in
-// landmark-books.js, checked by epubcheck.spec.js.
+// landmark-books.js.
 
 import { test, expect } from './fixtures.js';
 import {

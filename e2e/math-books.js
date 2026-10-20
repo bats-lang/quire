@@ -1,5 +1,4 @@
-// EPUB 3 books about mathematics (#408), each one concern, checked by
-// epubcheck (e2e/epubcheck.spec.js) and read by the math specs
+// EPUB 3 books about mathematics (#408), each one concern, read by the math specs
 // (e2e/math-native.spec.js and the others named in tests/groups.json). A
 // book is one chapter of one concern: how an equation sits in a line, how
 // it stands in a paragraph of its own, how a wide one is held, what a

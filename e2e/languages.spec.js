@@ -16,7 +16,7 @@
 //   voice and the dictionary go by its primary subtag.
 // - xml:lang on an element is kept on its content node, and a phrase in
 //   another language is read aloud in it.
-// The books are in language-books.js, checked by epubcheck.spec.js.
+// The books are in language-books.js.
 
 import { test, expect } from './fixtures.js';
 import {

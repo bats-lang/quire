@@ -2,8 +2,8 @@
 // package two levels down, hrefs written as URLs (./, %20, +, non-ASCII), a
 // chapter that climbs out of the container, links between chapters of
 // different folders, a note in a third folder, a notes file outside the
-// spine, and ids that two chapters share. The books are in folder-books.js,
-// checked by epubcheck.spec.js. Every other fixture puts the package at
+// spine, and ids that two chapters share. The books are in folder-books.js.
+// Every other fixture puts the package at
 // OEBPS/content.opf with the chapters beside it.
 //
 // Decided (issue 432) from the specifications and what readers do:

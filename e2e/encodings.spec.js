@@ -7,7 +7,7 @@
 // decoded by it; a document that is not UTF-8 and says nothing else, or an
 // encoding Quire has no table for, is refused with the words "Chapter N of
 // this book could not be read", never shown as mojibake. The books are in
-// encoding-books.js, checked by epubcheck.spec.js.
+// encoding-books.js.
 
 import { test, expect } from './fixtures.js';
 import {

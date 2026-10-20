@@ -1,5 +1,4 @@
-// A small EPUB 3 book of notes of every marking and shape (#414), checked
-// by epubcheck (e2e/epubcheck.spec.js).
+// A small EPUB 3 book of notes of every marking and shape (#414).
 
 const filler = Array.from({ length: 10 }, (_, k) => `<p>Filler ${k} ` + 'lorem ipsum dolor sit amet '.repeat(12) + '</p>').join('');
 const ref = (n, type = 'epub:type="noteref"') => `<a ${type} href="#n${n}">${n}</a>`;

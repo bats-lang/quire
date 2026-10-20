@@ -2,7 +2,7 @@
 // CSS is dropped (a `<style>`, a style attribute, `!important`, a media
 // rule), and so are obsolete presentational attributes, so nothing of it
 // fights the text size, the theme, the margins or the page's width. The
-// books are in publisher-books.js, checked by epubcheck.spec.js.
+// books are in publisher-books.js.
 //
 // Decided (issue 411), against Readium CSS (Thorium): it keeps the
 // publisher's styles unless the reader turns on "advanced" settings, and
