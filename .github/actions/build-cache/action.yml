@@ -23,7 +23,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # A locator, not a judge: what a restore is trusted for is bats's (.claude/rules/ci.md).
+    # A locator, not a judge: what a restore is trusted for is bats's (keyword: build cache).
     - name: Name the cache
       id: key
       shell: bash

@@ -246,7 +246,7 @@ async function sameBackupSameSentence(browser, testInfo, minute) {
 // HighlightSync plugin merges by latest timestamp, which cannot tell a
 // second act from the first's copy either; searched for Readwise, Kindle
 // and Kobo too and found no account of two highlights of one passage made
-// by two devices); and the rule the spec of ids gives (.claude/rules/sync.md, "The sync file and its stores")
+// by two devices); and the rule the spec of ids gives (keyword: sync file)
 // is the one tested: a highlight made twice in one minute on one passage
 // is a double tap, not two highlights (and a sync that finds the same
 // thing twice must not double it), and made in different minutes it is
