@@ -37,13 +37,19 @@
  *     (`userSpaceStacks`, `fallbackStacks`), never a failure of the test;
  *   - the kernel's view of the other browser processes too (the browser
  *     process, the GPU process: `native.browserProcesses`), which a frozen
- *     renderer may wait on, never attached to.
+ *     renderer may wait on, never attached to;
+ *   - what the page did before it stopped (`history`, e2e/page-history.js,
+ *     kept in node from the page's events, since its script cannot record
+ *     them): the last 100 console messages, uncaught errors, requests,
+ *     finished and failed requests, each with its time, and the requests
+ *     still in flight with their age. No body is read and nothing is awaited.
  */
 
 import { execFile } from 'node:child_process';
 import { accessSync, constants, existsSync, readdirSync, readFileSync, readlinkSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, isAbsolute, join } from 'node:path';
 import { bindAttempts } from './attempt-log.js';
+import { keepHistory } from './page-history.js';
 import { runnerLoad, sampleRunner } from './runner-load.js';
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
@@ -154,7 +160,8 @@ const armingOff = () => !['', '0'].includes(process.env[NO_ARM] || '');
  * the debugger enabled; `scripts` maps a script id to its URL.
  */
 export async function arm(page) {
-  const armed = { session: null, scripts: new Map(), error: null, pausing: false };
+  // the page's recent events, kept whether or not it is armed (#575): from before anything else can happen on it
+  const armed = { session: null, scripts: new Map(), error: null, pausing: false, history: keepHistory(page) };
   if (armingOff()) {
     // the capture then says the page was not armed (`armed: false`, this reason)
     armed.error = `not armed: ${NO_ARM}=${process.env[NO_ARM]} (the debugger is never enabled)`;
@@ -867,6 +874,8 @@ export async function capture(page, armed, reason, browser, save = () => {}, sco
 
 async function captureArmed(page, armed, reason, browser, save, scope, corePathFor) {
   const result = { reason, at: new Date().toISOString(), url: page.url(), armed: !armed.error, armError: armed.error };
+  // what the page did before this capture, read first so the requests in flight are those of the stall (#575)
+  result.history = armed.history ? armed.history.snapshot() : 'not available: the page was not watched yet';
   const session = armed.session;
   const cpu = browser ? rendererCpu(browser, CPU_WINDOW_MS) : Promise.resolve(null);
   // Does the page's main thread run a task? Asked of the armed session; a page
@@ -1024,6 +1033,11 @@ export function summary(result) {
     for (const [resource, rows] of Object.entries(result.machine.pressure)) if (rows[0]) lines.push(`  pressure ${resource}: ${rows.join(' | ')}`);
   }
   if (result.runnerLoad && result.runnerLoad.summary) lines.push(`  runner: ${result.runnerLoad.summary.reading}`);
+  if (result.history && result.history.inFlight) {
+    const history = result.history;
+    const flying = history.inFlight.slice(0, 3).map((each) => `${each.method} ${each.url} for ${each.ageMs} ms`).join('; ');
+    lines.push(`  page history: ${history.console.length} console, ${history.pageerror.length} errors, ${history.requestfailed.length} failed requests; ${history.inFlight.length} requests in flight${flying ? `: ${flying}` : ''}`);
+  }
   if (result.pageTiming && result.pageTiming.attempts) {
     const late = result.pageTiming.attempts.filter((entry) => entry.outcome === 'failed').slice(-3);
     for (const entry of late) lines.push(`  attempt ${entry.step} #${entry.attempt} failed after ${entry.ms} ms: ${entry.why}${entry.devtools && entry.devtools.reading ? ` (${entry.devtools.reading})` : ''}`);

@@ -215,6 +215,35 @@ test('a page in an endless wasm loop is captured in that loop, and gdb is not at
   expectBusyNotFrozen(capture);
 });
 
+test('a page\'s recent console messages, errors and requests are in its capture, with the requests in flight (#575)', async ({ page, stallWatch }) => {
+  // one request that is never answered (in flight at the stall) and one that Playwright fails
+  await page.route('**/history-never-answered', () => {});
+  await page.route('**/history-refused', (route) => route.abort('failed'));
+  await page.setContent('<!doctype html><title>History</title><p>History</p>');
+  await page.evaluate(async () => {
+    console.warn('history-marker');
+    setTimeout(() => { throw new Error('history-error'); }, 0);
+    await fetch('http://history.test/history-refused').catch(() => {});
+    fetch('http://history.test/history-never-answered').catch(() => {});
+  });
+  await new Promise((done) => setTimeout(done, 500));
+  await startLoop(page, stallWatch, 'setTimeout(spinForever, 0)');
+  const capture = await stallWatch.next(page, 20000);
+  await endLoop(page, stallWatch);
+  const history = capture.history;
+  expect(history.console.some((each) => each.type === 'warning' && each.text === 'history-marker')).toBe(true);
+  expect(history.pageerror.some((each) => each.message === 'history-error')).toBe(true);
+  expect(history.requestfailed.some((each) => /\/history-refused$/.test(each.url) && /ERR_FAILED/.test(each.failure))).toBe(true);
+  // the one never answered is in flight, with its age; the one that failed is not
+  const flying = history.inFlight.map((each) => each.url);
+  expect(flying.some((url) => /\/history-never-answered$/.test(url))).toBe(true);
+  expect(flying.some((url) => /\/history-refused$/.test(url))).toBe(false);
+  expect(history.inFlight.every((each) => each.ageMs >= 0)).toBe(true);
+  // every entry has its time, and the kinds are the ones the capture says it keeps
+  expect(history.request.every((each) => typeof each.at === 'number' && each.method === 'GET')).toBe(true);
+  expect(Object.keys(history).sort()).toEqual(['console', 'inFlight', 'note', 'pageerror', 'request', 'requestfailed', 'requestfinished']);
+});
+
 test('a page busy for 12 s that then recovers is captured, not attached to, and runs on', async ({ page, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   await page.setContent('<!doctype html><title>Busy</title>');
