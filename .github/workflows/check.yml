@@ -363,7 +363,7 @@ jobs:
 
       # Node's packages, retried and cached, and the Playwright browsers in
       # one directory (PLAYWRIGHT_BROWSERS_PATH): pwa's action (quire#637).
-      # 1.58 is the least Playwright the suite may run on (keyword: Playwright)
+      # 1.58 is the least Playwright the suite may run on: its fake clock needs it (keyword: the fake clock)
       - name: Set up Node.js and Playwright
         if: env.GROUP_RUN == 'yes'
         uses: bats-lang/pwa/.github/actions/e2e-setup@ea8a14aaaffbca00c6a740cc481e51f7d594e07d # pwa main after #124 (no release tag)

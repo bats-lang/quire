@@ -1,6 +1,6 @@
 # module, parts, smoke: the proof modules the mutation check covers (mutation_check.py, quire#594).
 # `parts` is how many members, run side by side, a module is split in (--shard I/N), so that no job is
-# over about 25 minutes on an idle pool (11 for the app's check, the rest the mutants: .claude/rules/ci.md).
+# over about 25 minutes on an idle pool (11 for the app's check, the rest the mutants; keyword: mutation groups).
 # `smoke` marks the modules a change to the checker alone runs, whole.
 src/bytes.bats 2
 src/chunk.bats

@@ -3,7 +3,7 @@
 // as the words beside them do, and a picture of black ink on no ground is
 // legible in the dark themes.
 //
-// By research (keyword: equations as pictures).
+// By research (keyword: a picture grows with the reader's text size).
 
 import { test, expect } from './fixtures.js';
 import { start, bookPage, colours } from './helpers.js';
