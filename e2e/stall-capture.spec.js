@@ -429,6 +429,68 @@ test('the real eu-stack and pstack give the stacks of a hung process when gdb do
   }
 });
 
+test('the browser and GPU processes are asked for their stacks by the fallback tools, and a utility process is not (#575)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const hung = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const browser = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const gpu = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const utility = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const kept = process.env.QUIRE_STALL_GDB;
+  process.env.QUIRE_STALL_GDB = NO_GDB;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const FRAMES = 'echo "TID $2:"; echo "#0  0x00007f0000001000 nanosleep - /lib/libc.so.6"; echo "#1  0x0000555500002000 main - /usr/bin/sleep"';
+    const others = [
+      { pid: browser.pid, type: 'browser', cpuSeconds: 0 },
+      { pid: gpu.pid, type: 'GPU', cpuSeconds: 0 },
+      { pid: utility.pid, type: 'utility', cpuSeconds: 0 },
+    ];
+    const found = await withTools({ 'eu-stack': FRAMES, pstack: 'echo "#0 pstack should not run"' }, () => nativeStacks([{ pid: hung.pid }], nativeScope(), null, others));
+    const entry = (pid) => found.browserProcesses.find((each) => each.pid === pid);
+    expect(found.renderers[0].userSpaceStacks).toBe('eu-stack');
+    expect(entry(browser.pid).userSpaceStacks, 'the browser process: eu-stack answered').toBe('eu-stack');
+    expect(entry(gpu.pid).userSpaceStacks, 'the GPU process: eu-stack answered').toBe('eu-stack');
+    expect(entry(gpu.pid).fallbackStacks.tried.map((each) => each.tool)).toEqual(['eu-stack']);
+    expect(entry(gpu.pid).fallbackStacks.tried[0].text).toContain('nanosleep');
+    expect(entry(utility.pid).userSpaceStacks, 'a utility process is not asked').toBeUndefined();
+    expect(entry(utility.pid).fallbackStacks).toBeUndefined();
+    // the tools give none: the process says why, with each tool's note, and nothing throws
+    const none = await withTools({ 'eu-stack': 'exit 3', pstack: 'echo nothing to show' }, () => nativeStacks([], nativeScope(), null, others.slice(0, 1)));
+    expect(none.error).toBeUndefined();
+    expect(none.browserProcesses[0].userSpaceStacks).toMatch(/^not available: eu-stack gave no stacks.*; not available: pstack gave no stacks/);
+  } finally {
+    hung.kill('SIGKILL');
+    browser.kill('SIGKILL');
+    gpu.kill('SIGKILL');
+    utility.kill('SIGKILL');
+    if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
+  }
+});
+
+test('the real eu-stack gives a browser or GPU process\'s stacks, and leaves the process running (#575)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  test.skip(!installed('eu-stack'), 'eu-stack (elfutils) is not installed on this machine');
+  const browser = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const gpu = spawn('sleep', ['300'], { stdio: 'ignore' });
+  const kept = process.env.QUIRE_STALL_GDB;
+  process.env.QUIRE_STALL_GDB = NO_GDB;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const found = await nativeStacks([], nativeScope(), null, [{ pid: browser.pid, type: 'browser', cpuSeconds: 0 }, { pid: gpu.pid, type: 'GPU', cpuSeconds: 0 }]);
+    expect(found.browserProcesses.length).toBe(2);
+    for (const other of found.browserProcesses) {
+      if (other.userSpaceStacks.startsWith('not available') && CANNOT_ATTACH.test(other.fallbackStacks.tried.map((each) => each.stderr).join('\n'))) unavailable('the kernel does not let this user attach');
+      expect(other.userSpaceStacks).toBe('eu-stack');
+      expect(other.fallbackStacks.tried[0].text).toMatch(/^#0\s+0x[0-9a-f]+ \S*nanosleep/m);
+      expect(stateOf(other.pid), 'the process is left running, not stopped').toMatch(/^[SR]$/);
+    }
+  } finally {
+    browser.kill('SIGKILL');
+    gpu.kill('SIGKILL');
+    if (kept === undefined) delete process.env.QUIRE_STALL_GDB; else process.env.QUIRE_STALL_GDB = kept;
+  }
+});
+
 test('a renderer\'s cgroup files and the kernel\'s log lines are read, and say why when they cannot be (#575)', async ({}, testInfo) => {
   desktopOnly(testInfo);
   const root = mkdtempSync(join(tmpdir(), 'stall-cgroup-'));

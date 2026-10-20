@@ -37,7 +37,10 @@
  *     (`userSpaceStacks`, `fallbackStacks`), never a failure of the test;
  *   - the kernel's view of the other browser processes too (the browser
  *     process, the GPU process: `native.browserProcesses`), which a frozen
- *     renderer may wait on, never attached to;
+ *     renderer may wait on; when a renderer is frozen their user-space
+ *     stacks are asked of the fallback tools only (eu-stack, then pstack:
+ *     `userSpaceStacks` on each entry, never gdb), after the renderers';
+ *     they are not stopped for longer than those tools take;
  *   - the kernel's record (`kernel`): each renderer's cgroup (v2, from
  *     /proc/<pid>/cgroup: memory.events, memory.current, memory.max, cpu.stat,
  *     cgroup.freeze) and the last 200 lines of dmesg that match an OOM kill,
@@ -134,10 +137,12 @@ export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS + HELPER_
  * (the browser session, two reads and CPU_WINDOW_MS: 3 commands and the
  * window, all of it counted, though it began alongside the probes above);
  * gdb's version; per renderer (side by side) readelf (the binary's
- * notes, sections and version, the system libraries' notes, dpkg), `sudo tail` for the kernel stacks, gdb (backtraces and core), the two fallback stack tools when gdb gave none, and gzip. A capture of a frozen page takes at most
+ * notes, sections and version, the system libraries' notes, dpkg), `sudo tail` for the kernel stacks, gdb (backtraces and core), the two fallback stack tools when gdb gave none, the two fallback tools again for the browser and GPU processes (after the renderers'), and gzip. A capture of a frozen page takes at most
  * CAPTURE_MOST_MS and this.
  */
-export const NATIVE_MOST_MS = COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 8 * HELPER_MS + GDB_MS + GZIP_MS + 2 * FALLBACK_MS;
+export const NATIVE_MOST_MS = COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 8 * HELPER_MS + GDB_MS + GZIP_MS + 2 * FALLBACK_MS
+  // the browser's and the GPU's fallback stacks, after the renderers' (side by side: one pair of tools each)
+  + 2 * FALLBACK_MS;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -933,6 +938,16 @@ export async function nativeStacks(renderers, scope, corePathFor, others = []) {
     return entry;
   }));
   result.browserProcesses = await aside;
+  // The browser's and the GPU's own user-space stacks (#575): a renderer whose main thread waits on a signal may
+  // be waiting on a thread of another process (mojo). Only the fallback tools are asked, eu-stack and then pstack,
+  // never gdb (it stops a process for longer and writes cores), each bounded by FALLBACK_MS; the two run side by side
+  // after the renderers. A process of another type (a utility, the network service) is not asked
+  await Promise.all(result.browserProcesses.filter((other) => /^(browser|gpu)$/i.test(other.type)).map(async (other) => {
+    other.fallbackStacks = await fallbackStacks(other.pid, scope);
+    const used = other.fallbackStacks.tried.find((each) => each.ok);
+    // each tool's note already begins `not available: `
+    other.userSpaceStacks = used ? used.tool : other.fallbackStacks.tried.map((each) => each.note).join('; ');
+  }));
   // no gdb, or none that may attach: the capture carries on without the stacks, and says so
   if (!gdb.available) result.unavailable = `native capture unavailable: ${gdb.error}`;
   else if (result.renderers.length && result.renderers.every((renderer) => !renderer.gdbStacks.ok && CANNOT_ATTACH.test(`${renderer.gdbStacks.stderr}\n${renderer.gdbStacks.text}\n${renderer.gdbStacks.error}`))) {
@@ -1102,6 +1117,10 @@ export function summary(result) {
   if (result.native && Array.isArray(result.native.browserProcesses)) for (const other of result.native.browserProcesses) {
     const tasks = other.kernel.tasks || [];
     lines.push(`  ${other.type} ${other.pid}: ${tasks.length} threads by the kernel${other.kernel.error ? ` (${other.kernel.error})` : ''}, main thread syscall ${(tasks.find((task) => task.tid === other.pid) || {}).syscall}`);
+    if (other.userSpaceStacks) {
+      lines.push(`    ${other.type} ${other.pid} user-space stacks: ${other.userSpaceStacks}`);
+      if (other.fallbackStacks) for (const each of other.fallbackStacks.tried) if (each.ok) lines.push(...each.text.split('\n').slice(0, 14).map((line) => `    ${each.tool}: ${line}`));
+    }
   }
   if (Array.isArray(result.otherProcesses)) for (const process of result.otherProcesses) {
     lines.push(`  ${process.type} ${process.pid}: CPU ${process.cpuSeconds}s over 1 s; threads: ${process.threads.join('; ')}`);
