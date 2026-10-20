@@ -170,7 +170,7 @@ const GOLDEN = [
 ];
 
 for (const mode of MODES) {
-  // Context for a failure seen in this test: quire#600.
+  // Context for a failure seen in the columns test: quire#600.
   test(`${mode}: highlights at, across and after the cuts of a text over 64 KiB paint their own text, after a reload and a restored backup`, async ({ browser, page }, testInfo) => {
     const errors = await start(page);
     const file = epubFile(giantBook);
