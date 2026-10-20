@@ -40,7 +40,9 @@
  *     user-space stacks from the fallback tools when a renderer is frozen;
  *   - the kernel's record (`kernel`): each renderer's cgroup and the OOM and
  *     hung-task lines of dmesg, read before the native stacks;
- *   - what the page did before it stopped (`history`, e2e/page-history.js).
+ *   - what the page did before it stopped (`history`, e2e/page-history.js);
+ *   - when the page is frozen, first of all, the flight recorder's two rings, written out
+ *     (`flight`, e2e/flight-recorder.js): the kernel's record of the run's processes and Chrome's trace.
  */
 
 import { execFile } from 'node:child_process';
@@ -48,6 +50,7 @@ import { accessSync, closeSync, constants, existsSync, openSync, readdirSync, re
 import { delimiter, isAbsolute, join } from 'node:path';
 import { bindAttempts } from './attempt-log.js';
 import { keepHistory } from './page-history.js';
+import { keepBoth, startBrowserTrace, ROOT_MOST_MS, TRACE_END_MS } from './flight-recorder.js';
 import { runnerLoad, sampleRunner } from './runner-load.js';
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
@@ -129,7 +132,8 @@ export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS + HELPER_
  * notes, sections and version, the system libraries' notes, dpkg), `sudo tail` for the kernel stacks, gdb (backtraces and core), the two fallback stack tools when gdb gave none, the two fallback tools again for the browser and GPU processes (after the renderers'), and gzip. A capture of a frozen page takes at most
  * CAPTURE_MOST_MS and this.
  */
-export const NATIVE_MOST_MS = COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 8 * HELPER_MS + GDB_MS + GZIP_MS + 2 * FALLBACK_MS
+export const FLIGHT_MOST_MS = ROOT_MOST_MS + 2 * TRACE_END_MS; // the kernel's ring written, Chrome's trace ended and its completion awaited
+export const NATIVE_MOST_MS = FLIGHT_MOST_MS + COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 8 * HELPER_MS + GDB_MS + GZIP_MS + 2 * FALLBACK_MS
   + 2 * FALLBACK_MS; // the browser's and the GPU's fallback tools
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -934,12 +938,12 @@ export async function nativeStacks(renderers, scope, corePathFor, others = []) {
 }
 
 /** Where a page's main thread is: see the top of this file. */
-export async function capture(page, armed, reason, browser, save = () => {}, scope = nativeScope(), corePathFor = null) {
+export async function capture(page, armed, reason, browser, save = () => {}, scope = nativeScope(), corePathFor = null, flight = null) {
   armed.capturing = true;
-  try { return await captureArmed(page, armed, reason, browser, save, scope, corePathFor); } finally { armed.capturing = false; }
+  try { return await captureArmed(page, armed, reason, browser, save, scope, corePathFor, flight); } finally { armed.capturing = false; }
 }
 
-async function captureArmed(page, armed, reason, browser, save, scope, corePathFor) {
+async function captureArmed(page, armed, reason, browser, save, scope, corePathFor, flight) {
   const result = { reason, at: new Date().toISOString(), url: page.url(), armed: !armed.error, armError: armed.error };
   result.history = armed.history ? armed.history.snapshot() : 'not available: the page was not watched';
   const session = armed.session;
@@ -986,6 +990,8 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
       if (busy.length) {
         result.presumedBusy = `renderer ${busy.map((process) => `${process.pid} used ${process.cpuSeconds} s of CPU`).join(', ')} over ${CPU_WINDOW_MS / 1000} s, so the page is presumed busy, not frozen, and nothing is attached`;
       } else if (renderers.length) {
+        // the rings first (flight recorder): what led up to the freeze, before anything touches the renderer
+        if (flight) result.flight = await flight().catch((error) => ({ error: String(error && error.stack || error) }));
         // before the stacks, which a teardown can cut off
         result.kernel = await kernelOf(processes);
         save(result);
@@ -1061,6 +1067,7 @@ function verdict(result) {
 
 export function summary(result) {
   const lines = [`[stall-capture] ${result.reason}: ${result.url}`, `  ${result.verdict}`];
+  if (result.test) lines.push(`  test: ${result.test} (${result.project}); the page was ${result.pageAgeMs} ms old at the capture, armed after ${result.armedAfterMs} ms`);
   if (result.answers) lines.push(`  answers: interrupt ${result.answers.interrupt.answered}, task ${result.answers.task.answered}`);
   if (result.paused) for (const frame of result.paused.frames.slice(0, 12)) {
     lines.push(`    at ${frame.functionName} (${frame.url}:${frame.line}:${frame.column})`);
@@ -1074,6 +1081,14 @@ export function summary(result) {
       if (process.threads) lines.push(`  renderer ${process.pid} threads: ${process.threads.join('; ')}`);
       if (process.mainThread) lines.push(`  renderer ${process.pid} main thread: syscall ${process.mainThread.syscall}; kernel stack ${process.mainThread.kernelStack.replace(/\s+/g, ' ').slice(0, 300)}`);
       if (process.channels) lines.push(`  renderer ${process.pid} open: ${process.channels.join(', ')}`);
+    }
+  }
+  if (result.flight) {
+    const { kernel, browserTrace, error } = result.flight;
+    if (error) lines.push(`  flight recorder: ${error}`);
+    for (const [name, each] of [['kernel ring', kernel], ['browser trace', browserTrace]]) {
+      if (!each) continue;
+      lines.push(`  flight ${name}: ${each.file ? `${each.file} (${each.bytes} bytes${each.lines ? `, ${each.lines} of ${each.seen} events` : ''}${each.dataLoss ? ', the ring wrapped' : ''})` : (each.unavailable || each.error)}`);
     }
   }
   if (result.native) {
@@ -1132,6 +1147,11 @@ export function summary(result) {
   return lines.join('\n');
 }
 
+function inertWatch() {
+  const unavailable = async () => { throw new Error('the stall watch is off (QUIRE_STALL_WATCH=off)'); };
+  return { captures: [], watchContext() {}, evidence: async () => ({}), next: unavailable, started: unavailable, session: async () => null, async stop() {} };
+}
+
 /**
  * The watch over one test's pages: arms each page as it is made (a
  * context's 'page' event; a context made with browser.newContext, or
@@ -1142,8 +1162,11 @@ export function summary(result) {
  * `started(page, ms)` for one to begin.
  */
 export function stallWatch(browser, testInfo) {
+  // the hunt's bare arm (#575): no probe, no arming, no recorder; a test that times out is all there is to see
+  if (process.env.QUIRE_STALL_WATCH === 'off') return inertWatch();
   const armed = new Map();     // page -> its armed session (a promise)
   const ready = new Map();     // page -> its armed session, once armed
+  const seen = new Map();      // page -> when the watch first saw it, and how long arming took
   const watchedContexts = new Set();
   const running = new Set();   // captures in progress
   const scope = nativeScope(); // what they run outside node
@@ -1158,7 +1181,8 @@ export function stallWatch(browser, testInfo) {
     if (stopped || armed.has(page) || page.isClosed()) return;
     const pending = arm(page);
     armed.set(page, pending);
-    pending.then((done) => ready.set(page, done));
+    seen.set(page, { at: Date.now() });
+    pending.then((done) => { ready.set(page, done); seen.get(page).armedAfterMs = Date.now() - seen.get(page).at; });
     probe(page);
   };
   const watchContext = (context) => {
@@ -1177,8 +1201,14 @@ export function stallWatch(browser, testInfo) {
     const path = testInfo.outputPath(`stall-capture-${count}.json`);
     // written when the native stacks are in and again at the end, so what the
     // native step found survives a teardown that does not wait for the rest
-    const save = (partial) => { try { writeFileSync(path, JSON.stringify(partial, null, 2)); } catch (error) { /* the output directory is gone: the test is over */ } };
-    const result = await capture(page, armedPage, reason, browser, save, scope, (pid) => testInfo.outputPath(`stall-core-${count}-${pid}.core`));
+    // which test, how old the page was, when it was armed (G5, G6 of #575): a deliberate freeze names its test
+    const first = seen.get(page);
+    const identity = { test: testInfo.title, project: testInfo.project.name, pageAgeMs: first ? Date.now() - first.at : null, armedAfterMs: first && first.armedAfterMs !== undefined ? first.armedAfterMs : null };
+    const save = (partial) => { try { writeFileSync(path, JSON.stringify({ ...identity, ...partial }, null, 2)); } catch (error) { /* the output directory is gone: the test is over */ } };
+    const number = count;
+    const result = await capture(page, armedPage, reason, browser, save, scope, (pid) => testInfo.outputPath(`stall-core-${count}-${pid}.core`),
+      () => keepBoth(browser, (name) => testInfo.outputPath(`flight-${number}-${name}`)));
+    Object.assign(result, identity);
     save(result);
     await testInfo.attach(`stall-capture-${count}`, { path, contentType: 'application/json' }).catch(() => {});
     console.error(summary(result));
@@ -1263,6 +1293,8 @@ export function stallWatch(browser, testInfo) {
     return context;
   };
 
+  // a @serial test asserts timings, which a trace perturbs (#741 measured +6%): it records nothing
+  if (!(testInfo.tags || []).includes('@serial')) startBrowserTrace(browser);
   scan();
   const scanTimer = setInterval(() => { scan(); nearTimeout(); }, SCAN_EVERY_MS);
 

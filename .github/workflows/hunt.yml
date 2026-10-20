@@ -1,0 +1,140 @@
+name: hunt
+
+# quire#575: the experiment that finds a flake whose cause is not known, in its own unit. The flake
+# is a fresh runner job's first minute (about 1 in 900 jobs), so the hunt is N independent fresh
+# jobs, each running the start of the desktop project of a group in check.yml's order, in three
+# arms that differ only by the environment (scripts/hunt.py): full (as CI), noarm
+# (QUIRE_NO_STALL_ARM=1) and bare (nothing of ours watches). Only a job that hits uploads its evidence;
+# the report gives the hits per arm and the 95% upper bound of the rate when there are none.
+#
+# Dispatch only: never a push, a pull request, a schedule or the merge queue. The dispatcher checks
+# `qsweep pressure` first (the runners are the scarce resource): 20 jobs of each matrix run at a time.
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobs_per_arm:
+        description: 'Fresh jobs in each arm (1 to 512 divided by the number of arms; 100 with three arms is 300 jobs)'
+        required: true
+        default: '100'
+        type: string
+      arms:
+        description: 'Arms, space separated, each once: full noarm bare'
+        required: true
+        default: 'full noarm bare'
+        type: string
+      groups:
+        description: 'E2e groups of tests/groups.json, space separated, dealt round robin (the groups of the four recurrences)'
+        required: true
+        default: 'relaunch settings extras reader'
+        type: string
+      seconds:
+        description: 'Seconds each of gen-pwa test runs may go (30 to 1200); the recurrences came 25 to 45 s into the run'
+        required: true
+        default: '150'
+        type: string
+
+jobs:
+  # Checks the inputs and makes the two matrices (GitHub allows 256 jobs in one)
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix_a: ${{ steps.plan.outputs.matrix_a }}
+      matrix_b: ${{ steps.plan.outputs.matrix_b }}
+      count_a: ${{ steps.plan.outputs.count_a }}
+      count_b: ${{ steps.plan.outputs.count_b }}
+      seconds: ${{ steps.plan.outputs.seconds }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check the inputs and plan the jobs
+        id: plan
+        run: scripts/hunt.py plan
+        env:
+          HUNT_JOBS_PER_ARM: ${{ inputs.jobs_per_arm }}
+          HUNT_ARMS: ${{ inputs.arms }}
+          HUNT_GROUPS: ${{ inputs.groups }}
+          HUNT_SECONDS: ${{ inputs.seconds }}
+
+  # The app and the PWA, built once for the jobs. check.yml's build job without its caches, Android and
+  # checks (it is not callable: no workflow_call, and its steps carry what the hunt does not need)
+  build:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up bats
+        uses: bats-lang/bats/.github/actions/setup@2ea56e16919a87077b793f2b08201de4fbc509bd # the setup action (bats#280)
+      - name: Build the app and the PWA generator
+        run: bats build
+      - name: Generate PWA
+        run: ./dist/debug/gen-pwa
+      - name: Sync clients
+        run: scripts/sync-clients.sh dist/pwa
+      - name: Upload the PWA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hunt-pwa
+          path: dist/pwa
+          retention-days: 1
+      - name: Upload the PWA generator
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hunt-gen-pwa
+          path: dist/debug/gen-pwa
+          retention-days: 1
+
+  hunt-a:
+    needs: [plan, build]
+    if: needs.plan.outputs.count_a != '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_a) }}
+    name: hunt ${{ matrix.arm }} ${{ matrix.group }} #${{ matrix.n }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/actions/hunt-job
+        with:
+          arm: ${{ matrix.arm }}
+          group: ${{ matrix.group }}
+          n: ${{ matrix.n }}
+          seconds: ${{ needs.plan.outputs.seconds }}
+
+  hunt-b:
+    needs: [plan, build]
+    if: needs.plan.outputs.count_b != '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_b) }}
+    name: hunt ${{ matrix.arm }} ${{ matrix.group }} #${{ matrix.n }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/actions/hunt-job
+        with:
+          arm: ${{ matrix.arm }}
+          group: ${{ matrix.group }}
+          n: ${{ matrix.n }}
+          seconds: ${{ needs.plan.outputs.seconds }}
+
+  report:
+    needs: [plan, hunt-a, hunt-b]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Download every job's result
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: hunt-result-*
+          path: results
+      - name: Report
+        run: scripts/hunt.py report results

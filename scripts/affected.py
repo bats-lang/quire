@@ -228,6 +228,8 @@ RULES = [
         '.github/workflows/relock.yml', '.github/workflows/sync-identity.yml',
         '.github/workflows/sync-providers.yml', '.github/workflows/supersede.yml',
     ], NONE, NONE),
+    # The hunt (quire#575): a dispatch-only workflow and its script, run by no group; its script's test is a checker
+    Rule('the hunt', ['.github/workflows/hunt.yml', 'scripts/hunt.py'], NONE, only_checkers),
     # Tests of the build job (vitest on the wasm, the codec, the CSS reader, the
     # layout cap's node check, the version) and the home page, which the e2e
     # groups serve beside the app

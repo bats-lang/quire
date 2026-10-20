@@ -238,3 +238,36 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
   A failed test attaches `page-timing.json` (each page's `attempts` and `longTasks`), and a capture has
   `pageTiming`. The JSON of a capture only gained fields. `e2e/stall-capture.spec.js` checks the fields,
   the attempt log, and that a stuck page or an unarmed one gives a note and no failure.
+
+## The flight recorder and the hunt (#575)
+
+Keyword: flight recorder. The freeze of #575 (a fresh job's renderer, main thread in an untimed futex wait, about
+1 in 900 fresh jobs) is not waited for: the history is recorded in rings during every CI e2e job and written out
+only for a frozen renderer, and the hunt (`hunt.yml`) makes N fresh jobs so it arrives. The design, with the research and what
+each means cannot find, is on quire#575.
+
+* **Kernel ring** (`e2e/flight-tracefs.js`, `e2e/flight-recorder.js`): `globalSetup` makes an ftrace instance of its
+  own (`/sys/kernel/tracing/instances/quire-<pid>`, root: in-process as root, else `sudo -n node`), scoped to the run's process
+  tree by `set_event_pid` and `event-fork`, 64 MB a CPU, overwriting its oldest events, `trace_clock` mono (the clock of Chrome's
+  trace events, so the two line up). Events: `sys_enter_futex`/`sys_exit_futex` (the address and result of the
+  untimed wait and of the wake that did not come), `sched_switch`/`sched_wakeup` (who woke whom), fork, exit, exec,
+  signals, and read, write, sendmsg, recvmsg, epoll_pwait, poll, ppoll, eventfd2 (the Mojo pipes). Measured on Chrome 149: about 44,000
+  events a second, no slowdown beyond noise (3.9 s against 3.7 s for 30 page cycles). A frozen renderer's capture first pauses the ring
+  and writes its last 1.5 million lines gzipped (`flight-<n>-kernel.txt.gz`). The teardown removes the instance.
+* **Chrome's ring** (`startBrowserTrace`, `keepBrowserTrace`): the browser's DevTools `Tracing` domain, `recordContinuously`, categories
+  toplevel, ipc, mojom and sync (`TRACE_CATEGORIES`), 32 MB. Measured over 8 rounds of 30 page cycles (a loop of nothing but IPC) with the kernel ring: 3.88 s with no recorder, 4.09 s with this set (+5%), 4.25 s with nine categories (+10%), so the light set is the default. Ended and read only for
+  a frozen renderer (`flight-<n>-browser-trace.json.gz`). Measured with one thread of a renderer stopped: `Tracing.end` answers in 79 ms
+  and the trace holds the renderer's events up to the freeze, so a frozen main thread does not take the renderer's trace with it.
+  A renderer with every thread stopped (SIGSTOP) answers nothing more: the browser's, GPU's and network's events are what is then in it.
+* **When it records**: CI, or `QUIRE_FLIGHT=1`, on Linux. `QUIRE_NO_RECORDER=1` turns it off, and `QUIRE_STALL_WATCH=off` makes the whole
+  watch inert (no probe, no arming); both are the hunt's bare arm and nothing else sets them. Without tracefs or sudo the capture says
+  `not available: <why>`; nothing fails a test.
+* **The hunt** (`.github/workflows/hunt.yml`, dispatch only; `scripts/hunt.py`; `.github/actions/hunt-job`): `jobs_per_arm` (100) fresh
+  jobs in each of three arms, `full` (as CI), `noarm` (`QUIRE_NO_STALL_ARM=1`) and `bare`, each running the start of the desktop project of
+  one of the four groups of the recurrences (relaunch, settings, extras, reader), in `check.yml`'s order and with its steps, for `seconds`
+  (150) of each `gen-pwa test` run. The arms differ only in the environment of one step. Only a job that hit uploads
+  (`hunt-hit-<arm>-<n>`, cores in `hunt-core-<arm>-<n>`); the report gives, per arm, the hits and, with none, the 95% upper bound of the rate
+  (`1 - 0.05^(1/N)`) and the chance that N jobs would have seen a 1-in-900 event. Two matrices of at most 256 (GitHub's limit), 20 jobs
+  of each running at a time. The dispatcher checks `qsweep pressure` first.
+* **A stopgap**: the recorder, the gdb install and the hunt are what a second Playwright app would copy; they belong in pwa's
+  `e2e-setup` and `gen-pwa test` (bats-lang/pwa#132 for the evidence, #109 for the tools), and this is quire's until they move.
