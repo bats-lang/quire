@@ -1,6 +1,8 @@
 # The stall capture's native tools (quire#575, #591): gdb for the renderer's stacks and core, elfutils
-# (eu-stack, its fallback when gdb cannot attach) and libc6-dbg (which names libc's internal
-# functions). Called by check.yml's e2e jobs.
+# (eu-stack, its fallback when gdb cannot attach), libc6-dbg (which names libc's internal
+# functions) and rr (never used to record a test: the preflight runs `rr record true` so that the log
+# carries rr's own verdict on this runner's CPU and counters, the proof that rr cannot be used here
+# is read again each job). Called by check.yml's e2e jobs.
 #
 # A STOPGAP: pwa's e2e-setup action should install these and keep the runner's passwordless sudo
 # (bats-lang/pwa#109); this action goes when that lands. A diagnostic for a rare freeze must not
@@ -27,5 +29,7 @@ runs:
         libc_version=$(dpkg-query -W -f='${Version}' libc6)
         sudo apt-get install -y -q --no-upgrade "libc6-dbg=$libc_version" \
           || echo "libc6-dbg $libc_version is not available: libc's internal functions stay unnamed"
+        # rr is its own install: a package that is missing must not take gdb with it
+        sudo apt-get install -y -q rr || echo "rr is not available: the preflight logs it as not installed"
         echo "Install gdb: installed=$installed after $(( $(date +%s) - started )) s"
         [ "$installed" = yes ]

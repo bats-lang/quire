@@ -133,12 +133,15 @@ export async function missingEvidence(state, env = process.env) {
   // a test that did not end as expected (failed, timed out, interrupted) or whose renderer froze or crashed owes its record
   const unexpected = !!state.status && !['passed', 'skipped'].includes(state.status) && state.status !== state.expectedStatus;
   const failing = unexpected || state.frozen;
-  // only a test of the capture's own teardown sets this: it ends the capture's native step on purpose, so the fields that step gives are not owed
-  if (!failing || !wanted(env) || state.cutOnPurpose) return [];
+  if (!failing || !wanted(env)) return [];
+  // Only a test of the capture's own teardown sets `cutOnPurpose`, and it says what it cuts: 'whole capture' (the teardown ends the capture before it
+  // has kept anything: nothing of that capture is owed) or 'native step' (the rings are kept and the native step is cut: the rings are owed as to any
+  // red, the native step's fields (`incompleteCapture`) and the capture file are not).
+  if (state.cutOnPurpose === 'whole capture') return [];
   const missing = [];
   const flight = state.flight;
   if (!flight) return ['flight recorder (nothing was written for the failure)'];
-  missing.push(...incompleteCapture(state.captureResult));
+  if (state.cutOnPurpose !== 'native step') missing.push(...incompleteCapture(state.captureResult));
   const kernel = flight.kernel || {};
   if (!kernel.file) missing.push(`kernel ring (${kernel.unavailable || kernel.error || 'not written'})`);
   else {
@@ -149,7 +152,7 @@ export async function missingEvidence(state, env = process.env) {
   }
   const trace = flight.browserTrace || {};
   if (!trace.file && !state.browserGone) missing.push(`browser trace (${trace.unavailable || trace.error || 'not written'})`);
-  if (state.frozen && !state.captureFile) missing.push('stall capture');
+  if (state.frozen && !state.captureFile && state.cutOnPurpose !== 'native step') missing.push('stall capture');
   return missing;
 }
 
@@ -276,15 +279,25 @@ export async function pageState(page, ms = 2000) {
 }
 
 /**
- * What a run can do that bears on the classes it cannot see, read each run and written to the job's log: whether the hardware
- * counters rr needs are there (perf stat on cycles), and whether a symbol file now exists for the Chrome for Testing build.
- * `notice` is set when either changed from what the design records, so the proof of impossibility is not one old measurement.
+ * What a run can do that bears on the classes it cannot see, read each run and written to the job's log: the facts the proof that rr
+ * cannot be used on a hosted runner stands on (whether the hardware counters it needs are there, `perf stat` on cycles; and whether rr
+ * itself, installed by the job, runs: its own CPU and counter checks, `rr record`), and whether a symbol file now exists for the Chrome
+ * for Testing build. `notice` is set when either changed from what the design records, so the proof of impossibility is not one old
+ * measurement. `run(command, args, env)` answers { ok, stdout, stderr }; rr records into a directory of the caller's choosing (`traceDirectory`).
  */
-export async function capabilities({ run, fetchHead, version, platform = 'linux64' }) {
-  const result = { at: new Date().toISOString(), counters: null, symbols: null, notice: [] };
+export async function capabilities({ run, fetchHead, version, platform = 'linux64', traceDirectory = null }) {
+  const result = { at: new Date().toISOString(), counters: null, rr: null, symbols: null, notice: [] };
   const perf = await run('perf', ['stat', '-e', 'cycles', 'true']);
   result.counters = { available: perf.ok && !/not supported|No supported events|Permission denied/i.test(`${perf.stdout}${perf.stderr}`), text: `${perf.stdout}${perf.stderr}`.trim().slice(0, 300) };
   if (result.counters.available) result.notice.push('perf can count cycles on this runner: rr may now work here (the design records that it did not, 2026-10-20)');
+  // rr's own verdict on this machine: the installed version, then a recording of `true` (its CPU check and its counter check run there)
+  const installed = await run('rr', ['--version']);
+  result.rr = { installed: installed.ok, version: installed.ok ? installed.stdout.trim().slice(0, 100) : null, record: null };
+  if (installed.ok) {
+    const recorded = await run('rr', ['record', 'true'], traceDirectory ? { _RR_TRACE_DIR: traceDirectory } : undefined);
+    result.rr.record = { works: recorded.ok, text: `${recorded.stdout}${recorded.stderr}`.trim().slice(0, 400) };
+    if (recorded.ok) result.notice.push('rr record works on this runner (the design records that it did not: Intel CPU type unknown, 2026-10-20)');
+  } else result.rr.record = { works: false, text: `rr is not installed: ${`${installed.stdout}${installed.stderr}`.trim().slice(0, 200) || installed.error || 'no answer'}` };
   if (version && fetchHead) {
     const names = [`chrome-headless-shell-${platform}-symbols.zip`, `chrome-${platform}-symbols.zip`, `chrome-${platform}.debug`];
     result.symbols = [];

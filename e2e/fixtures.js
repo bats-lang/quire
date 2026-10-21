@@ -135,8 +135,15 @@ export function refuseRawMouse(page) {
   Object.defineProperty(page, 'mouse', { value: guard, writable: false, configurable: false });
 }
 
+// QUIRE_NO_STALL_WATCH=1 (anything but empty or 0): the stall watch does nothing at all, with no arming, no probe, no capture and no trace ring of
+// its own, so a freeze has only what lies outside it (the kernel ring, the watchdog, the runner's reporter). Nothing sets it: evidence-real.spec.js
+// does, to show a freeze is recorded with the stall watch off (the table of quire#575, "a bug that vanishes under recording").
+const noStallWatch = () => !['', '0'].includes(process.env.QUIRE_NO_STALL_WATCH || '');
+const idleWatch = { watchContext() {}, async settle() {}, async ready() {}, async stop() {} };
+
 export const test = base.extend({
   stallWatch: [async ({ browser }, use, testInfo) => {
+    if (noStallWatch()) { await use(idleWatch); return; }
     const watch = stallWatch(browser, testInfo);
     // the browser's trace ring is on or the run fails here, by name (a @serial test records nothing)
     await watch.ready();

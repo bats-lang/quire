@@ -15,7 +15,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { sanitizerReports } from './evidence.js';
-import { HOLD_PREFIX, holdersIn } from './flight-tracefs.js';
+import { HOLD_PREFIX, LOCK_FAILED_PREFIX, holdersIn, lockFailuresIn } from './flight-tracefs.js';
 
 function walk(directory, found = []) {
   let names = [];
@@ -44,8 +44,8 @@ const reachProblem = (reach) => (reach ? (reach.reaches ? null : `does not reach
  * The missing fields of the runs in `reports` (parsed JSON). `sidecar` is the records of the runner's reporter
  * ([{ test, source, file, problem }]); `requireReport`: no report is itself missing.
  */
-export function missingFields(reports, sidecar = [], { requireReport = false, fatal = [], held = [] } = {}) {
-  const missing = [...fatal, ...(held || [])];
+export function missingFields(reports, sidecar = [], { requireReport = false, fatal = [], held = [], unlocked = [] } = {}) {
+  const missing = [...fatal, ...(held || []), ...(unlocked || [])];
   if (!reports.length && requireReport) missing.push('report (no Playwright JSON report: the run did not finish, or never started)');
   for (const report of reports) {
     for (const error of report.errors || []) {
@@ -97,7 +97,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const fatal = existsSync(note) ? [readFileSync(note, 'utf8').trim().replace(/^EVIDENCE MISSING: /, '')] : [];
   // a hold of the ring still down at the end of the run: a capture never released it, so the ring was paused for what followed
   const held = holdersIn('flight-watchdog').map((each) => `kernel ring (still held paused by ${each.holder} at the end of the run: a capture did not release it; files ${HOLD_PREFIX}*)`);
-  const missing = missingFields(reports, sidecar, { requireReport, fatal, held });
+  // a capture that went on without the ring lock (flight-tracefs.js, ring lock): it may have crossed another capture's pause and resume
+  const unlocked = lockFailuresIn('flight-watchdog').map((each) => `ring lock (${each.text}; files ${LOCK_FAILED_PREFIX}*)`);
+  const missing = missingFields(reports, sidecar, { requireReport, fatal, held, unlocked });
   for (const field of missing) console.log(`::error title=EVIDENCE MISSING::EVIDENCE MISSING: ${field}`);
   if (missing.length) process.exit(1);
   console.log(`evidence: nothing missing in ${reports.length} report(s)`);

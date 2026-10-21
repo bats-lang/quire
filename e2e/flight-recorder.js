@@ -51,8 +51,14 @@ function asRoot(op, args) {
 /** Starts the kernel ring for this process tree; the instance goes to the workers by the environment. */
 export async function startKernel(env = process.env) {
   if (!wanted(env)) return null;
-  // QUIRE_FLIGHT_TRACEFS: the spec's way to make the ring fail to start (a directory that is no tracefs)
-  const started = await asRoot('start', { name: `quire-${process.pid}`, pid: process.pid, ...(env.QUIRE_FLIGHT_TRACEFS ? { tracefs: env.QUIRE_FLIGHT_TRACEFS } : {}) });
+  // The specs' ways to make the ring fail to start or to record (evidence-real.spec.js; nothing else sets them):
+  // QUIRE_FLIGHT_TRACEFS a directory that is no tracefs; QUIRE_FLIGHT_REQUIRE_EVENT an event this kernel has not, required as the others are;
+  // QUIRE_FLIGHT_TRACE_PID the process the ring is scoped to, one that is not this run's, so the ring is made and on and records nothing of it
+  const started = await asRoot('start', {
+    name: `quire-${process.pid}`, pid: Number(env.QUIRE_FLIGHT_TRACE_PID) || process.pid,
+    ...(env.QUIRE_FLIGHT_TRACEFS ? { tracefs: env.QUIRE_FLIGHT_TRACEFS } : {}),
+    ...(env.QUIRE_FLIGHT_REQUIRE_EVENT ? { alsoRequired: env.QUIRE_FLIGHT_REQUIRE_EVENT.split(',') } : {}),
+  });
   if (started.instance) env[INSTANCE_VARIABLE] = started.instance;
   return started;
 }
@@ -351,6 +357,8 @@ export function pendingRequests(text) {
 export function pauseInstance(instance) { return asRoot('pause', { instance }); }
 /** Removes a ring by its instance path (the spec's way to make the red-time snapshot fail). */
 export function removeInstance(instance) { return asRoot('stop', { instance }); }
+/** Disables every event of the ring while it stays on (a test's: the ring then takes no events). */
+export function silenceInstance(instance) { return asRoot('silence', { instance }); }
 
 // Work the runner has started that needs the ring (the reporter's snapshots): the global teardown waits for it before the ring is removed.
 const outstanding = new Set();

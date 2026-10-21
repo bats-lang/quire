@@ -61,27 +61,50 @@ export function hold({ dir, holder }) { if (dir) attempt('hold', () => writeFile
 // release (the file down, who is left, then the resume). Without a lock a capture that wrote its hold and paused between another's look at
 // the directory (empty) and its resume had its ring switched back on while `tail` read it (a ring read as it records never ends).
 // A lock file made with `wx` (the time as its content, no file time is read) serialises them; the critical sections take milliseconds,
-// so a lock older than LOCK_STALE_MS is a dead holder's and is taken over, and one that cannot be had in LOCK_MOST_MS is gone without
-// (as before the lock). Keyword: ring lock.
+// so a lock older than LOCK_STALE_MS is a dead holder's and is taken over. A lock that cannot be had in LOCK_MOST_MS is not waited for any
+// longer: the action runs without it (a capture is worth more than none) and the failure is a record, `ring-lock-failed-*` in the output
+// directory and a line on stderr, which the run's monitor and the job's check turn into `EVIDENCE MISSING: ring lock`. Keyword: ring lock.
 export const LOCK_NAME = 'ring-lock';
 export const LOCK_STALE_MS = 2000;
 export const LOCK_MOST_MS = 5000;
+export const LOCK_FAILED_PREFIX = 'ring-lock-failed-';
 const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-/** Runs `action` while holding the ring's lock in `dir` (no lock without a directory), and answers what it answers. */
-export function withRingLock(dir, action) {
+/** The records of locks that were not had: [{ name, text }], in the output directory `dir`. */
+export function lockFailuresIn(dir) {
+  if (!dir) return [];
+  try {
+    return readdirSync(dir).filter((name) => name.startsWith(LOCK_FAILED_PREFIX)).map((name) => {
+      let text = '';
+      try { text = readFileSync(`${dir}/${name}`, 'utf8').trim(); } catch (gone) { /* taken down meanwhile */ }
+      return { name, text };
+    });
+  } catch (error) { return []; }
+}
+
+/**
+ * Runs `action` while holding the ring's lock in `dir` (no lock without a directory), and answers what it answers. `most` and `stale` (ms) are
+ * the limits, the constants above unless a test shortens them. A lock not had within `most` leaves a record (see above) and the action runs.
+ */
+export function withRingLock(dir, action, { most = LOCK_MOST_MS, stale = LOCK_STALE_MS } = {}) {
   if (!dir) return action();
   const path = `${dir}/${LOCK_NAME}`;
   const begun = Date.now();
   let locked = false;
-  while (!locked && Date.now() - begun < LOCK_MOST_MS) {
+  let holder = '';
+  while (!locked && Date.now() - begun < most) {
     try { writeFileSync(path, `${new Date().toISOString()} ${process.pid}\n`, { flag: 'wx' }); locked = true; } catch (error) {
       if (!error || error.code !== 'EEXIST') break; // the directory is gone: nothing to take turns over
       let at = Number.NaN;
-      try { at = Date.parse(readFileSync(path, 'utf8').split(/\s/)[0]); } catch (gone) { /* it was given back meanwhile */ }
-      if (Date.now() - at > LOCK_STALE_MS) attempt('unlock', () => unlinkSync(path));
+      try { holder = readFileSync(path, 'utf8').trim(); at = Date.parse(holder.split(/\s/)[0]); } catch (gone) { /* it was given back meanwhile */ }
+      if (Date.now() - at > stale) attempt('unlock', () => unlinkSync(path));
       else nap(2);
     }
+  }
+  if (!locked) {
+    const text = `${new Date().toISOString()} process ${process.pid} did not get the ring lock in ${Date.now() - begun} ms (limit ${most} ms; the lock said: ${holder || 'nothing readable'}); its action ran without the lock, so a ring it paused or resumed may have crossed another capture's`;
+    attempt('lock-failed', () => writeFileSync(`${dir}/${LOCK_FAILED_PREFIX}${process.pid}-${Date.now()}`, `${text}\n`));
+    console.error(`[ring lock] ${text}`);
   }
   try { return action(); } finally { if (locked) attempt('unlock', () => unlinkSync(path)); }
 }
@@ -106,7 +129,7 @@ export function release({ instance, dir, holder }) {
 }
 
 /** Makes the instance and starts it for the process tree of `pid`; { instance, skipped } or { error }. */
-export function start({ tracefs = TRACEFS, name, pid, bufferKb = BUFFER_KB, events = EVENTS }) {
+export function start({ tracefs = TRACEFS, name, pid, bufferKb = BUFFER_KB, events = EVENTS, alsoRequired = [] }) {
   const instance = `${tracefs}/instances/${name}`;
   try {
     if (!existsSync(`${tracefs}/instances`)) return { error: 'no tracefs instances directory (tracefs is not mounted here)' };
@@ -114,11 +137,11 @@ export function start({ tracefs = TRACEFS, name, pid, bufferKb = BUFFER_KB, even
   } catch (error) { return { error: `cannot make ${instance}: ${(error && error.code) || error}` }; }
   const skipped = [];
   const missing = [];
-  const set = (file, value) => { const bad = attempt(file, () => writeFileSync(`${instance}/${file}`, String(value))); if (bad) { skipped.push(bad); if (REQUIRED_EVENTS.some((event) => file === `events/${event}/enable`) || ['buffer_size_kb', 'trace_clock', 'set_event_pid', 'tracing_on'].includes(file)) missing.push(bad); } };
+  const set = (file, value) => { const bad = attempt(file, () => writeFileSync(`${instance}/${file}`, String(value))); if (bad) { skipped.push(bad); if ([...REQUIRED_EVENTS, ...alsoRequired].some((event) => file === `events/${event}/enable`) || ['buffer_size_kb', 'trace_clock', 'set_event_pid', 'tracing_on'].includes(file)) missing.push(bad); } };
   set('buffer_size_kb', bufferKb);
   // the same clock as Chrome's trace events (CLOCK_MONOTONIC), so the two records line up
   set('trace_clock', 'mono');
-  for (const event of events) set(`events/${event}/enable`, 1);
+  for (const event of [...events, ...alsoRequired]) set(`events/${event}/enable`, 1);
   set('options/event-fork', 1);
   set('set_event_pid', pid);
   set('tracing_on', 1);
@@ -214,6 +237,12 @@ export function stats({ instance }) {
   } catch (error) { return { error: String((error && error.code) || (error && error.message) || error) }; }
 }
 
+/** Stops the instance taking events while it stays on (every event disabled): what the monitor's idle-ring check is shown against. A test's. */
+export function silence({ instance }) {
+  const bad = attempt('set_event', () => writeFileSync(`${instance}/set_event`, ''));
+  return bad ? { error: bad } : { silenced: true };
+}
+
 /** Starts recording again after a pause. */
 export function resume({ instance }) {
   const bad = attempt('tracing_on', () => writeFileSync(`${instance}/tracing_on`, '1'));
@@ -225,7 +254,7 @@ export function state({ instance }) {
   try { return { on: readFileSync(`${instance}/tracing_on`, 'utf8').trim() }; } catch (error) { return { error: String((error && error.code) || error) }; }
 }
 
-const ops = { start, pause, snapshot, stop, readmem, resume, release, hold, holdAndPause, state, stats };
+const ops = { start, pause, snapshot, stop, readmem, resume, release, hold, holdAndPause, state, stats, silence };
 
 // `sudo -n node flight-tracefs.js <op> <json>`: the answer is one line of JSON
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

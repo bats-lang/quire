@@ -117,9 +117,10 @@ export function card(page, text) {
     breaks, so a whole card was the "title" (#575, library-records QLB4 on CI,
     job 119175168267: the read cards had isConnected false) */
 export async function titles(page) {
-  return page.evaluate(() => ['continue-reading', 'book-list']
-    .map(id => document.getElementById(id))
-    .filter(region => region && region.checkVisibility({ visibilityProperty: true }))
+  // the regions are found by their role and accessible name (aria-label), as `cards` finds them, in the same evaluation that reads the cards
+  return page.evaluate(() => ['Continue reading', 'Books']
+    .flatMap(name => [...document.querySelectorAll(`[role=region][aria-label="${name}"]`)])
+    .filter(region => region.checkVisibility({ visibilityProperty: true }))
     .flatMap(region => [...region.querySelectorAll('[role=group]')])
     .filter(group => group.checkVisibility({ visibilityProperty: true }))
     .map(group => group.innerText.split('\n')[0].trim()));

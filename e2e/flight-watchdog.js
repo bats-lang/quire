@@ -49,6 +49,20 @@ export function processTable(proc = '/proc') {
   return table;
 }
 
+/**
+ * The CPU the main thread of `pid` has used (utime + stime, in ticks), or null when it cannot be read. The watchdog's question is about this
+ * thread: a renderer whose other threads tick now and then (a compositor, a tracing thread: 1 tick in 3 s was measured on a frozen renderer
+ * of Chrome 149) is still frozen, and a process-wide count would start the clock again at each of those ticks and never report it.
+ */
+export function mainThreadTicks(pid, proc = '/proc') {
+  const stat = text(`${proc}/${pid}/task/${pid}/stat`);
+  const close = stat.lastIndexOf(')');
+  if (close < 0) return null;
+  const fields = stat.slice(close + 2).split(' ');
+  const ticks = Number(fields[11]) + Number(fields[12]);
+  return Number.isFinite(ticks) ? ticks : null;
+}
+
 /** `root` and every process below it. */
 export function tree(table, root) {
   const found = new Set([root]);
@@ -136,7 +150,8 @@ export class Watchdog {
       const blocked = parseBlocked(syscall);
       if (!blocked || !blocked.untimed) { this.seen.delete(pid); continue; }
       const seen = this.seen.get(pid);
-      if (!seen || seen.ticks !== entry.ticks) { this.seen.set(pid, { since: now, ticks: entry.ticks }); continue; }
+      const ticks = mainThreadTicks(pid, this.proc) ?? entry.ticks;
+      if (!seen || seen.ticks !== ticks) { this.seen.set(pid, { since: now, ticks }); continue; }
       if (now - seen.since >= this.sustainMs && !this.reported.has(pid)) {
         this.reported.add(pid);
         written.push(await this.report(pid, table, below, blocked, syscall, now - seen.since));

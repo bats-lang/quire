@@ -12,6 +12,11 @@ const books = [
   { idHigh: 0x3456789, idLow: 0x2cdef01, title: 'Gamma Days', author: 'Cy Penn' },
 ];
 
+const redraw = `setInterval(() => {
+  const list = document.querySelector('[role=region][aria-label="Books"]');
+  list.replaceChildren(...[...list.children].map(child => child.cloneNode(true)));
+}, 1)`;
+
 test('the titles are the cards\' first lines while the cards are replaced every millisecond', async ({ page }) => {
   await start(page);
   await syncEnded(page);
@@ -20,23 +25,26 @@ test('the titles are the cards\' first lines while the cards are replaced every 
   await reloadSettled(page);
   await expect(cards(page)).toHaveCount(2);
   // the list's cards are replaced by copies, as a redraw does
-  await page.evaluate(() => {
-    const list = document.getElementById('book-list');
-    globalThis.__redraw = setInterval(() => list.replaceChildren(...[...list.children].map(child => child.cloneNode(true))), 1);
-  });
+  await page.evaluate(`globalThis.__redraw = ${redraw}`);
   for (let i = 0; i < 40; i++) expect(await titles(page)).toEqual(['Alpha Tales', 'Gamma Days']);
   await page.evaluate(() => clearInterval(globalThis.__redraw));
-  // the read this replaces: the same redraw, and the locator's two calls
+});
+
+// The control, with no timing in it: a card found before the list is drawn again is detached when it is read, and a detached
+// element's innerText has no line break, so the whole card was the "title". This is what a read in two calls (find, then read) gives.
+test('a card found before the list is drawn again reads as its whole text', async ({ page }) => {
+  await start(page);
+  await syncEnded(page);
+  await forgetRecords(page);
+  await put(page, 'lib', [...legacyLibrary(6, [], books)]);
+  await reloadSettled(page);
+  await expect(cards(page)).toHaveCount(2);
+  const found = await cards(page).first().elementHandle();
   await page.evaluate(() => {
-    const list = document.getElementById('book-list');
-    globalThis.__redraw = setInterval(() => list.replaceChildren(...[...list.children].map(child => child.cloneNode(true))), 1);
+    const list = document.querySelector('[role=region][aria-label="Books"]');
+    list.replaceChildren(...[...list.children].map(child => child.cloneNode(true)));
   });
-  let detached = 0;
-  for (let i = 0; i < 40; i++) {
-    const texts = await cards(page).allInnerTexts();
-    if (texts.some(text => !text.includes('\n'))) detached++;
-  }
-  await page.evaluate(() => clearInterval(globalThis.__redraw));
-  test.info().annotations.push({ type: 'detached reads', description: `${detached} of 40 allInnerTexts reads gave a detached card's text` });
-  expect(detached, 'allInnerTexts read detached cards').toBeGreaterThan(0);
+  const read = await found.evaluate(element => ({ connected: element.isConnected, hasLineBreak: element.innerText.includes('\n') }));
+  expect(read).toEqual({ connected: false, hasLineBreak: false });
+  expect(await titles(page)).toEqual(['Alpha Tales', 'Gamma Days']);
 });

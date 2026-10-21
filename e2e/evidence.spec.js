@@ -23,7 +23,7 @@ import { missingFields } from './evidence-check.js';
 import { futexAnalysis, ringContent } from './flight-recorder.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { Watchdog } from './flight-watchdog.js';
-import { holdersIn } from './flight-tracefs.js';
+import { LOCK_NAME, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
 
 function desktopOnly(testInfo) {
   test.skip(testInfo.project.name !== 'desktop', 'the renderer and the machine do not depend on the project: once, in desktop, is enough');
@@ -349,6 +349,19 @@ test('a recorder that does not start is said, and the rule that names what a red
   expect(await missingEvidence({ ...failing, flight: { kernel: { file: testInfo.outputPath('missing.gz') }, browserTrace: {} } }, { CI: 'true' })).toEqual([expect.stringMatching(/^kernel ring \(unreadable/), expect.stringMatching(/^browser trace/)]);
   expect(await missingEvidence({ ...failing, status: 'passed' }, { CI: 'true' }), 'a test that passed owes nothing').toEqual([]);
   expect(await missingEvidence({ ...failing, flight: null }, {}), 'a machine that does not record owes nothing').toEqual([]);
+  // a test that cuts the native step of the capture on purpose ('native step') does not owe that step's fields, and owes both rings as any red does;
+  // one that cuts the whole capture ('whole capture') owes nothing of it
+  const ring = testInfo.outputPath('ring.txt.gz');
+  writeFileSync(ring, (await import('node:zlib')).gzipSync('# tracer: nop\n# entries-in-buffer/entries-written: 1/1   #P:4\n  task-1 [000] d.... 1.000000: sched_switch: x\n'));
+  const cut = { status: 'passed', expectedStatus: 'passed', frozen: true, captureFile: null, browserGone: false, captureResult: { futex: [{ pid: 7, notInFutex: 'no kernel view of the main thread' }] } };
+  const rings = { kernel: { file: ring }, browserTrace: { file: 'x' } };
+  expect(await missingEvidence({ ...cut, flight: rings }, { CI: 'true' }), 'without the exemption the native step\'s fields are owed').toEqual(['kernel view of renderer 7', 'stall capture']);
+  expect(await missingEvidence({ ...cut, cutOnPurpose: true, flight: rings }, { CI: 'true' }), 'a value that is neither kind of cut is no exemption').toEqual(['kernel view of renderer 7', 'stall capture']);
+  expect(await missingEvidence({ ...cut, cutOnPurpose: 'whole capture', flight: null }, { CI: 'true' }), 'a capture cut whole owes nothing').toEqual([]);
+  expect(await missingEvidence({ ...cut, cutOnPurpose: 'native step', flight: rings }, { CI: 'true' }), 'the native step\'s fields are not owed').toEqual([]);
+  expect(await missingEvidence({ ...cut, cutOnPurpose: 'native step', flight: { kernel: { unavailable: 'ring off' }, browserTrace: { file: 'x' } } }, { CI: 'true' }), 'the kernel ring is owed').toEqual([expect.stringMatching(/^kernel ring \(ring off\)/)]);
+  expect(await missingEvidence({ ...cut, cutOnPurpose: 'native step', flight: { kernel: { file: ring }, browserTrace: {} } }, { CI: 'true' }), 'the browser trace is owed').toEqual([expect.stringMatching(/^browser trace/)]);
+  expect(await missingEvidence({ ...cut, cutOnPurpose: 'native step', flight: null }, { CI: 'true' }), 'a record at all is owed').toEqual([expect.stringMatching(/^flight recorder/)]);
 });
 test('the watchdog, outside every worker and browser, sees a renderer frozen in an untimed futex wait and writes it out', async ({ page, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
@@ -443,6 +456,70 @@ test('a stall of the machine, seen from inside: a tick that comes late is kept w
   await new Promise((resolve) => setTimeout(resolve, 400));
   clearInterval(timer);
   expect(real.stalls.some((each) => each.gapMs >= 900)).toBe(true);
+});
+
+test('the watchdog counts the CPU of the main thread, not of the process: a frozen renderer whose other threads tick now and then is still reported', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  // a /proc of its own: the runner (100) and its renderer (200), the main thread waiting in an untimed futex
+  const proc = testInfo.outputPath('proc');
+  const stat = (pid, parent, comm, user, system) => `${pid} (${comm}) S ${parent} 0 0 0 0 0 0 0 0 0 ${user} ${system} 0 0 20 0 1 0 0\n`;
+  const lay = (pid, parent, comm, cmdline, processTicks, mainTicks, syscall) => {
+    mkdirSync(join(proc, String(pid), 'task', String(pid)), { recursive: true });
+    writeFileSync(join(proc, String(pid), 'stat'), stat(pid, parent, comm, processTicks, 0));
+    writeFileSync(join(proc, String(pid), 'cmdline'), cmdline.replace(/ /g, '\0'));
+    writeFileSync(join(proc, String(pid), 'task', String(pid), 'stat'), stat(pid, parent, comm, mainTicks, 0));
+    writeFileSync(join(proc, String(pid), 'task', String(pid), 'syscall'), syscall);
+  };
+  const futex = '202 0x7ffe9ead5e30 0x189 0x0 0x0 0x0 0xffffffff 0x7ffe9ead5ba0 0x7fdeb3e98e51\n';
+  lay(100, 1, 'node', 'node runner', 5, 5, '0 0x0\n');
+  lay(200, 100, 'chrome', 'chrome --type=renderer', 40, 12, futex);
+  const out = testInfo.outputPath('reports');
+  const dog = new Watchdog({ root: 100, out, proc, sustainMs: 10000, stacks: false });
+  expect(await dog.scan(0)).toEqual([]);
+  // a thread other than the main one uses a tick; the main thread uses none
+  lay(200, 100, 'chrome', 'chrome --type=renderer', 41, 12, futex);
+  expect(await dog.scan(5000)).toEqual([]);
+  lay(200, 100, 'chrome', 'chrome --type=renderer', 42, 12, futex);
+  const written = await dog.scan(11000);
+  expect(written, 'the main thread used no CPU for 11 s').toHaveLength(1);
+  const report = JSON.parse(readFileSync(join(out, written[0]), 'utf8'));
+  expect(report.reason).toMatch(/process 200: the main thread has been in an untimed wait \(futex\) with no CPU used for 11000 ms/);
+  // and a main thread that does use CPU starts the clock again
+  const busy = new Watchdog({ root: 100, out: testInfo.outputPath('busy'), proc, sustainMs: 10000, stacks: false });
+  await busy.scan(0);
+  lay(200, 100, 'chrome', 'chrome --type=renderer', 50, 13, futex);
+  await busy.scan(5000);
+  expect(await busy.scan(11000), 'the main thread used a tick at 5 s: 6 s since').toEqual([]);
+});
+
+test('a ring lock that cannot be had in its limit leaves a record, runs the action, and is the job\'s failure', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const dir = testInfo.outputPath('lock');
+  mkdirSync(dir, { recursive: true });
+  // another capture holds the lock, and renewed it just now: it is not stale, so it is waited for until the limit
+  writeFileSync(join(dir, LOCK_NAME), `${new Date().toISOString()} 4242\n`);
+  const began = Date.now();
+  const said = [];
+  const write = console.error;
+  console.error = (...line) => said.push(line.join(' '));
+  let ran;
+  try { ran = withRingLock(dir, () => 'ran', { most: 300, stale: 60000 }); } finally { console.error = write; }
+  expect(ran, 'the action runs without the lock').toBe('ran');
+  expect(Date.now() - began, 'it waited for the limit and no longer').toBeGreaterThanOrEqual(290);
+  const records = lockFailuresIn(dir);
+  expect(records).toHaveLength(1);
+  expect(records[0].text).toMatch(/did not get the ring lock in \d+ ms \(limit 300 ms; the lock said: .* 4242\)/);
+  expect(said.join('\n'), 'and a line says so').toMatch(/^\[ring lock\] .*did not get the ring lock/);
+  expect(existsSync(join(dir, LOCK_NAME)), 'the other holder\'s lock is not taken down').toBe(true);
+  // the job-level check names it, with no report needed to hold it
+  const unlocked = lockFailuresIn(dir).map((each) => `ring lock (${each.text})`);
+  expect(missingFields([], [], { unlocked })[0]).toMatch(/^ring lock \(.*did not get the ring lock/);
+  // and a lock that is free is had at once, with no record
+  const free = testInfo.outputPath('free');
+  mkdirSync(free, { recursive: true });
+  expect(withRingLock(free, () => 'ran', { most: 300 })).toBe('ran');
+  expect(lockFailuresIn(free)).toEqual([]);
+  expect(existsSync(join(free, LOCK_NAME)), 'and given back').toBe(false);
 });
 
 test('a capture leaves the ring recording on every outcome, the last of two readers resumes it, and a ring left paused is not a record of the next red', async ({}, testInfo) => {
@@ -811,13 +888,30 @@ test('what the runner can do that bears on the classes the record cannot see is 
   expect(unchanged.counters.available).toBe(false);
   expect(unchanged.notice).toEqual([]);
   expect(unchanged.symbols.map((each) => each.status)).toEqual([404, 404, 404]);
+  expect(unchanged.rr, 'rr is not installed: said so').toMatchObject({ installed: false, record: { works: false } });
   const changed = await capabilities({ run: yes, fetchHead: async (url) => (url.endsWith('symbols.zip') ? 200 : 404), version: '149.0.7827.55' });
   expect(changed.notice.join('\n')).toMatch(/rr may now work/);
   expect(changed.notice.join('\n')).toMatch(/a symbol file now exists/);
+  expect(changed.notice.join('\n')).toMatch(/rr record works on this runner/);
+  // rr is asked itself: installed, and refusing on the CPU as it did on the runner (2026-10-20), is read and written down without a notice
+  const asked = [];
+  const refusing = async (command, args, env) => {
+    asked.push([command, ...args, env && env._RR_TRACE_DIR]);
+    if (command === 'rr' && args[0] === 'record') return { ok: false, stdout: '', stderr: 'rr: Unhandled CPU model: Intel CPU type 0xc06f0 unknown' };
+    if (command === 'rr') return { ok: true, stdout: 'rr version 5.7.0\n', stderr: '' };
+    return { ok: false, stdout: '', stderr: 'No supported events found.' };
+  };
+  const refused = await capabilities({ run: refusing, fetchHead: async () => 404, version: '149.0.7827.55', traceDirectory: '/trace-here' });
+  expect(refused.rr).toMatchObject({ installed: true, version: 'rr version 5.7.0', record: { works: false } });
+  expect(refused.rr.record.text).toMatch(/Intel CPU type 0xc06f0 unknown/);
+  expect(refused.notice).toEqual([]);
+  expect(asked, 'rr is run, and records into the directory it was given').toContainEqual(['rr', 'record', 'true', '/trace-here']);
   // and this run's own reading, written by the preflight
   const written = process.env[OUT_VARIABLE] && join(process.env[OUT_VARIABLE], 'capabilities.json');
   expect(written && existsSync(written), 'the preflight wrote capabilities.json').toBe(true);
   const reading = JSON.parse(readFileSync(written, 'utf8'));
-  console.error(`[capabilities] perf cycles available: ${reading.counters.available}; symbols: ${JSON.stringify(reading.symbols)}`);
+  console.error(`[capabilities] perf cycles available: ${reading.counters.available}; rr: ${JSON.stringify(reading.rr)}; symbols: ${JSON.stringify(reading.symbols)}`);
   expect(reading.counters).toHaveProperty('available');
+  expect(reading.rr, 'the preflight asked rr itself').toHaveProperty('installed');
+  expect(reading.rr.record, 'and said what its recording did').toHaveProperty('works');
 });

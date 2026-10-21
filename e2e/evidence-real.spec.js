@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { test, expect } from './fixtures.js';
-import { OUT_VARIABLE, INSTANCE_VARIABLE, pauseInstance, removeInstance, ringSeen, wanted } from './flight-recorder.js';
+import { OUT_VARIABLE, INSTANCE_VARIABLE, pauseInstance, removeInstance, ringSeen, silenceInstance, wanted } from './flight-recorder.js';
 import { processTable, tree } from './flight-watchdog.js';
 
 test.describe.configure({ mode: 'parallel' });
@@ -27,9 +27,10 @@ function desktopOnly(testInfo) {
 }
 
 /** A Playwright run of one case, in a directory of its own. */
-function nested(testInfo, name, environment = {}, args = []) {
+function nested(testInfo, name, environment = {}, args = [], prepare = null) {
   const directory = testInfo.outputPath(`nested-${name}`);
   mkdirSync(directory, { recursive: true });
+  if (prepare) prepare(directory);
   const env = { ...process.env, CI: 'true', QUIRE_NO_COST: '1', PLAYWRIGHT_JSON_OUTPUT_NAME: join(directory, 'report.json'), ...environment };
   // what the outer worker carries must not reach the run: its own worker numbers, its ring, its output directory
   for (const key of Object.keys(env)) if (/^(PW_TEST|PWTEST|TEST_WORKER_INDEX|TEST_PARALLEL_INDEX)/.test(key)) delete env[key];
@@ -131,6 +132,87 @@ test('preflight: a watchdog that exits at start fails the job before any test, w
   expect(run.output()).toMatch(/PREFLIGHT FAILED: watchdog: exited at start \(code 3/);
 });
 
+// The other parts of the preflight (Done when 2a of quire#575), each failed for real on the real path: the same nested run, the part's own
+// guard in preflight.js, the named line, the job-level check repeating it. Where the failure cannot be had from the outside, the run's
+// environment names the induction (QUIRE_FLIGHT_SUDO, _REQUIRE_EVENT, _TRACE_PID and the watchdog's script: set by no job, only here).
+const bin = (testInfo, name, source) => {
+  const file = testInfo.outputPath(name);
+  writeFileSync(file, `#!${process.execPath}\n${source}\n`);
+  chmodSync(file, 0o755);
+  return file;
+};
+
+test('preflight: a sudo that asks for a password fails the job before any test, by name', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  const asking = bin(testInfo, 'sudo-asks.js', "process.stderr.write('sudo: a password is required\\n'); process.exit(1);");
+  const run = nested(testInfo, 'quiet', { QUIRE_FLIGHT_SUDO: asking });
+  const { code } = await run.finished;
+  expect(code, run.output()).not.toBe(0);
+  expect(run.output()).toMatch(/PREFLIGHT FAILED: sudo -n: not usable .*a password is required/);
+  expect(run.output(), 'no test ran').not.toMatch(/1 passed/);
+  expect(run.output(), 'and no ring was made').not.toMatch(/\[preflight\] ok/);
+});
+
+test('preflight: an output directory that cannot be written and read back fails the job before any test, by name', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  // a file where the directory has to be
+  const run = nested(testInfo, 'quiet', {}, [], (directory) => writeFileSync(join(directory, 'flight-watchdog'), 'a file, not a directory\n'));
+  const { code } = await run.finished;
+  expect(code, run.output()).not.toBe(0);
+  expect(run.output()).toMatch(/PREFLIGHT FAILED: output directory: .*flight-watchdog cannot be written and read back/);
+  expect(run.output(), 'no ring was made before it').not.toMatch(/ring \/sys\/kernel\/tracing\/instances\/quire-\d+ recording/);
+});
+
+test('preflight: a ring made without a required event fails the job before any test, by name, and leaves no ring behind', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  const run = nested(testInfo, 'quiet', { QUIRE_FLIGHT_REQUIRE_EVENT: 'syscalls/sys_enter_no_such_call' });
+  const { code } = await run.finished;
+  expect(code, run.output()).not.toBe(0);
+  expect(run.output()).toMatch(/PREFLIGHT FAILED: kernel ring: .*sys_enter_no_such_call.* could not be set/);
+  const made = run.output().match(/quire-(\d+)/);
+  expect(existsSync('/sys/kernel/tracing/instances/quire-' + (made ? made[1] : 'none')), 'the failed preflight removed the instance it made').toBe(false);
+});
+
+test('preflight: a ring that is made and on but takes no event of the run fails the job before any test, by name', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  // the ring is scoped to a process that does nothing, so the runner's own reads and timers are not in it
+  const idle = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { stdio: 'ignore' });
+  try {
+    const run = nested(testInfo, 'quiet', { QUIRE_FLIGHT_TRACE_PID: String(idle.pid) });
+    const { code } = await run.finished;
+    expect(code, run.output()).not.toBe(0);
+    expect(run.output()).toMatch(/PREFLIGHT FAILED: kernel ring: made but not recording: before .*"on":"1".*after/);
+  } finally { idle.kill('SIGKILL'); }
+});
+
+test('preflight: a watchdog that is alive and never beats fails the job before any test, by name', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  // alive (its child is checked, not its spawn assumed) and silent; it ends when the runner's pipe to it closes
+  const silent = bin(testInfo, 'silent-watchdog.js', "process.stdin.resume(); process.stdin.on('end', () => process.exit(0)); setInterval(() => {}, 1000);");
+  const run = nested(testInfo, 'quiet', { QUIRE_FLIGHT_WATCHDOG_SCRIPT: silent, QUIRE_FLIGHT_FIRST_BEAT_MS: '3000' });
+  const { code } = await run.finished;
+  expect(code, run.output()).not.toBe(0);
+  expect(run.output()).toMatch(/PREFLIGHT FAILED: watchdog: no heartbeat in 3000 ms/);
+});
+
+test('preflight: a browser whose trace ring cannot start fails the test before its body, by name, and the job-level check repeats it', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  const run = nested(testInfo, 'trace');
+  const { code } = await run.finished;
+  expect(code, run.output()).toBe(1);
+  expect(run.output()).toMatch(/PREFLIGHT FAILED: browser trace ring: Tracing.start failed: .*already been started/);
+  expect(run.output(), 'the body never ran').not.toMatch(/never reached/);
+  const check = evidenceCheck(run);
+  expect(check.code, check.text).toBe(1);
+  expect(check.text).toMatch(/EVIDENCE MISSING: browser trace ring: Tracing.start failed/);
+});
+
 test('heartbeat: a watchdog killed in the middle of the run fails the job at that moment, not at the end', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();
@@ -160,6 +242,102 @@ test('heartbeat: a ring that is stopped in the middle of the run fails the job a
     expect(run.output()).toMatch(/EVIDENCE MISSING: kernel ring: stopped/);
     expect(Date.now() - killedAt).toBeLessThan(30000);
   } finally { run.child.kill('SIGKILL'); }
+});
+
+// The monitor's end conditions that the tests above do not reach (Done when 2b): the watchdog goes quiet without dying, and the ring is on
+// and takes no events. The limits are shortened by the run's environment (QUIRE_FLIGHT_BEAT_STALE_MS, _RING_QUIET_MS), not waited for: the
+// condition and the code that ends the run are the real ones.
+test('heartbeat: a watchdog that is alive and stops beating fails the job at that moment, by name', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000', QUIRE_FLIGHT_BEAT_STALE_MS: '3000' });
+  let watchdog = null;
+  try {
+    const ok = await run.until(/watchdog (\d+) beating/);
+    watchdog = Number(ok[1]);
+    const stoppedAt = Date.now();
+    kill(watchdog, 'SIGSTOP'); // not killed: its process is there and its child has not exited
+    await run.until(/EVIDENCE MISSING: watchdog: no heartbeat for/, 30000);
+    // a stopped watchdog still holds the run's output pipe: it is ended before the run's close is waited for
+    kill(watchdog, 'SIGKILL');
+    const { code } = await run.finished;
+    expect(code, run.output()).not.toBe(0);
+    expect(run.output()).toMatch(/EVIDENCE MISSING: watchdog: no heartbeat for \d+ ms/);
+    expect(run.output(), 'it was not the exit that was seen').not.toMatch(/watchdog: exited during the run/);
+    expect(Date.now() - stoppedAt).toBeLessThan(30000);
+    expect(evidenceCheck(run).text).toMatch(/EVIDENCE MISSING: watchdog: no heartbeat for/);
+  } finally { run.child.kill('SIGKILL'); if (watchdog) { try { kill(watchdog, 'SIGKILL'); } catch (gone) { /* it ended with the run */ } } }
+});
+
+test('heartbeat: a ring that is on and takes no events fails the job at that moment, by name', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000', QUIRE_FLIGHT_RING_QUIET_MS: '4000' });
+  try {
+    const ok = await run.until(/ring (\/sys\/kernel\/tracing\/instances\/quire-\d+) recording/);
+    const silencedAt = Date.now();
+    await silenceInstance(ok[1]); // every event off, tracing_on still 1
+    const { code } = await run.finished;
+    expect(code, run.output()).not.toBe(0);
+    expect(run.output()).toMatch(/EVIDENCE MISSING: kernel ring: takes no events: \d+ written, unchanged for \d+ s/);
+    expect(run.output(), 'the ring was on').not.toMatch(/kernel ring: stopped/);
+    expect(Date.now() - silencedAt).toBeLessThan(30000);
+  } finally { run.child.kill('SIGKILL'); }
+});
+
+// The ring lock (flight-tracefs.js): a lock that stays held past its limit is a record and the job's failure, not a silent go-ahead.
+test('a ring lock that is held past its limit leaves a record: the capture goes on, and the job fails by name', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  test.setTimeout(testInfo.timeout + 60000);
+  const run = nested(testInfo, 'plain', { QUIRE_NESTED_SLEEP: '3000', QUIRE_NESTED_TIMEOUT: '60000', QUIRE_FLIGHT_MONITOR: 'off' });
+  let holder = null;
+  try {
+    await run.until(/ring (\/sys\/kernel\/tracing\/instances\/quire-\d+) recording/);
+    // another capture that never lets go: the lock's time is renewed every 200 ms, so it is never stale
+    const lock = join(run.directory, 'flight-watchdog', 'ring-lock');
+    holder = setInterval(() => { try { writeFileSync(lock, `${new Date().toISOString()} holder-in-the-test\n`); } catch (gone) { /* the run ended */ } }, 200);
+    const { code } = await run.finished;
+    expect(code, run.output()).toBe(1);
+    expect(run.output(), 'the line the capture printed').toMatch(/\[ring lock\] .* did not get the ring lock in \d+ ms \(limit 5000 ms; the lock said: .*holder-in-the-test\)/);
+    const records = readdirSync(join(run.directory, 'flight-watchdog')).filter((name) => name.startsWith('ring-lock-failed-'));
+    expect(records.length, 'the record in the output directory').toBeGreaterThan(0);
+    // the capture was still made (a capture without the lock is worth more than none)
+    expect(attachmentsOf(run.report()).map((each) => each.name)).toEqual(expect.arrayContaining(['flight-kernel']));
+    clearInterval(holder);
+    const check = evidenceCheck(run);
+    expect(check.code, check.text).toBe(1);
+    expect(check.text).toMatch(/EVIDENCE MISSING: ring lock \(.*did not get the ring lock/);
+  } finally { if (holder) clearInterval(holder); run.child.kill('SIGKILL'); }
+});
+
+// "A freeze is recorded with the stall watch off": the stall watch does nothing (QUIRE_NO_STALL_WATCH: no arming, no probe, no capture, no trace
+// ring of its own), the page is frozen through a session of the case's own, the test runs into its timeout, and the watchdog (which needs no DevTools,
+// no debugger and no worker) wrote the freeze out, with the kernel ring beside it.
+test('a freeze with the stall watch off is recorded by the watchdog, and the check finds nothing missing', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  test.setTimeout(testInfo.timeout + 120000);
+  const run = nested(testInfo, 'hang-unwatched', { QUIRE_NO_STALL_WATCH: '1', QUIRE_NESTED_TIMEOUT: '30000' });
+  const { code } = await run.finished;
+  expect(code, run.output()).toBe(1);
+  expect(statusesOf(run.report())).toEqual(['timedOut']);
+  const out = join(run.directory, 'flight-watchdog');
+  const reports = readdirSync(out).filter((name) => /^watchdog-\d+-\d+-\d+\.json$/.test(name)).map((name) => JSON.parse(readFileSync(join(out, name), 'utf8')));
+  expect(reports.length, `the watchdog wrote the freeze out: ${readdirSync(out)}`).toBeGreaterThan(0);
+  expect(reports[0].reason).toMatch(/untimed wait \(futex\)/);
+  expect(reports[0].futex.untimed).toBe(true);
+  expect(reports[0].futex.memory.bytes).toMatch(/^[0-9a-f]{128}$/);
+  expect(reports[0].kernelRing.file, JSON.stringify(reports[0].kernelRing)).toBeTruthy();
+  // and the stall watch really was off: it captured nothing, and left no record of its own for the red
+  const found = [];
+  const walkDirectory = (directory) => { for (const name of readdirSync(directory)) { const path = join(directory, name); if (statSync(path).isDirectory()) walkDirectory(path); else found.push(name); } };
+  walkDirectory(run.directory);
+  expect(found.filter((name) => /^stall-capture-/.test(name)), 'the stall watch captured nothing').toEqual([]);
+  expect(attachmentsOf(run.report()).map((each) => each.name), 'and attached no record of its own').not.toContain('flight-kernel');
+  // the runner's reporter wrote the ring for the result, so the job-level check has it
+  const check = evidenceCheck(run);
+  expect(check.code, check.text).toBe(0);
 });
 
 test('a plain failed test, the browser alive, leaves both rings, and the job-level check finds them in the report Playwright wrote', async ({}, testInfo) => {

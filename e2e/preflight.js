@@ -12,18 +12,21 @@
  */
 
 import { execFile } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { request } from 'node:https';
 import { join } from 'node:path';
 import { capabilities } from './evidence.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, WATCHDOG_DIRECTORY, markKept, pauseInstance, resumeKernel, ringStats, serialRun, settleOutstanding, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { HEARTBEAT_STALE_MS } from './flight-watchdog.js';
-import { holdersIn } from './flight-tracefs.js';
+import { LOCK_FAILED_PREFIX, holdersIn, lockFailuresIn } from './flight-tracefs.js';
 
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 const FIRST_HEARTBEAT_MS = 20000;
 const MONITOR_EVERY_MS = 2000;
 const RING_QUIET_MS = 60000;
+// The specs' way to see an end condition without waiting for its real limit (evidence-real.spec.js; nothing else sets these): the limit, in ms,
+// that the variable names, in place of the constant. The condition and the code that ends the run are the real ones.
+const limit = (env, name, fallback) => (Number(env[name]) > 0 ? Number(env[name]) : fallback);
 // a capture reads a ring in seconds (6 s for 600 MB) and its sudo call is killed at 60 s: a hold older than twice that is a capture that died holding the ring
 export const HOLD_MOST_MS = 120000;
 
@@ -31,8 +34,8 @@ export class PreflightFailed extends Error {
   constructor(part, why) { super(`PREFLIGHT FAILED: ${part}: ${why}`); this.part = part; }
 }
 
-const run = (command, args, ms = 15000) => new Promise((resolve) => {
-  execFile(command, args, { timeout: ms, killSignal: 'SIGKILL', maxBuffer: 1 << 20, encoding: 'utf8' }, (error, stdout, stderr) => resolve({ ok: !error, stdout: stdout || '', stderr: stderr || '', error: error ? String(error.message).slice(0, 200) : undefined }));
+const run = (command, args, ms = 15000, env = undefined) => new Promise((resolve) => {
+  execFile(command, args, { timeout: ms, killSignal: 'SIGKILL', maxBuffer: 1 << 20, encoding: 'utf8', ...(env ? { env: { ...process.env, ...env } } : {}) }, (error, stdout, stderr) => resolve({ ok: !error, stdout: stdout || '', stderr: stderr || '', error: error ? String(error.message).slice(0, 200) : undefined }));
 });
 
 const head = (url) => new Promise((resolve) => {
@@ -92,13 +95,26 @@ export async function measureCost(env = process.env, launchOptions = null, { rou
   }
 }
 
-/** Runs the preflight; resolves with what the run needs to keep and to stop, null where nothing is recorded. */
-export async function preflight(env = process.env, { cwd = process.cwd(), version = '149.0.7827.55', launchOptions = null } = {}) {
+/**
+ * Runs the preflight; resolves with what the run needs to keep and to stop, null where nothing is recorded. A part that fails ends what the
+ * earlier parts started (the ring and the watchdog), so a failed preflight leaves no instance in tracefs and no process.
+ */
+export async function preflight(env = process.env, options = {}) {
+  const started = {};
+  try { return await prove(env, options, started); } catch (error) {
+    stopWatchdog(started.watchdog);
+    await stopKernel(started.kernel);
+    throw error;
+  }
+}
+
+async function prove(env, { cwd = process.cwd(), version = '149.0.7827.55', launchOptions = null } = {}, started) {
   if (!wanted(env)) return null;
   // sudo -n: the ring, the watchdog and the memory reads need root, and a password prompt would hang
-  if (!isRoot) {
-    const sudo = await run('sudo', ['-n', 'true']);
-    if (!sudo.ok) throw new PreflightFailed('sudo -n', `not usable (${sudo.error || sudo.stderr.trim()}): the kernel ring, the watchdog and the word reads need it`);
+  // (QUIRE_FLIGHT_SUDO: the spec's way to make it refuse, a command in place of `sudo`, which is then asked even as root)
+  if (!isRoot || env.QUIRE_FLIGHT_SUDO) {
+    const sudo = await run(env.QUIRE_FLIGHT_SUDO || 'sudo', ['-n', 'true']);
+    if (!sudo.ok) throw new PreflightFailed('sudo -n', `not usable (${sudo.stderr.trim() || sudo.error}): the kernel ring, the watchdog and the word reads need it`);
   }
   // the output directory: written, and read back by this user (the upload runs as this user)
   const out = join(cwd, WATCHDOG_DIRECTORY);
@@ -112,6 +128,7 @@ export async function preflight(env = process.env, { cwd = process.cwd(), versio
   env[OUT_VARIABLE] = out;
   // the kernel ring: made, with every required event, on, and taking events
   const kernel = await startKernel(env);
+  started.kernel = kernel;
   if (!kernel || kernel.error) throw new PreflightFailed('kernel ring', (kernel && kernel.error) || 'did not start');
   if (kernel.missing && kernel.missing.length) throw new PreflightFailed('kernel ring', `${kernel.missing.join('; ')} could not be set (a kernel without these events cannot answer the question)`);
   // recording: this process is in the ring's tree, so what it does (a few reads, a timer) must add events
@@ -122,7 +139,9 @@ export async function preflight(env = process.env, { cwd = process.cwd(), versio
   if (before.error || after.error || after.on !== '1' || !(after.written > before.written)) throw new PreflightFailed('kernel ring', `made but not recording: before ${JSON.stringify(before)}, after ${JSON.stringify(after)}`);
   // the watchdog: its child alive and its first heartbeat read back
   const watchdog = startWatchdog(kernel.instance, env, out);
-  const deadline = Date.now() + FIRST_HEARTBEAT_MS;
+  started.watchdog = watchdog;
+  const firstHeartbeatMs = limit(env, 'QUIRE_FLIGHT_FIRST_BEAT_MS', FIRST_HEARTBEAT_MS);
+  const deadline = Date.now() + firstHeartbeatMs;
   let first = null;
   while (Date.now() < deadline) {
     if (watchdog.error) throw new PreflightFailed('watchdog', `did not start: ${watchdog.error}`);
@@ -131,13 +150,16 @@ export async function preflight(env = process.env, { cwd = process.cwd(), versio
     if (first) break;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  if (!first) throw new PreflightFailed('watchdog', `no heartbeat in ${FIRST_HEARTBEAT_MS} ms`);
+  if (!first) throw new PreflightFailed('watchdog', `no heartbeat in ${firstHeartbeatMs} ms`);
   if (first.ring && first.ring.on !== '1') throw new PreflightFailed('watchdog', `its first reading of the ring: ${JSON.stringify(first.ring)}`);
   // what the runner can do that bears on the classes the record cannot see (rr, symbols): in the log and in capabilities.json
-  const found = await capabilities({ run: (command, args) => run(command, args, 20000), fetchHead: head, version });
+  const traceDirectory = join(out, 'rr-traces');
+  mkdirSync(traceDirectory, { recursive: true });
+  const found = await capabilities({ run: (command, args, env) => run(command, args, 20000, env), fetchHead: head, version, traceDirectory });
+  rmSync(traceDirectory, { recursive: true, force: true }); // rr's recording of `true` is not evidence
   writeFileSync(join(out, 'capabilities.json'), JSON.stringify(found, null, 2));
-  console.error(`[capabilities] perf cycles available: ${found.counters.available}; symbols: ${JSON.stringify(found.symbols)}`);
-  console.error(`[preflight] ok${serialRun() ? ' (the @serial run)' : ''}: sudo, ${out} written and read back, ring ${kernel.instance} recording (${(kernel.skipped || []).length} optional events skipped), watchdog ${first.pid} beating; perf cycles ${found.counters.available ? 'AVAILABLE' : 'unsupported'}; symbols ${JSON.stringify(found.symbols)}`);
+  console.error(`[capabilities] perf cycles available: ${found.counters.available}; rr: ${found.rr.installed ? `${found.rr.version}, record ${found.rr.record.works ? 'WORKS' : `refused (${found.rr.record.text.split('\n').slice(-1)[0].slice(0, 160)})`}` : 'not installed'}; symbols: ${JSON.stringify(found.symbols)}`);
+  console.error(`[preflight] ok${serialRun() ? ' (the @serial run)' : ''}: sudo, ${out} written and read back, ring ${kernel.instance} recording (${(kernel.skipped || []).length} optional events skipped), watchdog ${first.pid} beating; perf cycles ${found.counters.available ? 'AVAILABLE' : 'unsupported'}; rr ${found.rr.installed ? (found.rr.record.works ? 'WORKS' : 'refused') : 'not installed'}; symbols ${JSON.stringify(found.symbols)}`);
   for (const notice of found.notice) console.error(`::notice title=capabilities changed::${notice}`);
   await measureCost(env, launchOptions);
   return { kernel, watchdog, out };
@@ -155,6 +177,8 @@ export function fatal(part, why, out) {
 export function startMonitor(started, env = process.env) {
   if (!started || env.QUIRE_FLIGHT_MONITOR === 'off') return () => {};
   const { watchdog, out } = started;
+  const staleMs = limit(env, 'QUIRE_FLIGHT_BEAT_STALE_MS', HEARTBEAT_STALE_MS);
+  const ringQuietMs = limit(env, 'QUIRE_FLIGHT_RING_QUIET_MS', RING_QUIET_MS);
   const began = Date.now();
   let lastWritten = null;
   let lastMoved = Date.now();
@@ -167,12 +191,15 @@ export function startMonitor(started, env = process.env) {
   const timer = setInterval(() => {
     seen.checks += 1;
     if (watchdog.exited && !watchdog.stopping) return die('watchdog', `exited during the run (code ${watchdog.exited.code}, signal ${watchdog.exited.signal})`);
+    // a capture that went without the ring lock (flight-tracefs.js, ring lock) may have crossed another's pause and resume: the ring is then not to be trusted
+    const unlocked = lockFailuresIn(out);
+    if (unlocked.length) return die('ring lock', `${unlocked[0].text} (${unlocked.length} record(s), files ${LOCK_FAILED_PREFIX}*)`);
     const beat = heartbeats(out).find((each) => each.file.startsWith(`heartbeat-${process.pid}-`));
     if (!beat) { unreadable += 1; if (unreadable >= 3) return die('watchdog', 'its heartbeat file is gone'); return; }
     unreadable = 0;
     seen.beats.add(beat.at);
     seen.lastScans = beat.scans;
-    if (Date.now() - beat.at > HEARTBEAT_STALE_MS) return die('watchdog', `no heartbeat for ${Date.now() - beat.at} ms`);
+    if (Date.now() - beat.at > staleMs) return die('watchdog', `no heartbeat for ${Date.now() - beat.at} ms`);
     const ring = beat.ring || {};
     if (ring.error) return die('kernel ring', `unreadable by the watchdog: ${ring.error}`);
     if (ring.written !== undefined) seen.lastRing = ring.written;
@@ -188,7 +215,7 @@ export function startMonitor(started, env = process.env) {
       else if (beat.at > stoppedSeenAt) return die('kernel ring', `stopped (tracing_on is ${ring.on}) and no capture paused it`);
     } else stoppedSeenAt = null;
     if (ring.written !== lastWritten) { lastWritten = ring.written; lastMoved = Date.now(); }
-    else if (ring.on === '1' && Date.now() - lastMoved > RING_QUIET_MS) return die('kernel ring', `takes no events: ${ring.written} written, unchanged for ${Math.round((Date.now() - lastMoved) / 1000)} s`);
+    else if (ring.on === '1' && Date.now() - lastMoved > ringQuietMs) return die('kernel ring', `takes no events: ${ring.written} written, unchanged for ${Math.round((Date.now() - lastMoved) / 1000)} s`);
   }, MONITOR_EVERY_MS);
   timer.unref();
   return () => { clearInterval(timer); console.error(`[monitor] stopped: ${summary()}`); };
