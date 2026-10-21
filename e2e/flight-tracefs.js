@@ -141,6 +141,11 @@ const RING_STAMP = /^\s*.+-\d+\s+\[\d+\]\s+\S+\s+(\d+\.\d+):/;
  */
 export async function snapshot({ instance, out, lines = LINES_KEPT, dir, holder = `snapshot-${process.pid}` }) {
   const others = holdersIn(dir).map((each) => each.holder).filter((each) => each !== holder);
+  // the readers of the ring and the file they write: ended on every outcome. A file that cannot be written (a directory that is gone) left tail and gzip
+  // blocked on pipes nobody read, holding the caller's stderr, so the root call ran its whole limit (ROOT_MS, 60 s; CI's 'lost' capture). Keyword: ring readers.
+  let tail = null;
+  let gzip = null;
+  let sink = null;
   try {
     // the ring is paused while it is read (a ring read as it records never reaches its end: tail ran for an hour on 44,000 events a second)
     holdAndPause({ instance, dir, holder });
@@ -152,12 +157,13 @@ export async function snapshot({ instance, out, lines = LINES_KEPT, dir, holder 
       header = chunk.toString('utf8', 0, got).split('\n').find((line) => line.includes('entries-in-buffer')) || '';
     } finally { closeSync(descriptor); }
     const clock = (readFileSync(`${instance}/trace_clock`, 'utf8').match(/\[(\w+)\]/) || [])[1] || 'unknown';
-    const sink = createWriteStream(out);
+    sink = createWriteStream(out);
     const finished = new Promise((resolve, reject) => { sink.on('finish', resolve); sink.on('error', reject); });
-    const gzip = spawn('gzip', ['-1'], { stdio: ['pipe', 'pipe', 'inherit'] });
+    gzip = spawn('gzip', ['-1'], { stdio: ['pipe', 'pipe', 'inherit'] });
+    gzip.stdin.on('error', () => {}); // a gzip ended on purpose (the finally below) is written to no more
     gzip.stdout.pipe(sink);
     gzip.stdin.write(`${header}\n# the last ${lines} lines at most; clock: ${clock}\n`);
-    const tail = spawn('tail', ['-n', String(lines), `${instance}/trace`], { stdio: ['ignore', 'pipe', 'inherit'] });
+    tail = spawn('tail', ['-n', String(lines), `${instance}/trace`], { stdio: ['ignore', 'pipe', 'inherit'] });
     // the end of the text passes by here: the last event's time says whether the file reaches as far as the red
     let end = Buffer.alloc(0);
     tail.stdout.on('data', (piece) => { end = Buffer.concat([end, piece]).subarray(-16384); });
@@ -170,7 +176,11 @@ export async function snapshot({ instance, out, lines = LINES_KEPT, dir, holder 
     const inBuffer = counts ? Number(counts[1]) : 0;
     const stamps = end.toString('utf8').split('\n').map((line) => RING_STAMP.exec(line)).filter(Boolean);
     return { file: out, lines: Math.min(lines, inBuffer), seen: counts ? Number(counts[2]) : 0, header, lastAt: stamps.length ? Number(stamps[stamps.length - 1][1]) : null, others };
-  } catch (error) { return { error: String((error && error.stack) || error), others }; } finally { release({ instance, dir, holder }); }
+  } catch (error) { return { error: String((error && error.stack) || error), others }; } finally {
+    for (const child of [tail, gzip]) { if (child && child.exitCode === null && child.signalCode === null) attempt('kill', () => child.kill('SIGKILL')); }
+    if (sink) sink.destroy();
+    release({ instance, dir, holder });
+  }
 }
 
 /** Stops the instance and removes it. */

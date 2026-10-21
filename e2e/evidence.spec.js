@@ -9,7 +9,7 @@ import { createServer } from 'node:http';
 import { Worker } from 'node:worker_threads';
 import { pathToFileURL } from 'node:url';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
@@ -527,6 +527,35 @@ test('four captures at once on one ring: no capture sees the ring recording whil
   expect(readFileSync(join(instance, 'tracing_on'), 'utf8').trim(), 'the last one out resumed it').toBe('1');
   expect(holdersIn(holds), 'no hold is left').toEqual([]);
   expect(readdirSync(holds), 'the lock is given back').toEqual([]);
+});
+
+test('a capture whose file cannot be written ends at once, with no reader of the ring left behind (a ring too large for the pipes, the sudo call that ran its whole limit)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  // a stand-in for a ring that holds more than the pipes between tail, gzip and the file can carry (CI's quire-4296 hung its 'lost' capture for the 60 s limit of the root call)
+  const instance = testInfo.outputPath('instance');
+  mkdirSync(instance, { recursive: true });
+  writeFileSync(join(instance, 'tracing_on'), '1');
+  writeFileSync(join(instance, 'trace_clock'), '[mono] global\n');
+  let state = 12345;
+  const lines = [];
+  for (let line = 0; line < 60000; line += 1) { state = (state * 1103515245 + 12345) % 2147483648; lines.push(`   node-1 [000] ..... ${line}.${state}: sys_futex(uaddr: ${state.toString(16)}${(state * 7).toString(16)})`); }
+  writeFileSync(join(instance, 'trace'), `# entries-in-buffer/entries-written: 60000/60000   #P:4\n${lines.join('\n')}\n`);
+  const holds = testInfo.outputPath('holds');
+  mkdirSync(holds, { recursive: true });
+  const args = JSON.stringify({ instance, out: join(holds, 'no-such-directory', 'x.txt.gz'), dir: holds, holder: 'lost' });
+  const began = Date.now();
+  // as the recorder calls it (flight-recorder.js asRoot): the caller is done when the process has ended and every pipe it gave is closed, so a reader left alive holds the call
+  const answer = await new Promise((resolve) => {
+    execFile(process.execPath, [join(import.meta.dirname, 'flight-tracefs.js'), 'snapshot', args], { timeout: 20000, killSignal: 'SIGKILL', encoding: 'utf8' }, (error, stdout) => resolve({ error, stdout, ms: Date.now() - began }));
+  });
+  const left = readdirSync('/proc').filter((name) => /^\d+$/.test(name)).filter((name) => { try { return readFileSync(`/proc/${name}/cmdline`, 'utf8').includes(instance); } catch (gone) { return false; } });
+  for (const pid of left) { try { process.kill(Number(pid), 'SIGKILL'); } catch (gone) { /* it ended */ } }
+  expect(answer.error, `the call ran to its limit (${answer.ms} ms): ${String(answer.stdout).slice(0, 300)}`).toBeNull();
+  expect(JSON.parse(String(answer.stdout).trim().split('\n').pop()).error, 'the capture says why it has no file').toBeTruthy();
+  expect(answer.ms, 'it ended at once').toBeLessThan(10000);
+  expect(left, 'readers of the ring that outlived the capture').toEqual([]);
+  expect(readFileSync(join(instance, 'tracing_on'), 'utf8').trim(), 'the ring records again').toBe('1');
+  expect(holdersIn(holds), 'no hold is left').toEqual([]);
 });
 
 test('the job-level check: a test that ended unexpectedly names a kernel ring or it is missing, a named error is repeated, no report is a failure', async ({}, testInfo) => {
