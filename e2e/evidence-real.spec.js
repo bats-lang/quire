@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { test, expect } from './fixtures.js';
-import { OUT_VARIABLE, INSTANCE_VARIABLE, pauseInstance, removeInstance, wanted } from './flight-recorder.js';
+import { OUT_VARIABLE, INSTANCE_VARIABLE, pauseInstance, removeInstance, ringSeen, wanted } from './flight-recorder.js';
 import { processTable, tree } from './flight-watchdog.js';
 
 test.describe.configure({ mode: 'parallel' });
@@ -89,7 +89,8 @@ function evidenceCheck(run, extra = []) {
 
 const kill = (pid, signal = 'SIGKILL') => (isRoot ? process.kill(pid, signal) : spawnSync('sudo', ['-n', 'kill', `-${signal.replace('SIG', '')}`, String(pid)]));
 
-const ringText = (file) => gunzipSync(readFileSync(file)).toString();
+// a ring is read a line at a time: one that recorded a whole run is larger than a string can be
+const ringFirst = async (file, pattern) => (await ringSeen(file, { found: pattern })).found;
 
 function needRecorder() {
   expect(wanted(), 'run with CI=true or QUIRE_FLIGHT=1 (and sudo): the evidence tests prove what the apparatus does when a part fails').toBe(true);
@@ -162,7 +163,7 @@ test('a plain failed test, the browser alive, leaves both rings, and the job-lev
   const kernel = attachments.find((each) => each.name === 'flight-kernel');
   const trace = attachments.find((each) => each.name === 'flight-browser-trace');
   expect(kernel && existsSync(kernel.path), JSON.stringify(attachments.map((each) => each.name))).toBe(true);
-  expect(ringText(kernel.path)).toContain('sched_switch');
+  expect(await ringFirst(kernel.path, /sched_switch/), 'the ring holds the scheduler').not.toBeNull();
   expect(trace && statSync(trace.path).size).toBeGreaterThan(100);
   const check = evidenceCheck(run);
   expect(check.code, check.text).toBe(0);
@@ -256,7 +257,7 @@ test('a worker that is killed leaves no teardown, and the runner writes the ring
     expect(sidecar.length).toBeGreaterThan(0);
     const records = JSON.parse(readFileSync(join(run.directory, 'test-results', 'runner-evidence', sidecar[0]), 'utf8'));
     expect(records[0]).toMatchObject({ source: 'the runner' });
-    expect(ringText(records[0].file)).toContain('sched_switch');
+    expect(await ringFirst(records[0].file, /sched_switch/), 'the ring holds the scheduler').not.toBeNull();
     const check = evidenceCheck(run);
     expect(check.code, check.text).toBe(0);
   } finally { run.child.kill('SIGKILL'); }
@@ -270,7 +271,7 @@ test('a browser that cannot be started (the zygote, the sandbox, a missing execu
   expect(code, run.output()).toBe(1);
   expect(JSON.stringify(run.report())).toMatch(/browserType\.launch|Target page, context or browser has been closed/);
   const records = JSON.parse(readFileSync(join(run.directory, 'test-results', 'runner-evidence', readdirSync(join(run.directory, 'test-results', 'runner-evidence')).find((name) => /^runner-evidence-\d+\.json$/.test(name))), 'utf8'));
-  expect(ringText(records[0].file)).toMatch(/sched_process_exit: comm=false /);
+  expect(await ringFirst(records[0].file, /sched_process_exit: comm=false /), 'the exit is in the ring').not.toBeNull();
   const check = evidenceCheck(run);
   expect(check.code, check.text).toBe(0);
 });
@@ -285,7 +286,7 @@ test('a browser that dies of SIGSEGV as it starts (quire#599): the signal is in 
   const { code } = await run.finished;
   expect(code, run.output()).toBe(1);
   const records = JSON.parse(readFileSync(join(run.directory, 'test-results', 'runner-evidence', readdirSync(join(run.directory, 'test-results', 'runner-evidence')).find((name) => /^runner-evidence-\d+\.json$/.test(name))), 'utf8'));
-  expect(ringText(records[0].file)).toMatch(/signal_generate: sig=11 /);
+  expect(await ringFirst(records[0].file, /signal_generate: sig=11 /), 'the signal is in the ring').not.toBeNull();
   expect(JSON.stringify(run.report())).toMatch(/launch|closed/);
   // the cause of #599 (setenv racing getenv in Chromium 145) is guarded by the value already set in the browser's environment
   expect(readFileSync(join(here, '..', 'playwright.config.js'), 'utf8')).toMatch(/FC_FONTATIONS: '1'/);

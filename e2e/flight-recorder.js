@@ -220,6 +220,24 @@ export async function futexAnalysis(ringFile, { address, tid }) {
 }
 
 /** Whether a kept ring file has content: { ok, lines } or { ok: false, why }. */
+/**
+ * The first line of the ring file that each pattern matches: { name: line | null }, read as a stream a line at a time. A ring that
+ * recorded a whole run is larger than a string can be (0x1fffffe8 characters), so no reader of a ring builds one string of it.
+ */
+export async function ringSeen(file, patterns) {
+  const seen = Object.fromEntries(Object.keys(patterns).map((name) => [name, null]));
+  const reader = createInterface({ input: createReadStream(file).pipe(createGunzip()), crlfDelay: Infinity });
+  let open = Object.keys(patterns).length;
+  for await (const line of reader) {
+    for (const [name, pattern] of Object.entries(patterns)) {
+      if (seen[name] === null && pattern.test(line)) { seen[name] = line; open -= 1; }
+    }
+    if (open === 0) break;
+  }
+  reader.close();
+  return seen;
+}
+
 export async function ringContent(file) {
   if (!existsSync(file)) return { ok: false, why: `unreadable: ${file} is not there` };
   try {

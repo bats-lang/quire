@@ -24,7 +24,7 @@ import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
 import { gunzipSync } from 'node:zlib';
-import { keepBrowserTrace, keepKernel, serialRun, startBrowserTrace, startKernel, stopKernel, wanted } from './flight-recorder.js';
+import { keepBrowserTrace, keepKernel, ringSeen, serialRun, startBrowserTrace, startKernel, stopKernel, wanted } from './flight-recorder.js';
 import { arm, capture, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
@@ -329,9 +329,9 @@ test('a frozen renderer\'s capture holds the flight recorder\'s kernel ring and 
     expect(ring.bytes, `${name} ring has content`).toBeGreaterThan(100);
   }
   if (capture.flight.kernel.file) {
-    const text = gunzipSync(readFileSync(capture.flight.kernel.file)).toString();
-    expect(text, 'the kernel ring holds the run\'s futex calls').toContain('sys_futex');
-    expect(text, 'and its wakeups').toContain('sched_wakeup');
+    const seen = await ringSeen(capture.flight.kernel.file, { futex: /sys_futex/, wakeup: /sched_wakeup/ });
+    expect(seen.futex, 'the kernel ring holds the run\'s futex calls').not.toBeNull();
+    expect(seen.wakeup, 'and its wakeups').not.toBeNull();
   }
   if (capture.flight.browserTrace.file) {
     const trace = JSON.parse(gunzipSync(readFileSync(capture.flight.browserTrace.file)).toString());
@@ -361,10 +361,10 @@ test('the kernel ring starts for a process tree, keeps its futex calls and wakeu
     const kept = await keepKernel(out, env);
     expect(kept.error, JSON.stringify(kept)).toBeUndefined();
     expect(kept.lines).toBeGreaterThan(0);
-    const text = gunzipSync(readFileSync(out)).toString();
-    expect(text).toContain('# the last');
-    expect(text).toMatch(/sys_futex|sched_switch|sched_wakeup/);
-    expect(text, 'timestamps are CLOCK_MONOTONIC (the clock of Chrome\'s trace)').toContain('clock: mono');
+    const seen = await ringSeen(out, { header: /# the last/, events: /sys_futex|sched_switch|sched_wakeup/, clock: /clock: mono/ });
+    expect(seen.header).not.toBeNull();
+    expect(seen.events).not.toBeNull();
+    expect(seen.clock, 'timestamps are CLOCK_MONOTONIC (the clock of Chrome\'s trace)').not.toBeNull();
   } finally {
     const stopped = await stopKernel(started);
     expect(stopped.removed, JSON.stringify(stopped)).toBe(true);

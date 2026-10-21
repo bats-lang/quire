@@ -9,13 +9,17 @@ import { createServer } from 'node:http';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { gunzipSync } from 'node:zlib';
+import { createWriteStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { createGzip, gunzipSync } from 'node:zlib';
 import { test, expect } from './fixtures.js';
 import { arm, capture, CAPTURE_MOST_MS, NATIVE_MOST_MS, stallWatch as makeWatch } from './stall-capture.js';
 import { capabilities, diskEvidence, missingEvidence, pageState, parseBlocked, symbolEvidence } from './evidence.js';
 import { pixelDiff } from './relaunch.js';
 import { missingFields } from './evidence-check.js';
-import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
+import { futexAnalysis, ringContent } from './flight-recorder.js';
+import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { Watchdog } from './flight-watchdog.js';
 
 function desktopOnly(testInfo) {
@@ -29,7 +33,8 @@ async function recorderOn() {
   await resumeKernel();
 }
 
-const ring = (file) => gunzipSync(readFileSync(file)).toString();
+// a ring is read a line at a time (ringSeen): one that recorded a whole run is larger than a string can be
+const ringHas = async (file, patterns) => ringSeen(file, patterns);
 const processes = async (browser) => {
   const session = await browser.newBrowserCDPSession();
   try { return (await session.send('SystemInfo.getProcessInfo')).processInfo; } finally { await session.detach(); }
@@ -71,8 +76,7 @@ test('an untimed futex wait in the renderer\'s main thread: the word, its neighb
   expect(history.waiter.sleepingMs).toBeGreaterThanOrEqual(0);
   expect(Array.isArray(history.onAddress.wakers)).toBe(true);
   // the ring is the run's, with the CPU-level story around the wait
-  const text = ring(found.flight.kernel.file);
-  expect(text).toContain('sched_switch');
+  expect((await ringHas(found.flight.kernel.file, { switched: /sched_switch/ })).switched, 'the ring holds the scheduler').not.toBeNull();
   // Chrome's trace holds the renderer's own events
   const trace = JSON.parse(gunzipSync(readFileSync(found.flight.browserTrace.file)).toString());
   expect((trace.traceEvents || trace).some((event) => event.pid === word.pid)).toBe(true);
@@ -89,7 +93,7 @@ test('an untimed futex wait in the renderer\'s main thread: the word, its neighb
   // the registers of the wait, and the traffic: Chrome's trace names the Mojo interfaces and the ring the sockets (G1 and G4 of #575)
   expect(word.registers.sp).toMatch(/^0x[0-9a-f]+$/);
   expect(new Set(trace.traceEvents ? trace.traceEvents.map((event) => event.cat) : trace.map((event) => event.cat)).size).toBeGreaterThan(2);
-  expect(ring(found.flight.kernel.file)).toMatch(/sys_(recvmsg|sendmsg|epoll_pwait)/);
+  expect((await ringHas(found.flight.kernel.file, { traffic: /sys_(recvmsg|sendmsg|epoll_pwait)/ })).traffic, 'the ring holds the Mojo traffic').not.toBeNull();
   expect(found.test).toBe(testInfo.title);
   expect(found.pageAgeMs).toBeGreaterThan(0);
   expect(found.disk.length).toBeGreaterThanOrEqual(3);
@@ -121,8 +125,8 @@ test('a renderer that crashes: the browser reports it, and the ring holds the si
   await expect.poll(() => stallWatch.state.flight, { timeout: 60000 }).toBeTruthy();
   const gone = before.filter((pid) => !existsSync(`/proc/${pid}`));
   expect(gone.length, 'one renderer died').toBeGreaterThanOrEqual(1);
-  const text = ring(stallWatch.state.flight.kernel.file);
-  expect(gone.some((pid) => new RegExp(`signal_generate: sig=11 .*pid=${pid} `).test(text) || new RegExp(`sched_process_exit: .*pid=${pid} `).test(text)), 'the signal or the exit of the renderer is in the ring').toBe(true);
+  const seenGone = await ringHas(stallWatch.state.flight.kernel.file, { gone: new RegExp(`(signal_generate: sig=11 .*pid=(${gone.join('|')}) )|(sched_process_exit: .*pid=(${gone.join('|')}) )`) });
+  expect(seenGone.gone, 'the signal or the exit of the renderer is in the ring').not.toBeNull();
   const written = readdirSync(testInfo.outputDir).filter((name) => /^crash-\d+\.json$/.test(name));
   expect(written.length).toBeGreaterThan(0);
   const body = JSON.parse(readFileSync(join(testInfo.outputDir, written[0]), 'utf8'));
@@ -175,9 +179,9 @@ test('a browser process killed: the ring holds the signal and the exit, and the 
     const browserPid = (await processes(own)).find((each) => each.type === 'browser').id;
     process.kill(browserPid, 'SIGSEGV');
     await expect.poll(() => watch.state.flight, { timeout: 60000 }).toBeTruthy();
-    const text = ring(watch.state.flight.kernel.file);
-    expect(text).toMatch(new RegExp(`signal_generate: sig=11 .*pid=${browserPid} `));
-    expect(text).toMatch(new RegExp(`sched_process_exit: .*pid=${browserPid} `));
+    const seenBrowser = await ringHas(watch.state.flight.kernel.file, { signal: new RegExp(`signal_generate: sig=11 .*pid=${browserPid} `), exit: new RegExp(`sched_process_exit: .*pid=${browserPid} `) });
+    expect(seenBrowser.signal, 'the signal is in the ring').not.toBeNull();
+    expect(seenBrowser.exit, 'the exit is in the ring').not.toBeNull();
     expect(watch.state.browserGone).toBe(true);
     expect(watch.state.flight.browserTrace.unavailable || watch.state.flight.browserTrace.error, 'the missing trace says why').toBeTruthy();
     expect(await watch.verify(), 'a dead browser needs no trace').toEqual([]);
@@ -266,11 +270,31 @@ test('a full disk and a disk that is slow: the free space is in the capture, and
     expect(wrote.status, wrote.stderr).toBe(0);
     const kernel = await keepKernel(testInfo.outputPath('disk-ring.txt.gz'), process.env, true);
     expect(kernel.error, JSON.stringify(kernel)).toBeUndefined();
-    expect(ring(kernel.file)).toContain('block_rq_issue');
+    expect((await ringHas(kernel.file, { block: /block_rq_issue/ })).block, 'the ring holds the block requests').not.toBeNull();
   } finally {
     if (kept === undefined) delete process.env.QUIRE_EVIDENCE_PATHS; else process.env.QUIRE_EVIDENCE_PATHS = kept;
     spawnSync(...(root ? ['umount', [mountpoint]] : ['sudo', ['-n', 'umount', mountpoint]]), { encoding: 'utf8' });
   }
+});
+
+test('a ring larger than a string can be (a whole run recorded) is read a line at a time by every reader', async ({}, testInfo) => {
+  test.setTimeout(testInfo.timeout + 240000);
+  const file = testInfo.outputPath('huge-ring.txt.gz');
+  const line = `   Compositor-4242  [001] .... 1000.000001: sys_enter_futex: ${'x'.repeat(900)}\n`;
+  // 640 million characters: past the 0x1fffffe8 a string can hold, which the first CI run met with a ring of a whole run
+  const source = Readable.from((function* () {
+    yield '# entries-in-buffer/entries-written: 700000/700000   #P:4\n# the last 12000000 lines at most; clock: mono\n';
+    for (let i = 0; i < 700000; i += 1) yield line;
+    yield '   Chrome_ChildIOT-4243  [002] .... 1000.5: sched_process_exit: comm=last pid=4243 prio=120\n';
+  })());
+  await pipeline(source, createGzip({ level: 1 }), createWriteStream(file));
+  expect(() => gunzipSync(readFileSync(file)).toString(), 'the failure of the first run, reproduced: one string of the whole ring').toThrow(/string longer than|Invalid string length|Cannot create a string/);
+  const seen = await ringSeen(file, { header: /entries-in-buffer/, last: /sched_process_exit: comm=last/ });
+  expect(seen.header).not.toBeNull();
+  expect(seen.last, 'the last line of a ring larger than a string').not.toBeNull();
+  expect((await ringContent(file)).ok).toBe(true);
+  const analysed = await futexAnalysis(file, { address: '7ffe33dd6610', tid: 4242 });
+  expect(analysed && analysed.error, JSON.stringify(analysed).slice(0, 300)).toBeUndefined();
 });
 
 test('the ring is read in both forms the kernel prints a futex call in (6.18 with 0x, 7.0 on the runners without)', async ({}, testInfo) => {
@@ -470,9 +494,9 @@ test('a renderer killed by the kernel for want of memory: the OOM killer\'s choi
     hog.evaluate(() => { const held = []; for (let i = 0; i < 60; i += 1) held.push(new Uint8Array(20e6).fill(1)); return held.length; }).catch(() => {});
     await expect.poll(() => stallWatch.state.flight, { timeout: 90000 }).toBeTruthy();
     await expect.poll(() => readdirSync(testInfo.outputDir).some((name) => /^crash-\d+\.json$/.test(name)), { timeout: 60000 }).toBe(true);
-    const text = ring(stallWatch.state.flight.kernel.file);
-    expect(text, 'the OOM killer marked the renderer').toMatch(new RegExp(`mark_victim.*pid=${victim}`));
-    expect(text).toMatch(new RegExp(`signal_generate: sig=9 .*pid=${victim} `));
+    const seenOom = await ringHas(stallWatch.state.flight.kernel.file, { marked: new RegExp(`mark_victim.*pid=${victim}`), killed: new RegExp(`signal_generate: sig=9 .*pid=${victim} `) });
+    expect(seenOom.marked, 'the OOM killer marked the renderer').not.toBeNull();
+    expect(seenOom.killed, 'and the kill is in the ring').not.toBeNull();
     const body = JSON.parse(readFileSync(join(testInfo.outputDir, readdirSync(testInfo.outputDir).find((name) => /^crash-\d+\.json$/.test(name))), 'utf8'));
     expect(JSON.stringify(body.kernelLog), 'dmesg says it').toMatch(/Killed process|out of memory/i);
   } finally {
