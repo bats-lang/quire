@@ -119,6 +119,17 @@ reviewed PR that runs the same CI; the daily relock is one such PR. The build ca
 key, the merge queue, the Node packages, the mutation check and which groups a change runs
 are in `.claude/rules/ci.md`, which loads when CI files are touched.
 
+## No cache key is relied on for correctness (#622)
+
+A restored `build/` or fixtures memo is judged by bats, never by the key that found it: bats
+drops a `build/` whose stamp (its own inputs, ATS2, the C compiler, the flags, the target)
+differs and says so on stderr, rebuilds a module by the content hash of its sources and of the
+files patsopt read, and serves a fixture's memo only when every file it read is unchanged
+(bats's CLAUDE.md and its `stamp`, `build-freshness`, `check-memo` and `fixtures-memo` notes).
+Quire's key is `quire-<name>@<commit>`, only a locator for the newest earlier cache; it names
+no pin, image, lock or source hash and carries no number to bump, so a new input needs no key
+edit. What bats does not yet judge is listed in `.claude/rules/ci.md`.
+
 ## Check locally before every push
 
 Run `bats check` before every push, so a push that does not type-check never reaches CI. The

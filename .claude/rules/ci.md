@@ -21,7 +21,7 @@ The pins and the relock are in CLAUDE.md. Specifics:
   `ubuntu-latest` moves with GitHub's default. The label moves by hand, in a PR of its own,
   when GitHub announces its successor. The build cache's key does not name it: bats stamps a
   `build/` with the C compiler's version, so a build made with another clang is dropped; an
-  image's headers and libraries are not judged (bats#338, bats#380; "Not judged yet" below) (#622).
+  image's headers and libraries are not judged (bats#394, which holds bats#338 and bats#380; "Not judged yet" below) (#622).
 * A publish never turns main red: until a lock names a package release, quire does not use
   it, so package releases publish first and the quire PR with the new lock follows.
 * GITHUB_TOKEN cannot change workflow files, so the relock PR lists pwa's `android.yml` pin
@@ -55,10 +55,10 @@ bats's judgement, by the mechanisms below.
     of `bats_modules`, the package's unsafe flag, and, for `#use` records, the file's bytes.
 * **Not judged yet.** A change to one of these is not noticed by any stamp, key or record above,
   so a restored `build/` keeps what it made from the old one:
-  * the system headers the C includes (bats#338): the stamp's `cc` line is clang's version,
+  * the system headers the C includes (bats#338, closed on 2026-10-20 as broken into bats#394, still open; none of the pieces is in the pin 2ea56e1 or in bats main d3c0791): the stamp's `cc` line is clang's version,
     target and environment, not the headers;
   * the system libraries that patsopt and the native link load, libgmp among them (the stamp's
-    `patsopt` line is the cksum of `bin/patsopt`, not of the libraries it loads; bats#380);
+    `patsopt` line is the cksum of `bin/patsopt`, not of the libraries it loads; bats#380, closed as broken into bats#394 the same way);
   * `bats.toml`: the rules name only its version and constraints (`lock.md`), its unsafe flag
     (validation records) and its dependencies (the listing of `bats_modules`); no rule says what
     else in it reaches the build (bats#381).
@@ -68,7 +68,9 @@ bats's judgement, by the mechanisms below.
   the toolchain's stamp, the snippet, the module with it in and every file patsopt reads for
   the module, and serves it only when all are as they were. `--cold` (run.sh's first argument,
   not `BATS_COLD`, which would also make every check cold) serves none and audits what it would
-  have served.
+  have served. A snippet is never kept when it names `load` or `include` (it may read a file):
+  `reject/export-unmatched` does, inside `ExportedByDownload`, so it runs in every restored job
+  until the pin has bats#433 (bats#432).
 * **Paths**: bats takes the checkout's path out of the C (bats#250), so a cache is valid
   anywhere. `QUIRE_STATIC_WORK` (CI: `$RUNNER_TEMP/quire-static`) is the directory
   `tests/static/run.sh` works in. It stays a fixed directory because the save step names the
@@ -86,8 +88,10 @@ bats's judgement, by the mechanisms below.
   therefore shows on main or in the nightly run at the latest. A cache is saved only by a job
   that passed.
 * **Sharing**: jobs of one run start together, so none sees what another saves; the gain is from
-  the previous build. Each static group saves the `static` build under one key; the second to
-  finish gets a warning, not a failure. Caches are immutable, 10 GB per repository, evicted
+  the previous build. A key is a name plus the commit and a save of it is immutable, so one name
+  is saved by one job: the `static` build (every group restores it) only by the `app` group, and
+  each group saves its own `static-memo-<group>`. Two jobs saving one key print
+  `Cache save failed` (seen in the run of #750). Caches are immutable, 10 GB per repository, evicted
   by last access and after 7 days.
 * **Research** (what others do): Swatinem/rust-cache, ccache, sccache and Bazel key on the
   inputs because the tool computes them. Keying on the lock is the common choice where the tool

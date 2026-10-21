@@ -42,7 +42,8 @@
 # make every check cold: 3 to 5 minutes a fixture. Which compiler, ATS2, C compiler or
 # flags made a build/ is bats's to judge (its stamp): nothing here does.
 #
-# (A second push of a pull request restores the first's caches: #622.)
+# (A pull request restores the newest earlier cache whatever made it: a restore
+# of another bats, ATS2 or C compiler is dropped by bats's stamp, #622.)
 # usage: tests/static/run.sh [--cold] <repository-dir> [<member> ...]
 #        (bats must be on PATH)
 set -eu
