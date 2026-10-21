@@ -1,3 +1,11 @@
 {
-  "subagentPromptCacheTtl": "1h"
+  "subagentPromptCacheTtl": "1h",
+  "permissions": {
+    "allow": [
+      "Bash(uvx pitboss clean-container)",
+      "Bash(uvx pitboss clean-container --no-dry-run)",
+      "Bash(uvx --from git+https://github.com/dev-skill-up/pitboss pitboss clean-container)",
+      "Bash(uvx --from git+https://github.com/dev-skill-up/pitboss pitboss clean-container --no-dry-run)"
+    ]
+  }
 }
