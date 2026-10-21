@@ -8,7 +8,7 @@
 import { createServer } from 'node:http';
 import { Worker } from 'node:worker_threads';
 import { pathToFileURL } from 'node:url';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { createWriteStream } from 'node:fs';
@@ -490,6 +490,40 @@ test('the watchdog counts the CPU of the main thread, not of the process: a froz
   lay(200, 100, 'chrome', 'chrome --type=renderer', 50, 13, futex);
   await busy.scan(5000);
   expect(await busy.scan(11000), 'the main thread used a tick at 5 s: 6 s since').toEqual([]);
+});
+
+test('a watchdog run under sudo gives its output to the invoking user: the directories it makes, the heartbeat, a stall and a report (quire#767)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  // sudo runs the watchdog as root, so what it writes is root's unless it is given to SUDO_UID; this test is root, so the invoking user is nobody
+  const invoking = process.getuid() === 0 ? { uid: 65534, gid: 65534 } : { uid: process.getuid(), gid: process.getgid() };
+  const proc = testInfo.outputPath('proc');
+  const lay = (pid, parent, comm, cmdline, syscall) => {
+    mkdirSync(join(proc, String(pid), 'task', String(pid)), { recursive: true });
+    const stat = `${pid} (${comm}) S ${parent} 0 0 0 0 0 0 0 0 0 5 5 0 0 20 0 1 0 0\n`;
+    writeFileSync(join(proc, String(pid), 'stat'), stat);
+    writeFileSync(join(proc, String(pid), 'cmdline'), cmdline.replace(/ /g, '\0'));
+    writeFileSync(join(proc, String(pid), 'task', String(pid), 'stat'), stat);
+    writeFileSync(join(proc, String(pid), 'task', String(pid), 'syscall'), syscall);
+  };
+  lay(100, 1, 'node', 'node runner', '0 0x0\n');
+  lay(200, 100, 'chrome', 'chrome --type=renderer', '202 0x7ffe9ead5e30 0x189 0x0 0x0 0x0 0xffffffff 0x7ffe9ead5ba0 0x7fdeb3e98e51\n');
+  const base = testInfo.outputPath('owned');
+  const out = join(base, 'flight', 'watchdog');
+  const dog = new Watchdog({ root: 100, out, proc, sustainMs: 10000, stacks: false, env: { SUDO_UID: String(invoking.uid), SUDO_GID: String(invoking.gid) } });
+  dog.tick(0, 0);
+  dog.tick(2000, 2000);                 // a tick 1.9 s late: host-stalls is written
+  dog.heartbeat();
+  expect(await dog.scan(0)).toEqual([]);
+  expect(await dog.scan(11000), 'the frozen renderer is reported').toHaveLength(1);
+  const names = readdirSync(out);
+  expect(names, 'the heartbeat, the stall and the report are there').toEqual(expect.arrayContaining([
+    expect.stringMatching(/^heartbeat-100-\d+\.json$/), expect.stringMatching(/^host-stalls-100-\d+\.json$/), expect.stringMatching(/^watchdog-100-\d+-1\.json$/),
+  ]));
+  const made = [base, join(base, 'flight'), out, ...names.map((name) => join(out, name))];
+  for (const path of made) {
+    const info = statSync(path);
+    expect({ path, uid: info.uid, gid: info.gid }).toEqual({ path, uid: invoking.uid, gid: invoking.gid });
+  }
 });
 
 test('a ring lock that cannot be had in its limit leaves a record, runs the action, and is the job\'s failure', async ({}, testInfo) => {
