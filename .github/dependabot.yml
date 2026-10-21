@@ -1,0 +1,23 @@
+# Keeps the npm pins and the action pins moving through reviewed pull requests
+# (bridge#174, as dom#93 has it); which tool moves which pin: .claude/rules/ci.md, "Node's packages".
+#
+# npm: the root package.json and package-lock.json (@playwright/test, the Chromium it runs).
+# github-actions: the workflows' actions pinned by commit with their release comments.
+# bats-lang/* is ignored: the daily relock and the hand moves own those (CLAUDE.md, "CI is pinned").
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # a release is a week old before it is proposed, so a compromised one can be noticed first
+    cooldown:
+      default-days: 7
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: bats-lang/*
