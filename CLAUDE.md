@@ -143,7 +143,7 @@ A test that went red is root-caused, or the test is made robust against the caus
 found: `it passed again`, `it passes alone` and `contention` are not causes. A class of
 failure a change says it covers has a case that fails when the class occurs, shown by
 injecting it. The author owns CI until it is green (push, report the head, finish; never
-wait on a run), and any author, not necessarily the same one, takes a red. A reviewer runs
+wait on a run); any author may take over a red, or a merge conflict. A reviewer runs
 nothing and starts only when every required check is finished and green on the exact head.
 The rules for the agents are in `.claude/agents/worker.md`, `.claude/agents/reviewer.md` and
 `.claude/orchestration.md`, and `tests/static/guidelines.py` (the `checkers` group) refuses

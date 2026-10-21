@@ -1,0 +1,160 @@
+#!/bin/bash
+# STOPGAP, kept here so the guidelines point at a file that exists (quire#751, #573): pitboss (quire#573) will replace qsweep and slots.
+# Non-bats code of ours (quire#646): the avenue exhausted is that bats has no program today that calls the GitHub REST API, reads
+# a worktree's git state and prints one sweep; quire#573 builds it in bats, and bats#431 moves the text lint they sit beside.
+# Install on a machine: install -m 755 qsweep slots /usr/local/bin/ (the copy that runs is a copy of these files).
+_t0=$(date +%s); _lap(){ echo "[qsweep $(( $(date +%s)-_t0 ))s] $1" >&2; }
+# runner pressure: merge_group runs with jobs still queued (no runner) mean: do not push or merge anything that starts CI
+_pressure(){
+  local n=0 id
+  for id in $(gh api 'repos/bats-lang/quire/actions/runs?event=merge_group&status=queued&per_page=10' --jq '.workflow_runs[].id') $(gh api 'repos/bats-lang/quire/actions/runs?event=merge_group&status=in_progress&per_page=10' --jq '.workflow_runs[].id'); do n=$((n+$(gh api repos/bats-lang/quire/actions/runs/$id/jobs --jq '[.jobs[]|select(.status=="queued")]|length'))); done
+  if [ "$n" -gt 0 ]; then echo "RUNNER PRESSURE: $n queue-run jobs waiting for a runner: HOLD pushes and merges (quire and other repos)"; else echo "runner pressure: none"; fi
+}
+# `qsweep pressure` prints only that line (and exits 1 under pressure), so no caller pipes qsweep through grep
+if [ "$1" = pressure ]; then r=$(_pressure); echo "$r"; case "$r" in "runner pressure: none") exit 0;; *) exit 1;; esac; fi
+# `qsweep push <git push arguments>` is the pressure check and the push in one command (quire#751, row 5): the check cannot be left out
+# or put in the wrong place. Under pressure it prints the hold line, exits 1 and pushes nothing.
+if [ "$1" = push ]; then shift; r=$(_pressure); echo "$r"; case "$r" in "runner pressure: none") exec git push "$@";; *) exit 1;; esac; fi
+# every open PR of bats-lang/quire (subscribed or not): merge state, the failing checks of its head, and what the head is ready for (quire#751, rows 15 and 19):
+#   FIX-NEEDED          a check or a commit status of the head is red, the PR has a merge conflict (dirty), or the newest review names this head and says changes needed
+#   WAIT-FOR-CI         no check-run yet, one not finished, or the aggregate `check` not green: no reviewer starts (a reviewer starts only on green)
+#   READY-FOR-REVIEW    at least one check-run, every one finished, `check` green, no status red, and no review names this head: a reviewer takes the slot
+#   REVIEWED-approved   the newest review names this head and approves
+_next_fix=""; _next_review=""
+for n in $(gh api "repos/bats-lang/quire/pulls?state=open&per_page=50" --jq '.[].number'); do
+  j=$(gh api repos/bats-lang/quire/pulls/$n --jq '[.mergeable_state,.head.sha,.head.ref,.title[0:55],.auto_merge!=null]|@tsv')
+  st=$(echo "$j" | cut -f1); sha=$(echo "$j" | cut -f2); ref=$(echo "$j" | cut -f3); t=$(echo "$j" | cut -f4); am=$(echo "$j" | cut -f5)
+  cr=$(gh api "repos/bats-lang/quire/commits/$sha/check-runs?per_page=100")
+  fails=$(echo "$cr" | jq -r '[.check_runs[]|select(.conclusion=="failure" or .conclusion=="cancelled" or .conclusion=="timed_out")|.name]|join(",")')
+  pend=$(echo "$cr" | jq '[.check_runs[]|select(.status!="completed")]|length')
+  total=$(echo "$cr" | jq '.check_runs|length')
+  # the aggregate `check` job needs every other required job, so it must exist, be finished and be green (a head with no check-run yet is not green)
+  checkok=$(echo "$cr" | jq '[.check_runs[]|select(.name=="check" and .status=="completed" and .conclusion=="success")]|length')
+  # commit statuses (text-lint, adversarial-review): one that failed or errored is a fix
+  badstatus=$(gh api "repos/bats-lang/quire/commits/$sha/status" --jq '[.statuses[]|select(.state=="failure" or .state=="error")|.context]|join(",")')
+  # the newest review comment of a trusted author, by its FIRST line only (reviewer.md, "The comment"):
+  #   Independent review (a separate reviewer agent, not the author) of head <40 hex>: approved|changes needed     (ungated repositories)
+  #   ## Adversarial review, with one Verdict: line and one Reviewed: line                                           (gated ones)
+  rv=$(gh api "repos/bats-lang/quire/issues/$n/comments?per_page=100" --jq '
+    def lines: (.body|split("\n")|map(select(length>0)));
+    def info: (lines|.[0]) as $f
+      | if ($f|test("^Independent review \\(a separate reviewer agent, not the author\\) of head [0-9a-f]{40}: (approved|changes needed)$"))
+        then {v:($f|capture(": (?<v>approved|changes needed)$").v), h:($f|capture("head (?<h>[0-9a-f]{40}):").h)}
+        elif $f=="## Adversarial review"
+        then {v:((lines|map(select(test("^Verdict: (approved|changes needed)$")))|.[0]//"Verdict: none")|sub("^Verdict: ";"")), h:((lines|map(select(test("^Reviewed: [0-9a-f]{40}$")))|.[0]//"Reviewed: ")|sub("^Reviewed: ";""))}
+        else empty end;
+    [.[]|select(.author_association=="OWNER" or .author_association=="MEMBER" or .author_association=="COLLABORATOR")|info]|last
+    | if .==null then "none" else ((.v|gsub(" ";"-"))+(if .h=="'"$sha"'" then "-this-head" else "-older-head" end)) end')
+  if [ "$st" = dirty ] || [ -n "$fails" ] || [ -n "$badstatus" ] || [ "$rv" = "changes-needed-this-head" ]; then ready=FIX-NEEDED; _next_fix="$_next_fix #$n"
+  elif [ "$total" -eq 0 ] || [ "$pend" -gt 0 ] || [ "$checkok" -eq 0 ]; then ready=WAIT-FOR-CI
+  elif [ "$rv" = "approved-this-head" ]; then ready=REVIEWED-approved
+  else ready=READY-FOR-REVIEW; _next_review="$_next_review #$n"; fi
+  echo "#$n [$st] auto-merge=$am checks=$total pending=$pend fails=[$fails] statuses-red=[$badstatus] review=$rv $ready $t ($ref)"
+done
+if [ -n "$_next_fix" ]; then echo "NEXT FOR A FREE SLOT: a fix (an author; any author) for$_next_fix"
+elif [ -n "$_next_review" ]; then echo "NEXT FOR A FREE SLOT: a review (not by the author) of$_next_review"
+else echo "NEXT FOR A FREE SLOT: the oldest ticket of the highest priority (CLAUDE.md, Priorities)"; fi
+
+_lap "quire PRs done"
+# every library repo quire's agents change: each open PR with its head's checks and whether the newest
+# review comment (a trusted author's, first line "## Adversarial review", Verdict: approved) names exactly that head.
+# READY = checks all green, mergeable_state clean and an approval of this very head: merge it now (do not wait for an event: none arrives).
+for r in arith array sha256 zip dom bridge gestures; do
+  for n in $(gh api "repos/bats-lang/$r/pulls?state=open&per_page=20" --jq '.[].number' 2>/dev/null); do
+    j=$(gh api repos/bats-lang/$r/pulls/$n --jq '[.mergeable_state,.head.sha,.head.ref,.title[0:50]]|@tsv')
+    st=$(echo "$j" | cut -f1); sha=$(echo "$j" | cut -f2); ref=$(echo "$j" | cut -f3); t=$(echo "$j" | cut -f4)
+    chk=$(gh api "repos/bats-lang/$r/commits/$sha/check-runs?per_page=60" --jq '[.check_runs[]|.conclusion//.status]|join(",")')
+    rv=$(gh api "repos/bats-lang/$r/issues/$n/comments?per_page=100" --jq '[.[]|select(.author_association=="OWNER" or .author_association=="MEMBER" or .author_association=="COLLABORATOR")|select(.body|split("\n")[0]=="## Adversarial review")]|last|if .==null then "no-review" elif (.body|contains("Verdict: approved")) and (.body|contains("Reviewed: '"$sha"'")) then "approved-this-head" else "review-not-for-this-head-or-not-approved" end')
+    ready=""; case ",$chk," in *,failure,*|*,cancelled,*|*,in_progress,*|*,queued,*|*,pending,*) ;; *) [ "$st" = clean ] && [ "$rv" = approved-this-head ] && ready=" READY-TO-MERGE";; esac
+    # the gate's own status for this head, with its reason (bridge#200: a comment with two Reviewed lines is refused and says so here)
+    gate=$(gh api "repos/bats-lang/$r/commits/$sha/status" --jq '[.statuses[]|select(.context=="adversarial-review")]|first|if .==null then "none" else .state+": "+.description end' 2>/dev/null)
+    echo "$r #$n [$st] checks=$chk review=$rv gate=[$gate]$ready $t ($ref)"
+  done
+done
+_lap "library PRs done"
+_pressure
+_lap "runner pressure done"
+# stragglers: work that exists only on this machine. Every worktree and clone under /home/user: uncommitted changes, and commits not on any remote branch
+# (a straggler is an agent's finished work that never reached GitHub; during a RUNNER PRESSURE hold they are expected, otherwise ask the owner or push)
+_fetched=""
+for d in /home/user/* ; do
+  [ -e "$d/.git" ] || continue
+  # worktrees of one repository share their refs: fetch each repository once
+  _c=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+  case " $_fetched " in *" $_c "*) ;; *) _fetched="$_fetched $_c"; _s=$(date +%s); git -C "$d" fetch -q origin 2>/dev/null; _d=$(( $(date +%s)-_s )); [ "$_d" -gt 3 ] && echo "[qsweep] fetch in $d took ${_d}s" >&2 ;; esac
+  b=$(git -C "$d" branch --show-current)
+  dirty=$(git -C "$d" status --porcelain | wc -l)
+  ahead=$(git -C "$d" rev-list --count HEAD --not --remotes=origin 2>/dev/null)
+  remote=$(git -C "$d" rev-parse --verify -q "origin/$b" >/dev/null && echo yes || echo no)
+  if [ "$dirty" -gt 0 ] || [ "${ahead:-0}" -gt 0 ]; then
+    echo "STRAGGLER $d [${b:-detached}] uncommitted=$dirty commits-not-on-origin=${ahead:-0} branch-on-origin=$remote last=$(git -C "$d" log -1 --format='%h %cr %s' | cut -c1-60)"
+  fi
+done
+# the loaded checkouts (/home/user/<repo> of the 12 repositories) stay on main with a clean tree (orchestration.md, Checkouts): a worker works in a worktree of its own,
+# and the stop hook reads the orchestrator's directory, so work left in one fires it on work an agent is still doing (quire#751, row 12)
+for _r in quire bats pwa bridge dom gestures arith array zip sha256 capacitor-plugins repository-prototype; do
+  _d=/home/user/$_r; [ -e "$_d/.git" ] || continue
+  _b=$(git -C "$_d" branch --show-current)
+  if [ "$_b" != main ] || [ -n "$(git -C "$_d" status --porcelain | head -1)" ]; then echo "LOADED CHECKOUT OFF MAIN $_d [${_b:-detached}] dirty=$(git -C "$_d" status --porcelain | wc -l): no worker works here; move the work to its own worktree, then fast-forward to main"; fi
+done
+echo "stragglers: sweep done"
+_lap "stragglers done"
+
+# stale queue runs: merge_group runs of a pull request that are not its newest. GitHub rebuilds the groups behind a dequeued entry and leaves the old runs
+# waiting for runners (quire#586): they are the load. Read-only here; cancelling is `gh run cancel <id>` (a decision for the maintainer).
+# pages by hand: gh --paginate follows Link headers that name repositories/{id}, which the proxy refuses
+for _pg in 1 2 3; do gh api "repos/bats-lang/quire/actions/runs?event=merge_group&per_page=100&page=$_pg" --jq '.workflow_runs[]|select(.status!="completed")|[.id,.status,.created_at,(.head_branch|capture("pr-(?<n>[0-9]+)-").n)]|@tsv'; done | sort -k4,4n -k3,3 > /tmp/qsweep-queue.tsv
+awk -F'\t' '{n[$4]=$1; all[NR]=$0} END{for(i=1;i<=NR;i++){split(all[i],f,"\t"); if(n[f[4]]!=f[1]) print "STALE QUEUE RUN "f[1]" (pr-"f[4]", "f[2]", created "f[3]"): newest for it is "n[f[4]]}}' /tmp/qsweep-queue.tsv
+# a queue run that is not the newest of its pull request is superseded (GitHub rebuilds the groups behind a removed entry and leaves
+# the old runs waiting for runners, quire#586): cancel it, as the maintainer decided (2026-10-15): "Cancel superseded runs, obviously"
+for _stale in $(awk -F'\t' '{n[$4]=$1; all[NR]=$0} END{for(i=1;i<=NR;i++){split(all[i],f,"\t"); if(n[f[4]]!=f[1]) print f[1]}}' /tmp/qsweep-queue.tsv); do
+  if gh api -X POST "repos/bats-lang/quire/actions/runs/$_stale/cancel" >/dev/null 2>&1; then echo "CANCELLED STALE QUEUE RUN $_stale"; else echo "COULD NOT CANCEL STALE QUEUE RUN $_stale (is it already finished?)"; fi
+done
+echo "queue runs not completed: $(wc -l < /tmp/qsweep-queue.tsv) for $(cut -f4 /tmp/qsweep-queue.tsv | sort -u | wc -l) pull requests"
+_lap "queue runs done"
+
+# finished worktrees of quire: reported as reusable; `qsweep clean` removes them only at 90% disk (the branch is kept).
+# A worktree is stale only when ALL hold: not the main clone; nothing uncommitted; every commit is on a remote branch; nothing in it touched in the last 3 hours;
+# and its branch is finished: its pull request is merged or closed, or the branch tip is already in origin/main.
+_main=/home/user/quire
+git -C $_main fetch -q origin main 2>/dev/null
+for _pg in 1 2 3 4 5 6; do gh api "repos/bats-lang/quire/pulls?state=all&per_page=100&page=$_pg" --jq '.[]|[.head.ref,.state,(.merged_at!=null)]|@tsv'; done > /tmp/qsweep-prs.tsv
+_lap "pull request states read"
+_stale=0; _kept=0
+while IFS=$'\t' read -r w b; do
+  [ "$w" = "$_main" ] && continue
+  case "$w" in /home/user/*) ;; *) continue ;; esac
+  [ -d "$w" ] || continue
+  [ -n "$(git -C "$w" status --porcelain | head -1)" ] && { _kept=$((_kept+1)); continue; }
+  [ "$(git -C "$w" rev-list --count HEAD --not --remotes=origin 2>/dev/null)" != "0" ] && { _kept=$((_kept+1)); continue; }
+  # in use: anything in the checkout touched in the last 3 hours (a new worktree has an old tip, so the last commit's date says nothing)
+  [ -n "$(find "$w" -maxdepth 3 -mmin -180 -not -path '*/.git/*' -not -path '*/node_modules/*' 2>/dev/null | head -1)" ] && { _kept=$((_kept+1)); continue; }
+  _why=""
+  if [ "$b" != "(detached)" ] && [ -n "$b" ]; then
+    _pr=$(awk -F'\t' -v b="$b" '$1==b{print $2" "$3; exit}' /tmp/qsweep-prs.tsv)
+    case "$_pr" in "closed true") _why="pull request merged" ;; "closed false") _why="pull request closed" ;; "open "*) _why="" ;; esac
+  fi
+  [ -z "$_why" ] && git -C "$_main" merge-base --is-ancestor "$(git -C "$w" rev-parse HEAD)" origin/main 2>/dev/null && _why="tip is in origin/main"
+  if [ -n "$_why" ]; then
+    _stale=$((_stale+1)); _sz=$(du -sm "$w" 2>/dev/null | cut -f1)
+    # a worker's checkout persists (quire#751, row 4): its build/ keeps the next ticket's check incremental, and a deleted one makes every check cold.
+    # `qsweep clean` removes a finished worktree only when the disk is 90% full; otherwise the worktree is reported as reusable for the next ticket's branch.
+    _full=$(df --output=pcent /home/user | tail -1 | tr -dc 0-9)
+    if [ "$1" = "clean" ] && [ "${_full:-0}" -ge 90 ]; then
+      if git -C "$_main" worktree remove "$w" 2>/dev/null || git -C "$_main" worktree remove --force "$w" 2>/dev/null; then echo "REMOVED $w [${b}] ${_sz} MB ($_why)"; else echo "COULD NOT REMOVE $w"; fi
+    else
+      echo "REUSABLE WORKTREE $w [${b}] ${_sz} MB ($_why): the next ticket is a new branch in it (git checkout -B <branch> origin/main); it is removed only by 'qsweep clean' at 90% disk (now ${_full}%)"
+    fi
+  else _kept=$((_kept+1)); fi
+done < <(git -C $_main worktree list --porcelain | awk '/^worktree /{w=$2} /^branch /{b=$2} /^detached/{b="(detached)"} /^$/{print w"\t"b; w="";b=""}' | sed 's#refs/heads/##')
+[ "$1" = "clean" ] && git -C $_main worktree prune
+echo "worktrees: $_stale stale, $_kept kept"
+_lap "worktrees done"
+echo "Look to see which tasks need to be updated"
+echo "SWEEP REMINDER: check whether any ticket is closeable (its work merged: read the merged PR against the ticket's Done-when, comment the evidence, close it; a duplicate is closed as a duplicate)"
+echo "SWEEP REMINDER: the agent mix is EXACTLY the slot list: one SONNET slot and one HAIKU slot, both always filled, each by its own model (a different number of slots means a different exact mix). A free slot is refilled the same turn with an agent of ITS model. Run slots set at every spawn and slots free at every hand-back, in the same turn"
+echo "SWEEP REMINDER: check whether any open ticket holds more than one piece, or has rows or steps still owed beside done ones: break it up before work (one ticket per piece from its own steps, original closed with Broken into #a #b, pieces inherit priority; quire/.claude/orchestration.md, agents/worker.md)"
+echo "SWEEP REMINDER: check whether any blocked ticket is unblocked (read the PR or ticket it says it waits for; if that merged or closed, say so on the ticket and make it workable)"
+echo "SWEEP REMINDER: order for a free slot (owner): (1) a fix for a review that asked for changes, (2) a review for a fix that is ready (green on its exact head), (3) a new PR; oldest first inside each. Never start a new ticket while a green PR waits for its reviewer or a changes-needed review waits for its fix"
+echo "SWEEP REMINDER: workers never wait for CI (owner): every brief says push, then hand back at once with PR, head sha and local runs. The orchestrator watches the checks and continues; a worker found waiting is told to hand back"
+slots show

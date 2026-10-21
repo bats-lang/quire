@@ -257,5 +257,5 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   Chromium this Playwright expects (it never downloads one), and runs the `@serial` tests alone
   and then the others. A `--grep` or `--workers` of the caller's makes it one run. A change to
   a spec or a static fixture runs that group too where the machine can (`tests/static/run.sh`,
-  `gen-pwa test -- <spec>`); what it cannot run is left to CI and said in the PR. Playwright
+  `gen-pwa test -- <spec>`); the rest of the population is CI's. Playwright
   1.58 or later is required (`.claude/rules/e2e.md`).

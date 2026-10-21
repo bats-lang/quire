@@ -25,9 +25,9 @@ them, and nothing refused the text that made them. This checks, without a compil
 
 Stopgap (CLAUDE.md, "Pipeline and tooling improvements belong in bats or pwa"): a second
 bats app would copy this lint and the workflow that runs it (the text-lint workflow),
-so they move to bats (bats-lang/bats#431); the avenue exhausted for non-bats code
-(quire#646): bats has no command that reads markdown or a comment's text, and this has to
-run in the `plan`-like jobs that have no compiler.
+so they move to bats (bats-lang/bats#431). The avenue exhausted for non-bats code
+(quire#646): bats has no command that reads markdown or the text of a comment, and
+bats#431 is the ticket that adds one.
 
 usage: python3 tests/static/guidelines.py [ROOT]
        python3 tests/static/guidelines.py --text FILE
@@ -44,6 +44,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 PHRASES = os.path.join(HERE, 'guidelines', 'phrases.tsv')
+CONTRADICTIONS = os.path.join(HERE, 'guidelines', 'contradictions.tsv')
 
 GENERATED = (
     '🤖 Generated with [Claude Code](https://claude.ai/code)',
@@ -132,15 +133,39 @@ def guideline_files(root):
     return found
 
 
+def load_contradictions(path=CONTRADICTIONS):
+    found = []
+    with open(path, encoding='utf-8') as handle:
+        for line in handle:
+            if line.strip() and not line.startswith('#'):
+                first, second, example_first, example_second, reason = line.rstrip('\n').split('\t')
+                found.append((re.compile(first, re.IGNORECASE), re.compile(second, re.IGNORECASE), example_first, example_second, reason))
+    return found
+
+
+def lint_contradictions(texts, contradictions):
+    """texts: {file: text}. A pair is a finding when its two sentences are held (code spans removed)."""
+    stripped = {name: strip_code(text) for name, text in texts.items()}
+    findings = []
+    for first, second, _a, _b, reason in contradictions:
+        where_first = [name for name, text in stripped.items() if first.search(text)]
+        where_second = [name for name, text in stripped.items() if second.search(text)]
+        if where_first and where_second:
+            findings.append(f'contradiction: "{first.pattern}" ({", ".join(where_first)}) and "{second.pattern}" ({", ".join(where_second)}): {reason}')
+    return findings
+
+
 def lint_guidelines(root, phrases):
     findings = []
+    texts = {}
     for relative in guideline_files(root):
         with open(os.path.join(root, relative), encoding='utf-8') as handle:
             text = handle.read()
+        texts[relative] = text
         findings += lint_text(text, relative, phrases, guide=True, notes=relative.startswith('.claude/rules/'))
         if relative == '.claude/agents/reviewer.md':
             findings += lint_reviewer_tools(text, relative)
-    return findings
+    return findings + lint_contradictions(texts, load_contradictions())
 
 
 def lint_pr_body(text, head, phrases):
@@ -178,11 +203,8 @@ def lint_review(text, phrases, gate_form=False):
             findings.append(f'review: exactly one line holds "Verdict:", and it is exactly "Verdict: approved" or "Verdict: changes needed" (found {len(verdicts)}; bridge#200)')
         if len(reviewed) != 1 or not re.fullmatch(r'Reviewed: [0-9a-f]{40}', reviewed[0]):
             findings.append(f'review: exactly one line holds "Reviewed:", and it is "Reviewed: <40-character SHA>" (found {len(reviewed)}; bridge#200): do not write the word in any other line')
-    else:
-        if first not in ('approved', 'changes needed'):
-            findings.append('review: the first line is "approved" or "changes needed"')
-        if not SHA.search(text):
-            findings.append('review: it names the head SHA reviewed as the full 40-character SHA')
+    elif not UNGATED_FIRST.fullmatch(first):
+        findings.append('review: the first line is exactly "Independent review (a separate reviewer agent, not the author) of head <40-character SHA>: approved" or ": changes needed"')
     return findings
 
 
@@ -206,7 +228,14 @@ def lint_brief(brief, ticket, phrases):
 TRUSTED = ('OWNER', 'MEMBER', 'COLLABORATOR')
 MARKER = '<!-- text-lint -->'
 EXEMPT_BRANCHES = ('relock/', 'dependabot/')
-REVIEW_FIRST_LINES = ('approved', 'changes needed', '## Adversarial review')
+# the one first line of a review in a repository without a review gate (reviewer.md), and the gate's own
+UNGATED_FIRST = re.compile(r'Independent review \(a separate reviewer agent, not the author\) of head ([0-9a-f]{40}): (approved|changes needed)')
+GATED_FIRST = '## Adversarial review'
+
+
+def is_review_first_line(line):
+    line = line.strip()
+    return bool(UNGATED_FIRST.fullmatch(line)) or line == GATED_FIRST
 
 
 def gh_api(path, method='GET', fields=None):
@@ -227,7 +256,7 @@ def newest_review(comments):
         if comment.get('author_association') not in TRUSTED:
             continue
         lines = [line for line in (comment.get('body') or '').split('\n') if line.strip()]
-        if lines and lines[0].strip() in REVIEW_FIRST_LINES:
+        if lines and is_review_first_line(lines[0]):
             found = comment
     return found
 

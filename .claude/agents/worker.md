@@ -15,7 +15,7 @@ You are a worker on bats-lang/quire. The brief names the ticket, the files and d
 
 ## Where you work, and how long a run is
 
-- Work in a checkout of your own that stays: a worktree beside `/home/user/<repo>` (`git -C /home/user/<repo> worktree add /home/user/<repo>-<ticket> -b <branch> origin/main`), or the one the brief names. Never in `/home/user/<repo>` itself: it is the loaded checkout, kept on main, and the stop hook there fires on whatever you leave in it. The next ticket is a new branch in the same checkout (`git checkout -B <branch> origin/main`), so its `build/` stays warm. Never clone afresh, and never delete a checkout or its `build/`.
+- Work in a checkout of your own that stays: a worktree beside `/home/user/<repo>` (`git -C /home/user/<repo> worktree add /home/user/<repo>-<ticket> -b <branch> origin/main`), or the one the brief names. Never in `/home/user/<repo>` itself: it is the loaded checkout, kept on main, and the stop hook there fires on whatever you leave in it. When you start in a checkout, claim it for the stop hook: `printf '%s\t%s\n' "<your agent name>" "<the session URL the brief gives>" > "$(git rev-parse --git-dir)/agent-holder"` (the hook, once the owner installs `.claude/skills/sweep/stop-hook-git-check.proposed.sh`, then skips a checkout held by another session and names you). The next ticket is a new branch in the same checkout (`git checkout -B <branch> origin/main`), so its `build/` stays warm. Never clone afresh, and never delete a checkout or its `build/`.
 - A local run is incremental, in that checkout, and takes about 10 minutes at most. The Done-when's command runs over the whole population in CI; locally you run a random sample of it (fixtures, specs, tests), drawn with a seed you print, sized to fit the 10 minutes, and say in the PR what the sample was, its seed and size, and why that sample is enough for the claim (the claim is per member, so a random member shows it; or the claim is a rate, and the sample's standard error is within the claim). The members are drawn at random, never chosen by hand; no repeated cold runs for the same information, and no two heavy runs at once on this 4-core machine.
 - The check command is the one in `.claude/rules/ci.md`, "Checking locally before a push": `BATS_SLOTS=1` through the env file, no `timeout` wrapper. A command that can run past the Bash tool's cap of 600000 ms (the first build of a new checkout) runs with `run_in_background` and its log is read until it ends, inside your turn; nothing else is left running when you finish.
 - Run the repository's check before a push, as its CLAUDE.md "Check locally" section says.
@@ -31,7 +31,7 @@ You are a worker on bats-lang/quire. The brief names the ticket, the files and d
 ## Pushing, CI and hand-back
 
 - Push with `qsweep push <git push arguments>`: it prints `qsweep pressure` and runs `git push` only when it says `runner pressure: none` (exit 0). Under pressure keep working locally; do not push.
-- You own CI until it is green: push, report the head, finish. Never wait on a run. A red CI is fixed by an author, not necessarily you, who checks the fix locally first.
+- Owning CI is CLAUDE.md's rule ("Evidence, red tests and CI"): push, report the head, finish; never wait on a run. A fix for a red CI is checked locally first, whoever writes it.
 - The PR body is rewritten for the head you report, not appended to: its first line is `Fixes #N`, it has a line `Head: <the 40-character SHA>` that is the head, an `Evidence` section, and it ends with the line `🤖 Generated with [Claude Code](https://claude.ai/code)`. `python3 tests/static/guidelines.py --pr-body <file> --head <sha>` checks the form, and `.github/workflows/text-lint.yml` runs it on every push and edit. After every push, edit the body for the new head. The ticket's title and body say what is true of the head (a title that names a plan that changed is edited); its Done-when is the owner's and is never edited.
 - Commit message trailers, last two lines:
   `Co-Authored-By: Claude <your model name> <noreply@anthropic.com>`
@@ -43,5 +43,5 @@ You are a worker on bats-lang/quire. The brief names the ticket, the files and d
 ## What the owner's rules are
 
 - `/dev`: never create, move, link, delete or truncate anything under `/dev`. Redirecting output to `/dev/null` is fine.
-- Checked-in code and YAML do not depend on sed. Edit with any tool you like. Quire is written in bats, not shell: new tooling is bats unless the brief says otherwise, and non-bats code names the avenue it exhausted (quire#646).
+- Checked-in code and YAML do not depend on sed. Edit with any tool you like. Quire is written in bats, not shell, and non-bats code names the avenue it exhausted (quire#646, CLAUDE.md).
 - Nothing else in this file is the owner's word; it is how the work is done here.
