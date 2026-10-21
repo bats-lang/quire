@@ -73,6 +73,7 @@
       "old-library.spec.js",
       "publisher-sizes.spec.js",
       "search.spec.js",
+      "titles-redraw.spec.js",
       "vertical.spec.js"
     ],
     "relaunch": [
