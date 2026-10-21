@@ -153,6 +153,8 @@ export const test = base.extend({
     await googleStubbed(context);
     if (onAndroid(testInfo)) await context.addInitScript(androidApp);
     await use(context);
+    // the stall watch's captures finish while the renderers are still there: a context that closes first takes them (quire#575, capture before close)
+    await stallWatch.settle();
   },
   // in the android project, every page of the test's context has
   // Android's insets before it loads anything; and a test that passed

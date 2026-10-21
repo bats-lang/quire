@@ -1367,13 +1367,14 @@ export function stallWatch(browser, testInfo) {
       const pending = armed.get(page);
       return pending ? (await pending).session : null;
     },
-    async stop() {
+    /**
+     * The test is over: no capture starts, and the ones running are waited for, but not for ever (a native step started at the margin
+     * before the timeout would hold the teardown). The `context` fixture calls it before the context closes, because a closed context
+     * takes its renderers with it and a capture still reading one finds `/proc/<pid>` gone (quire#575: `kernel view of renderer N`).
+     * Keyword: capture before close.
+     */
+    async settle() {
       stopped = true;
-      browser.newContext = newContext;
-      clearInterval(scanTimer);
-      for (const context of watchedContexts) context.off('page', watchPage);
-      // the captures running are waited for, but not for ever: a native step
-      // started at the margin before the timeout would hold the teardown
       const settled = await within(Promise.all([...running]), TEARDOWN_MS);
       if (!settled.answered) {
         // a capture still running outside node (gdb attached to a renderer that
@@ -1382,6 +1383,13 @@ export function stallWatch(browser, testInfo) {
         await within(scope.abort(), HELPER_MS);
         await within(Promise.all([...running]), 1500);
       }
+    },
+    async stop() {
+      stopped = true;
+      browser.newContext = newContext;
+      clearInterval(scanTimer);
+      for (const context of watchedContexts) context.off('page', watchPage);
+      await this.settle();
       await keepEvidence();
       browser.off('disconnected', onDisconnected);
       // a test that failed with no frozen page leaves the rings too: any red has its history (a timeout with the page

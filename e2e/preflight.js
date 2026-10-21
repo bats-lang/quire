@@ -161,7 +161,7 @@ export function startMonitor(started, env = process.env) {
   let stoppedSeenAt = null;
   let unreadable = 0;
   const seen = { checks: 0, beats: new Set(), holdsMost: 0, lastRing: null, lastScans: null };
-  const summary = () => `${seen.checks} checks in ${Math.round((Date.now() - began) / 1000)} s; ${seen.beats.size} distinct heartbeats of the watchdog read (last: ${seen.lastScans === null ? 'none' : `${seen.lastScans} scans`}); the ring had written ${seen.lastRing === null ? 'nothing read' : seen.lastRing} events at the last reading; ring holds seen at once: ${seen.holdsMost}`;
+  const summary = () => `${seen.checks} checks in ${Math.round((Date.now() - began) / 1000)} s; ${seen.beats.size} distinct heartbeats of the watchdog read (last: ${seen.lastScans === null ? 'none' : `${seen.lastScans} scans`}); ${seen.lastRing === null ? 'no reading of the ring was made' : `the ring had written ${seen.lastRing} events at the last reading`}; ring holds seen at once: ${seen.holdsMost}`;
   const die = (part, why) => { console.error(`[monitor] ended the run: ${summary()}`); return fatal(part, why, out); };
   console.error(`[monitor] started (${serialRun() ? 'the @serial run' : 'the run'}): every ${MONITOR_EVERY_MS} ms the watchdog ${started.watchdog.child ? started.watchdog.child.pid : '?'} (child and heartbeat), the ring ${started.kernel.instance} (on, taking events, held paused only by a capture that ends within ${HOLD_MOST_MS / 1000} s)`);
   const timer = setInterval(() => {

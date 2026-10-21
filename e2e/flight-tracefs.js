@@ -57,16 +57,52 @@ export function holdersIn(dir) {
 
 export function hold({ dir, holder }) { if (dir) attempt('hold', () => writeFileSync(`${dir}/${HOLD_PREFIX}${holder}`, `${new Date().toISOString()} ${holder}\n`)); return { held: true }; }
 
+// The two sequences that decide whether the ring records are each one step to the other captures: a hold (the file, then the pause) and a
+// release (the file down, who is left, then the resume). Without a lock a capture that wrote its hold and paused between another's look at
+// the directory (empty) and its resume had its ring switched back on while `tail` read it (a ring read as it records never ends).
+// A lock file made with `wx` (the time as its content, no file time is read) serialises them; the critical sections take milliseconds,
+// so a lock older than LOCK_STALE_MS is a dead holder's and is taken over, and one that cannot be had in LOCK_MOST_MS is gone without
+// (as before the lock). Keyword: ring lock.
+export const LOCK_NAME = 'ring-lock';
+export const LOCK_STALE_MS = 2000;
+export const LOCK_MOST_MS = 5000;
+const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/** Runs `action` while holding the ring's lock in `dir` (no lock without a directory), and answers what it answers. */
+export function withRingLock(dir, action) {
+  if (!dir) return action();
+  const path = `${dir}/${LOCK_NAME}`;
+  const begun = Date.now();
+  let locked = false;
+  while (!locked && Date.now() - begun < LOCK_MOST_MS) {
+    try { writeFileSync(path, `${new Date().toISOString()} ${process.pid}\n`, { flag: 'wx' }); locked = true; } catch (error) {
+      if (!error || error.code !== 'EEXIST') break; // the directory is gone: nothing to take turns over
+      let at = Number.NaN;
+      try { at = Date.parse(readFileSync(path, 'utf8').split(/\s/)[0]); } catch (gone) { /* it was given back meanwhile */ }
+      if (Date.now() - at > LOCK_STALE_MS) attempt('unlock', () => unlinkSync(path));
+      else nap(2);
+    }
+  }
+  try { return action(); } finally { if (locked) attempt('unlock', () => unlinkSync(path)); }
+}
+
+/** The start of a hold: the holder's file, then the ring paused, as one step to the other holders. */
+export function holdAndPause({ instance, dir, holder }) {
+  return withRingLock(dir, () => { hold({ dir, holder }); return pause({ instance }); });
+}
+
 /**
  * The end of a hold, on every outcome of a capture (a snapshot that failed, a crash, a freeze, a pass): the holder's file goes down
  * first, then the ring records again unless another holder is still reading it (the last one out resumes it, whichever it is).
  * Without a directory there are no holders to ask and the ring records again.
  */
 export function release({ instance, dir, holder }) {
-  if (dir) attempt('unhold', () => unlinkSync(`${dir}/${HOLD_PREFIX}${holder}`));
-  const others = holdersIn(dir).map((each) => each.holder);
-  if (others.length) return { released: true, resumed: false, others };
-  return { released: true, ...resume({ instance }), others };
+  return withRingLock(dir, () => {
+    if (dir) attempt('unhold', () => unlinkSync(`${dir}/${HOLD_PREFIX}${holder}`));
+    const others = holdersIn(dir).map((each) => each.holder);
+    if (others.length) return { released: true, resumed: false, others };
+    return { released: true, ...resume({ instance }), others };
+  });
 }
 
 /** Makes the instance and starts it for the process tree of `pid`; { instance, skipped } or { error }. */
@@ -105,10 +141,9 @@ const RING_STAMP = /^\s*.+-\d+\s+\[\d+\]\s+\S+\s+(\d+\.\d+):/;
  */
 export async function snapshot({ instance, out, lines = LINES_KEPT, dir, holder = `snapshot-${process.pid}` }) {
   const others = holdersIn(dir).map((each) => each.holder).filter((each) => each !== holder);
-  hold({ dir, holder });
   try {
     // the ring is paused while it is read (a ring read as it records never reaches its end: tail ran for an hour on 44,000 events a second)
-    pause({ instance });
+    holdAndPause({ instance, dir, holder });
     let header = '';
     const descriptor = openSync(`${instance}/trace`, 'r');
     try {
@@ -180,7 +215,7 @@ export function state({ instance }) {
   try { return { on: readFileSync(`${instance}/tracing_on`, 'utf8').trim() }; } catch (error) { return { error: String((error && error.code) || error) }; }
 }
 
-const ops = { start, pause, snapshot, stop, readmem, resume, release, hold, state, stats };
+const ops = { start, pause, snapshot, stop, readmem, resume, release, hold, holdAndPause, state, stats };
 
 // `sudo -n node flight-tracefs.js <op> <json>`: the answer is one line of JSON
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

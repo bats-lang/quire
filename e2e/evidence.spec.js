@@ -6,6 +6,8 @@
  */
 
 import { createServer } from 'node:http';
+import { Worker } from 'node:worker_threads';
+import { pathToFileURL } from 'node:url';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -368,10 +370,25 @@ test('the watchdog, outside every worker and browser, sees a renderer frozen in 
     expect(report.kernelRing.file, JSON.stringify(report.kernelRing)).toBeTruthy();
     expect(report.futex.ring.waiter.lastWait.untimed).toBe(true);
     expect(report.processes.some((each) => /--type=renderer/.test(each.cmdline))).toBe(true);
+    // the stall watch sees the same freeze (its capture begins about 5 s into the hang, in the Playwright worker) and is not cut short by this
+    // test ending: the hang is held until that capture has read the renderer, as the test above does (a loaded run ended the test under it, quire#575)
+    await stallWatch.next(page, 20000 + NATIVE_MOST_MS);
   } finally {
     hang.release();
     stopWatchdog(watchdog);
   }
+});
+
+test('a page closed while the stall watch is still capturing its frozen renderer: the capture reads the renderer before it goes (quire#575)', async ({ page, stallWatch }, testInfo) => {
+  desktopOnly(testInfo);
+  await recorderOn();
+  test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
+  const hang = await hangPage(page, stallWatch);
+  try {
+    await stallWatch.started(page, 20000);
+    // past the capture's questions to the page (they are answered or timed out within 4 s, the renderers' CPU read in 1 s more): it is in the rings now, and the test ends under it
+    await new Promise((resolve) => setTimeout(resolve, 5500));
+  } finally { hang.release(); }
 });
 
 test('a stall of the machine, seen from inside: a tick that comes late is kept with the steal time that passed', async ({}, testInfo) => {
@@ -442,6 +459,43 @@ test('a capture leaves the ring recording on every outcome, the last of two read
     await resumeKernel(env, 'reader-c');
     expect(await on()).toBe('1');
   } finally { await stopKernel(started); }
+});
+
+test('four captures at once on one ring: no capture sees the ring recording while it holds it, and the last one out resumes it (the ring lock)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  // a stand-in for the ring (a directory with a tracing_on file): the sequences are the real ones, so the race does not need a kernel to show
+  const holds = testInfo.outputPath('holds');
+  const instance = testInfo.outputPath('instance');
+  mkdirSync(holds, { recursive: true });
+  mkdirSync(instance, { recursive: true });
+  writeFileSync(join(instance, 'tracing_on'), '1');
+  const module = pathToFileURL(join(import.meta.dirname, 'flight-tracefs.js')).href;
+  // each capture: hold the ring, look at it a few times while it holds it (it must read paused), release it
+  const code = `
+    const { parentPort, workerData } = require('node:worker_threads');
+    const { readFileSync } = require('node:fs');
+    import(workerData.module).then(({ holdAndPause, release }) => {
+      const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+      let seenRecording = 0;
+      for (let round = 0; round < workerData.rounds; round += 1) {
+        holdAndPause({ instance: workerData.instance, dir: workerData.dir, holder: workerData.holder });
+        for (let look = 0; look < 3; look += 1) {
+          if (readFileSync(workerData.instance + '/tracing_on', 'utf8').trim() === '1') seenRecording += 1; // (a file being rewritten reads empty: the kernel's does not)
+          if (look < 2) nap(0);
+        }
+        release({ instance: workerData.instance, dir: workerData.dir, holder: workerData.holder });
+      }
+      parentPort.postMessage({ holder: workerData.holder, seenRecording });
+    });`;
+  const answers = await Promise.all(['a', 'b', 'c', 'd'].map((holder) => new Promise((resolve, reject) => {
+    const worker = new Worker(code, { eval: true, workerData: { module, instance, dir: holds, holder, rounds: 3000 } });
+    worker.on('message', resolve);
+    worker.on('error', reject);
+  })));
+  expect(answers.map((each) => each.seenRecording), `times a capture found the ring recording while it held it: ${JSON.stringify(answers)}`).toEqual([0, 0, 0, 0]);
+  expect(readFileSync(join(instance, 'tracing_on'), 'utf8').trim(), 'the last one out resumed it').toBe('1');
+  expect(holdersIn(holds), 'no hold is left').toEqual([]);
+  expect(readdirSync(holds), 'the lock is given back').toEqual([]);
 });
 
 test('the job-level check: a test that ended unexpectedly names a kernel ring or it is missing, a named error is repeated, no report is a failure', async ({}, testInfo) => {
