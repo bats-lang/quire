@@ -391,6 +391,37 @@ test('a page closed while the stall watch is still capturing its frozen renderer
   } finally { hang.release(); }
 });
 
+test('a renderer gone when the capture has finished its rings: what /proc held of it was read before them (quire#575, capture before close)', async ({ playwright, launchOptions }, testInfo) => {
+  desktopOnly(testInfo);
+  await recorderOn();
+  test.setTimeout(testInfo.timeout + CAPTURE_MOST_MS + NATIVE_MOST_MS);
+  const own = await playwright.chromium.launch(launchOptions);
+  try {
+    const page = await (await own.newContext()).newPage();
+    const armed = await arm(page);
+    const hang = await hangPage(page, { session: async () => armed.session });
+    try {
+      // the rings are the step after which a context that closes under the capture has taken the renderers (on a runner they take longer than the
+      // test): here the step kills every renderer and returns when /proc has lost them, so the capture reads what is left after the rings, every run
+      const rings = async () => {
+        for (const each of (await processes(own)).filter((process) => process.type === 'renderer')) process.kill(each.id, 'SIGKILL');
+        await expect.poll(() => (processes(own).then((list) => list.filter((process) => process.type === 'renderer' && existsSync(`/proc/${process.id}`)).length)), { timeout: 20000 }).toBe(0);
+        return { rings: 'killed' };
+      };
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const found = await capture(page, armed, 'induced: a renderer gone after the rings', own, () => {}, undefined, null, rings);
+      const word = (found.futex || []).find((each) => each.untimed);
+      expect(word, `a renderer waited in an untimed futex: ${JSON.stringify(found.futex)}`).toBeTruthy();
+      expect(word.memory.bytes, JSON.stringify(word.memory)).toMatch(/^[0-9a-f]{128}$/);
+      const waiting = found.rendererCpu.find((each) => each.pid === word.pid);
+      expect(waiting.threads.join(' '), 'the threads were read').not.toMatch(/ENOENT/);
+      expect(waiting.mainThread.syscall, 'the main thread was read').toMatch(/^202 /);
+      expect(waiting.channels.join(' '), 'the open files were read').not.toMatch(/ENOENT/);
+      expect(found.native.renderers.find((each) => each.pid === word.pid).kernel.tasks.length, 'the kernel view was read').toBeGreaterThan(1);
+    } finally { hang.release(); }
+  } finally { await own.close().catch(() => {}); }
+});
+
 test('a stall of the machine, seen from inside: a tick that comes late is kept with the steal time that passed', async ({}, testInfo) => {
   desktopOnly(testInfo);
   const out = testInfo.outputPath('host-stalls');

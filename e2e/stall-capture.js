@@ -51,7 +51,7 @@ import { delimiter, isAbsolute, join } from 'node:path';
 import { bindAttempts } from './attempt-log.js';
 import { keepHistory } from './page-history.js';
 import { keepBoth, startBrowserTrace, traceReady, wanted, ROOT_MOST_MS, TRACE_END_MS } from './flight-recorder.js';
-import { diskEvidence, futexEvidence, missingEvidence, pageProbes, sanitizerReports, symbolEvidence } from './evidence.js';
+import { diskEvidence, futexEvidence, futexWordMemory, missingEvidence, pageProbes, sanitizerReports, symbolEvidence } from './evidence.js';
 import { runnerLoad, sampleRunner } from './runner-load.js';
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
@@ -892,7 +892,7 @@ async function keepCore(corePath, scope, saved, callsFailed) {
  * The native stacks of these renderers (a page judged stalled: see the top
  * of this file). Nothing here throws, and every command is limited.
  */
-export async function nativeStacks(renderers, scope, corePathFor, others = []) {
+export async function nativeStacks(renderers, scope, corePathFor, others = [], before = new Map()) {
   const result = { ptraceScope: '(absent)' };
   try { result.ptraceScope = readFileSync('/proc/sys/kernel/yama/ptrace_scope', 'utf8').trim(); } catch (error) { /* no Yama: ptrace is the kernel's usual rule */ }
   result.root = isRoot;
@@ -903,7 +903,10 @@ export async function nativeStacks(renderers, scope, corePathFor, others = []) {
   result.renderers = await Promise.all(taken.map(async (renderer, index) => {
     // the kernel's view and the addresses first: gdb stops the process
     const { result: entry, maps } = await identity(renderer.pid, scope);
-    entry.kernel = await kernelTasks(renderer.pid, scope);
+    // the capture read it when the freeze was seen, before the rings (a renderer can be gone by now); read again only when that read failed
+    const early = before.get(renderer.pid);
+    entry.kernel = early && early.kernel && early.kernel.tasks ? early.kernel : await kernelTasks(renderer.pid, scope);
+    if (early && early.futexMemory) entry.futexMemory = early.futexMemory;
     // A process in a group stop (SIGSTOP, state T) cannot run the calls that leave the empty
     // reservations out of the core, and a call abandoned there leaves it broken: no core of it
     const main = entry.kernel.tasks && entry.kernel.tasks.find((task) => task.tid === renderer.pid);
@@ -969,6 +972,7 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
     answers = evaluated.answered;
   }
   let processes = null;
+  const before = new Map(); // a frozen renderer's pid -> { kernel, futexMemory }, read before the rings and the native step
   const kernelOf = (list) => kernelEvidence(Array.isArray(list) ? list.filter((process) => process.type === 'renderer').map((process) => process.pid) : [], scope).catch((error) => ({ error: String(error && error.stack || error) }));
   if (!answers) {
     // No answer, and only then: the renderers that also used (almost) no CPU
@@ -991,12 +995,24 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
       if (busy.length) {
         result.presumedBusy = `renderer ${busy.map((process) => `${process.pid} used ${process.cpuSeconds} s of CPU`).join(', ')} over ${CPU_WINDOW_MS / 1000} s, so the page is presumed busy, not frozen, and nothing is attached`;
       } else if (renderers.length) {
-        // the rings first (flight recorder): what led up to the freeze, before anything touches the renderer
+        // everything /proc holds of the frozen processes is read now, before the rings and the native step, which take tens of seconds
+        // and outlast the test: a context that closes under them takes the renderers, and a read made after finds /proc/<pid> gone
+        // (quire#575: the futex word's memory, ENOENT on a runner). Reading changes nothing in a renderer. Keyword: capture before close.
+        for (const process of processes) {
+          process.threads = threadStates(process.pid);
+          process.mainThread = mainThreadWait(process.pid);
+          process.channels = openChannels(process.pid);
+        }
+        for (const renderer of renderers) {
+          const kernel = await kernelTasks(renderer.pid, scope);
+          before.set(renderer.pid, { kernel, futexMemory: await futexWordMemory(kernel, renderer.pid) });
+        }
+        // the rings (flight recorder): what led up to the freeze, before anything touches the renderer
         if (flight) result.flight = await flight().catch((error) => ({ error: String(error && error.stack || error) }));
         // before the stacks, which a teardown can cut off
         result.kernel = await kernelOf(processes);
         save(result);
-        result.native = await nativeStacks(renderers, scope, corePathFor, processes.filter((process) => process.type !== 'renderer' && process.cpuSeconds !== null)).catch((error) => ({ error: String(error && error.stack || error) }));
+        result.native = await nativeStacks(renderers, scope, corePathFor, processes.filter((process) => process.type !== 'renderer' && process.cpuSeconds !== null), before).catch((error) => ({ error: String(error && error.stack || error) }));
         save(result);
       }
     }
@@ -1031,9 +1047,10 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
   processes = processes || await cpu;
   if (Array.isArray(processes)) {
     for (const process of processes) {
-      process.threads = threadStates(process.pid);
-      process.mainThread = mainThreadWait(process.pid);
-      process.channels = openChannels(process.pid);
+      // a frozen process's were read before the rings (above)
+      if (!process.threads) process.threads = threadStates(process.pid);
+      if (!process.mainThread) process.mainThread = mainThreadWait(process.pid);
+      if (!process.channels) process.channels = openChannels(process.pid);
     }
     result.rendererCpu = processes.filter((process) => process.type === 'renderer');
     result.otherProcesses = processes.filter((process) => process.type !== 'renderer');

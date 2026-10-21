@@ -32,6 +32,18 @@ export function parseFutexSyscall(text) {
 }
 
 /**
+ * The 64 bytes around the futex word a process's main thread waits on, from the kernel view of its tasks (`kernelTasks`): read
+ * at once, because the capture goes on for tens of seconds after it and its renderer can be gone by then. null when the main
+ * thread is not in a futex wait. Keyword: capture before close.
+ */
+export async function futexWordMemory(kernel, pid) {
+  const main = ((kernel && kernel.tasks) || []).find((task) => task.tid === pid);
+  const call = main && parseFutexSyscall(main.syscall);
+  if (!call) return null;
+  return readMemory(pid, `0x${call.address}`, 64).catch((error) => ({ error: String(error) }));
+}
+
+/**
  * For each frozen renderer whose main thread is in a futex: the word (its address, the 64 bytes around it as
  * the process holds them), whether the wait has a timeout, what the kernel ring says of the address and of the
  * waiter (who woke it last and how long ago, every wait and wake on the word), and the process's other threads as
@@ -54,7 +66,8 @@ export async function futexEvidence(native, ringFile) {
     const words = String(main.syscall).trim().split(/\s+/);
     // the stack pointer and the program counter of the wait: where on its stack the word lies and in which code it sleeps (G4 of #575)
     const entry = { pid: renderer.pid, ...call, registers: { sp: words[7] || null, pc: words[8] || null } };
-    entry.memory = await readMemory(renderer.pid, `0x${call.address}`, 64).catch((error) => ({ error: String(error) }));
+    // read when the freeze was first seen, before the rings and the native step (a renderer can be gone by now: capture before close)
+    entry.memory = renderer.futexMemory || await readMemory(renderer.pid, `0x${call.address}`, 64).catch((error) => ({ error: String(error) }));
     entry.candidates = tasks.filter((task) => task.tid !== renderer.pid).map((task) => ({ tid: task.tid, comm: task.comm, state: task.state, wchan: task.wchan, syscall: String(task.syscall).split(' ').slice(0, 3).join(' ') }));
     entry.ring = ringFile ? await futexAnalysis(ringFile, { address: call.address, tid: renderer.pid }).catch((error) => ({ error: String(error && error.message || error) })) : 'the kernel ring was not kept';
     found.push(entry);
