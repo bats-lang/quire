@@ -578,6 +578,26 @@ test('a chown that fails does not stop the watchdog\'s own output: the report is
   expect(quiet.walks, 'a stall file written is walked').toBe(walked + 1);
 });
 
+test('a chown that fails for good is said once for its path and kept in a bounded list across heartbeats (quire#767)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const said = [];
+  const write = console.error;
+  console.error = (...line) => said.push(line.join(' '));
+  let dog;
+  try {
+    // files are refused for good, directories are given over, so the walk reaches every file
+    const chown = (path) => { if (!/\.(json|part)$/.test(path)) return; const error = new Error(`EPERM: operation not permitted, chown '${path}'`); error.code = 'EPERM'; throw error; };
+    dog = new Watchdog({ root: 100, out: testInfo.outputPath('permanent'), proc: testInfo.outputPath('noproc'), stacks: false, chown, env: { SUDO_UID: '65534', SUDO_GID: '65534' } });
+    for (let beat = 0; beat < 5; beat += 1) dog.heartbeat();
+    // many distinct paths: the list stops at the cap
+    for (let file = 0; file < 150; file += 1) { writeFileSync(join(dog.out, `extra-${file}.json`), '{}'); dog.own(dog.out); }
+  } finally { console.error = write; }
+  const heartbeatLines = said.filter((line) => /heartbeat-100-\d+\.json\.part/.test(line));
+  expect(heartbeatLines, 'the heartbeat file is said once over five heartbeats').toHaveLength(1);
+  expect(dog.ownFailures.length, 'the list is bounded').toBe(100);
+  expect(said.length, 'each path is said once').toBe(new Set(said).size);
+});
+
 test('a ring lock that cannot be had in its limit leaves a record, runs the action, and is the job\'s failure', async ({}, testInfo) => {
   desktopOnly(testInfo);
   const dir = testInfo.outputPath('lock');

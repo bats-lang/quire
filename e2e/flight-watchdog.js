@@ -58,7 +58,7 @@ export function ownTree(path, owner, failed = null, chown = chownSync) {
 /** The topmost directory that mkdir makes for `dir` (its missing ancestors too), or null when `dir` exists (owner). */
 function topMissing(dir) {
   let top = null;
-  for (let at = absolute(dir); !existsSync(at); at = dirname(at)) top = at;
+  for (let ancestor = absolute(dir); !existsSync(ancestor); ancestor = dirname(ancestor)) top = ancestor;
   return top;
 }
 
@@ -121,7 +121,8 @@ export class Watchdog {
     this.written = false;       // a file was written since own() last walked (owner)
     this.listed = '';           // the names in the output and the holds' directory at that walk
     this.walks = 0;
-    this.ownFailures = [];      // what could not be given to the owner, each said once in the log
+    this.ownFailures = [];      // the first 100 paths that could not be given to the owner (owner)
+    this.failedPaths = new Set(); // every such path, so each is logged once
     this.match = new RegExp(match || '--type=renderer\\b');
     this.seen = new Map();      // pid -> { since, ticks }
     this.reported = new Set();
@@ -151,8 +152,15 @@ export class Watchdog {
     this.written = false;
     this.listed = this.listing();
     // owner: a chown that fails (EPERM) is the watchdog's log, never an exception out of tick, heartbeat or report
+    this.noteFailures(failed);
+  }
+
+  /** Logs a path that failed to be given over the first time only, and keeps at most 100 of them (owner). */
+  noteFailures(failed) {
     for (const each of failed) {
-      this.ownFailures.push(each);
+      if (this.failedPaths.has(each.path)) continue;
+      this.failedPaths.add(each.path);
+      if (this.ownFailures.length < 100) this.ownFailures.push(each);
       console.error(`[watchdog] could not give ${each.path} to ${this.owner.uid}:${this.owner.gid}: ${each.code || 'error'} ${each.message}`);
     }
   }
@@ -202,10 +210,7 @@ export class Watchdog {
       ownTree(`${file}.part`, this.owner, failed, this.chown);
       renameSync(`${file}.part`, file);
       this.own();
-      for (const each of failed) {
-        this.ownFailures.push(each);
-        console.error(`[watchdog] could not give ${each.path} to ${this.owner.uid}:${this.owner.gid}: ${each.code || 'error'} ${each.message}`);
-      }
+      this.noteFailures(failed);
     } catch (error) { /* the output directory is gone */ }
     return body;
   }
