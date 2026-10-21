@@ -7,6 +7,7 @@ No bats, no network: the GitHub API is a fake.
 usage: python3 tests/static/guidelines_test.py
 """
 import os
+import re
 import sys
 import unittest
 
@@ -333,6 +334,28 @@ class FreeSlotOrder(unittest.TestCase):
         self.assertIn('ListAgents', section)
         for step in SLOT_STEPS:
             self.assertIn(step, section)
+
+
+class NextReadsEveryRepository(unittest.TestCase):
+    """quire#751, row 19: the NEXT FOR A FREE SLOT line reads the library PRs as it reads quire's, in the one order."""
+
+    def test_qsweep_reads_the_library_repositories_before_it_prints_the_next_line(self):
+        text = read_root('.claude', 'skills', 'sweep', 'qsweep')
+        loop = re.search(r'^for r in ([a-z0-9 -]+); do$', text, re.M)
+        self.assertIsNotNone(loop)
+        for repository in ('arith', 'array', 'sha256', 'zip', 'dom', 'bridge', 'gestures', 'bats', 'builder', 'process', 'pwa', 'capacitor-plugins'):
+            self.assertIn(repository, loop.group(1).split(), repository)
+        self.assertEqual(text.count('NEXT FOR A FREE SLOT: a fix'), 1)
+        self.assertGreater(text.index('NEXT FOR A FREE SLOT: a fix'), loop.end())
+        self.assertIn('$_next_fix$_next_fix_lib', text)
+        self.assertIn('$_next_review$_next_review_lib', text)
+
+    def test_the_installed_qsweep_is_this_file(self):
+        installed = '/usr/local/bin/qsweep'
+        if not os.path.exists(installed):
+            self.skipTest('qsweep is not installed on this machine')
+        with open(installed, encoding='utf-8') as handle:
+            self.assertEqual(handle.read(), read_root('.claude', 'skills', 'sweep', 'qsweep'))
 
 
 class SweepFiles(unittest.TestCase):

@@ -52,26 +52,35 @@ for n in $(gh api "repos/bats-lang/quire/pulls?state=open&per_page=50" --jq '.[]
   else ready=READY-FOR-REVIEW; _next_review="$_next_review #$n"; fi
   echo "#$n [$st] auto-merge=$am checks=$total pending=$pend fails=[$fails] statuses-red=[$badstatus] review=$rv $ready $t ($ref)"
 done
-if [ -n "$_next_fix" ]; then echo "NEXT FOR A FREE SLOT: a fix (an author; any author) for$_next_fix"
-elif [ -n "$_next_review" ]; then echo "NEXT FOR A FREE SLOT: a review (not by the author) of$_next_review"
-else echo "NEXT FOR A FREE SLOT: the oldest ticket of the highest priority (CLAUDE.md, Priorities)"; fi
 
 _lap "quire PRs done"
 # every library repo quire's agents change: each open PR with its head's checks and whether the newest
 # review comment (a trusted author's, first line "## Adversarial review", Verdict: approved) names exactly that head.
 # READY = checks all green, mergeable_state clean and an approval of this very head: merge it now (do not wait for an event: none arrives).
-for r in arith array sha256 zip dom bridge gestures; do
+# The same one order as the quire PRs above (quire#751, row 19): a library PR with a red check, a conflict or a changes-needed review for its head
+# is a fix; one with every check finished and green and no review of its head is a review. They are added to the NEXT line printed after this loop.
+# The repositories: the libraries and the tools agents change (arith array sha256 zip dom bridge gestures), and bats builder process pwa capacitor-plugins.
+_next_fix_lib=""; _next_review_lib=""
+for r in arith array sha256 zip dom bridge gestures bats builder process pwa capacitor-plugins; do
   for n in $(gh api "repos/bats-lang/$r/pulls?state=open&per_page=20" --jq '.[].number' 2>/dev/null); do
     j=$(gh api repos/bats-lang/$r/pulls/$n --jq '[.mergeable_state,.head.sha,.head.ref,.title[0:50]]|@tsv')
     st=$(echo "$j" | cut -f1); sha=$(echo "$j" | cut -f2); ref=$(echo "$j" | cut -f3); t=$(echo "$j" | cut -f4)
     chk=$(gh api "repos/bats-lang/$r/commits/$sha/check-runs?per_page=60" --jq '[.check_runs[]|.conclusion//.status]|join(",")')
-    rv=$(gh api "repos/bats-lang/$r/issues/$n/comments?per_page=100" --jq '[.[]|select(.author_association=="OWNER" or .author_association=="MEMBER" or .author_association=="COLLABORATOR")|select(.body|split("\n")[0]=="## Adversarial review")]|last|if .==null then "no-review" elif (.body|contains("Verdict: approved")) and (.body|contains("Reviewed: '"$sha"'")) then "approved-this-head" else "review-not-for-this-head-or-not-approved" end')
+    rv=$(gh api "repos/bats-lang/$r/issues/$n/comments?per_page=100" --jq '[.[]|select(.author_association=="OWNER" or .author_association=="MEMBER" or .author_association=="COLLABORATOR")|select(.body|split("\n")[0]=="## Adversarial review")]|last|if .==null then "no-review" elif (.body|contains("Verdict: changes needed")) and (.body|contains("Reviewed: '"$sha"'")) then "changes-needed-this-head" elif (.body|contains("Verdict: approved")) and (.body|contains("Reviewed: '"$sha"'")) then "approved-this-head" else "review-not-for-this-head-or-not-approved" end')
     ready=""; case ",$chk," in *,failure,*|*,cancelled,*|*,in_progress,*|*,queued,*|*,pending,*) ;; *) [ "$st" = clean ] && [ "$rv" = approved-this-head ] && ready=" READY-TO-MERGE";; esac
     # the gate's own status for this head, with its reason (bridge#200: a comment with two Reviewed lines is refused and says so here)
     gate=$(gh api "repos/bats-lang/$r/commits/$sha/status" --jq '[.statuses[]|select(.context=="adversarial-review")]|first|if .==null then "none" else .state+": "+.description end' 2>/dev/null)
+    case ",$chk," in *,failure,*|*,cancelled,*|*,timed_out,*) _red=yes;; *) _red=no;; esac
+    case ",$chk," in *,in_progress,*|*,queued,*|*,pending,*) _running=yes;; *) _running=no;; esac
+    if [ "$st" = dirty ] || [ "$_red" = yes ] || [ "$rv" = "changes-needed-this-head" ]; then _next_fix_lib="$_next_fix_lib $r#$n"
+    elif [ -n "$chk" ] && [ "$_running" = no ] && [ "$rv" != "approved-this-head" ]; then _next_review_lib="$_next_review_lib $r#$n"; fi
     echo "$r #$n [$st] checks=$chk review=$rv gate=[$gate]$ready $t ($ref)"
   done
 done
+# the one NEXT line: the quire PRs and the library PRs together, a fix before a review before a new ticket (orchestration.md, Agents and slots)
+if [ -n "$_next_fix$_next_fix_lib" ]; then echo "NEXT FOR A FREE SLOT: a fix (an author; any author) for$_next_fix$_next_fix_lib"
+elif [ -n "$_next_review$_next_review_lib" ]; then echo "NEXT FOR A FREE SLOT: a review (not by the author) of$_next_review$_next_review_lib"
+else echo "NEXT FOR A FREE SLOT: the oldest ticket of the highest priority (CLAUDE.md, Priorities)"; fi
 _lap "library PRs done"
 _pressure
 _lap "runner pressure done"
@@ -157,5 +166,5 @@ echo "SWEEP REMINDER: the agent mix is EXACTLY the slot list: one SONNET slot an
 echo "SWEEP REMINDER: check whether any open ticket holds more than one piece, or has rows or steps still owed beside done ones: break it up before work (one ticket per piece from its own steps, original closed with Broken into #a #b, pieces inherit priority; quire/.claude/orchestration.md, agents/worker.md)"
 echo "SWEEP REMINDER: check whether any blocked ticket is unblocked (read the PR or ticket it says it waits for; if that merged or closed, say so on the ticket and make it workable)"
 echo "SWEEP REMINDER: order for a free slot (orchestration.md, Agents and slots): (1) a fix, by an author (any author, not necessarily the one who wrote the PR), for a review that asked for changes, a red CI, or a merge conflict; (2) a review of a PR green on its exact head; (3) the oldest ticket of the highest priority (CLAUDE.md, Priorities); oldest first inside each step. Never a new ticket while a changes-needed review, a red CI or a merge conflict waits for its fix, or a green PR waits for its reviewer"
-echo "SWEEP REMINDER: workers never wait for CI (owner): every brief says push, then hand back at once with PR, head sha and local runs. The orchestrator watches the checks and continues; a worker found waiting is told to hand back"
+echo "SWEEP REMINDER: workers never wait for CI (owner, 2026-10-20T04:22:32Z: \"Standing rule: agents don't wait for check. They hand back, and trust you to continue the process.\"): every brief says push, then hand back at once with PR, head sha and local runs. The orchestrator watches the checks and continues; a worker found waiting is told to hand back"
 slots show
