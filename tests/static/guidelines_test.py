@@ -261,6 +261,29 @@ class GitHub(unittest.TestCase):
         self.assertEqual(self.status(api)['state'], 'failure')
         self.assertIn('describes head', self.status(api)['description'])
 
+    def test_a_finding_with_a_four_byte_character_gives_a_description_github_accepts(self):
+        # text-lint status ASCII (quire#764): GitHub refuses a status description with a 4-byte character
+        description = gl.status_description('PR body: ends with \U0001F916 Generated with [Claude Code]')
+        self.assertTrue(description.isascii())
+        self.assertLessEqual(len(description), 140)
+        self.assertIn('robot', description)
+
+    def test_a_description_is_ascii_and_at_most_140_whatever_the_finding(self):
+        for finding in ('caf\u00e9 \u2014 \U0001F916' * 30, '\U0001F916' * 200, 'plain'):
+            description = gl.status_description(finding)
+            self.assertTrue(description.isascii())
+            self.assertLessEqual(len(description), 140)
+
+    def test_a_wrong_footer_posts_a_status_with_the_finding_in_ascii(self):
+        api = FakeApi()
+        pull = dict(PULL, body=GOOD_BODY.replace('\U0001F916 Generated with [Claude Code](https://claude.ai/code)\n', 'done\n'))
+        findings = self.run_event('pull_request_target', {'pull_request': pull}, api)
+        description = self.status(api)['description']
+        self.assertTrue(description.isascii())
+        self.assertLessEqual(len(description), 140)
+        self.assertIn('generated-by line', description)
+        self.assertTrue(findings)
+
     def test_a_bot_and_a_relock_branch_are_exempt(self):
         for pull in (dict(PULL, user={'login': 'dependabot[bot]'}, body=''), dict(PULL, head={'sha': HEAD, 'ref': 'relock/2026-10-21'}, body='')):
             api = FakeApi()
