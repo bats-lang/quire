@@ -29,7 +29,9 @@ export const TRACE_BUFFER_KB = 32768;
 // devtools.timeline adds ResourceSendRequest and ResourceFinish: a fetch a service worker never answers reaches no network layer, so only these show it (+1%)
 export const TRACE_CATEGORIES = ['toplevel', 'ipc', 'mojom', 'sync', 'devtools.timeline'];
 
-const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+// QUIRE_FLIGHT_VIA_SUDO=1 takes the runner's path (every root step through `sudo -n`, as on CI's non-root user) even where the machine is root, so a
+// worker's machine reproduces what CI does; no job sets it. Keyword: via sudo.
+export const isRoot = typeof process.getuid === 'function' && process.getuid() === 0 && !process.env.QUIRE_FLIGHT_VIA_SUDO;
 
 /** Whether this run records: CI or QUIRE_FLIGHT=1, on Linux, unless QUIRE_NO_RECORDER is set. */
 export function wanted(env = process.env) {
@@ -42,6 +44,8 @@ function asRoot(op, args) {
   if (isRoot) return Promise.resolve(tracefs[op](args));
   return new Promise((resolve) => {
     execFile('sudo', ['-n', process.execPath, ROOT_SCRIPT, op, JSON.stringify(args)], { timeout: ROOT_MS, killSignal: 'SIGKILL', maxBuffer: 1 << 20, encoding: 'utf8' }, (error, stdout, stderr) => {
+      // what the root step said on stderr (a `[ring lock]` line) is said here as it is by the in-process path of a root runner: the runner on CI is not root
+      if (stderr) process.stderr.write(String(stderr));
       const last = String(stdout).trim().split('\n').pop();
       try { resolve(JSON.parse(last)); } catch (bad) { resolve({ error: `sudo node ${op} gave no answer (exit ${error && error.code}${error && error.killed ? ', killed after its limit' : ''}): stderr ${String(stderr).slice(0, 300)}; stdout ${String(stdout).slice(0, 200)}` }); }
     });

@@ -13,18 +13,28 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { test, expect } from './fixtures.js';
-import { OUT_VARIABLE, INSTANCE_VARIABLE, pauseInstance, removeInstance, ringSeen, silenceInstance, wanted } from './flight-recorder.js';
+import { OUT_VARIABLE, INSTANCE_VARIABLE, isRoot, pauseInstance, removeInstance, ringSeen, silenceInstance, wanted } from './flight-recorder.js';
 import { processTable, tree } from './flight-watchdog.js';
 
 test.describe.configure({ mode: 'parallel' });
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = createRequire(import.meta.url).resolve('@playwright/test/cli');
-const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 
 function desktopOnly(testInfo) {
   test.skip(testInfo.project.name !== 'desktop', 'the machine does not depend on the project: once, in desktop, is enough');
 }
+
+// A nested run's output is the evidence of these tests: a test that timed out waiting for the run (quire#749, job 119272940341) said only
+// "Test timeout of 90000ms exceeded" and nothing of what the run had printed. Every run of a test is attached to it, whatever the outcome.
+const runsOf = new Map();
+test.afterEach(async ({}, testInfo) => {
+  for (const [index, run] of (runsOf.get(testInfo.testId) || []).entries()) {
+    await testInfo.attach(`nested-output-${index}`, { body: run.output() || '(the nested run printed nothing)', contentType: 'text/plain' });
+    try { run.child.kill('SIGKILL'); } catch (gone) { /* it ended */ }
+  }
+  runsOf.delete(testInfo.testId);
+});
 
 /** A Playwright run of one case, in a directory of its own. */
 function nested(testInfo, name, environment = {}, args = [], prepare = null) {
@@ -44,9 +54,15 @@ function nested(testInfo, name, environment = {}, args = [], prepare = null) {
   child.stdout.on('data', take);
   child.stderr.on('data', take);
   const finished = new Promise((resolve) => child.on('close', (code, signal) => resolve({ code, signal })));
-  return {
+  const run = {
     directory, child, finished,
     output: () => output,
+    /** The run's end, or a failure that carries the output when it has not ended within `ms` (a run that does not close holds a pipe: say which). */
+    async done(ms = 30000) {
+      let timer = null;
+      const late = new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error(`the nested run did not close within ${ms} ms (exit ${child.exitCode}, signal ${child.signalCode}):\n${output.slice(-3000)}`)), ms); });
+      try { return await Promise.race([finished, late]); } finally { clearTimeout(timer); }
+    },
     /** Resolves with the match when the run's output has the pattern; fails with the output when it does not within `ms`. */
     async until(pattern, ms = 60000) {
       const started = Date.now();
@@ -59,6 +75,8 @@ function nested(testInfo, name, environment = {}, args = [], prepare = null) {
     },
     report() { try { return JSON.parse(readFileSync(join(directory, 'report.json'), 'utf8')); } catch (error) { return null; } },
   };
+  runsOf.set(testInfo.testId, [...(runsOf.get(testInfo.testId) || []), run]);
+  return run;
 }
 
 /** The attachments of every result of a report: [{ name, path }]. */
@@ -252,21 +270,26 @@ test('heartbeat: a watchdog that is alive and stops beating fails the job at tha
   needRecorder();
   const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000', QUIRE_FLIGHT_BEAT_STALE_MS: '3000' });
   let watchdog = null;
+  let parent = null;
   try {
     const ok = await run.until(/watchdog (\d+) beating/);
     watchdog = Number(ok[1]);
+    // the monitor's line names the process the runner started: on CI's user that is `sudo`, the parent of the watchdog (the heartbeat's pid)
+    parent = Number((await run.until(/the watchdog (\d+) \(child and heartbeat\)/))[1]);
     const stoppedAt = Date.now();
     kill(watchdog, 'SIGSTOP'); // not killed: its process is there and its child has not exited
     await run.until(/EVIDENCE MISSING: watchdog: no heartbeat for/, 30000);
-    // a stopped watchdog still holds the run's output pipe: it is ended before the run's close is waited for
-    kill(watchdog, 'SIGKILL');
-    const { code } = await run.finished;
+    // A stopped watchdog still holds the run's output pipe, and so does its parent: sudo stops itself when its command is stopped (job control) and
+    // stays stopped when the command is killed, so the pipe stays open and the run never closes (quire#749, job 119272940341: 90 s, the test's timeout).
+    // Both are ended before the run's close is waited for; SIGKILL needs no continue.
+    for (const pid of new Set([watchdog, parent])) { try { kill(pid, 'SIGKILL'); } catch (gone) { /* it ended with the run */ } }
+    const { code } = await run.done();
     expect(code, run.output()).not.toBe(0);
     expect(run.output()).toMatch(/EVIDENCE MISSING: watchdog: no heartbeat for \d+ ms/);
     expect(run.output(), 'it was not the exit that was seen').not.toMatch(/watchdog: exited during the run/);
     expect(Date.now() - stoppedAt).toBeLessThan(30000);
     expect(evidenceCheck(run).text).toMatch(/EVIDENCE MISSING: watchdog: no heartbeat for/);
-  } finally { run.child.kill('SIGKILL'); if (watchdog) { try { kill(watchdog, 'SIGKILL'); } catch (gone) { /* it ended with the run */ } } }
+  } finally { run.child.kill('SIGKILL'); for (const pid of [watchdog, parent]) if (pid) { try { kill(pid, 'SIGKILL'); } catch (gone) { /* it ended with the run */ } } }
 });
 
 test('heartbeat: a ring that is on and takes no events fails the job at that moment, by name', async ({}, testInfo) => {
