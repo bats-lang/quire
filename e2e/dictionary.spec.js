@@ -306,7 +306,7 @@ test('a dictionary is kept across a reload', async ({ page }) => {
   await expect(entry(page)).toContainText('Une demeure');
 });
 
-// Context for a failure seen in this test: quire#575 and quire#591.
+// Area: "a page that stops answering" (e2e.md). Failure: the renderer answers no DevTools command at 0 CPU, 90 s timeout. Analysis: quire#575, quire#591.
 test('a dictionary without its .idx, or whose .idx is not the size its .ifo gives, is refused', async ({ page }) => {
   await start(page);
   const refusal = dialog(page, 'Dictionary not imported');
