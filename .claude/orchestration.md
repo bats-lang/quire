@@ -51,6 +51,7 @@ The hourly slot check runs this section, and nothing in it needs another section
 ## Pushing and merging
 
 * Before any push or merge: `qsweep pressure` (prints one line, exits 0 only on `runner pressure: none`); `qsweep push <git push arguments>` is that check and the push in one command, and workers push with it. Under pressure, hold; do not push.
+* **A worker never waits for CI checks** (owner, 2026-10-20T04:22:42Z: "a worker never waits for CI checks. It pushes, then hands back at once with the PR number, the exact head sha and what it ran locally; the orchestrator watches the checks and continues the process (review when green on the exact head, fix when red, merge)."). A worker brief says so, and the orchestrator is the one that watches the checks.
 * At most 2 merge-queue entries. Cancel superseded runs (the queue's `supersede.yml` does it). No stacked PRs. No hooks. Many small PRs (repins) go in batches of about six with a pressure check before each; avoid bursts: CI capacity is the constraint.
 * A PR merges only after an independent review comment for its head. Gated repositories (bridge, pwa, capacitor-plugins) need the exact form their CLAUDE.md gives; a push, an update-branch or a merge of main voids an approval. Use merge, not squash. quire merges through the queue (`enable_pr_auto_merge` MERGE); the others by `merge_pull_request`.
 * A PR that adopts new package versions runs `bats lock --repository <dir>` and commits `bats.lock`.
