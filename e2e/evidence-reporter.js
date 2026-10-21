@@ -32,8 +32,8 @@ export default class EvidenceReporter {
     this.work = track(this.work.then(async () => {
       mkdirSync(this.directory, { recursive: true });
       const file = join(this.directory, `runner-flight-${process.pid}-${number}-kernel.txt.gz`);
-      const kept = await keepKernel(file, process.env, true);
-      this.records.push({ test: test.titlePath().join(' > '), status: result.status, source: 'the runner', file: kept.file || null, problem: kept.file ? null : (kept.unavailable || kept.error || 'not written'), error: result.error ? String(result.error.message).split('\n')[0].slice(0, 200) : null });
+      const kept = await keepKernel(file, process.env);
+      this.records.push({ test: test.titlePath().join(' > '), status: result.status, source: 'the runner', file: kept.file || null, reach: kept.reach || null, problem: kept.file ? (kept.reach && !kept.reach.reaches ? `does not reach the red: ${kept.reach.why}` : null) : (kept.unavailable || kept.error || 'not written'), error: result.error ? String(result.error.message).split('\n')[0].slice(0, 200) : null });
     }));
   }
 

@@ -6,7 +6,7 @@
  * Every op returns plain data and never throws.
  */
 
-import { chmodSync, closeSync, createWriteStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, createWriteStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
@@ -38,6 +38,37 @@ export const LINES_KEPT = 12000000;
 
 const attempt = (what, action) => { try { return action(); } catch (error) { return `${what}: ${String((error && error.code) || (error && error.message) || error)}`; } };
 
+// Who holds the ring paused (a capture reading it): one file for each holder in the run's output directory, named `ring-kept-<holder>`,
+// written (the time and the holder, as its content: no file time is read) before the ring is paused and taken down after the last
+// reader is done; the ring records again when no holder is left. Keyword: ring hold.
+export const HOLD_PREFIX = 'ring-kept-';
+
+/** The holders of the ring in `dir`: [{ holder, at }] (at: the time the file says, in ms, NaN when unreadable). */
+export function holdersIn(dir) {
+  if (!dir) return [];
+  try {
+    return readdirSync(dir).filter((name) => name.startsWith(HOLD_PREFIX)).map((name) => {
+      let at = Number.NaN;
+      try { at = Date.parse(readFileSync(`${dir}/${name}`, 'utf8').split(/\s/)[0]); } catch (gone) { /* it was taken down meanwhile */ }
+      return { holder: name.slice(HOLD_PREFIX.length), at };
+    });
+  } catch (error) { return []; }
+}
+
+export function hold({ dir, holder }) { if (dir) attempt('hold', () => writeFileSync(`${dir}/${HOLD_PREFIX}${holder}`, `${new Date().toISOString()} ${holder}\n`)); return { held: true }; }
+
+/**
+ * The end of a hold, on every outcome of a capture (a snapshot that failed, a crash, a freeze, a pass): the holder's file goes down
+ * first, then the ring records again unless another holder is still reading it (the last one out resumes it, whichever it is).
+ * Without a directory there are no holders to ask and the ring records again.
+ */
+export function release({ instance, dir, holder }) {
+  if (dir) attempt('unhold', () => unlinkSync(`${dir}/${HOLD_PREFIX}${holder}`));
+  const others = holdersIn(dir).map((each) => each.holder);
+  if (others.length) return { released: true, resumed: false, others };
+  return { released: true, ...resume({ instance }), others };
+}
+
 /** Makes the instance and starts it for the process tree of `pid`; { instance, skipped } or { error }. */
 export function start({ tracefs = TRACEFS, name, pid, bufferKb = BUFFER_KB, events = EVENTS }) {
   const instance = `${tracefs}/instances/${name}`;
@@ -64,11 +95,19 @@ export function pause({ instance }) {
   return bad ? { error: bad } : { paused: true };
 }
 
-/** Writes the last `lines` lines of the record, gzipped, to `out` (a file anyone can read). tail and gzip do the bulk: the kernel formats the text, and a ring of 600 MB must not pass through node's lines. */
-export async function snapshot({ instance, out, lines = LINES_KEPT, resume = false }) {
+const RING_STAMP = /^\s*.+-\d+\s+\[\d+\]\s+\S+\s+(\d+\.\d+):/;
+
+/**
+ * Writes the last `lines` lines of the record, gzipped, to `out` (a file anyone can read). tail and gzip do the bulk: the kernel formats the text,
+ * and a ring of 600 MB must not pass through node's lines. The ring is held paused while it is read and released on every outcome (`holder` in `dir`,
+ * see the ring hold above): a record leaves the ring recording again, whether it was written or not. Answers `lastAt`, the time (CLOCK_MONOTONIC, seconds) of the
+ * last event in the file, and `others`, the holders that already held the ring when this one began (events between their pause and this one are not in it).
+ */
+export async function snapshot({ instance, out, lines = LINES_KEPT, dir, holder = `snapshot-${process.pid}` }) {
+  const others = holdersIn(dir).map((each) => each.holder).filter((each) => each !== holder);
+  hold({ dir, holder });
   try {
-    // the ring is paused while it is read (a ring read as it records never reaches its end: tail ran for an hour on 44,000 events a second);
-    // a record kept for a freeze stays paused (the first record is kept), one kept for a failure is resumed by its caller (keepKernel)
+    // the ring is paused while it is read (a ring read as it records never reaches its end: tail ran for an hour on 44,000 events a second)
     pause({ instance });
     let header = '';
     const descriptor = openSync(`${instance}/trace`, 'r');
@@ -84,15 +123,19 @@ export async function snapshot({ instance, out, lines = LINES_KEPT, resume = fal
     gzip.stdout.pipe(sink);
     gzip.stdin.write(`${header}\n# the last ${lines} lines at most; clock: ${clock}\n`);
     const tail = spawn('tail', ['-n', String(lines), `${instance}/trace`], { stdio: ['ignore', 'pipe', 'inherit'] });
+    // the end of the text passes by here: the last event's time says whether the file reaches as far as the red
+    let end = Buffer.alloc(0);
+    tail.stdout.on('data', (piece) => { end = Buffer.concat([end, piece]).subarray(-16384); });
     tail.stdout.pipe(gzip.stdin);
     const ended = (child) => new Promise((resolve) => child.on('close', (code) => resolve(code)));
     const codes = await Promise.all([ended(tail), ended(gzip), finished]);
     chmodSync(out, 0o644);
-    if (codes[0] !== 0 || codes[1] !== 0) return { error: `tail exited ${codes[0]}, gzip exited ${codes[1]}` };
+    if (codes[0] !== 0 || codes[1] !== 0) return { error: `tail exited ${codes[0]}, gzip exited ${codes[1]}`, others };
     const counts = header.match(/entries-in-buffer\/entries-written: (\d+)\/(\d+)/);
     const inBuffer = counts ? Number(counts[1]) : 0;
-    return { file: out, lines: Math.min(lines, inBuffer), seen: counts ? Number(counts[2]) : 0, header };
-  } catch (error) { return { error: String((error && error.stack) || error) }; }
+    const stamps = end.toString('utf8').split('\n').map((line) => RING_STAMP.exec(line)).filter(Boolean);
+    return { file: out, lines: Math.min(lines, inBuffer), seen: counts ? Number(counts[2]) : 0, header, lastAt: stamps.length ? Number(stamps[stamps.length - 1][1]) : null, others };
+  } catch (error) { return { error: String((error && error.stack) || error), others }; } finally { release({ instance, dir, holder }); }
 }
 
 /** Stops the instance and removes it. */
@@ -137,7 +180,7 @@ export function state({ instance }) {
   try { return { on: readFileSync(`${instance}/tracing_on`, 'utf8').trim() }; } catch (error) { return { error: String((error && error.code) || error) }; }
 }
 
-const ops = { start, pause, snapshot, stop, readmem, resume, state, stats };
+const ops = { start, pause, snapshot, stop, readmem, resume, release, hold, state, stats };
 
 // `sudo -n node flight-tracefs.js <op> <json>`: the answer is one line of JSON
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

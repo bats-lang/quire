@@ -258,7 +258,7 @@ only for a red. The design, with the research and what each means cannot find, i
   a frozen renderer (`flight-<n>-browser-trace.json.gz`). Measured with one thread of a renderer stopped: `Tracing.end` answers in 79 ms
   and the trace holds the renderer's events up to the freeze, so a frozen main thread does not take the renderer's trace with it.
   A renderer with every thread stopped (SIGSTOP) answers nothing more: the browser's, GPU's and network's events are what is then in it.
-* **When it records**: CI, or `QUIRE_FLIGHT=1`, on Linux, never in the run of the `@serial` tests (they assert timings). `QUIRE_NO_RECORDER=1` turns it off. Without
+* **When it records**: CI, or `QUIRE_FLIGHT=1`, on Linux, in every run, the `@serial` run too (its budgets keep headroom over a loaded runner and fail a turn that costs twice as much; the recorder costs about 6 to 8%, `[cost]`; a red there had no record when it was exempt). `QUIRE_NO_RECORDER=1` turns it off. Without
   tracefs or sudo a red says `EVIDENCE MISSING` (below); a local run without the variable records nothing and owes nothing.
 * **Every red has its record.** A test that fails with nothing frozen writes both rings too (`flight-failed-*`), and they go on for the tests after it. A renderer that
   crashes or a browser that goes away writes `crash-<n>.json` (the reason, both rings, dmesg, the disk, a sanitizer's reports); the kernel ring holds the signal and the exit.
@@ -274,12 +274,13 @@ only for a red. The design, with the research and what each means cannot find, i
   browser's trace ring started (`traceReady`, in the `stallWatch` fixture). While the run goes on, a monitor in the runner
   process reads, every 2 s, the watchdog's child and its heartbeat (the file's content, never its time) and the ring's reading in
   that heartbeat, and ends the run with `::error::EVIDENCE MISSING: <part>` when the watchdog died or went quiet for 6 s, the
-  ring was stopped with no capture having paused it (the `ring-kept` marker file, written before a capture's pause and taken down
-  after its resume; a stopped reading counts only when a heartbeat made after the marker was missing still shows it), or the ring took no
-  events for 60 s. A reporter in the runner (`e2e/evidence-reporter.js`) writes the ring for an unexpected result no worker kept a
+  ring was stopped with no capture holding it (a capture's hold is a file `ring-kept-<holder>` in `flight-watchdog/`, its time as content, written before the
+  pause and taken down after; a stopped reading counts only when a heartbeat made after the holds were missing still shows it), a hold is older than 120 s (a capture
+  that died holding the ring), or the ring took no events for 60 s. A reporter in the runner (`e2e/evidence-reporter.js`) writes the ring for an unexpected result no worker kept a
   record for (a killed worker, a runner killed mid-test), and the job's `Evidence check` (`--require-report`) fails with no report
   or a result without a kernel ring. A snapshot pauses the ring while it is read (a ring read as it records never reaches its
-  end). Every capture keeps `capabilities.json` (perf counters, symbol files) and logs a `::notice` when it changes.
+  end) and **releases it on every outcome** (a freeze, a crash, a failure, a pass, a snapshot that failed, a watchdog report): the holder's file goes down and the last holder out starts the ring again. A ring left paused hid every later red (the four `EVIDENCE MISSING` of the reading-tools job), so a kept ring carries `reach` (the red's time and the last event's time, CLOCK_MONOTONIC; the `flight-kernel-reach` attachment); a file that ends before the red with no other capture holding the ring is `EVIDENCE MISSING: kernel ring (does not reach the red ...)`, and the job's check fails a hold still down at the end. Tested by `evidence-real.spec.js` (three reds in one run, a hold nobody releases, a red in the `@serial` run) and `evidence.spec.js` (the hold rules, on a ring of its own).
+  Every job logs `[preflight]`, `[capabilities]` and `[cost]` (the loop of page cycles with the rings off and on, at the start of each run), and the monitor logs `[monitor] started` and `[monitor] stopped: <checks, heartbeats read, ring events>`. Every capture keeps `capabilities.json` (perf counters, symbol files) and logs a `::notice` when it changes.
   `e2e/evidence-real.spec.js` induces each part's failure in a nested Playwright run on the real path.
 * **A red without its record is its own failure.** A test that timed out, or whose renderer froze or crashed, and has no kernel ring (written and with events) or no
   browser trace (unless the browser itself is gone) fails its teardown with `EVIDENCE MISSING: <field>`; `e2e/evidence-check.js` (the job's `Evidence check` step) turns that into the

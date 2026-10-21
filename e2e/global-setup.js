@@ -7,10 +7,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { serialRun } from './flight-recorder.js';
 import { preflight, startMonitor, teardown } from './preflight.js';
 
-export default async function globalSetup() {
+export default async function globalSetup(config) {
   const directory = dirname(fileURLToPath(import.meta.url));
   const unwatched = readdirSync(directory)
     .filter((name) => name.endsWith('.spec.js'))
@@ -18,13 +17,11 @@ export default async function globalSetup() {
   if (unwatched.length) {
     throw new Error(`these specs do not import test from './fixtures.js', so no stall watch: ${unwatched.join(', ')}`);
   }
-  // not in the run of the @serial tests, which assert timings (a recorder perturbs them: #741 measured +6% for a trace)
+  // in every run, the @serial one too (alone on one worker, it is where pathological.spec.js stalls): a red there has the same record as any other
   let started = null;
-  if (!serialRun()) {
-    try { started = await preflight(); } catch (error) {
-      console.error(`::error title=PREFLIGHT FAILED::${error.message}`);
-      throw error;
-    }
+  try { started = await preflight(process.env, { launchOptions: (config && config.projects && config.projects[0] && config.projects[0].use && config.projects[0].use.launchOptions) || null }); } catch (error) {
+    console.error(`::error title=PREFLIGHT FAILED::${error.message}`);
+    throw error;
   }
   const stopMonitoring = startMonitor(started);
   return () => teardown(started, stopMonitoring);

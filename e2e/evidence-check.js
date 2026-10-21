@@ -15,6 +15,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { sanitizerReports } from './evidence.js';
+import { HOLD_PREFIX, holdersIn } from './flight-tracefs.js';
 
 function walk(directory, found = []) {
   let names = [];
@@ -33,12 +34,18 @@ function testsOf(suite, out) {
 
 const holds = (file) => { try { return statSync(file).size > 0; } catch (error) { return false; } };
 
+/** What a kept ring's reach record says ({ reaches, why }), or why there is none: a ring that ends before the red is a paused ring, not a record of it. */
+function reachOf(file) {
+  try { return JSON.parse(readFileSync(file, 'utf8')); } catch (error) { return null; }
+}
+const reachProblem = (reach) => (reach ? (reach.reaches ? null : `does not reach the red: ${reach.why || 'its last event is before it'}`) : 'has no reach record (when its last event was, against the red)');
+
 /**
  * The missing fields of the runs in `reports` (parsed JSON). `sidecar` is the records of the runner's reporter
  * ([{ test, source, file, problem }]); `requireReport`: no report is itself missing.
  */
-export function missingFields(reports, sidecar = [], { requireReport = false, fatal = [] } = {}) {
-  const missing = [...fatal];
+export function missingFields(reports, sidecar = [], { requireReport = false, fatal = [], held = [] } = {}) {
+  const missing = [...fatal, ...(held || [])];
   if (!reports.length && requireReport) missing.push('report (no Playwright JSON report: the run did not finish, or never started)');
   for (const report of reports) {
     for (const error of report.errors || []) {
@@ -56,8 +63,12 @@ export function missingFields(reports, sidecar = [], { requireReport = false, fa
         const unexpected = !['passed', 'skipped'].includes(result.status) && result.status !== test.expectedStatus;
         if (!unexpected) continue;
         const named = (result.attachments || []).some((attachment) => attachment.name === 'flight-kernel' && attachment.path && holds(attachment.path));
-        const rescued = sidecar.some((record) => record.source === 'the runner' && record.file && holds(record.file) && String(record.test).endsWith(title));
-        if (!named && !rescued) missing.push(`kernel ring (test "${title}" ended ${result.status} and left no record: the worker wrote none and the runner's reporter wrote none)`);
+        const rescue = sidecar.find((record) => record.source === 'the runner' && record.file && holds(record.file) && String(record.test).endsWith(title));
+        if (!named && !rescue) { missing.push(`kernel ring (test "${title}" ended ${result.status} and left no record: the worker wrote none and the runner's reporter wrote none)`); continue; }
+        // the ring has to reach the red: one left paused by an earlier capture has content and no evidence
+        const attached = (result.attachments || []).find((attachment) => attachment.name === 'flight-kernel-reach' && attachment.path);
+        const problem = reachProblem(named ? (attached && reachOf(attached.path)) : rescue.reach);
+        if (problem) missing.push(`kernel ring (test "${title}": ${problem})`);
       }
     }
   }
@@ -84,7 +95,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const sidecar = walk(join(results, 'runner-evidence')).filter((file) => /runner-evidence-\d+\.json$/.test(file)).flatMap((file) => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch (error) { return []; } });
   const note = join('flight-watchdog', 'FATAL.txt');
   const fatal = existsSync(note) ? [readFileSync(note, 'utf8').trim().replace(/^EVIDENCE MISSING: /, '')] : [];
-  const missing = missingFields(reports, sidecar, { requireReport, fatal });
+  // a hold of the ring still down at the end of the run: a capture never released it, so the ring was paused for what followed
+  const held = holdersIn('flight-watchdog').map((each) => `kernel ring (still held paused by ${each.holder} at the end of the run: a capture did not release it; files ${HOLD_PREFIX}*)`);
+  const missing = missingFields(reports, sidecar, { requireReport, fatal, held });
   for (const field of missing) console.log(`::error title=EVIDENCE MISSING::EVIDENCE MISSING: ${field}`);
   if (missing.length) process.exit(1);
   console.log(`evidence: nothing missing in ${reports.length} report(s)`);

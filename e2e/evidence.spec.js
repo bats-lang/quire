@@ -21,6 +21,7 @@ import { missingFields } from './evidence-check.js';
 import { futexAnalysis, ringContent } from './flight-recorder.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { Watchdog } from './flight-watchdog.js';
+import { holdersIn } from './flight-tracefs.js';
 
 function desktopOnly(testInfo) {
   test.skip(testInfo.project.name !== 'desktop', 'the renderer and the machine do not depend on the project: once, in desktop, is enough');
@@ -30,7 +31,7 @@ function desktopOnly(testInfo) {
 async function recorderOn() {
   expect(wanted(), 'run with CI=true or QUIRE_FLIGHT=1 (and sudo): the evidence tests prove what the recorder lands').toBe(true);
   expect(process.env[INSTANCE_VARIABLE], 'the kernel ring started in global setup').toBeTruthy();
-  await resumeKernel();
+  // no resume here: every capture ends its own pause (quire#575), and a test that needed this line would be hiding a ring left paused
 }
 
 // a ring is read a line at a time (ringSeen): one that recorded a whole run is larger than a string can be
@@ -134,7 +135,6 @@ test('a renderer that crashes: the browser reports it, and the ring holds the si
   expect(body.kernelLog).toBeTruthy();
   expect(body.flight.browserTrace.file, 'the browser lived, so its trace is there').toBeTruthy();
   await context.close();
-  await resumeKernel();
 });
 
 test('a memory error a sanitizer finds in a process of the run: its report is in the crash capture', async ({ browser, stallWatch }, testInfo) => {
@@ -164,7 +164,6 @@ test('a memory error a sanitizer finds in a process of the run: its report is in
     await context.close();
   } finally {
     if (kept === undefined) delete process.env.QUIRE_SANITIZER_LOGS; else process.env.QUIRE_SANITIZER_LOGS = kept;
-    await resumeKernel();
   }
 });
 
@@ -188,7 +187,6 @@ test('a browser process killed: the ring holds the signal and the exit, and the 
   } finally {
     await watch.stop();
     await own.close().catch(() => {});
-    await resumeKernel();
   }
 });
 
@@ -268,7 +266,7 @@ test('a full disk and a disk that is slow: the free space is in the capture, and
     const written = join(testInfo.outputPath('direct-write'));
     const wrote = spawnSync('dd', ['if=/dev/zero', `of=${written}`, 'bs=1M', 'count=8', 'oflag=direct'], { encoding: 'utf8' });
     expect(wrote.status, wrote.stderr).toBe(0);
-    const kernel = await keepKernel(testInfo.outputPath('disk-ring.txt.gz'), process.env, true);
+    const kernel = await keepKernel(testInfo.outputPath('disk-ring.txt.gz'));
     expect(kernel.error, JSON.stringify(kernel)).toBeUndefined();
     expect((await ringHas(kernel.file, { block: /block_rq_issue/ })).block, 'the ring holds the block requests').not.toBeNull();
   } finally {
@@ -373,7 +371,6 @@ test('the watchdog, outside every worker and browser, sees a renderer frozen in 
   } finally {
     hang.release();
     stopWatchdog(watchdog);
-    await resumeKernel();
   }
 });
 
@@ -400,17 +397,72 @@ test('a stall of the machine, seen from inside: a tick that comes late is kept w
   expect(real.stalls.some((each) => each.gapMs >= 900)).toBe(true);
 });
 
+test('a capture leaves the ring recording on every outcome, the last of two readers resumes it, and a ring left paused is not a record of the next red', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  await recorderOn();
+  // a ring of its own, so the captures of the other tests of this run do not pause the one read here
+  const holds = testInfo.outputPath('holds');
+  mkdirSync(holds, { recursive: true });
+  const env = { CI: 'true', [OUT_VARIABLE]: holds };
+  const started = await startKernel(env);
+  expect(started.instance, JSON.stringify(started)).toBeTruthy();
+  const on = async () => (await ringState(env)).on;
+  try {
+    const first = await keepKernel(testInfo.outputPath('first.txt.gz'), env);
+    expect(first.file, JSON.stringify(first)).toBeTruthy();
+    expect(await on(), 'a capture that was written').toBe('1');
+    expect(first.reach, JSON.stringify(first.reach)).toMatchObject({ reaches: true, others: [] });
+    expect(holdersIn(holds), 'its hold is down').toEqual([]);
+    const lost = await keepKernel(join(holds, 'no-such-directory', 'x.txt.gz'), env);
+    expect(lost.error, 'a capture that could not be written').toBeTruthy();
+    expect(await on(), 'a capture that failed').toBe('1');
+    expect(holdersIn(holds)).toEqual([]);
+    // two readers: the first out leaves the ring paused for the second, the last out starts it
+    markKept(env, 'reader-a');
+    markKept(env, 'reader-b');
+    await pauseInstance(started.instance);
+    await resumeKernel(env, 'reader-a');
+    expect(await on(), 'one reader is still reading').toBe('0');
+    await resumeKernel(env, 'reader-b');
+    expect(await on(), 'the last reader is out').toBe('1');
+    // a ring paused by an earlier capture and never resumed ends before the next red: the file has content and is not evidence
+    await pauseInstance(started.instance);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const stale = await keepKernel(testInfo.outputPath('stale.txt.gz'), env);
+    expect(stale.file).toBeTruthy();
+    expect(stale.reach.reaches, JSON.stringify(stale.reach)).toBe(false);
+    expect(stale.reach.why).toMatch(/before the red and no other capture held the ring/);
+    expect(await missingEvidence({ status: 'failed', expectedStatus: 'passed', flight: { kernel: stale, browserTrace: { file: 'x' } } }, env), 'the red-time rule names it').toEqual([expect.stringMatching(/^kernel ring \(does not reach the red/)]);
+    // the same gap with another capture holding the ring is explained by it
+    markKept(env, 'reader-c');
+    await pauseInstance(started.instance);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const explained = await keepKernel(testInfo.outputPath('explained.txt.gz'), env);
+    expect(explained.reach, JSON.stringify(explained.reach)).toMatchObject({ reaches: true, others: ['reader-c'] });
+    await resumeKernel(env, 'reader-c');
+    expect(await on()).toBe('1');
+  } finally { await stopKernel(started); }
+});
+
 test('the job-level check: a test that ended unexpectedly names a kernel ring or it is missing, a named error is repeated, no report is a failure', async ({}, testInfo) => {
   desktopOnly(testInfo);
   const kept = testInfo.outputPath('flight-1-kernel.txt.gz');
   writeFileSync(kept, 'x');
+  const reaching = testInfo.outputPath('flight-1-kernel.txt.gz.reach.json');
+  writeFileSync(reaching, JSON.stringify({ redAt: 100, lastAt: 100.2, others: [], reaches: true }));
+  const stale = testInfo.outputPath('stale.reach.json');
+  writeFileSync(stale, JSON.stringify({ redAt: 100, lastAt: 40, others: [], reaches: false, why: 'the last event is 60.0 s before the red and no other capture held the ring' }));
   const report = (status, message, attachments = []) => ({ suites: [{ specs: [{ title: 'a test', file: 'a.spec.js', tests: [{ expectedStatus: 'passed', results: [{ status, errors: message ? [{ message }] : [], attachments }] }] }] }] });
   expect(missingFields([report('failed', 'Error: EVIDENCE MISSING: kernel ring (not written)\n at x')])).toEqual(expect.arrayContaining(['kernel ring (not written) (test: a test)']));
   expect(missingFields([report('failed', 'Error: expected 1 to be 2')])[0], 'a plain failure with no record').toMatch(/^kernel ring \(test "a test" ended failed and left no record/);
   expect(missingFields([report('timedOut', 'Test timeout of 90000ms exceeded')])[0]).toMatch(/ended timedOut and left no record/);
-  expect(missingFields([report('failed', 'x', [{ name: 'flight-kernel', path: kept }])]), 'a record named in the report').toEqual([]);
+  expect(missingFields([report('failed', 'x', [{ name: 'flight-kernel', path: kept }, { name: 'flight-kernel-reach', path: reaching }])]), 'a record named in the report').toEqual([]);
+  expect(missingFields([report('failed', 'x', [{ name: 'flight-kernel', path: kept }, { name: 'flight-kernel-reach', path: stale }])])[0], 'a ring that ends before the red (left paused) is not a record of it').toMatch(/does not reach the red: the last event is 60.0 s before the red/);
+  expect(missingFields([report('failed', 'x', [{ name: 'flight-kernel', path: kept }])])[0], 'a ring with no reach record').toMatch(/has no reach record/);
   expect(missingFields([report('failed', 'x', [{ name: 'flight-kernel', path: testInfo.outputPath('gone.gz') }])])[0], 'a record named but gone').toMatch(/left no record/);
-  expect(missingFields([report('failed', 'x')], [{ source: 'the runner', file: kept, test: 'file > a test' }]), 'a record the runner wrote').toEqual([]);
+  expect(missingFields([report('failed', 'x')], [{ source: 'the runner', file: kept, test: 'file > a test', reach: { reaches: true } }]), 'a record the runner wrote').toEqual([]);
+  expect(missingFields([report('failed', 'x')], [{ source: 'the runner', file: kept, test: 'file > a test', reach: { reaches: false, why: 'stale' } }])[0], 'a record the runner wrote that stops before the red').toMatch(/does not reach the red: stale/);
+  expect(missingFields([report('passed')], [], { held: ['kernel ring (still held paused by 42-1)'] }), 'a hold nobody released').toEqual(['kernel ring (still held paused by 42-1)']);
   expect(missingFields([report('passed')])).toEqual([]);
   expect(missingFields([])).toEqual([]);
   expect(missingFields([], [], { requireReport: true })[0]).toMatch(/^report \(no Playwright JSON report/);
@@ -464,7 +516,7 @@ test('a main thread blocked in a call that is not a futex (a read on a pipe, a w
       expect(report.reason).toMatch(/untimed wait \((read|write)\)/);
       expect(report.threads.length).toBeGreaterThan(0);
     }
-  } finally { reader.kill('SIGKILL'); writer.kill('SIGKILL'); stopWatchdog(watchdog); closeSync(emptyHeld); closeSync(fullHeld); await resumeKernel(); }
+  } finally { reader.kill('SIGKILL'); writer.kill('SIGKILL'); stopWatchdog(watchdog); closeSync(emptyHeld); closeSync(fullHeld); }
 });
 
 /** Runs a command as root (through sudo where this is not root). */
@@ -502,7 +554,6 @@ test('a renderer killed by the kernel for want of memory: the OOM killer\'s choi
   } finally {
     await context.close().catch(() => {});
     asRootCommand('rmdir', [group]);
-    await resumeKernel();
   }
 });
 
@@ -622,10 +673,10 @@ test('what the recorder costs: a loop of page cycles with the rings on against o
   for (let round = 0; round < 3; round += 1) {
     // off: the ring paused (marked as a pause on purpose, for the monitor) and no trace
     const plain = await playwright.chromium.launch(launchOptions);
-    markKept();
+    markKept(process.env, 'cost');
     await pauseInstance(process.env[INSTANCE_VARIABLE]);
     off.push(await cycles(plain));
-    await resumeKernel();
+    await resumeKernel(process.env, 'cost');
     await plain.close();
     const traced = await playwright.chromium.launch(launchOptions);
     await startBrowserTrace(traced);

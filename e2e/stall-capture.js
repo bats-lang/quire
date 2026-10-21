@@ -50,7 +50,7 @@ import { accessSync, closeSync, constants, existsSync, openSync, readdirSync, re
 import { delimiter, isAbsolute, join } from 'node:path';
 import { bindAttempts } from './attempt-log.js';
 import { keepHistory } from './page-history.js';
-import { keepBoth, resumeKernel, startBrowserTrace, traceReady, wanted, ROOT_MOST_MS, TRACE_END_MS } from './flight-recorder.js';
+import { keepBoth, startBrowserTrace, traceReady, wanted, ROOT_MOST_MS, TRACE_END_MS } from './flight-recorder.js';
 import { diskEvidence, futexEvidence, missingEvidence, pageProbes, sanitizerReports, symbolEvidence } from './evidence.js';
 import { runnerLoad, sampleRunner } from './runner-load.js';
 
@@ -1331,8 +1331,9 @@ export function stallWatch(browser, testInfo) {
     return context;
   };
 
-  // a @serial test asserts timings, which a trace perturbs (#741 measured +6%): it records nothing
-  if (!(testInfo.tags || []).includes('@serial')) startBrowserTrace(browser);
+  // every test records, a @serial one too: its budget keeps headroom over a loaded runner and fails a turn that costs twice as much, and the recorder costs
+  // about 7% (a red in the @serial run had no record when it was exempt, quire#575)
+  startBrowserTrace(browser);
   browser.on('disconnected', onDisconnected);
   scan();
   const scanTimer = setInterval(() => { scan(); nearTimeout(); }, SCAN_EVERY_MS);
@@ -1388,7 +1389,7 @@ export function stallWatch(browser, testInfo) {
       const failed = testInfo.status && testInfo.status !== 'skipped' && testInfo.status !== testInfo.expectedStatus;
       if (failed && !state.flight && wanted()) {
         state.browserGone = !browser.isConnected();
-        state.flight = await keepBoth(browser, (name) => testInfo.outputPath(`flight-failed-${name}`), process.env, true).catch((error) => ({ kernel: { error: String(error) }, browserTrace: { error: String(error) } }));
+        state.flight = await keepBoth(browser, (name) => testInfo.outputPath(`flight-failed-${name}`)).catch((error) => ({ kernel: { error: String(error) }, browserTrace: { error: String(error) } }));
         await attachFlight(testInfo, state.flight);
       }
       leaveSampler();
@@ -1402,17 +1403,14 @@ export function stallWatch(browser, testInfo) {
       // a freeze a test made on purpose, in a test that passed, is not kept: the record is for a red (the files are tens of MB)
       if (state.flight && !failed && testInfo.status === testInfo.expectedStatus && !process.env.QUIRE_KEEP_FLIGHT) {
         for (const entry of [state.flight.kernel, state.flight.browserTrace]) if (entry && entry.file) { try { unlinkSync(entry.file); } catch (gone) { /* it was not there */ } }
-        // the freeze was the test's own and no red: the ring records again, so the next test's freeze (or fault) is in it, not behind this one's pause
-        await resumeKernel().catch(() => {});
       }
     },
     /** What a failing test is missing of its evidence (the fields, named); none when it passed. */
     async verify() {
       return missingEvidence({ status: testInfo.status, expectedStatus: testInfo.expectedStatus, frozen: state.frozen, captureFile: state.captureFile, captureResult: state.captureResult, flight: state.flight, browserGone: state.browserGone, cutOnPurpose: state.cutOnPurpose });
     },
-    /** The browser's trace ring is on, or this throws PREFLIGHT FAILED (a test of the @serial run records nothing and owes nothing). */
+    /** The browser's trace ring is on, or this throws PREFLIGHT FAILED. */
     async ready() {
-      if ((testInfo.tags || []).includes('@serial')) return;
       await traceReady(browser);
     },
     state,
@@ -1424,4 +1422,7 @@ async function attachFlight(testInfo, flight) {
   for (const [name, entry] of [['flight-kernel', flight && flight.kernel], ['flight-browser-trace', flight && flight.browserTrace]]) {
     if (entry && entry.file) await testInfo.attach(name, { path: entry.file, contentType: 'application/gzip' }).catch(() => {});
   }
+  // whether the kernel ring reaches the red (the job-level check reads it)
+  const reach = flight && flight.kernel && flight.kernel.reachFile;
+  if (reach) await testInfo.attach('flight-kernel-reach', { path: reach, contentType: 'application/json' }).catch(() => {});
 }

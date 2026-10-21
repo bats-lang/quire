@@ -27,16 +27,16 @@ function desktopOnly(testInfo) {
 }
 
 /** A Playwright run of one case, in a directory of its own. */
-function nested(testInfo, name, environment = {}) {
+function nested(testInfo, name, environment = {}, args = []) {
   const directory = testInfo.outputPath(`nested-${name}`);
   mkdirSync(directory, { recursive: true });
-  const env = { ...process.env, CI: 'true', PLAYWRIGHT_JSON_OUTPUT_NAME: join(directory, 'report.json'), ...environment };
+  const env = { ...process.env, CI: 'true', QUIRE_NO_COST: '1', PLAYWRIGHT_JSON_OUTPUT_NAME: join(directory, 'report.json'), ...environment };
   // what the outer worker carries must not reach the run: its own worker numbers, its ring, its output directory
   for (const key of Object.keys(env)) if (/^(PW_TEST|PWTEST|TEST_WORKER_INDEX|TEST_PARALLEL_INDEX)/.test(key)) delete env[key];
   delete env[INSTANCE_VARIABLE];
   delete env[OUT_VARIABLE];
   delete env.QUIRE_RUNNER_EVIDENCE;
-  const child = spawn(process.execPath, [cli, 'test', '--config', join(here, 'nested', 'playwright.nested.config.js'), `${name}.case.js`], { cwd: directory, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [cli, 'test', '--config', join(here, 'nested', 'playwright.nested.config.js'), ...args, `${name}.case.js`], { cwd: directory, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   const listeners = [];
   const take = (chunk) => { output += chunk.toString(); for (const listener of listeners) listener(); };
@@ -65,6 +65,17 @@ function attachmentsOf(report) {
   const found = [];
   const walk = (suite) => {
     for (const spec of suite.specs || []) for (const each of spec.tests || []) for (const result of each.results || []) found.push(...(result.attachments || []));
+    for (const child of suite.suites || []) walk(child);
+  };
+  for (const suite of (report && report.suites) || []) walk(suite);
+  return found;
+}
+
+/** Every result of a report, in the order they ran: [{ title, status, attachments: { name: path } }]. */
+function resultsOf(report) {
+  const found = [];
+  const walk = (suite) => {
+    for (const spec of suite.specs || []) for (const each of spec.tests || []) for (const result of each.results || []) found.push({ title: spec.title, status: result.status, attachments: Object.fromEntries((result.attachments || []).filter((a) => a.path).map((a) => [a.name, a.path])) });
     for (const child of suite.suites || []) walk(child);
   };
   for (const suite of (report && report.suites) || []) walk(suite);
@@ -303,6 +314,82 @@ test('DevTools lost while the browser lives (quire#591: "Target page, context or
   const trace = attachments.find((each) => each.name === 'flight-browser-trace');
   expect(trace, JSON.stringify(attachments.map((each) => each.name))).toBeTruthy();
   expect(attachments.some((each) => each.name === 'flight-kernel')).toBe(true);
+  const check = evidenceCheck(run);
+  expect(check.code, check.text).toBe(0);
+});
+
+test('two reds and a third in one run (a crash, a freeze, a plain failure): each ring holds its own red, and the ring reaches the last one', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  test.setTimeout(testInfo.timeout + 180000);
+  const run = nested(testInfo, 'twice');
+  const { code } = await run.finished;
+  expect(code, run.output()).toBe(1);
+  const results = resultsOf(run.report());
+  expect(results.map((each) => each.status), run.output()).toEqual(['failed', 'timedOut', 'failed']);
+  expect(run.output(), 'nothing was missing, in the worker or in the monitor').not.toMatch(/EVIDENCE MISSING/);
+  for (const each of results) {
+    expect(Object.keys(each.attachments), each.title).toEqual(expect.arrayContaining(['flight-kernel', 'flight-kernel-reach', 'flight-browser-trace']));
+    const reach = JSON.parse(readFileSync(each.attachments['flight-kernel-reach'], 'utf8'));
+    expect(reach.reaches, `${each.title}: ${JSON.stringify(reach)}`).toBe(true);
+    // not explained by another capture: the reds are seconds apart, so a ring left paused would have ended before this one (the freeze's ring may
+    // overlap the watchdog's own report of it, which holds the ring too)
+    if (!/second/.test(each.title)) expect(reach.others, each.title).toEqual([]);
+    expect(reach.lastAt, each.title).toBeGreaterThanOrEqual(reach.redAt - 0.5);
+  }
+  // the second red is the freeze: its own futex wait is in its ring, after the first red's capture
+  const [first, second, third] = results;
+  const reaches = results.map((each) => JSON.parse(readFileSync(each.attachments['flight-kernel-reach'], 'utf8')));
+  expect(reaches[1].lastAt, 'the second ring ends after the first red').toBeGreaterThan(reaches[0].lastAt + 1);
+  expect(reaches[2].lastAt, 'the third ring ends after the second red').toBeGreaterThan(reaches[1].lastAt + 1);
+  expect((await ringSeen(second.attachments['flight-kernel'], { wait: /sys_futex\(uaddr: (0x)?[0-9a-f]+, op: (0x)?189, val: \S+, utime: (0x)?0,/ })).wait, 'the freeze, in the second ring').not.toBeNull();
+  // the third red's own event, a signal only that test sends, is in the third ring
+  const event = JSON.parse(readFileSync(join(run.directory, 'third-event.json'), 'utf8'));
+  expect((await ringSeen(third.attachments['flight-kernel'], { signal: new RegExp(`signal_generate: sig=${event.signal} .*pid=${event.pid} `) })).signal, 'the third red\'s signal is in the third ring').not.toBeNull();
+  expect((await ringSeen(first.attachments['flight-kernel'], { signal: new RegExp(`signal_generate: sig=${event.signal} .*pid=${event.pid} `) })).signal, 'and not in the first, which ended before it').toBeNull();
+  // no capture still holds the ring, the monitor ran and said so, and the job-level check passes
+  expect(readdirSync(join(run.directory, 'flight-watchdog')).filter((name) => name.startsWith('ring-kept-'))).toEqual([]);
+  expect(run.output()).toMatch(/\[monitor\] started/);
+  expect(run.output()).toMatch(/\[monitor\] stopped: \d+ checks/);
+  const check = evidenceCheck(run);
+  expect(check.code, check.text).toBe(0);
+});
+
+test('a hold that nobody releases (a capture that died holding the ring) ends the run at that moment, and the job-level check names it', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000' });
+  try {
+    const ok = await run.until(/ring (\/sys\/kernel\/tracing\/instances\/quire-\d+) recording/);
+    await run.until(/\[monitor\] started/);
+    // a capture five minutes ago paused the ring and never came back
+    writeFileSync(join(run.directory, 'flight-watchdog', 'ring-kept-dead-capture'), `${new Date(Date.now() - 300000).toISOString()} dead-capture\n`);
+    await pauseInstance(ok[1]);
+    const stoppedAt = Date.now();
+    const { code } = await run.finished;
+    expect(code, run.output()).not.toBe(0);
+    expect(run.output()).toMatch(/EVIDENCE MISSING: kernel ring: held paused by dead-capture for \d+ s/);
+    expect(Date.now() - stoppedAt).toBeLessThan(30000);
+    expect(run.output(), 'the monitor says what it saw when it ended the run').toMatch(/\[monitor\] ended the run: \d+ checks/);
+    expect(evidenceCheck(run).text).toMatch(/EVIDENCE MISSING: .*held paused by dead-capture/);
+  } finally { run.child.kill('SIGKILL'); }
+});
+
+test('a red in a test tagged @serial, alone in the serial run, has the preflight, the monitor and both rings like any other', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  const run = nested(testInfo, 'serial', { QUIRE_NO_COST: '' }, ['--grep', '@serial']);
+  const { code } = await run.finished;
+  expect(code, run.output()).toBe(1);
+  expect(run.output()).toMatch(/\[preflight\] ok \(the @serial run\): .*ring \/sys\/kernel\/tracing\/instances\/quire-\d+ recording.*watchdog \d+ beating/);
+  expect(run.output(), 'the cost and the capabilities are in every run\'s log').toMatch(/\[cost\] 8 page cycles \(the @serial run\): \d+ ms with the rings off, \d+ ms with both on/);
+  expect(run.output()).toMatch(/\[capabilities\] perf cycles available: (true|false)/);
+  expect(run.output()).toMatch(/\[monitor\] started \(the @serial run\)/);
+  expect(run.output()).toMatch(/\[monitor\] stopped: \d+ checks/);
+  const results = resultsOf(run.report());
+  expect(results.map((each) => each.status)).toEqual(['failed']);
+  expect(Object.keys(results[0].attachments)).toEqual(expect.arrayContaining(['flight-kernel', 'flight-kernel-reach', 'flight-browser-trace']));
+  expect((await ringSeen(results[0].attachments['flight-kernel'], { switched: /sched_switch/ })).switched).not.toBeNull();
   const check = evidenceCheck(run);
   expect(check.code, check.text).toBe(0);
 });

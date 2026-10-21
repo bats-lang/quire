@@ -71,8 +71,8 @@ const run = (command, args, ms) => new Promise((resolve) => {
 });
 
 export class Watchdog {
-  constructor({ root, out, instance, proc = '/proc', sustainMs = SUSTAIN_MS, gapMs = GAP_MS, stacks = true, match = '--type=renderer\\b', marker = null }) {
-    Object.assign(this, { root, out, instance, proc, sustainMs, gapMs, stacks, marker: marker || join(out, 'ring-kept') });
+  constructor({ root, out, instance, proc = '/proc', sustainMs = SUSTAIN_MS, gapMs = GAP_MS, stacks = true, match = '--type=renderer\\b', holdDir = null }) {
+    Object.assign(this, { root, out, instance, proc, sustainMs, gapMs, stacks, holdDir: holdDir || out });
     this.match = new RegExp(match || '--type=renderer\\b');
     this.seen = new Map();      // pid -> { since, ticks }
     this.reported = new Set();
@@ -170,9 +170,9 @@ export class Watchdog {
     } else if (this.instance) {
       this.rings += 1;
       const ring = join(this.out, `${name}-kernel.txt.gz`);
-      // the ring is paused by this snapshot on purpose (the first record is kept): the marker goes down first, so the monitor never sees a pause without it
-      try { writeFileSync(this.marker, `${new Date().toISOString()} by the watchdog\n`); } catch (error) { /* the directory is gone */ }
-      const kept = await tracefs.snapshot({ instance: this.instance, out: ring, lines: RING_LINES });
+      // the snapshot holds the ring paused while it reads (its hold file is down first, so the monitor never sees a pause without it) and releases it on
+      // every outcome: the ring records again for the reds after this one
+      const kept = await tracefs.snapshot({ instance: this.instance, out: ring, lines: RING_LINES, dir: this.holdDir, holder: `watchdog-${process.pid}-${this.rings}` });
       body.kernelRing = kept;
       if (kept.file && futex) body.futex.ring = await futexAnalysis(ring, { address: futex.address, tid: pid }).catch((error) => ({ error: String(error && error.message || error) }));
     } else body.kernelRing = { unavailable: 'no ring was started' };
@@ -191,7 +191,7 @@ export class Watchdog {
 // node flight-watchdog.js <root pid> <out dir> [<ring instance> [<sustain ms> [<match>]]]: until the root is gone
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [root, out, instance, sustain, match, marker] = [Number(process.argv[2]), process.argv[3], process.argv[4] || undefined, Number(process.argv[5]) || SUSTAIN_MS, process.argv[6] || undefined, process.argv[7] || undefined];
-  const dog = new Watchdog({ root, out, instance, sustainMs: sustain, match, marker });
+  const dog = new Watchdog({ root, out, instance, sustainMs: sustain, match, holdDir: marker });
   const origin = performance.now();
   const ticker = setInterval(() => dog.tick(performance.now() - origin, Date.now()), TICK_MS);
   // on a timer of its own: a report that takes seconds (the ring written, the stacks) must not look like a dead watchdog
