@@ -142,6 +142,13 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
 `e2e/stall-capture.spec.js` checks it; its long tests run in the desktop project only.
 `QUIRE_NO_STALL_ARM=1` skips arming (to compare stall rates); nothing sets it.
 
+* **A capture reads only what a value can hold** (quire#751, row 8). A log, ring or trace
+  read into one string is read in pieces, or its size is bounded below the largest string
+  the engine allows (V8's is about 512 MiB); a capture that throws on its own size turns the
+  test red with no record. A class a capture says it covers (a red in an `@serial` test, a
+  renderer the kernel killed) has a spec that makes the class occur and checks the capture
+  holds it; a class with no such spec is not named as covered.
+
 * **Native stacks (gdb)** are taken **only when a page answers nothing AND no renderer used
   `FROZEN_CPU_SECONDS` of CPU over the capture's 1 s window** (a DevTools target has no
   process id, so any renderer's CPU means the page is presumed busy, `presumedBusy`). Every
