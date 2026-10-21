@@ -237,12 +237,24 @@ class Overlap(unittest.TestCase):
         self.assertEqual(gl.lint_brief(brief, self.TICKET, PHRASES), [])
 
     def test_a_review_of_a_signature_change_without_the_check_is_refused(self):
-        found = gl.lint_review(GOOD_REVIEW + '\nThe public signature changed in place.\n', PHRASES)
+        found = gl.lint_review(GOOD_REVIEW + '\nThe author changes the public signature in place.\n', PHRASES)
         self.assertTrue(any('Overlap check' in line for line in found), found)
 
     def test_a_review_of_a_signature_change_with_the_check_passes(self):
-        review = GOOD_REVIEW.replace('The Done-when is met.', 'The public signature changed.\nOverlap check: the old form is still there; a test calls it.')
+        review = GOOD_REVIEW.replace('The Done-when is met.', 'It changes the public signature.\nOverlap check: the old form is still there; a test calls it.')
         self.assertEqual(gl.lint_review(review, PHRASES), [])
+
+    def test_a_brief_with_only_the_review_line_is_refused(self):
+        brief = self.BRIEF + 'Change a published signature.\nOverlap check: the old form is still there.\n'
+        self.assertTrue(any('Overlap' in line for line in gl.lint_brief(brief, self.TICKET, PHRASES)))
+
+    def test_a_text_that_says_no_signature_changed_is_not_refused(self):
+        self.assertEqual(gl.lint_brief(self.BRIEF + 'No published signature changed.\n', self.TICKET, PHRASES), [])
+        self.assertEqual(gl.lint_review(GOOD_REVIEW + '\nNo public signature changed.\n', PHRASES), [])
+
+    def test_a_review_with_only_the_brief_line_is_refused(self):
+        found = gl.lint_review(GOOD_REVIEW + '\nIt changes the public signature.\nOverlap: the old form stays.\n', PHRASES)
+        self.assertTrue(any('Overlap check' in line for line in found), found)
 
     def test_claude_md_and_orchestration_md_carry_the_rule(self):
         for parts, needle in ((('CLAUDE.md',), 'at least* one version of overlap'), (('.claude', 'orchestration.md'), 'Overlap check:'), (('.claude', 'orchestration.md'), '`Overlap: ')):

@@ -210,14 +210,13 @@ def review_text(text, phrases):
     return findings + lint_text('\n'.join(kept), 'review', phrases)
 
 
-SIGNATURE_CHANGE = re.compile(r'(?i)\b(published|public)\s+signatures?\b')
-OVERLAP_BRIEF = re.compile(r'^\s*Overlap( check)?:', re.MULTILINE)
+SIGNATURE_CHANGE = re.compile(r'(?i)\b(chang(?:e|es|ed|ing)|replac(?:e|es|ed|ing)|remov(?:e|es|ed|ing))\s+(?:a |an |the )?(?:published|public)\s+signatures?\b')
+OVERLAP_BRIEF = re.compile(r'^\s*Overlap:', re.MULTILINE)
 OVERLAP_REVIEW = re.compile(r'^\s*Overlap check:', re.MULTILINE)
 
 
 def lint_overlap(text, name, line_form, line_name):
-    """Breaking changes keep at least one published version of overlap (quire#762, CLAUDE.md): a text that
-    names a change to a published signature carries the overlap line of orchestration.md."""
+    """Overlap rule (quire#762, CLAUDE.md): a text that changes a published signature carries the overlap line."""
     if SIGNATURE_CHANGE.search(text) and not line_form.search(text):
         return [f'{name}: it names a change to a published signature and has no line "{line_name}" (CLAUDE.md, "Breaking changes keep at least one published version of overlap")']
     return []
