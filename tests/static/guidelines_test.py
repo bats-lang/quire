@@ -492,19 +492,21 @@ class SweepFiles(unittest.TestCase):
         import tempfile
         text = read_root('.claude', 'skills', 'sweep', 'qsweep')
         block = re.search(r'^for _r in .*?^done$', text, re.M | re.S).group(0)
+        # tests/static/run.sh exports GIT_DIR (bats reads the commit's facts from it); the scratch repositories must not inherit it, or git acts on the checkout (quire#751)
+        clean_env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
         with tempfile.TemporaryDirectory() as tmp:
             repo = os.path.join(tmp, 'quire')
             git = ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-C', repo]
-            subprocess.run(['git', 'init', '-q', '-b', 'main', repo], check=True)
-            subprocess.run(git + ['commit', '-q', '--allow-empty', '-m', 'x'], check=True)
+            subprocess.run(['git', 'init', '-q', '-b', 'main', repo], check=True, env=clean_env)
+            subprocess.run(git + ['commit', '-q', '--allow-empty', '-m', 'x'], check=True, env=clean_env)
             script = block.replace('/home/user/$_r', tmp + '/$_r')
             def run():
-                return subprocess.run(['bash', '-c', script], capture_output=True, text=True, check=True).stdout
+                return subprocess.run(['bash', '-c', script], capture_output=True, text=True, check=True, env=clean_env).stdout
             self.assertEqual(run(), '')
             open(os.path.join(repo, 'stray'), 'w').close()
             self.assertIn('STRAY-WORK ' + repo, run())
             os.remove(os.path.join(repo, 'stray'))
-            subprocess.run(git + ['checkout', '-q', '-b', 'feature'], check=True)
+            subprocess.run(git + ['checkout', '-q', '-b', 'feature'], check=True, env=clean_env)
             self.assertIn('STRAY-WORK ' + repo, run())
 
 
