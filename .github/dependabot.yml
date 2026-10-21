@@ -1,5 +1,5 @@
 # Keeps the npm pins and the action pins moving through reviewed pull requests
-# (bridge#174, as dom#93 has it); which tool moves which pin: .claude/rules/ci.md, "Node's packages".
+# (bridge#174; the shape of bridge's and dom's files); which tool moves which pin: .claude/rules/ci.md, "Node's packages".
 #
 # npm: the root package.json and package-lock.json (@playwright/test, the Chromium it runs).
 # github-actions: the workflows' actions pinned by commit with their release comments.
