@@ -210,8 +210,20 @@ def review_text(text, phrases):
     return findings + lint_text('\n'.join(kept), 'review', phrases)
 
 
+SIGNATURE_CHANGE = re.compile(r'(?i)\b(chang(?:e|es|ed|ing)|replac(?:e|es|ed|ing)|remov(?:e|es|ed|ing))\s+(?:a |an |the )?(?:published|public)\s+signatures?\b')
+OVERLAP_BRIEF = re.compile(r'^\s*Overlap:', re.MULTILINE)
+OVERLAP_REVIEW = re.compile(r'^\s*Overlap check:', re.MULTILINE)
+
+
+def lint_overlap(text, name, line_form, line_name):
+    """Overlap rule (quire#762, CLAUDE.md): a text that changes a published signature carries the overlap line."""
+    if SIGNATURE_CHANGE.search(text) and not line_form.search(text):
+        return [f'{name}: it names a change to a published signature and has no line "{line_name}" (CLAUDE.md, "Breaking changes keep at least one published version of overlap")']
+    return []
+
+
 def lint_review(text, phrases, gate_form=False):
-    findings = review_text(text, phrases)
+    findings = review_text(text, phrases) + lint_overlap(text, 'review', OVERLAP_REVIEW, 'Overlap check: ...')
     lines = [line for line in text.split('\n') if line.strip()]
     first = lines[0].strip() if lines else ''
     if gate_form or first == '## Adversarial review':
@@ -234,7 +246,7 @@ def done_when(ticket):
 
 
 def lint_brief(brief, ticket, phrases):
-    findings = lint_text(brief, 'brief', phrases)
+    findings = lint_text(brief, 'brief', phrases) + lint_overlap(brief, 'brief', OVERLAP_BRIEF, 'Overlap: ...')
     lines = done_when(ticket)
     if lines is None:
         findings.append('ticket: it has no "Done when" section: add it before the brief (the Done-when is what the work is measured by)')
