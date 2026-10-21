@@ -40,14 +40,19 @@ export function ownerOf(env = process.env) {
 }
 
 /** Gives `path` and everything below it (not a link's target) to `owner`, where it is not so already (owner). */
-export function ownTree(path, owner) {
+export function ownTree(path, owner, failed = null, chown = chownSync) {
   if (!owner) return;
   try {
     const stat = lstatSync(path);
     if (stat.isSymbolicLink()) return;
-    if (stat.uid !== owner.uid || stat.gid !== owner.gid) chownSync(path, owner.uid, owner.gid);
-    if (stat.isDirectory()) for (const name of readdirSync(path)) ownTree(join(path, name), owner);
-  } catch (error) { if (error.code !== 'ENOENT') throw error; } // a file the run removed meanwhile
+    if (stat.uid !== owner.uid || stat.gid !== owner.gid) chown(path, owner.uid, owner.gid);
+    if (stat.isDirectory()) for (const name of readdirSync(path)) ownTree(join(path, name), owner, failed, chown);
+  } catch (error) {
+    if (error.code === 'ENOENT') return; // a file the run removed meanwhile
+    // owner: a failure is listed in `failed` when the caller gave one (the watchdog does, and goes on), else it is thrown
+    if (!failed) throw error;
+    failed.push({ path, code: error.code, message: String(error.message) });
+  }
 }
 
 /** The topmost directory that mkdir makes for `dir` (its missing ancestors too), or null when `dir` exists (owner). */
@@ -111,8 +116,12 @@ const run = (command, args, ms) => new Promise((resolve) => {
 });
 
 export class Watchdog {
-  constructor({ root, out, instance, proc = '/proc', sustainMs = SUSTAIN_MS, gapMs = GAP_MS, stacks = true, match = '--type=renderer\\b', holdDir = null, env = process.env }) {
-    Object.assign(this, { root, out, instance, proc, sustainMs, gapMs, stacks, holdDir: holdDir || out, owner: ownerOf(env) });
+  constructor({ root, out, instance, proc = '/proc', sustainMs = SUSTAIN_MS, gapMs = GAP_MS, stacks = true, match = '--type=renderer\\b', holdDir = null, env = process.env, chown = chownSync }) {
+    Object.assign(this, { root, out, instance, proc, sustainMs, gapMs, stacks, holdDir: holdDir || out, owner: ownerOf(env), chown });
+    this.written = false;       // a file was written since own() last walked (owner)
+    this.listed = '';           // the names in the output and the holds' directory at that walk
+    this.walks = 0;
+    this.ownFailures = [];      // what could not be given to the owner, each said once in the log
     this.match = new RegExp(match || '--type=renderer\\b');
     this.seen = new Map();      // pid -> { since, ticks }
     this.reported = new Set();
@@ -130,9 +139,28 @@ export class Watchdog {
   }
 
   /** Gives the output and the ring's holds (their directory) to the invoking user, so no file this run leaves is root's alone (owner). */
-  own(path = this.out) {
-    ownTree(path, this.owner);
-    if (this.holdDir !== this.out) ownTree(this.holdDir, this.owner);
+  own(path) {
+    if (!this.owner) return;
+    const listing = this.listing();
+    // owner: the whole tree is walked only when a file was written or a name came or went (compared by content, not by time)
+    if (path === undefined && !this.written && listing === this.listed) return;
+    this.walks += 1;
+    const failed = [];
+    ownTree(path === undefined ? this.out : path, this.owner, failed, this.chown);
+    if (this.holdDir !== this.out) ownTree(this.holdDir, this.owner, failed, this.chown);
+    this.written = false;
+    this.listed = this.listing();
+    // owner: a chown that fails (EPERM) is the watchdog's log, never an exception out of tick, heartbeat or report
+    for (const each of failed) {
+      this.ownFailures.push(each);
+      console.error(`[watchdog] could not give ${each.path} to ${this.owner.uid}:${this.owner.gid}: ${each.code || 'error'} ${each.message}`);
+    }
+  }
+
+  /** The names in the output and in the holds' directory (owner). */
+  listing() {
+    const names = (dir) => { try { return readdirSync(dir).join('\0'); } catch (error) { return ''; } };
+    return `${names(this.out)}\u0001${this.holdDir === this.out ? '' : names(this.holdDir)}`;
   }
 
   /**
@@ -146,13 +174,13 @@ export class Watchdog {
         this.stalls.push({ at: new Date().toISOString(), gapMs: now - this.lastTick - TICK_MS, stealMsDuring: steal - this.lastSteal });
         if (this.stalls.length > 100) this.stalls.shift();
         this.lastSteal = steal;
-        try { writeFileSync(join(this.out, `host-stalls-${this.root}-${process.pid}.json`), JSON.stringify(this.stalls, null, 2)); } catch (error) { /* the output directory is gone */ }
+        try { writeFileSync(join(this.out, `host-stalls-${this.root}-${process.pid}.json`), JSON.stringify(this.stalls, null, 2)); this.written = true; } catch (error) { /* the output directory is gone */ }
         this.own();
       }
       const jump = (wall - this.lastWall) - (now - this.lastTick);
       if (Math.abs(jump) > CLOCK_JUMP_MS) {
         this.clockJumps.push({ at: new Date(wall).toISOString(), jumpMs: Math.round(jump) });
-        try { writeFileSync(join(this.out, `clock-jumps-${this.root}-${process.pid}.json`), JSON.stringify(this.clockJumps, null, 2)); } catch (error) { /* the output directory is gone */ }
+        try { writeFileSync(join(this.out, `clock-jumps-${this.root}-${process.pid}.json`), JSON.stringify(this.clockJumps, null, 2)); this.written = true; } catch (error) { /* the output directory is gone */ }
         this.own();
       }
     }
@@ -169,8 +197,15 @@ export class Watchdog {
     try {
       const file = join(this.out, `heartbeat-${this.root}-${process.pid}.json`);
       writeFileSync(`${file}.part`, JSON.stringify(body));
-      this.own();
+      // owner: only the file written is given over here; the rename keeps its owner, and the listing check in own() sees a new name
+      const failed = [];
+      ownTree(`${file}.part`, this.owner, failed, this.chown);
       renameSync(`${file}.part`, file);
+      this.own();
+      for (const each of failed) {
+        this.ownFailures.push(each);
+        console.error(`[watchdog] could not give ${each.path} to ${this.owner.uid}:${this.owner.gid}: ${each.code || 'error'} ${each.message}`);
+      }
     } catch (error) { /* the output directory is gone */ }
     return body;
   }
@@ -225,18 +260,20 @@ export class Watchdog {
       // the snapshot holds the ring paused while it reads (its hold file is down first, so the monitor never sees a pause without it) and releases it on
       // every outcome: the ring records again for the reds after this one
       // the ring's file and the hold and lock files it makes are owned too, whatever the snapshot does (finally)
-      const kept = await tracefs.snapshot({ instance: this.instance, out: ring, lines: RING_LINES, dir: this.holdDir, holder: `watchdog-${process.pid}-${this.rings}` }).finally(() => this.own());
+      const kept = await tracefs.snapshot({ instance: this.instance, out: ring, lines: RING_LINES, dir: this.holdDir, holder: `watchdog-${process.pid}-${this.rings}` }).finally(() => { this.written = true; this.own(); });
       body.kernelRing = kept;
       if (kept.file && futex) body.futex.ring = await futexAnalysis(ring, { address: futex.address, tid: pid }).catch((error) => ({ error: String(error && error.message || error) }));
     } else body.kernelRing = { unavailable: 'no ring was started' };
     // written now and again with the stacks, which take up to STACK_MS: what is known is not held back by them
     writeFileSync(join(this.out, `${name}.json`), JSON.stringify(body, null, 2));
+    this.written = true;
     this.own();
     if (this.stacks) {
       const stacks = await run('eu-stack', ['-p', String(pid), '-m', '-n', '40'], STACK_MS);
       body.userSpaceStacks = /#\d+\s/.test(stacks.stdout) ? stacks.stdout.slice(0, 20000) : `not available: ${stacks.error || stacks.stderr.slice(0, 200) || 'no frames'}`;
     }
     writeFileSync(join(this.out, `${name}.json`), JSON.stringify(body, null, 2));
+    this.written = true;
     this.own();
     console.error(`[watchdog] ${body.reason}: ${name}.json`);
     return `${name}.json`;
