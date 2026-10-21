@@ -271,7 +271,7 @@ only for a red. The design, with the research and what each means cannot find, i
   crashes or a browser that goes away writes `crash-<n>.json` (the reason, both rings, dmesg, the disk, a sanitizer's reports); the kernel ring holds the signal and the exit.
 * **The watchdog** (`e2e/flight-watchdog.js`, started as root by global setup, outside every worker and browser): every second it looks at the renderers of the run; one whose
   main thread has been in an untimed futex wait with no CPU used for 10 s is written out to `flight-watchdog/` (the threads, the word and its neighbours, the ring's view of the word,
-  stacks), whatever the stall watch does (off, unarmed, dead or stuck). It also keeps every tick of its own that came late by 300 ms or more, with the steal time that passed
+  stacks), whatever the stall watch does (off, unarmed, dead or stuck). Its output and the ring's holds go to SUDO_UID and SUDO_GID when sudo set them (`ownerOf`, `ownTree`, quire#767), so a root run leaves nothing a non-root run cannot rewrite. It also keeps every tick of its own that came late by 300 ms or more, with the steal time that passed
   (`host-stalls-*.json`): a stall of the machine shows as a gap of everything at once.
 * **The apparatus fails closed; `EVIDENCE MISSING` is the last net (`e2e/preflight.js`).** Before any test, global setup
   proves every part works, or the job is red with `PREFLIGHT FAILED: <part>: <why>`: `sudo -n` usable; the output directory

@@ -8,7 +8,7 @@
 import { createServer } from 'node:http';
 import { Worker } from 'node:worker_threads';
 import { pathToFileURL } from 'node:url';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { createWriteStream } from 'node:fs';
@@ -490,6 +490,112 @@ test('the watchdog counts the CPU of the main thread, not of the process: a froz
   lay(200, 100, 'chrome', 'chrome --type=renderer', 50, 13, futex);
   await busy.scan(5000);
   expect(await busy.scan(11000), 'the main thread used a tick at 5 s: 6 s since').toEqual([]);
+});
+
+test('a watchdog run under sudo gives its output to the invoking user: the directories it makes, the heartbeat, a stall and a report (quire#767)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  // sudo runs the watchdog as root, so what it writes is root's unless it is given to SUDO_UID; the invoking ids must differ from the process's own, or the code
+  // that gives nothing over passes: as root they are nobody's, else the own uid and another group of the process's (a chown it may do), and without a second group the test cannot tell
+  const other = process.getgroups().find((group) => group !== process.getgid());
+  test.skip(process.getuid() !== 0 && other === undefined, 'a non-root user with one group cannot be given a different group to chown to');
+  const invoking = process.getuid() === 0 ? { uid: 65534, gid: 65534 } : { uid: process.getuid(), gid: other };
+  expect(invoking.uid !== process.getuid() || invoking.gid !== process.getgid(), 'the invoking ids differ from the process\'s own').toBe(true);
+  const proc = testInfo.outputPath('proc');
+  const lay = (pid, parent, comm, cmdline, syscall) => {
+    mkdirSync(join(proc, String(pid), 'task', String(pid)), { recursive: true });
+    const stat = `${pid} (${comm}) S ${parent} 0 0 0 0 0 0 0 0 0 5 5 0 0 20 0 1 0 0\n`;
+    writeFileSync(join(proc, String(pid), 'stat'), stat);
+    writeFileSync(join(proc, String(pid), 'cmdline'), cmdline.replace(/ /g, '\0'));
+    writeFileSync(join(proc, String(pid), 'task', String(pid), 'stat'), stat);
+    writeFileSync(join(proc, String(pid), 'task', String(pid), 'syscall'), syscall);
+  };
+  lay(100, 1, 'node', 'node runner', '0 0x0\n');
+  lay(200, 100, 'chrome', 'chrome --type=renderer', '202 0x7ffe9ead5e30 0x189 0x0 0x0 0x0 0xffffffff 0x7ffe9ead5ba0 0x7fdeb3e98e51\n');
+  const base = testInfo.outputPath('owned');
+  const out = join(base, 'flight', 'watchdog');
+  const dog = new Watchdog({ root: 100, out, proc, sustainMs: 10000, stacks: false, env: { SUDO_UID: String(invoking.uid), SUDO_GID: String(invoking.gid) } });
+  dog.tick(0, 0);
+  dog.tick(2000, 2000);                 // a tick 1.9 s late: host-stalls is written
+  dog.heartbeat();
+  expect(await dog.scan(0)).toEqual([]);
+  expect(await dog.scan(11000), 'the frozen renderer is reported').toHaveLength(1);
+  const names = readdirSync(out);
+  expect(names, 'the heartbeat, the stall and the report are there').toEqual(expect.arrayContaining([
+    expect.stringMatching(/^heartbeat-100-\d+\.json$/), expect.stringMatching(/^host-stalls-100-\d+\.json$/), expect.stringMatching(/^watchdog-100-\d+-1\.json$/),
+  ]));
+  const made = [base, join(base, 'flight'), out, ...names.map((name) => join(out, name))];
+  for (const path of made) {
+    const info = statSync(path);
+    expect({ path, uid: info.uid, gid: info.gid }).toEqual({ path, uid: invoking.uid, gid: invoking.gid });
+  }
+});
+
+test('a chown that fails does not stop the watchdog\'s own output: the report is written whole and the failure is in its log, and the tree is walked only when a file came (quire#767)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const proc = testInfo.outputPath('proc');
+  const lay = (pid, parent, comm, cmdline, syscall) => {
+    mkdirSync(join(proc, String(pid), 'task', String(pid)), { recursive: true });
+    const stat = `${pid} (${comm}) S ${parent} 0 0 0 0 0 0 0 0 0 5 5 0 0 20 0 1 0 0\n`;
+    writeFileSync(join(proc, String(pid), 'stat'), stat);
+    writeFileSync(join(proc, String(pid), 'cmdline'), cmdline.replace(/ /g, '\0'));
+    writeFileSync(join(proc, String(pid), 'task', String(pid), 'stat'), stat);
+    writeFileSync(join(proc, String(pid), 'task', String(pid), 'syscall'), syscall);
+  };
+  lay(100, 1, 'node', 'node runner', '0 0x0\n');
+  lay(200, 100, 'chrome', 'chrome --type=renderer', '202 0x7ffe9ead5e30 0x189 0x0 0x0 0x0 0xffffffff 0x7ffe9ead5ba0 0x7fdeb3e98e51\n');
+  const out = testInfo.outputPath('refused');
+  const refused = [];
+  const chown = (path) => { refused.push(path); const error = new Error(`EPERM: operation not permitted, chown '${path}'`); error.code = 'EPERM'; throw error; };
+  const said = [];
+  const write = console.error;
+  console.error = (...line) => said.push(line.join(' '));
+  let dog;
+  let written;
+  try {
+    dog = new Watchdog({ root: 100, out, proc, sustainMs: 10000, stacks: false, chown, env: { SUDO_UID: '65534', SUDO_GID: '65534' } });
+    dog.tick(0, 0);
+    dog.tick(2000, 2000);                 // host-stalls is written, and its chown is refused
+    dog.heartbeat();
+    await dog.scan(0);
+    written = await dog.scan(11000);
+  } finally { console.error = write; }
+  expect(written, 'the report is written although every chown is refused').toHaveLength(1);
+  const report = JSON.parse(readFileSync(join(out, written[0]), 'utf8'));
+  expect(report.reason, 'and whole').toMatch(/process 200: the main thread has been in an untimed wait/);
+  expect(readdirSync(out), 'with the heartbeat and the stall').toEqual(expect.arrayContaining([expect.stringMatching(/^heartbeat-100-\d+\.json$/), expect.stringMatching(/^host-stalls-100-\d+\.json$/)]));
+  expect(dog.ownFailures.length, 'the failures are kept').toBeGreaterThan(0);
+  expect(dog.ownFailures[0]).toMatchObject({ code: 'EPERM' });
+  expect(refused.length).toBeGreaterThan(0);
+  expect(said.join('\n'), 'and said in the watchdog\'s log').toMatch(/^\[watchdog\] could not give .* to 65534:65534: EPERM /m);
+  // the tree is walked when a file came, not at every heartbeat
+  const quiet = new Watchdog({ root: 100, out: testInfo.outputPath('quiet'), proc, sustainMs: 10000, stacks: false, env: { SUDO_UID: '65534', SUDO_GID: '65534' }, chown: () => {} });
+  quiet.heartbeat();
+  const walked = quiet.walks;
+  for (let beat = 0; beat < 5; beat += 1) quiet.heartbeat();
+  expect(quiet.walks, 'five more heartbeats of the same file walk nothing').toBe(walked);
+  quiet.tick(0, 0);
+  quiet.tick(2000, 2000);
+  expect(quiet.walks, 'a stall file written is walked').toBe(walked + 1);
+});
+
+test('a chown that fails for good is said once for its path and kept in a bounded list across heartbeats (quire#767)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const said = [];
+  const write = console.error;
+  console.error = (...line) => said.push(line.join(' '));
+  let dog;
+  try {
+    // files are refused for good, directories are given over, so the walk reaches every file
+    const chown = (path) => { if (!/\.(json|part)$/.test(path)) return; const error = new Error(`EPERM: operation not permitted, chown '${path}'`); error.code = 'EPERM'; throw error; };
+    dog = new Watchdog({ root: 100, out: testInfo.outputPath('permanent'), proc: testInfo.outputPath('noproc'), stacks: false, chown, env: { SUDO_UID: '65534', SUDO_GID: '65534' } });
+    for (let beat = 0; beat < 5; beat += 1) dog.heartbeat();
+    // many distinct paths: the list stops at the cap
+    for (let file = 0; file < 150; file += 1) { writeFileSync(join(dog.out, `extra-${file}.json`), '{}'); dog.own(dog.out); }
+  } finally { console.error = write; }
+  const heartbeatLines = said.filter((line) => /heartbeat-100-\d+\.json\.part/.test(line));
+  expect(heartbeatLines, 'the heartbeat file is said once over five heartbeats').toHaveLength(1);
+  expect(dog.ownFailures.length, 'the list is bounded').toBe(100);
+  expect(said.length, 'each path is said once').toBe(new Set(said).size);
 });
 
 test('a ring lock that cannot be had in its limit leaves a record, runs the action, and is the job\'s failure', async ({}, testInfo) => {
