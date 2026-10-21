@@ -45,6 +45,7 @@
       "stability.spec.js"
     ],
     "sync": [
+      "evidence-real.spec.js",
       "footnotes.spec.js",
       "headings.spec.js",
       "notice-details.spec.js",

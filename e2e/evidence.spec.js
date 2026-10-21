@@ -6,15 +6,16 @@
  */
 
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { test, expect } from './fixtures.js';
 import { arm, capture, CAPTURE_MOST_MS, NATIVE_MOST_MS, stallWatch as makeWatch } from './stall-capture.js';
-import { diskEvidence, missingEvidence, symbolEvidence } from './evidence.js';
+import { capabilities, diskEvidence, missingEvidence, pageState, parseBlocked, symbolEvidence } from './evidence.js';
+import { pixelDiff } from './relaunch.js';
 import { missingFields } from './evidence-check.js';
-import { INSTANCE_VARIABLE, keepBoth, keepKernel, resumeKernel, ringState, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
+import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { Watchdog } from './flight-watchdog.js';
 
 function desktopOnly(testInfo) {
@@ -76,13 +77,19 @@ test('an untimed futex wait in the renderer\'s main thread: the word, its neighb
   const trace = JSON.parse(gunzipSync(readFileSync(found.flight.browserTrace.file)).toString());
   expect((trace.traceEvents || trace).some((event) => event.pid === word.pid)).toBe(true);
   // the frames: named, or unavailable with the reason and the module and offset of each frame to resolve them later
+  // the frames: some are named and some are not; for the ones that are not, why, and the module and offset of each (always asserted:
+  // on the runner 5 of 7 main-thread frames are named, and the unnamed ones are what an offline lookup takes)
   const symbols = found.symbols.find((each) => each.pid === word.pid);
   expect(symbols.buildId).toMatch(/^[0-9a-f]{40}$/);
-  if (symbols.named === 0) {
-    expect(symbols.state).toMatch(/^unavailable: .*build id [0-9a-f]{40}/);
-    expect(symbols.unnamed.length).toBeGreaterThan(0);
-    expect(symbols.unnamed[0].module).toBeTruthy();
-  }
+  expect(symbols.frames).toBeGreaterThan(symbols.named);
+  expect(symbols.unnamed.length, 'the frames without a name are listed').toBe(Math.min(symbols.frames - symbols.named, 20));
+  expect(symbols.unnamed[0].module).toBeTruthy();
+  expect(symbols.unnamed[0].offset).toMatch(/^0x[0-9a-f]+$/);
+  expect(symbols.state).toMatch(/^(unavailable: .*build id [0-9a-f]{40}|debug file found: |named by the binary)/);
+  // the registers of the wait, and the traffic: Chrome's trace names the Mojo interfaces and the ring the sockets (G1 and G4 of #575)
+  expect(word.registers.sp).toMatch(/^0x[0-9a-f]+$/);
+  expect(new Set(trace.traceEvents ? trace.traceEvents.map((event) => event.cat) : trace.map((event) => event.cat)).size).toBeGreaterThan(2);
+  expect(ring(found.flight.kernel.file)).toMatch(/sys_(recvmsg|sendmsg|epoll_pwait)/);
   expect(found.test).toBe(testInfo.title);
   expect(found.pageAgeMs).toBeGreaterThan(0);
   expect(found.disk.length).toBeGreaterThanOrEqual(3);
@@ -305,7 +312,7 @@ test('a missing symbol file: the frames stay unnamed, and the capture says why a
   expect(symbolEvidence({ renderers: [renderer] }, { QUIRE_SYMBOLS_DIR: testInfo.outputPath('symbols') })[0].state).toMatch(/^debug file found: /);
 });
 
-test('a recorder that does not start is said, and a red without its record is the named failure EVIDENCE MISSING', async ({ playwright, launchOptions }, testInfo) => {
+test('a recorder that does not start is said, and the rule that names what a red is missing', async ({}, testInfo) => {
   desktopOnly(testInfo);
   await recorderOn();
   // the ring cannot start where there is no tracefs
@@ -318,36 +325,7 @@ test('a recorder that does not start is said, and a red without its record is th
   expect(await missingEvidence({ ...failing, flight: { kernel: { file: testInfo.outputPath('missing.gz') }, browserTrace: {} } }, { CI: 'true' })).toEqual([expect.stringMatching(/^kernel ring \(unreadable/), expect.stringMatching(/^browser trace/)]);
   expect(await missingEvidence({ ...failing, status: 'passed' }, { CI: 'true' }), 'a test that passed owes nothing').toEqual([]);
   expect(await missingEvidence({ ...failing, flight: null }, {}), 'a machine that does not record owes nothing').toEqual([]);
-  // the real path: a test that timed out with the ring gone fails its teardown with the named field
-  const own = await playwright.chromium.launch(launchOptions);
-  const timedOut = new Proxy(testInfo, { get: (target, key) => (key === 'status' ? 'timedOut' : Reflect.get(target, key)) });
-  const watch = makeWatch(own, timedOut);
-  const instance = process.env[INSTANCE_VARIABLE];
-  delete process.env[INSTANCE_VARIABLE];
-  try {
-    await expect(watch.stop()).rejects.toThrow(/^EVIDENCE MISSING: kernel ring \(the kernel ring did not start/);
-  } finally {
-    process.env[INSTANCE_VARIABLE] = instance;
-    await own.close();
-  }
 });
-
-test('a test that fails with nothing frozen leaves the rings anyway, and the rings go on for the tests after it', async ({ playwright, launchOptions }, testInfo) => {
-  desktopOnly(testInfo);
-  await recorderOn();
-  const own = await playwright.chromium.launch(launchOptions);
-  const failed = new Proxy(testInfo, { get: (target, key) => (key === 'status' ? 'failed' : Reflect.get(target, key)) });
-  const watch = makeWatch(own, failed);
-  try {
-    const context = await own.newContext();
-    await context.newPage();
-    await watch.stop();   // does not throw: the record is complete
-    const names = readdirSync(testInfo.outputDir);
-    expect(names).toEqual(expect.arrayContaining(['flight-failed-kernel.txt.gz', 'flight-failed-browser-trace.json.gz']));
-    expect((await ringState()).on, 'the ring records on').toBe('1');
-  } finally { await own.close(); }
-});
-
 test('the watchdog, outside every worker and browser, sees a renderer frozen in an untimed futex wait and writes it out', async ({ page, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   await recorderOn();
@@ -360,7 +338,7 @@ test('the watchdog, outside every worker and browser, sees a renderer frozen in 
     const reports = () => (existsSync(out) ? readdirSync(out).filter((name) => /^watchdog-\d+-\d+-\d+\.json$/.test(name)).flatMap((name) => { try { return [JSON.parse(readFileSync(join(out, name), 'utf8'))]; } catch (partial) { return []; } }) : []);
     await expect.poll(() => reports().length, { timeout: 150000 }).toBeGreaterThan(0);
     const report = reports()[0];
-    expect(report.reason).toMatch(/untimed futex wait/);
+    expect(report.reason).toMatch(/untimed wait \(futex\)/);
     expect(report.futex.untimed).toBe(true);
     expect(report.futex.memory.bytes, JSON.stringify(report.futex.memory)).toMatch(/^[0-9a-f]{128}$/);
     expect(report.threads.length).toBeGreaterThan(1);
@@ -398,13 +376,259 @@ test('a stall of the machine, seen from inside: a tick that comes late is kept w
   expect(real.stalls.some((each) => each.gapMs >= 900)).toBe(true);
 });
 
-test('the job-level check names the missing field of a report, and finds a timeout that left no record at all', async ({}, testInfo) => {
+test('the job-level check: a test that ended unexpectedly names a kernel ring or it is missing, a named error is repeated, no report is a failure', async ({}, testInfo) => {
   desktopOnly(testInfo);
-  const report = (status, message) => ({ suites: [{ specs: [{ title: 'a test', file: 'a.spec.js', tests: [{ results: [{ status, errors: message ? [{ message }] : [] }] }] }] }] });
-  expect(missingFields([report('failed', 'Error: EVIDENCE MISSING: kernel ring (not written)\n at x')], [])).toEqual(['kernel ring (not written) (test: a test)']);
-  expect(missingFields([report('timedOut', 'Test timeout of 90000ms exceeded')], [])[0]).toMatch(/^kernel ring \(1 test\(s\) timed out and no test left a flight record/);
-  expect(missingFields([report('passed')], [])).toEqual([]);
   const kept = testInfo.outputPath('flight-1-kernel.txt.gz');
   writeFileSync(kept, 'x');
-  expect(missingFields([report('timedOut', 'Test timeout')], [kept])).toEqual([]);
+  const report = (status, message, attachments = []) => ({ suites: [{ specs: [{ title: 'a test', file: 'a.spec.js', tests: [{ expectedStatus: 'passed', results: [{ status, errors: message ? [{ message }] : [], attachments }] }] }] }] });
+  expect(missingFields([report('failed', 'Error: EVIDENCE MISSING: kernel ring (not written)\n at x')])).toEqual(expect.arrayContaining(['kernel ring (not written) (test: a test)']));
+  expect(missingFields([report('failed', 'Error: expected 1 to be 2')])[0], 'a plain failure with no record').toMatch(/^kernel ring \(test "a test" ended failed and left no record/);
+  expect(missingFields([report('timedOut', 'Test timeout of 90000ms exceeded')])[0]).toMatch(/ended timedOut and left no record/);
+  expect(missingFields([report('failed', 'x', [{ name: 'flight-kernel', path: kept }])]), 'a record named in the report').toEqual([]);
+  expect(missingFields([report('failed', 'x', [{ name: 'flight-kernel', path: testInfo.outputPath('gone.gz') }])])[0], 'a record named but gone').toMatch(/left no record/);
+  expect(missingFields([report('failed', 'x')], [{ source: 'the runner', file: kept, test: 'file > a test' }]), 'a record the runner wrote').toEqual([]);
+  expect(missingFields([report('passed')])).toEqual([]);
+  expect(missingFields([])).toEqual([]);
+  expect(missingFields([], [], { requireReport: true })[0]).toMatch(/^report \(no Playwright JSON report/);
+  expect(missingFields([{ errors: [{ message: 'Error: PREFLIGHT FAILED: watchdog: exited at start' }], suites: [] }])[0]).toMatch(/^watchdog: exited at start/);
+  expect(missingFields([report('passed')], [], { fatal: ['watchdog: no heartbeat for 9000 ms'] })).toEqual(['watchdog: no heartbeat for 9000 ms']);
+});
+
+test('what a system call that waits for ever looks like: the table reads epoll, poll, ppoll and read, and tells a timeout from none', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const line = (nr, args) => `${nr} ${args.map((each) => `0x${each.toString(16)}`).join(' ')} 0x7ffd1000 0x7f0010`;
+  const minusOne = 0xffffffffffffffffn;
+  expect(parseBlocked(line(232, [3, 0x7ffd, 32, minusOne, 0, 0]))).toMatchObject({ name: 'epoll_wait', untimed: true, fd: 3 });
+  expect(parseBlocked(line(232, [3, 0x7ffd, 32, 100, 0, 0]))).toMatchObject({ name: 'epoll_wait', untimed: false });
+  expect(parseBlocked(line(281, [3, 0x7ffd, 32, 0xffffffff, 0, 0]))).toMatchObject({ name: 'epoll_pwait', untimed: true });
+  expect(parseBlocked(line(7, [0x7ffd, 2, minusOne, 0, 0, 0]))).toMatchObject({ name: 'poll', untimed: true });
+  expect(parseBlocked(line(7, [0x7ffd, 2, 1000, 0, 0, 0]))).toMatchObject({ name: 'poll', untimed: false });
+  expect(parseBlocked(line(271, [0x7ffd, 2, 0, 0, 0, 0]))).toMatchObject({ name: 'ppoll', untimed: true });
+  expect(parseBlocked(line(271, [0x7ffd, 2, 0x7ffe, 0, 0, 0]))).toMatchObject({ name: 'ppoll', untimed: false });
+  expect(parseBlocked(line(0, [5, 0x7ffd, 4096, 0, 0, 0]))).toMatchObject({ name: 'read', untimed: true, fd: 5 });
+  expect(parseBlocked(line(1, [6, 0x7ffd, 4096, 0, 0, 0]))).toMatchObject({ name: 'write', fd: 6 });
+  expect(parseBlocked(line(202, [0x7ffc, 0x189, 0, 0, 0, 0xffffffff]))).toMatchObject({ name: 'futex', untimed: true });
+  expect(parseBlocked(line(202, [0x7ffc, 0x89, 0, 0x7ffd, 0, 0xffffffff]))).toMatchObject({ name: 'futex', untimed: false });
+  expect(parseBlocked(line(35, [0x7ffd, 0, 0, 0, 0, 0])), 'a sleep with a time is not a wait for ever').toBeNull();
+  expect(parseBlocked('running')).toBeNull();
+  expect(parseBlocked('-1 0x7ffd1000 0x7f0010')).toBeNull();
+});
+
+test('a main thread blocked in a call that is not a futex (a read on a pipe, a write to a full pipe): the watchdog names the call, the file and the other end', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  await recorderOn();
+  const out = testInfo.outputPath('blocked');
+  // `cat` waits in read(0) on a pipe whose write end this process holds; `yes` in write(1) to a pipe nobody reads
+  // real pipes (a named pipe is one, and node's own stdio pipes are socket pairs): this process holds each one open for reading and writing
+  mkdirSync(out, { recursive: true });
+  const emptyPipe = join(out, 'empty.fifo');
+  const fullPipe = join(out, 'full.fifo');
+  for (const fifo of [emptyPipe, fullPipe]) expect(spawnSync('mkfifo', [fifo]).status).toBe(0);
+  const emptyHeld = openSync(emptyPipe, 'r+');
+  const fullHeld = openSync(fullPipe, 'r+');
+  const reader = spawn('cat', [], { stdio: [emptyHeld, 'ignore', 'ignore'] });
+  const writer = spawn('yes', [], { stdio: ['ignore', fullHeld, 'ignore'] });
+  const watchdog = startWatchdog(process.env[INSTANCE_VARIABLE], process.env, out, 3000, '^(cat|yes)$');
+  try {
+    const reports = () => (existsSync(out) ? readdirSync(out).filter((name) => /^watchdog-\d+-\d+-\d+\.json$/.test(name)).flatMap((name) => { try { return [JSON.parse(readFileSync(join(out, name), 'utf8'))]; } catch (partial) { return []; } }) : []);
+    await expect.poll(() => reports().map((each) => each.blocked.name).sort(), { timeout: 60000 }).toEqual(['read', 'write']);
+    for (const report of reports()) {
+      expect(report.blocked.untimed).toBe(true);
+      // a named pipe is told by its path, an anonymous one by pipe:[inode]
+      expect(report.target, `${report.blocked.name} waits on a pipe`).toMatch(report.blocked.name === 'read' ? /empty\.fifo$/ : /full\.fifo$/);
+      expect(report.peers.map((peer) => peer.pid), 'the other end of the pipe is held by this process').toContain(process.pid);
+      expect(report.reason).toMatch(/untimed wait \((read|write)\)/);
+      expect(report.threads.length).toBeGreaterThan(0);
+    }
+  } finally { reader.kill('SIGKILL'); writer.kill('SIGKILL'); stopWatchdog(watchdog); closeSync(emptyHeld); closeSync(fullHeld); await resumeKernel(); }
+});
+
+/** Runs a command as root (through sudo where this is not root). */
+const asRootCommand = (command, args, input) => spawnSync(isRootUser ? command : 'sudo', isRootUser ? args : ['-n', command, ...args], { encoding: 'utf8', input });
+const isRootUser = typeof process.getuid === 'function' && process.getuid() === 0;
+
+test('a renderer killed by the kernel for want of memory: the OOM killer\'s choice is in the ring and its line in the kernel log of the crash capture', async ({ browser, stallWatch }, testInfo) => {
+  desktopOnly(testInfo);
+  await recorderOn();
+  test.setTimeout(testInfo.timeout + 120000);
+  const unified = existsSync('/sys/fs/cgroup/cgroup.controllers');
+  const base = unified ? '/sys/fs/cgroup' : '/sys/fs/cgroup/memory';
+  const group = `${base}/quire-oom-${process.pid}`;
+  const context = await browser.newContext();
+  const hog = await context.newPage();
+  await hog.setContent('<p>about to run out of memory</p>');
+  const renderers = (await processes(browser)).filter((each) => each.type === 'renderer').map((each) => each.id);
+  const victim = renderers.find((pid) => /RendererMain|renderer/.test(readFileSync(`/proc/${pid}/cmdline`, 'utf8')) && existsSync(`/proc/${pid}`));
+  try {
+    if (unified) asRootCommand('tee', [`${base}/cgroup.subtree_control`], '+memory');
+    expect(asRootCommand('mkdir', [group]).status, 'a cgroup for the renderer').toBe(0);
+    const resident = Number((/VmRSS:\s+(\d+) kB/.exec(readFileSync(`/proc/${victim}/status`, 'utf8')) || [0, 100000])[1]) * 1024;
+    const limit = String(resident + 150 * 1024 * 1024);
+    expect(asRootCommand('tee', [`${group}/${unified ? 'memory.max' : 'memory.limit_in_bytes'}`], limit).status).toBe(0);
+    if (unified) asRootCommand('tee', [`${group}/memory.swap.max`], '0');
+    expect(asRootCommand('tee', [`${group}/cgroup.procs`], String(victim)).status, 'the renderer joins it').toBe(0);
+    hog.evaluate(() => { const held = []; for (let i = 0; i < 60; i += 1) held.push(new Uint8Array(20e6).fill(1)); return held.length; }).catch(() => {});
+    await expect.poll(() => stallWatch.state.flight, { timeout: 90000 }).toBeTruthy();
+    await expect.poll(() => readdirSync(testInfo.outputDir).some((name) => /^crash-\d+\.json$/.test(name)), { timeout: 60000 }).toBe(true);
+    const text = ring(stallWatch.state.flight.kernel.file);
+    expect(text, 'the OOM killer marked the renderer').toMatch(new RegExp(`mark_victim.*pid=${victim}`));
+    expect(text).toMatch(new RegExp(`signal_generate: sig=9 .*pid=${victim} `));
+    const body = JSON.parse(readFileSync(join(testInfo.outputDir, readdirSync(testInfo.outputDir).find((name) => /^crash-\d+\.json$/.test(name))), 'utf8'));
+    expect(JSON.stringify(body.kernelLog), 'dmesg says it').toMatch(/Killed process|out of memory/i);
+  } finally {
+    await context.close().catch(() => {});
+    asRootCommand('rmdir', [group]);
+    await resumeKernel();
+  }
+});
+
+test('a jump of the wall clock: the watchdog keeps the jump, against the monotonic clock the ring and the trace use', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  await recorderOn();
+  const set = (milliseconds) => asRootCommand('date', ['-s', `@${(milliseconds / 1000).toFixed(3)}`]);
+  const wall = Date.now();
+  const mono = performance.now();
+  expect(set(wall + 700).status, 'the clock can be set').toBe(0);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(set(wall + (performance.now() - mono)).status).toBe(0);
+  const out = process.env[OUT_VARIABLE];
+  const jumps = () => readdirSync(out).filter((name) => /^clock-jumps-/.test(name)).flatMap((name) => JSON.parse(readFileSync(join(out, name), 'utf8')));
+  await expect.poll(() => { const seen = jumps().map((each) => each.jumpMs); return seen.some((jump) => jump > 400 && jump < 1000) && seen.some((jump) => jump < -400 && jump > -1000); }, { timeout: 20000 }).toBe(true);
+  // and the unit: a wall clock that moves 5 s while the monotonic one moves 100 ms
+  const dog = new Watchdog({ root: process.pid, out: testInfo.outputPath('jumps') });
+  dog.tick(0, 1000);
+  dog.tick(100, 6100);
+  expect(dog.clockJumps).toHaveLength(1);
+  expect(dog.clockJumps[0].jumpMs).toBe(5000);
+});
+
+test('a network stall (a fetch to a server that never answers, the page free): the request is in the capture and in Chrome\'s trace, with its age', async ({ page, browser }, testInfo) => {
+  desktopOnly(testInfo);
+  await recorderOn();
+  test.setTimeout(testInfo.timeout + CAPTURE_MOST_MS);
+  const held = new Set();
+  // the page itself is answered; the one request under test never is
+  const server = createServer((request, response) => { if (request.url === '/') { response.setHeader('content-type', 'text/html'); response.end('<p>waiting</p>'); } });
+  server.on('connection', (socket) => held.add(socket));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/never-answered`;
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const armed = await arm(page);
+    await page.evaluate((target) => { fetch(target, { mode: 'no-cors' }).catch(() => {}); }, url);
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    const found = await capture(page, armed, 'induced: a fetch nobody answers', browser);
+    expect(found.answers.task.answered, 'the page is free').toBe(true);
+    expect(found.history.inFlight.some((each) => each.url === url && each.ageMs >= 2000)).toBe(true);
+    const kept = await keepBoth(browser, (name) => testInfo.outputPath(`net-${name}`), process.env, true);
+    expect(kept.browserTrace.pendingRequests.some((each) => each.url === url && each.ageMs >= 2000), JSON.stringify(kept.browserTrace.pendingRequests)).toBe(true);
+  } finally {
+    // the request in flight ends with the page's document, before the server's sockets go
+    await page.goto('about:blank').catch(() => {});
+    for (const socket of held) socket.destroy();
+    server.close();
+  }
+});
+
+test('a page that is slow, not frozen (quire#600): the long task, the page\'s attempts and the runner\'s load are in the capture, and the task is in Chrome\'s trace', async ({ page, browser, stallWatch }, testInfo) => {
+  desktopOnly(testInfo);
+  await recorderOn();
+  test.setTimeout(testInfo.timeout + CAPTURE_MOST_MS);
+  await page.setContent('<button id="go">go</button>');
+  const armed = await arm(page);
+  // 1.5 s of script on the main thread, as a heavy layout is
+  await page.evaluate(() => new Promise((resolve) => setTimeout(() => { const start = performance.now(); while (performance.now() - start < 1500) { /* a long task */ } resolve(1); }, 0)));
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  const found = await capture(page, armed, 'induced: a slow page', browser);
+  expect(found.answers.task.answered).toBe(true);
+  // the page's tasks are taken by whichever session harvests first (the test's own, here, and the watch's probe every 2 s): between them they hold the task
+  expect(Array.isArray(found.pageTiming.longTasks) && Array.isArray(found.pageTiming.attempts), 'the capture has the fields').toBe(true);
+  const watched = await stallWatch.evidence();
+  const tasks = [...found.pageTiming.longTasks, ...watched.pageTiming.flatMap((each) => each.longTasks)];
+  expect(tasks.some((each) => each.ms >= 1000), JSON.stringify(tasks).slice(0, 300)).toBe(true);
+  expect(found.runnerLoad.summary.reading, 'the runner\'s load over the last minute').toMatch(/CPU pressure/);
+  const kept = await keepBoth(browser, (name) => testInfo.outputPath(`slow-${name}`), process.env, true);
+  const trace = JSON.parse(gunzipSync(readFileSync(kept.browserTrace.file)).toString());
+  expect((trace.traceEvents || trace).some((event) => event.dur >= 1000000 && /FunctionCall|EvaluateScript|RunTask|TimerFire/.test(event.name)), 'a task of a second or more in Chrome\'s trace').toBe(true);
+});
+
+test('a banner or a toast over a control (quire#556): what is on the page, with the box of each overlay, and what Playwright says intercepted the click', async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  await page.setContent('<style>.banner { position: fixed; top: 0; left: 0; width: 300px; height: 60px; background: #fdd; z-index: 5 } #menu { position: absolute; top: 10px; left: 10px }</style><div class="banner" role="alert" id="error-banner">Could not read the chapter</div><button id="menu">More options</button>');
+  const clicked = await page.click('#menu', { timeout: 1500 }).then(() => 'clicked', (error) => String(error.message));
+  expect(clicked).toMatch(/intercepts pointer events/);
+  expect(clicked).toMatch(/error-banner/);
+  const state = await pageState(page);
+  const banner = state.overlays.find((each) => each.element.includes('error-banner'));
+  expect(banner.box).toEqual([0, 0, 300, 60]);
+  expect(banner.text).toBe('Could not read the chapter');
+  expect(state.alerts[0]).toContain('Could not read the chapter');
+});
+
+test('two screens that differ by a pixel (quire#546): where it is, both colours and the elements there', async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  await page.setContent('<style>body { margin: 0; background: #fff } #dot { position: absolute; left: 300px; top: 200px; width: 1px; height: 1px; background: #000; display: none }</style><div id="dot"></div>');
+  const before = { screen: await page.screenshot({ animations: 'disabled' }) };
+  await page.evaluate(() => { document.getElementById('dot').style.display = 'block'; });
+  const after = { screen: await page.screenshot({ animations: 'disabled' }) };
+  const found = await pixelDiff(page, before, after);
+  expect(found.count).toBe(1);
+  expect(found.list[0]).toMatchObject({ x: 300, y: 200, before: [255, 255, 255], after: [0, 0, 0] });
+  expect(found.dom[0].stack.join(' ')).toContain('div#dot');
+});
+
+test('what the recorder costs: a loop of page cycles with the rings on against off, in this job, and the numbers in the log', async ({ playwright, launchOptions }, testInfo) => {
+  desktopOnly(testInfo);
+  await recorderOn();
+  test.setTimeout(testInfo.timeout + 240000);
+  const cycles = async (browser) => {
+    const started = performance.now();
+    for (let i = 0; i < 12; i += 1) {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      await page.setContent('<button id="b">x</button>');
+      await page.click('#b');
+      await page.evaluate(() => fetch('data:text/plain,hi').then((answer) => answer.text()));
+      await context.close();
+    }
+    return performance.now() - started;
+  };
+  const off = [];
+  const on = [];
+  for (let round = 0; round < 3; round += 1) {
+    // off: the ring paused (marked as a pause on purpose, for the monitor) and no trace
+    const plain = await playwright.chromium.launch(launchOptions);
+    markKept();
+    await pauseInstance(process.env[INSTANCE_VARIABLE]);
+    off.push(await cycles(plain));
+    await resumeKernel();
+    await plain.close();
+    const traced = await playwright.chromium.launch(launchOptions);
+    await startBrowserTrace(traced);
+    on.push(await cycles(traced));
+    await traced.close();
+  }
+  const median = (list) => [...list].sort((a, b) => a - b)[Math.floor(list.length / 2)];
+  const ratio = median(on) / median(off);
+  console.error(`[cost] 12 page cycles: ${Math.round(median(off))} ms with the rings off, ${Math.round(median(on))} ms with both on (x${ratio.toFixed(2)}); rounds off ${off.map(Math.round)}, on ${on.map(Math.round)}`);
+  expect(ratio, 'both rings together stay under 75% extra on a loop of nothing but IPC').toBeLessThan(1.75);
+});
+
+test('what the runner can do that bears on the classes the record cannot see is read each run and a change is a notice', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const no = async () => ({ ok: false, stdout: '', stderr: 'No supported events found.' });
+  const yes = async () => ({ ok: true, stdout: ' 1,000 cycles', stderr: '' });
+  const unchanged = await capabilities({ run: no, fetchHead: async () => 404, version: '149.0.7827.55' });
+  expect(unchanged.counters.available).toBe(false);
+  expect(unchanged.notice).toEqual([]);
+  expect(unchanged.symbols.map((each) => each.status)).toEqual([404, 404, 404]);
+  const changed = await capabilities({ run: yes, fetchHead: async (url) => (url.endsWith('symbols.zip') ? 200 : 404), version: '149.0.7827.55' });
+  expect(changed.notice.join('\n')).toMatch(/rr may now work/);
+  expect(changed.notice.join('\n')).toMatch(/a symbol file now exists/);
+  // and this run's own reading, written by the preflight
+  const written = process.env[OUT_VARIABLE] && join(process.env[OUT_VARIABLE], 'capabilities.json');
+  expect(written && existsSync(written), 'the preflight wrote capabilities.json').toBe(true);
+  const reading = JSON.parse(readFileSync(written, 'utf8'));
+  console.error(`[capabilities] perf cycles available: ${reading.counters.available}; symbols: ${JSON.stringify(reading.symbols)}`);
+  expect(reading.counters).toHaveProperty('available');
 });

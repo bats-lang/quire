@@ -1,12 +1,14 @@
 /**
  * Before the suite: every spec takes `test` from fixtures.js, so the
- * stall watch (stall-capture.js, #244) is on every test.
+ * stall watch (stall-capture.js, #244) is on every test; and the evidence is shown to work (preflight.js, #575): a part that
+ * does not fails the run here, by name, and a part that stops later fails it then.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { serialRun, startKernel, startWatchdog, stopKernel, stopWatchdog } from './flight-recorder.js';
+import { serialRun } from './flight-recorder.js';
+import { preflight, startMonitor, teardown } from './preflight.js';
 
 export default async function globalSetup() {
   const directory = dirname(fileURLToPath(import.meta.url));
@@ -16,11 +18,14 @@ export default async function globalSetup() {
   if (unwatched.length) {
     throw new Error(`these specs do not import test from './fixtures.js', so no stall watch: ${unwatched.join(', ')}`);
   }
-  // the kernel's ring of the run (flight recorder, #575), started before any worker; the teardown removes it
   // not in the run of the @serial tests, which assert timings (a recorder perturbs them: #741 measured +6% for a trace)
-  const kernel = serialRun() ? null : await startKernel();
-  if (kernel) console.error(`[flight-recorder] kernel ring: ${kernel.instance ? `${kernel.instance}${kernel.skipped && kernel.skipped.length ? `, skipped ${kernel.skipped.join('; ')}` : ''}` : `not started: ${kernel.error}`}`);
-  // and the watchdog outside every worker and browser, which sees a freeze whatever the stall watch does
-  const watchdog = serialRun() ? null : startWatchdog(kernel && kernel.instance);
-  return async () => { stopWatchdog(watchdog); await stopKernel(kernel); };
+  let started = null;
+  if (!serialRun()) {
+    try { started = await preflight(); } catch (error) {
+      console.error(`::error title=PREFLIGHT FAILED::${error.message}`);
+      throw error;
+    }
+  }
+  const stopMonitoring = startMonitor(started);
+  return () => teardown(started, stopMonitoring);
 }

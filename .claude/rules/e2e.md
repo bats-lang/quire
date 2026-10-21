@@ -266,6 +266,21 @@ only for a red. The design, with the research and what each means cannot find, i
   main thread has been in an untimed futex wait with no CPU used for 10 s is written out to `flight-watchdog/` (the threads, the word and its neighbours, the ring's view of the word,
   stacks), whatever the stall watch does (off, unarmed, dead or stuck). It also keeps every tick of its own that came late by 300 ms or more, with the steal time that passed
   (`host-stalls-*.json`): a stall of the machine shows as a gap of everything at once.
+* **The apparatus fails closed; `EVIDENCE MISSING` is the last net (`e2e/preflight.js`).** Before any test, global setup
+  proves every part works, or the job is red with `PREFLIGHT FAILED: <part>: <why>`: `sudo -n` usable; the output directory
+  written and read back; the kernel ring made with every required event (futex, sched, signals, read/write/sendmsg/recvmsg/epoll;
+  exec, poll, eventfd, block and oom events are optional and skipped by name), on, and taking events from the runner process
+  (`stats` before and after an action of the traced process); the watchdog's child alive and its first heartbeat read; each
+  browser's trace ring started (`traceReady`, in the `stallWatch` fixture). While the run goes on, a monitor in the runner
+  process reads, every 2 s, the watchdog's child and its heartbeat (the file's content, never its time) and the ring's reading in
+  that heartbeat, and ends the run with `::error::EVIDENCE MISSING: <part>` when the watchdog died or went quiet for 6 s, the
+  ring was stopped with no capture having paused it (the `ring-kept` marker file, written before a capture's pause and taken down
+  after its resume; a stopped reading counts only when a heartbeat made after the marker was missing still shows it), or the ring took no
+  events for 60 s. A reporter in the runner (`e2e/evidence-reporter.js`) writes the ring for an unexpected result no worker kept a
+  record for (a killed worker, a runner killed mid-test), and the job's `Evidence check` (`--require-report`) fails with no report
+  or a result without a kernel ring. A snapshot pauses the ring while it is read (a ring read as it records never reaches its
+  end). Every capture keeps `capabilities.json` (perf counters, symbol files) and logs a `::notice` when it changes.
+  `e2e/evidence-real.spec.js` induces each part's failure in a nested Playwright run on the real path.
 * **A red without its record is its own failure.** A test that timed out, or whose renderer froze or crashed, and has no kernel ring (written and with events) or no
   browser trace (unless the browser itself is gone) fails its teardown with `EVIDENCE MISSING: <field>`; `e2e/evidence-check.js` (the job's `Evidence check` step) turns that into the
   job's named error and also fails a job whose tests timed out with no flight file at all; the stall artifact's upload fails when a test failed and there is nothing to upload.
@@ -277,12 +292,24 @@ only for a red. The design, with the research and what each means cannot find, i
   fetch: its state in the capture and the request in the trace (`pendingRequests`, since it reaches no network layer and no page request event shows it); a full disk: `disk` and the
   block requests in the ring; a missing symbol file: `symbols.state` and the module and offset of each frame; a recorder that does not start and a red with no record:
   `EVIDENCE MISSING`; a sanitizer's report: in the crash capture; a stall of the machine: the watchdog's late ticks with the steal time.
+  The classes added by the review, each with the field and the test (`evidence.spec.js` unless named): a main thread in an untimed
+  call that is not a futex (read on an empty pipe, write to a full one; `blocked`, `target`, `peers` of the watchdog's report; "a main
+  thread blocked in a call that is not a futex", on real named pipes, and the `parseBlocked` table); an OOM kill (the kernel log and the
+  `oom` events in the ring; "a renderer killed by the kernel for want of memory", in a memory cgroup); a jump of the wall clock
+  (`clock-jumps-*.json`, against the monotonic clock; the test sets the clock); a sandbox or zygote failure at launch and a lost DevTools
+  session (quire#591, quire#599: `evidence-real.spec.js`, a browser that is `/bin/false`, one that dies of SIGSEGV, a target closed); a
+  network stall (`history.inFlight` with its age, and `pendingRequests` of Chrome's trace); a slow page (quire#600: long tasks, attempts and
+  the runner's load in the capture, the task in Chrome's trace); a banner over a control (quire#556: `page-state`, the box of each overlay
+  and what Playwright says intercepted the click); two screens that differ by a pixel (quire#546: `pixel-diff`, where, both colours and the
+  elements there); the cost (the rings' price measured in every job, `[cost]` in the log).
 * **Not seen by the record, and the means that sees it** (decided): (1) A bug that vanishes under any recording: the kernel ring is outside every process and cost no
   measurable time, and the watchdog works with the stall watch off, so a freeze leaves a record without the debugger enabled, the DevTools probe or the page's session. (2) Memory
-  corruption in Chromium: the `sanitizer` step of the `reading-tools` job runs the app's first screen on Chromium's public AddressSanitizer build (file and SHA-256 pinned), and any
-  report fails it; Chrome for Testing has no sanitizer build, and building one is hours. (3) The ordering of a race that rr would replay: impossible on a hosted runner (measured on
+  corruption in Chromium: the `sanitizer` step of the `reading-tools` job runs the app's first screen on Chromium's public AddressSanitizer build (position 1625077,
+  Chromium 149.0.7827.0, the branch of the suite's headless shell 149.0.7827.55; file and SHA-256 pinned), and any report fails it; two more
+  tests there make a renderer exhaust memory (`chrome://memory-exhaust`), sandboxed and not, and require the report in `log_path`, so
+  "no report" means something; Chrome for Testing has no sanitizer build, and building one is hours. (3) The ordering of a race that rr would replay: impossible on a hosted runner (measured on
   ubuntu-24.04, image 20261018.339.1: no PMU, `perf stat -e cycles` fails as root, rr 5.7.0 dies on the CPU model; `rr.soft` needs Ubuntu 24.10 and does not instrument V8's
-  JIT); the substitute is the ring, which orders every futex wait and wake, wakeup and switch with CLOCK_MONOTONIC timestamps. (4) The hypervisor's own reasons for a stall:
+  JIT); every job probes this again (`capabilities.json`: whether `perf stat -e cycles` works, and whether the symbol files exist) and notes a change, so the proof is not one old run; the substitute is the ring, which orders every futex wait and wake, wakeup and switch with CLOCK_MONOTONIC timestamps. (4) The hypervisor's own reasons for a stall:
   invisible from the guest by nature; the observable part is the gap in all tasks and the steal time. (5) Symbols: Chrome for Testing 149's headless shell is stripped and no public
   symbol file exists for it (every name tried in its bucket is a 404; Playwright 1.61 downloads the same build); the substitute is the thread names, the Mojo interfaces and tasks of
   Chrome's trace, and the module and offset of each frame to resolve against a build that has symbols if one appears (`QUIRE_SYMBOLS_DIR`).

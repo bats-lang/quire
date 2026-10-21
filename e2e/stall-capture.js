@@ -50,7 +50,7 @@ import { accessSync, closeSync, constants, existsSync, openSync, readdirSync, re
 import { delimiter, isAbsolute, join } from 'node:path';
 import { bindAttempts } from './attempt-log.js';
 import { keepHistory } from './page-history.js';
-import { keepBoth, startBrowserTrace, wanted, ROOT_MOST_MS, TRACE_END_MS } from './flight-recorder.js';
+import { keepBoth, resumeKernel, startBrowserTrace, traceReady, wanted, ROOT_MOST_MS, TRACE_END_MS } from './flight-recorder.js';
 import { diskEvidence, futexEvidence, missingEvidence, pageProbes, sanitizerReports, symbolEvidence } from './evidence.js';
 import { runnerLoad, sampleRunner } from './runner-load.js';
 
@@ -1221,9 +1221,9 @@ export function stallWatch(browser, testInfo) {
     const save = (partial) => { try { writeFileSync(path, JSON.stringify({ ...identity, ...partial }, null, 2)); } catch (error) { /* the output directory is gone: the test is over */ } };
     const number = count;
     const result = await capture(page, armedPage, reason, browser, save, scope, (pid) => testInfo.outputPath(`stall-core-${count}-${pid}.core`),
-      async () => { const kept = await keepBoth(browser, (name) => testInfo.outputPath(`flight-${number}-${name}`)); state.flight = kept; return kept; });
+      async () => { const kept = await keepBoth(browser, (name) => testInfo.outputPath(`flight-${number}-${name}`)); state.flight = kept; await attachFlight(testInfo, kept); return kept; });
     Object.assign(result, identity);
-    if (result.flight) { state.frozen = true; state.captureFile = path; }
+    if (result.flight) { state.frozen = true; state.captureFile = path; if (!state.captureResult) state.captureResult = result; }
     save(result);
     await testInfo.attach(`stall-capture-${count}`, { path, contentType: 'application/json' }).catch(() => {});
     console.error(summary(result));
@@ -1246,6 +1246,7 @@ export function stallWatch(browser, testInfo) {
       const log = await kernelLog(scope).catch((error) => ({ unavailable: String(error) }));
       const body = { reason, at: new Date().toISOString(), test: testInfo.title, project: testInfo.project.name, flight, kernelLog: log, disk: diskEvidence(), sanitizer: sanitizerReports() };
       try { writeFileSync(path, JSON.stringify(body, null, 2)); } catch (gone) { /* the output directory is gone */ }
+      await attachFlight(testInfo, flight);
       await testInfo.attach(`crash-${number}`, { path, contentType: 'application/json' }).catch(() => {});
       console.error(`[stall-capture] ${reason}: kernel ring ${flight.kernel.file || flight.kernel.unavailable || flight.kernel.error}; browser trace ${flight.browserTrace.file || flight.browserTrace.unavailable || flight.browserTrace.error}`);
     })().catch((error) => console.error(`[stall-capture] crash evidence failed: ${error && error.stack || error}`));
@@ -1388,6 +1389,7 @@ export function stallWatch(browser, testInfo) {
       if (failed && !state.flight && wanted()) {
         state.browserGone = !browser.isConnected();
         state.flight = await keepBoth(browser, (name) => testInfo.outputPath(`flight-failed-${name}`), process.env, true).catch((error) => ({ kernel: { error: String(error) }, browserTrace: { error: String(error) } }));
+        await attachFlight(testInfo, state.flight);
       }
       leaveSampler();
       for (const pending of armed.values()) {
@@ -1397,11 +1399,29 @@ export function stallWatch(browser, testInfo) {
       // a red whose evidence is missing is its own failure, named, and the one to fix first
       const missing = await this.verify();
       if (missing.length) throw new Error(`EVIDENCE MISSING: ${missing.join('; ')}`);
+      // a freeze a test made on purpose, in a test that passed, is not kept: the record is for a red (the files are tens of MB)
+      if (state.flight && !failed && testInfo.status === testInfo.expectedStatus && !process.env.QUIRE_KEEP_FLIGHT) {
+        for (const entry of [state.flight.kernel, state.flight.browserTrace]) if (entry && entry.file) { try { unlinkSync(entry.file); } catch (gone) { /* it was not there */ } }
+        // the freeze was the test's own and no red: the ring records again, so the next test's freeze (or fault) is in it, not behind this one's pause
+        await resumeKernel().catch(() => {});
+      }
     },
     /** What a failing test is missing of its evidence (the fields, named); none when it passed. */
     async verify() {
-      return missingEvidence({ status: testInfo.status, frozen: state.frozen, captureFile: state.captureFile, flight: state.flight, browserGone: state.browserGone });
+      return missingEvidence({ status: testInfo.status, expectedStatus: testInfo.expectedStatus, frozen: state.frozen, captureFile: state.captureFile, captureResult: state.captureResult, flight: state.flight, browserGone: state.browserGone, cutOnPurpose: state.cutOnPurpose });
+    },
+    /** The browser's trace ring is on, or this throws PREFLIGHT FAILED (a test of the @serial run records nothing and owes nothing). */
+    async ready() {
+      if ((testInfo.tags || []).includes('@serial')) return;
+      await traceReady(browser);
     },
     state,
   };
+}
+
+/** The record's two files as attachments of the test, so the report names them: the job-level check finds a red's record there. */
+async function attachFlight(testInfo, flight) {
+  for (const [name, entry] of [['flight-kernel', flight && flight.kernel], ['flight-browser-trace', flight && flight.browserTrace]]) {
+    if (entry && entry.file) await testInfo.attach(name, { path: entry.file, contentType: 'application/gzip' }).catch(() => {});
+  }
 }

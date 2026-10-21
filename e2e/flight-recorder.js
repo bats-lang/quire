@@ -11,7 +11,7 @@ import { execFile, spawn } from 'node:child_process';
 import { createGunzip, createGzip } from 'node:zlib';
 import { createReadStream, existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
-import { createWriteStream, statSync } from 'node:fs';
+import { createWriteStream, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -65,10 +65,20 @@ export async function stopKernel(started) {
 export async function keepKernel(out, env = process.env, resume = false) {
   const instance = env[INSTANCE_VARIABLE];
   if (!instance) return { unavailable: wanted(env) ? 'the kernel ring did not start (no tracefs, or sudo refused: see the run\'s first lines)' : 'not recording (neither CI nor QUIRE_FLIGHT=1, or QUIRE_NO_RECORDER)' };
+  // the ring is paused on purpose until resumed: the marker is down before the pause, so the monitor never sees a pause without it
+  markKept(env);
   const kept = await asRoot('snapshot', { instance, out, resume });
+  // a failure that is not a freeze records again for the tests after it (the ring first, then the marker goes)
+  if (resume) await resumeKernel(env);
   if (kept.file) { try { kept.bytes = statSync(kept.file).size; } catch (gone) { /* kept.file is not there */ } }
   return kept;
 }
+
+export const OUT_VARIABLE = 'QUIRE_FLIGHT_OUT';
+/** The file whose presence says the ring was paused by a capture, not by a fault (the monitor reads it). */
+export function keptMarker(env = process.env) { return env[OUT_VARIABLE] ? join(env[OUT_VARIABLE], 'ring-kept') : null; }
+export function markKept(env = process.env) { const file = keptMarker(env); if (file) { try { writeFileSync(file, `${new Date().toISOString()}\n`); } catch (error) { /* the directory is gone */ } } }
+export function unmarkKept(env = process.env) { const file = keptMarker(env); if (file) { try { unlinkSync(file); } catch (error) { /* it was not there */ } } }
 
 const within = (promise, ms) => new Promise((resolve) => {
   const timer = setTimeout(() => resolve({ timedOut: true }), ms);
@@ -224,24 +234,47 @@ export const WATCHDOG_DIRECTORY = 'flight-watchdog';
 const WATCHDOG_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'flight-watchdog.js');
 
 /** Starts the watchdog (flight-watchdog.js) as root for this process tree; { child } or { unavailable }. Ends with `stopWatchdog`. */
-export function startWatchdog(instance, env = process.env, out = join(process.cwd(), WATCHDOG_DIRECTORY), sustainMs = 10000) {
+export function startWatchdog(instance, env = process.env, out = join(process.cwd(), WATCHDOG_DIRECTORY), sustainMs = 10000, match = '') {
   if (!wanted(env)) return null;
-  const args = [WATCHDOG_SCRIPT, String(process.pid), out, instance || '', String(sustainMs)];
+  // QUIRE_FLIGHT_WATCHDOG_SCRIPT: the spec's way to make the watchdog really fail (a script that dies); nothing else sets it
+  const args = [env.QUIRE_FLIGHT_WATCHDOG_SCRIPT || WATCHDOG_SCRIPT, String(process.pid), out, instance || '', String(sustainMs), match, keptMarker(env) || ''];
+  // what became of the child is kept, never swallowed: the preflight and the monitor read it
+  const started = { out, stopping: false, exited: null, error: null, child: null };
   try {
     const child = isRoot ? spawn(process.execPath, args, { stdio: ['pipe', 'inherit', 'inherit'] }) : spawn('sudo', ['-n', process.execPath, ...args], { stdio: ['pipe', 'inherit', 'inherit'] });
-    child.on('error', () => { /* sudo missing: the run goes on without it */ });
-    return { child, out };
-  } catch (error) { return { unavailable: String((error && error.message) || error) }; }
+    child.on('error', (error) => { started.error = String((error && error.message) || error); });
+    child.on('exit', (code, signal) => { started.exited = { code, signal }; });
+    started.child = child;
+  } catch (error) { started.error = String((error && error.message) || error); }
+  return started;
 }
 
 export function stopWatchdog(started) {
-  if (started && started.child) { try { started.child.kill('SIGTERM'); } catch (gone) { /* already gone */ } }
+  if (started && started.child) { started.stopping = true; try { started.child.kill('SIGTERM'); } catch (gone) { /* already gone */ } }
 }
 
 /** Starts the kernel ring recording again after a capture paused it (a test that induced a freeze does, for the tests after it). */
-export function resumeKernel(env = process.env) {
+export async function resumeKernel(env = process.env) {
   const instance = env[INSTANCE_VARIABLE];
-  return instance ? asRoot('resume', { instance }) : Promise.resolve({ unavailable: 'no ring' });
+  if (!instance) { unmarkKept(env); return { unavailable: 'no ring' }; }
+  // the ring records again before the marker goes: the monitor never sees a stopped ring without it
+  const resumed = await asRoot('resume', { instance });
+  unmarkKept(env);
+  return resumed;
+}
+
+/** The ring's readings: { on, written } (the heartbeat), and the probe of the preflight. */
+export function ringStats(env = process.env) {
+  const instance = env[INSTANCE_VARIABLE];
+  return instance ? asRoot('stats', { instance }) : Promise.resolve({ error: 'no ring' });
+}
+/** Whether the browser's trace ring is on: the answer of Tracing.start, awaited. Throws PREFLIGHT FAILED where it is wanted and is not. */
+export async function traceReady(browser, env = process.env) {
+  if (!wanted(env)) return null;
+  const trace = traces.get(browser) || startBrowserTrace(browser, env);
+  const started = await trace;
+  if (!started || !started.session) throw new Error(`PREFLIGHT FAILED: browser trace ring: ${(started && started.unavailable) || 'it did not start'}`);
+  return started;
 }
 
 /** Whether the ring records now: { on: '1' | '0' } or { error }. */
@@ -271,3 +304,13 @@ export function pendingRequests(text) {
     return [...sent.values()].map((each) => ({ url: each.url, requestId: each.requestId, ageMs: Math.round((last - each.at) / 1000) })).slice(-100);
   } catch (error) { return { error: String((error && error.message) || error).slice(0, 200) }; }
 }
+
+/** Stops the recording of a ring by its instance path (what a fault in the run does; the spec's way to kill a ring mid-run). */
+export function pauseInstance(instance) { return asRoot('pause', { instance }); }
+/** Removes a ring by its instance path (the spec's way to make the red-time snapshot fail). */
+export function removeInstance(instance) { return asRoot('stop', { instance }); }
+
+// Work the runner has started that needs the ring (the reporter's snapshots): the global teardown waits for it before the ring is removed.
+const outstanding = new Set();
+export function track(promise) { outstanding.add(promise); promise.finally(() => outstanding.delete(promise)); return promise; }
+export async function settleOutstanding() { await Promise.allSettled([...outstanding]); }

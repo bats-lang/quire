@@ -407,7 +407,7 @@ jobs:
           # alone on one worker first, then the others; each run's JSON
           # report in the timings directory (serial.json, parallel.json)
           mkdir -p "$RUNNER_TEMP/e2e-timings"
-          ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/e2e-timings" -- --reporter=list,html,json $specs
+          ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/e2e-timings" -- --reporter=list,html,json,./e2e/evidence-reporter.js $specs
         env:
           PLAYWRIGHT_HTML_OPEN: never
 
@@ -415,17 +415,18 @@ jobs:
       # that failed with EVIDENCE MISSING (the stall watch's check), or a timeout that left no kernel ring
       - name: Evidence check
         if: always() && env.GROUP_RUN == 'yes'
-        run: node e2e/evidence-check.js "$RUNNER_TEMP/e2e-timings" --results test-results
+        run: node e2e/evidence-check.js "$RUNNER_TEMP/e2e-timings" --results test-results --require-report
 
-      # Chromium's public AddressSanitizer build (pinned by file and SHA-256; position 1705668, Chromium 156), run on
+      # Chromium's public AddressSanitizer build (pinned by file and SHA-256; position 1625077, Chromium 149.0.7827.0, the
+      # branch of the headless shell the suite runs; the server's md5 of the file was checked against the download), run on
       # the app's first screen: a memory error in the browser is named where a release build hangs or dies later
       # (#575). A STOPGAP with the rest of the evidence tooling: it belongs in pwa's e2e-setup (bats-lang/pwa#132)
       - name: Download Chromium's AddressSanitizer build
         if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
         run: |
-          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/asan.zip" https://storage.googleapis.com/chromium-browser-asan/linux-release/asan-linux-release-1705668.zip
-          echo "e1441463cd70aacecddeb7ea8a53ff6ce130c36627c4897a67412d008ae0a54c  $RUNNER_TEMP/asan.zip" | sha256sum -c -
-          unzip -q "$RUNNER_TEMP/asan.zip" -d "$RUNNER_TEMP/asan" 'out/f2d4-ASAN_Release/chrome' 'out/f2d4-ASAN_Release/*.pak' 'out/f2d4-ASAN_Release/icudtl.dat' 'out/f2d4-ASAN_Release/*.bin' 'out/f2d4-ASAN_Release/*.so' 'out/f2d4-ASAN_Release/*.so.1' 'out/f2d4-ASAN_Release/chrome_crashpad_handler' 'out/f2d4-ASAN_Release/vk_swiftshader_icd.json'
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/asan.zip" https://storage.googleapis.com/chromium-browser-asan/linux-release/asan-linux-release-1625077.zip
+          echo "1e4744f206e8a2eca53b3184ff673e1dbed7cdcad146a0f2efc42bdde65749bc  $RUNNER_TEMP/asan.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/asan.zip" -d "$RUNNER_TEMP/asan" chrome '*.pak' icudtl.dat '*.bin' '*.so' libvulkan.so.1 'locales/*' chrome_crashpad_handler vk_swiftshader_icd.json
           rm "$RUNNER_TEMP/asan.zip"
           sudo apt-get install -y -q libpci3
 
@@ -434,18 +435,23 @@ jobs:
         if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
         run: |
           mkdir -p "$QUIRE_SANITIZER_LOGS"
-          ./dist/debug/gen-pwa test -- --output=test-results-sanitizer e2e/sanitizer.spec.js
+          ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/sanitizer-timings" -- --output=test-results-sanitizer --reporter=list,json,./e2e/evidence-reporter.js e2e/sanitizer.spec.js
         env:
           PLAYWRIGHT_HTML_OPEN: never
-          QUIRE_BROWSER_EXECUTABLE: ${{ runner.temp }}/asan/out/f2d4-ASAN_Release/chrome
+          QUIRE_BROWSER_EXECUTABLE: ${{ runner.temp }}/asan/chrome
           QUIRE_SANITIZER_LOGS: ${{ runner.temp }}/sanitizer-reports
           QUIRE_REQUIRE_SANITIZER: '1'
+          QUIRE_RUNNER_EVIDENCE: test-results-sanitizer/runner-evidence
 
       - name: Sanitizer reports
         if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
         run: node e2e/evidence-check.js --sanitizer "$QUIRE_SANITIZER_LOGS"
         env:
           QUIRE_SANITIZER_LOGS: ${{ runner.temp }}/sanitizer-reports
+
+      - name: Evidence check of the sanitizer run
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        run: node e2e/evidence-check.js "$RUNNER_TEMP/sanitizer-timings" --results test-results-sanitizer --require-report
 
       - name: Upload sanitizer reports
         if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
@@ -491,8 +497,8 @@ jobs:
             test-results/**/flight-*.gz
             test-results/**/crash-*.json
             flight-watchdog/**
-          # a job with a failed test has its record: none is the evidence missing (#575)
-          if-no-files-found: ${{ steps.tests.outcome == 'failure' && 'error' || 'ignore' }}
+          # the watchdog's heartbeat is always there, so a job with nothing to upload had no watchdog: an error, not an ignore (#575)
+          if-no-files-found: error
           retention-days: 30
 
       # The core of a renderer that froze (e2e/stall-capture.js): written, gzipped

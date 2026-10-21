@@ -836,6 +836,7 @@ function stateOf(pid) {
 
 test('teardown ends a gdb attached to a hung renderer: gdb lets go and the renderer runs again', async ({ page, browser, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
+  stallWatch.state.cutOnPurpose = true; // this test ends the capture's native step itself: its fields are not owed
   test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
   const real = spawnSync('sh', ['-c', 'command -v gdb'], { encoding: 'utf8' }).stdout.trim();
   if (!real) unavailable('gdb is not installed on this machine');
@@ -886,6 +887,7 @@ test('teardown ends a gdb attached to a hung renderer: gdb lets go and the rende
 
 test('teardown does not wait for a native capture to end: stop() returns within its bound', async ({ page, browser, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
+  stallWatch.state.cutOnPurpose = true; // this test ends the capture's native step itself: its fields are not owed
   await page.setContent('<!doctype html><title>Frozen</title><p>Frozen</p>');
   const pids = await rendererPids(browser);
   await frozen(pids, async () => {
@@ -897,8 +899,9 @@ test('teardown does not wait for a native capture to end: stop() returns within 
   });
 });
 
-test('the kernel evidence is saved before the native step, which a teardown can cut off (#575)', async ({ page, browser }, testInfo) => {
+test('the kernel evidence is saved before the native step, which a teardown can cut off (#575)', async ({ page, browser, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
+  stallWatch.state.cutOnPurpose = true; // the freeze here is cut off by the teardown on purpose: the watch's own capture of it is not owed whole
   test.setTimeout(testInfo.timeout + CAPTURE_MOST_MS + NATIVE_MOST_MS);
   await page.setContent('<!doctype html><title>Frozen</title><p>Frozen</p>');
   const armed = await arm(page);
