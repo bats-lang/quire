@@ -189,7 +189,7 @@ while IFS=$'\t' read -r w b; do
       echo "REUSABLE WORKTREE $w [${b}] ${_sz} MB ($_why): the next ticket is a new branch in it (git checkout -B <branch> origin/main); it is never removed by 'qsweep clean'"
     fi
   else _kept=$((_kept+1)); fi
-done < <(git -C $_main worktree list --porcelain | awk '/^worktree /{w=$2} /^branch /{b=$2} /^detached/{b="(detached)"} /^$/{print w"\t"b; w="";b=""}' | sed 's#refs/heads/##')
+done < <(git -C $_main worktree list --porcelain | awk '/^worktree /{w=$2} /^branch /{b=$2; sub(/^refs\/heads\//,"",b)} /^detached/{b="(detached)"} /^$/{print w"\t"b; w="";b=""}')
 _full=$(df --output=pcent /home/user | tail -1 | tr -dc 0-9)
 while read -r _verdict _w; do
   _line=$(awk -F'\t' -v w="$_w" '$2==w' /tmp/qsweep-finished.tsv)

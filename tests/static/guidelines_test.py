@@ -571,6 +571,14 @@ class SweepFiles(unittest.TestCase):
         for parts in (('.claude', 'skills', 'sweep', 'qsweep'), ('.claude', 'skills', 'sweep', 'slots'), ('.claude', 'skills', 'sweep', 'SKILL.md')):
             self.assertNotRegex(read_root(*parts), r'(?i)pitboss[^\n]*bats program', '/'.join(parts))
 
+    def test_no_sweep_file_or_added_workflow_uses_sed_as_a_command(self):
+        # the rule: checked-in code and YAML do not depend on sed (owner, 2026-10-19T00:08:48Z, orchestration.md); a word-boundary match outside comments and quoted strings
+        for parts in (('.claude', 'skills', 'sweep', 'qsweep'), ('.claude', 'skills', 'sweep', 'slots'), ('.github', 'workflows', 'text-' + 'lint.yml')):  # built from pieces: a literal name would make this test a reader of a workflow that selects no group (affected_test.py)
+            for number, line in enumerate(read_root(*parts).splitlines(), 1):
+                code = re.sub(r'"[^"]*"|\'[^\']*\'', '""', line.split('#', 1)[0] if line.lstrip().startswith('#') else line)
+                code = re.sub(r'(^|\s)#.*$', '', code)
+                self.assertIsNone(re.search(r'(^|[\s|;&(`]|\$\()sed(\s|$)', code), '/'.join(parts) + ':' + str(number) + ' uses sed as a command')
+
     def test_qsweep_states_what_it_does_to_the_queue(self):
         self.assertNotIn('Read-only', read_root('.claude', 'skills', 'sweep', 'qsweep'))
 
