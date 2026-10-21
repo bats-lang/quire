@@ -9,6 +9,9 @@ name: text-lint
 # STOPGAP (CLAUDE.md, "Pipeline and tooling improvements belong in bats or pwa"): a second app
 # would copy this workflow, so its move is bats-lang/bats#431 and this file is deleted when
 # that lands. Waiting would cost more than the move: the same mistakes came back every session.
+# The avenue exhausted for non-bats code (quire#646): bats has no command that reads the text of
+# a comment or of a markdown file, and bats-lang/bats#431 (with bats#435 for the sweep tools) is
+# the ticket that adds one; a workflow that calls it replaces this file.
 #
 # Safe on pull_request_target: it runs the script as the default branch has it, checks out
 # nothing of the PR and passes the PR's text to the script in the event payload only, never

@@ -26,7 +26,6 @@ You are a worker on bats-lang/quire. The brief names the ticket, the files and d
 - A class of failure the change says it covers has a case that fails when the class occurs: show it by injecting the failure and posting the failing output. A class with no means to see it (a red in a test with no record) is not covered.
 - A test that went red is root-caused: the line, the state, the sequence that makes it fail, shown by a run that fails before the fix and passes after it, or the test is made robust against the cause. `it passed again`, `it passes alone`, `contention` and `nothing touches it` are not causes. A fix that stops one symptom while the cause stays in the code is not a fix. Every failure after the first one in a run is explained too.
 - Data read into one value (a string, a buffer, an array) has a size that value can hold; say the bound or stream it.
-- No sentence holds the words `all` and `data` together: name the sample and why it suffices.
 
 ## Pushing, CI and hand-back
 
@@ -42,6 +41,6 @@ You are a worker on bats-lang/quire. The brief names the ticket, the files and d
 
 ## What the owner's rules are
 
-- `/dev`: never create, move, link, delete or truncate anything under `/dev`. Redirecting output to `/dev/null` is fine.
-- Checked-in code and YAML do not depend on sed. Edit with any tool you like. Quire is written in bats, not shell, and non-bats code names the avenue it exhausted (quire#646, CLAUDE.md).
+- The owner's words on `/dev` (owner, 2026-10-21T01:35:13Z): "I agree workers shouldn't *trash* /dev/null, but that's different from redirection". The rule that follows is the orchestrator's reading of them: never create, move, link, delete or truncate anything under `/dev`; redirecting output to `/dev/null` is fine.
+- The owner's words on sed (owner, 2026-10-19T00:08:48Z): "please don't depend on `sed` being available on the machine". The rule that follows is the orchestrator's reading of them: checked-in code and YAML do not depend on sed; edit with any tool you like. Quire is written in bats, not shell, and non-bats code names the avenue it exhausted (quire#646, CLAUDE.md).
 - Nothing else in this file is the owner's word; it is how the work is done here.

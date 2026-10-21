@@ -4,6 +4,11 @@ a clean text passes, and each defect of a PR body, a review and a brief is named
 
 No bats, no network: the GitHub API is a fake.
 
+Stopgap (CLAUDE.md, "Pipeline and tooling improvements belong in bats or pwa"), with the lint it
+tests. The avenue exhausted for non-bats code (quire#646): bats has no command that reads the text
+of a comment or of a markdown file, so the lint and its tests are Python until bats-lang/bats#431
+(the lint) and bats-lang/bats#435 (the sweep tools) land.
+
 usage: python3 tests/static/guidelines_test.py
 """
 import os
@@ -58,10 +63,6 @@ class Phrases(unittest.TestCase):
     def test_an_area_note_is_held_to_the_guide_phrases_only(self):
         self.assertEqual(gl.lint_text('PSI cannot separate contention from none.', 'x', PHRASES, guide=True, notes=True), [])
         self.assertTrue(gl.lint_text('No sed.', 'x', PHRASES, guide=True, notes=True))
-
-    def test_all_and_data_in_one_sentence(self):
-        self.assertTrue(gl.lint_text('We measured all the data.', 'x', PHRASES))
-        self.assertEqual(gl.lint_text('We measured all fixtures. The data is a sample.', 'x', PHRASES), [])
 
     def test_the_repository_guidelines_are_clean(self):
         self.assertEqual(gl.lint_guidelines(gl.ROOT, PHRASES), [])
@@ -312,6 +313,70 @@ def read_root(*parts):
         return handle.read()
 
 
+def sed_command_lines(text):
+    """The numbers of the lines of a shell or YAML text that run sed as a command (quire#751)."""
+    found = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if re.search(r'(^|[\s|;&(`]|\$\()sed(\s|$)', shell_code_of(line)):
+            found.append(number)
+    return found
+
+
+def shell_code_of(line):
+    """The part of a line the shell would run: the text of a quoted string is blanked, except what a
+    command substitution inside a double quote runs (`$(...)` and backticks), and a comment is cut.
+    One line at a time: a string that goes on over the next line is not followed."""
+    code = []
+    states = ['code']  # 'code', 'double', 'single', 'substitution', 'backtick', 'group'
+    index = 0
+    while index < len(line):
+        char, state = line[index], states[-1]
+        if state == 'single':
+            if char == "'":
+                states.pop()
+            index += 1
+            continue
+        if char == '\\':
+            index += 2
+            continue
+        if state == 'double' and char == '"':
+            states.pop()
+            index += 1
+            continue
+        if state == 'double' and char not in '`$':
+            index += 1
+            continue
+        if line.startswith('$(', index):
+            states.append('substitution')
+            code.append('$(')
+            index += 2
+            continue
+        if char == '`':
+            if state == 'backtick':
+                states.pop()
+            else:
+                states.append('backtick')
+            code.append(char)
+        elif state == 'double':
+            pass  # a `$` that starts no substitution
+        elif char == "'":
+            states.append('single')
+        elif char == '"':
+            states.append('double')
+        elif char == '(' and state in ('substitution', 'group'):
+            states.append('group')
+            code.append(char)
+        elif char == ')' and state in ('substitution', 'group'):
+            states.pop()
+            code.append(char)
+        elif char == '#' and state == 'code' and (not code or code[-1].isspace()):
+            break
+        else:
+            code.append(char)
+        index += 1
+    return ''.join(code)
+
+
 class FreeSlotOrder(unittest.TestCase):
     """quire#751, row 14 and finding 3: the order a free slot is filled in is the same words in every file that states it."""
 
@@ -543,13 +608,33 @@ class PersistentCheckout(unittest.TestCase):
 class OwnerAttribution(unittest.TestCase):
     """quire#751 (review of a056d76, finding 2): the owner's name is on a sentence only with the words and the message's timestamp."""
 
-    FILES = (('.claude', 'orchestration.md'), ('.claude', 'skills', 'sweep', 'qsweep'), ('.claude', 'skills', 'sweep', 'slots'), ('.claude', 'skills', 'sweep', 'SKILL.md'))
+    FILES = (('.claude', 'orchestration.md'), ('.claude', 'skills', 'sweep', 'qsweep'), ('.claude', 'skills', 'sweep', 'slots'), ('.claude', 'skills', 'sweep', 'SKILL.md'),
+             ('.claude', 'agents', 'worker.md'), ('.claude', 'agents', 'reviewer.md'), ('CLAUDE.md',))
 
     def test_every_dated_owner_marker_has_a_full_timestamp(self):
         for parts in self.FILES:
             text = read_root(*parts)
             self.assertIsNone(re.search(r'owner[,:]? \(?\d{4}-\d\d-\d\d(?!T)', text), '/'.join(parts))
             self.assertIsNone(re.search(r'\(owner, 2026-10-\d\d\)', text), '/'.join(parts))
+
+    def test_every_owner_marker_has_the_timestamp_and_the_owners_words_in_quotation_marks(self):
+        # a marker is `(owner, <timestamp>`; the words follow it within the sentence (finding 3 of the review at 2634fe0)
+        for parts in self.FILES:
+            text = read_root(*parts)
+            for found in re.finditer(r'\(owner, (?!<)', text):
+                after = text[found.end():found.end() + 400]
+                self.assertRegex(after, r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ', '/'.join(parts) + ': ' + after[:60])
+                self.assertIn('"', after.split('\n')[0], '/'.join(parts) + ': ' + after[:60])
+
+    def test_workers_owner_rules_quote_the_owner_with_the_timestamp_of_each_message(self):
+        # finding 2 of the review at 2634fe0: the /dev rule and the sed rule were called the owner's with no words and no time
+        section = read_root('.claude', 'agents', 'worker.md').split("## What the owner's rules are")[1]
+        self.assertIn('(owner, 2026-10-21T01:35:13Z): "I agree workers shouldn\'t *trash* /dev/null, but that\'s different from redirection"', section)
+        self.assertIn('(owner, 2026-10-19T00:08:48Z): "please don\'t depend on `sed` being available on the machine"', section)
+
+    def test_no_file_marks_a_paraphrase_as_the_owners(self):
+        for parts in self.FILES:
+            self.assertNotRegex(read_root(*parts), r'(?i)closely paraphrased|\(owner, [^)]*paraphras', '/'.join(parts))
 
     def test_no_sweep_file_attributes_a_decision_to_the_maintainer(self):
         for parts in self.FILES:
@@ -572,12 +657,20 @@ class SweepFiles(unittest.TestCase):
             self.assertNotRegex(read_root(*parts), r'(?i)pitboss[^\n]*bats program', '/'.join(parts))
 
     def test_no_sweep_file_or_added_workflow_uses_sed_as_a_command(self):
-        # the rule: checked-in code and YAML do not depend on sed (owner, 2026-10-19T00:08:48Z, orchestration.md); a word-boundary match outside comments and quoted strings
+        # the rule: checked-in code and YAML do not depend on sed (owner, 2026-10-19T00:08:48Z, orchestration.md); the helper's cases are below
         for parts in (('.claude', 'skills', 'sweep', 'qsweep'), ('.claude', 'skills', 'sweep', 'slots'), ('.github', 'workflows', 'text-' + 'lint.yml')):  # built from pieces: a literal name would make this test a reader of a workflow that selects no group (affected_test.py)
-            for number, line in enumerate(read_root(*parts).splitlines(), 1):
-                code = re.sub(r'"[^"]*"|\'[^\']*\'', '""', line.split('#', 1)[0] if line.lstrip().startswith('#') else line)
-                code = re.sub(r'(^|\s)#.*$', '', code)
-                self.assertIsNone(re.search(r'(^|[\s|;&(`]|\$\()sed(\s|$)', code), '/'.join(parts) + ':' + str(number) + ' uses sed as a command')
+            self.assertEqual(sed_command_lines(read_root(*parts)), [], '/'.join(parts))
+
+    def test_sed_is_found_as_a_command_wherever_the_shell_would_run_it(self):
+        for line in ('sed -n p file', 'x=$(sed -n p file)', 'x="$(sed -n p file)"', 'x="`sed -n p file`"',
+                     'echo "$(echo "a" | sed p)"', 'cat f | sed p', 'if true; then sed p f; fi', 'echo "a $(sed p f) b"'):
+            with self.subTest(line=line):
+                self.assertEqual(sed_command_lines(line), [1])
+
+    def test_sed_in_a_comment_or_a_literal_string_is_not_a_command(self):
+        for line in ('# sed -n p file', 'echo "use sed here"', "echo 'x=$(sed p f)'", 'name=sedan', 'echo "a" # sed p', 'run: python3 x.py  # not sed'):
+            with self.subTest(line=line):
+                self.assertEqual(sed_command_lines(line), [])
 
     def test_qsweep_states_what_it_does_to_the_queue(self):
         self.assertNotIn('Read-only', read_root('.claude', 'skills', 'sweep', 'qsweep'))
@@ -585,8 +678,7 @@ class SweepFiles(unittest.TestCase):
     def test_nothing_depends_on_a_hook_or_a_file_under_the_users_claude_directory(self):
         self.assertFalse(os.path.exists(os.path.join(gl.ROOT, '.claude', 'skills', 'sweep', 'stop-hook-git-check.proposed.sh')))
         for parts in (('.claude', 'agents', 'worker.md'), ('.claude', 'orchestration.md'), ('.claude', 'skills', 'sweep', 'SKILL.md'), ('.claude', 'skills', 'sweep', 'qsweep')):
-            # the owner's message of 2026-10-21T10:36:06Z is quoted verbatim in orchestration.md and names the withdrawn ticket
-            text = read_root(*parts).replace('quire#754: human-only. You install the stop hook after #752 merges.', '')
+            text = read_root(*parts)
             for banned in ('agent-holder', 'quire#754', 'bats#436', 'proposed.sh', 'owner installs', 'LOADED CHECKOUT OFF MAIN'):
                 self.assertNotIn(banned, text, '/'.join(parts))
         worker = read_root('.claude', 'agents', 'worker.md')

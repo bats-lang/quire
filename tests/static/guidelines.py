@@ -6,8 +6,7 @@ them, and nothing refused the text that made them. This checks, without a compil
 
 * the guideline files (CLAUDE.md and every .claude/**/*.md): none holds a phrase of
   tests/static/guidelines/phrases.tsv outside a code span (an exit clause, a rule the
-  owner never wrote, a sentence that contradicts the owner's), and no sentence holds the
-  words "all" and "data" together (name the sample and why it suffices); the reviewer's
+  owner never wrote, a sentence that contradicts the owner's); the reviewer's
   tool list holds no tool that runs anything (row 1);
 * `--text FILE`: a brief, a ticket, a hand-back, a comment: the same phrases, anywhere;
 * `--pr-body FILE --head SHA`: the above, and the body's form: it starts "Fixes #N" for
@@ -80,10 +79,6 @@ def strip_code(text):
     return re.sub(r'`[^`\n]*`', ' ', text)
 
 
-def sentences(text):
-    return [part for part in re.split(r'(?<=[.!?])\s+|\n', text) if part.strip()]
-
-
 def lint_text(text, name, phrases, guide=False, notes=False):
     """Findings for a text: the `text` phrases (and, for a guideline, the `guide` ones). An area
     note (.claude/rules, which holds technical findings: a load average is "contention") is
@@ -100,9 +95,6 @@ def lint_text(text, name, phrases, guide=False, notes=False):
             found = regex.search(line)
             if found:
                 findings.append(f'{name}:{number}: row {row}: "{found.group(0)}": {reason}')
-    for sentence in sentences(text):
-        if re.search(r'\ball\b', sentence, re.IGNORECASE) and re.search(r'\bdata\b', sentence, re.IGNORECASE):
-            findings.append(f'{name}: "all" and "data" in one sentence: name the sample and why it suffices: {sentence.strip()[:80]}')
     return findings
 
 
