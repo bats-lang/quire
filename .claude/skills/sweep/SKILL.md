@@ -15,11 +15,11 @@ Install on a machine (the running copy is a copy of these files): `install -m 75
   * `READY-FOR-REVIEW`: at least one check-run, all finished, `check` green, no red status, no review of this head. A reviewer starts;
   * `REVIEWED-approved`.
   Then `NEXT FOR A FREE SLOT`: a fix for the PRs above, else a review, else the oldest ticket of the highest priority (`.claude/orchestration.md`, "Agents and slots").
-* The library PRs (arith, array, sha256, zip, dom, bridge, gestures) with their checks, the review and the gate's own status with its reason.
+* The library PRs, of the repositories `qsweep repositories` prints (the one list the sweep reads; this file does not copy it), with their checks, the review and the gate's own status with its reason. The `NEXT FOR A FREE SLOT` line orders each category oldest first by the PR's creation date across quire and all of them.
 * `STRAY-WORK`: the orchestrator's checkout (`/home/user/<repo>`) that is off main or not clean; `STRAGGLER`: work that exists only on this machine; `REUSABLE WORKTREE`: a finished worktree for the next ticket's branch.
 * `qsweep pressure`: prints `runner pressure: none` and exits 0, or a hold line and exits 1.
 * `qsweep push <git push arguments>`: the pressure check and the push in one command.
-* `qsweep clean`: prune worktrees; remove a finished one only at 90 percent disk (the orchestrator's own working rule, not the owner's).
+* `qsweep clean`: prune worktrees; at 90 percent disk remove a worktree whose pull request merged and whose tip is in `origin/main`, never the persistent checkout (the one that merged last), a ticket in flight, or the orchestrator's checkout (the orchestrator's own working rule, not the owner's).
 
 ## slots
 

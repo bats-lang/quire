@@ -3,12 +3,12 @@
 # calls the GitHub REST API, reads a worktree's git state and prints one sweep. The move into bats is bats-lang/bats#435 (filed for it).
 # quire#573 (p3) keeps the script in the repository as a skill; its comments name pitboss, a Python package in dev-skill-up/pitboss, as the replacement.
 # Install on a machine: install -m 755 qsweep slots /usr/local/bin/ (the copy that runs is a copy of these files).
-# Ledger of the two worker slots (one sonnet, one haiku; down from three on 2026-10-17 at the owner's word, quota), kept by hand:
+# Ledger of the two worker slots (one sonnet, one haiku; down from three on 2026-10-17, owner, 2026-10-17T20:07:29Z: "go down to one sonnet, one haiku until I say otherwise"), kept by hand:
 #   slots                      print the ledger and a loud line for each EMPTY slot
 #   slots set SLOT AGENT TASK  a worker took the slot (SLOT: sonnet1, haiku1)
 #   slots free SLOT            the worker finished, or was stopped: the slot is empty
 #   slots check N              N = agents running now (count them with ListAgents): warns TOO MANY AGENTS above 2
-# At most TWO agents run at any time, REVIEWERS INCLUDED (owner, 2026-10-18): a review takes a slot like any work.
+# At most TWO agents run at any time, REVIEWERS INCLUDED (orchestrator, 2026-10-18, from the owner's slot count; orchestration.md, Agents and slots, step 4): a review takes a slot like any work.
 # Update it at every spawn and at every final hand-back or completion notice. It is never the answer to "what is running" or "is a slot free": that is ListAgents (quire#751, row 14).
 f=/tmp/claude-0/slots.tsv
 [ -f "$f" ] || printf 'sonnet1\t-\t-\nhaiku1\t-\t-\n' > "$f"

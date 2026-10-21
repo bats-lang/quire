@@ -341,14 +341,16 @@ class NextReadsEveryRepository(unittest.TestCase):
 
     def test_qsweep_reads_the_library_repositories_before_it_prints_the_next_line(self):
         text = read_root('.claude', 'skills', 'sweep', 'qsweep')
-        loop = re.search(r'^for r in ([a-z0-9 -]+); do$', text, re.M)
+        loop = re.search(r'^for r in \$_repositories; do$', text, re.M)
         self.assertIsNotNone(loop)
+        listed = re.search(r'^_repositories="([a-z0-9 -]+)"$', text, re.M)
+        self.assertIsNotNone(listed)
         for repository in ('arith', 'array', 'sha256', 'zip', 'dom', 'bridge', 'gestures', 'bats', 'builder', 'process', 'pwa', 'capacitor-plugins'):
-            self.assertIn(repository, loop.group(1).split(), repository)
+            self.assertIn(repository, listed.group(1).split(), repository)
         self.assertEqual(text.count('NEXT FOR A FREE SLOT: a fix'), 1)
         self.assertGreater(text.index('NEXT FOR A FREE SLOT: a fix'), loop.end())
-        self.assertIn('$_next_fix$_next_fix_lib', text)
-        self.assertIn('$_next_review$_next_review_lib', text)
+        self.assertIn('$(_order "$_cand_fix")', text)
+        self.assertIn('$(_order "$_cand_review")', text)
 
     def test_the_installed_qsweep_is_this_file(self):
         installed = '/usr/local/bin/qsweep'
@@ -395,11 +397,13 @@ class QsweepLibraries(unittest.TestCase):
         return done.stdout.strip().split('\n')
 
     @staticmethod
-    def pr(fixture, repository, number, state, runs, review=None, statuses=()):
+    def pr(fixture, repository, number, state, runs, review=None, statuses=(), created=None):
         sha = f'{number:040x}'
         base = f'repos/bats-lang/{repository}'
         fixture.setdefault(f'{base}/pulls', []).append({'number': number})
-        fixture[f'{base}/pulls/{number}'] = {'mergeable_state': state, 'head': {'sha': sha, 'ref': f'claude/{number}'}, 'title': f'PR {number}', 'auto_merge': None}
+        # by default a PR is created the day of its number, so a larger number is newer
+        created = created or f'2026-01-{number:02d}T00:00:00Z'
+        fixture[f'{base}/pulls/{number}'] = {'mergeable_state': state, 'head': {'sha': sha, 'ref': f'claude/{number}'}, 'title': f'PR {number}', 'auto_merge': None, 'created_at': created}
         fixture[f'{base}/commits/{sha}/check-runs'] = {'check_runs': [{'name': name, 'status': status, 'conclusion': conclusion} for name, status, conclusion in runs]}
         fixture[f'{base}/commits/{sha}/status'] = {'statuses': [{'context': context, 'state': 'failure', 'description': 'red'} for context in statuses]}
         fixture[f'{base}/issues/{number}/comments'] = [] if review is None else [{'author_association': 'OWNER', 'body': review.replace('SHA', sha)}]
@@ -461,11 +465,105 @@ class QsweepLibraries(unittest.TestCase):
         lines = self.run_qsweep(without_fixes)
         self.assertEqual(lines[-1], 'NEXT FOR A FREE SLOT: a review (not by the author) of array#3 array#5 sha256#7')
 
+    def test_the_next_line_is_oldest_first_across_all_repositories(self):
+        # quire#751, row 19: the order inside each category is the PR's creation date, oldest first, not the API's order (newest first) or the repository's place in the list
+        fixture = {}
+        self.pr(fixture, 'bats', 433, 'blocked', self.GREEN, created='2026-10-21T05:36:39Z')
+        self.pr(fixture, 'bats', 429, 'blocked', self.GREEN, created='2026-10-20T19:03:08Z')
+        self.pr(fixture, 'bats', 423, 'blocked', self.GREEN, created='2026-10-20T17:54:44Z')
+        self.pr(fixture, 'arith', 5, 'blocked', self.GREEN, created='2026-10-21T01:00:00Z')
+        self.pr(fixture, 'sha256', 60, 'blocked', self.GREEN, created='2026-10-20T14:30:35Z')
+        self.pr(fixture, 'quire', 752, 'blocked', self.GREEN, created='2026-10-21T05:04:31Z')
+        lines = self.run_qsweep(fixture)
+        self.assertEqual(lines[-1], 'NEXT FOR A FREE SLOT: a review (not by the author) of sha256#60 bats#423 bats#429 arith#5 quire#752 bats#433')
+        fixes = {}
+        self.pr(fixes, 'quire', 700, 'dirty', self.GREEN, created='2026-10-21T03:00:00Z')
+        self.pr(fixes, 'zip', 9, 'dirty', self.GREEN, created='2026-10-19T03:00:00Z')
+        self.pr(fixes, 'bridge', 8, 'dirty', self.GREEN, created='2026-10-20T03:00:00Z')
+        self.pr(fixes, 'arith', 7, 'dirty', self.GREEN, created='2026-10-22T03:00:00Z')
+        self.assertEqual(self.run_qsweep(fixes)[-1], 'NEXT FOR A FREE SLOT: a fix (an author; any author) for zip#9 bridge#8 quire#700 arith#7')
+
+    def test_the_repositories_are_listed_once_and_skill_md_points_to_the_list(self):
+        import subprocess
+        qsweep = os.path.join(gl.ROOT, '.claude', 'skills', 'sweep', 'qsweep')
+        printed = subprocess.run(['bash', qsweep, 'repositories'], capture_output=True, text=True, check=True).stdout.split()
+        self.assertEqual(len(printed), 12)
+        skill = read_root('.claude', 'skills', 'sweep', 'SKILL.md')
+        self.assertIn('qsweep repositories', skill)
+        self.assertNotRegex(skill, r'\(arith, array', 'SKILL.md copies the list of repositories')
+        self.assertNotRegex(skill, r'arith[, ]+array[, ]+sha256')
+
     def test_a_failing_call_prints_its_own_line_and_says_the_next_line_is_incomplete(self):
         lines = self.run_qsweep(self.fixture())
         self.assertIn('fixture failure', self.line_of(lines, 'zip ERROR reading the open pull requests'))
         self.assertIn('fixture failure', self.line_of(lines, 'gestures #10 ERROR reading the pull request'))
         self.assertEqual(self.line_of(lines, 'UNREAD'), 'UNREAD (the NEXT line is incomplete; look at these by hand): zip gestures#10')
+
+
+class PersistentCheckout(unittest.TestCase):
+    """quire#751 (review of a056d76, finding 3): one rule for the persistent checkout in the guideline files and in qsweep clean."""
+
+    def decide(self, lines, full, mode):
+        import subprocess
+        text = read_root('.claude', 'skills', 'sweep', 'qsweep')
+        function = re.search(r'^_clean_decide\(\)\{.*$', text, re.M).group(0)
+        done = subprocess.run(['bash', '-c', function + '\n_clean_decide "$1" "$2"', 'x', str(full), mode], input=lines, capture_output=True, text=True, check=True)
+        return done.stdout.strip().split('\n')
+
+    FINISHED = '2026-10-20T10:00:00Z\t/home/user/quire-a\n2026-10-21T10:00:00Z\t/home/user/quire-c\n2026-10-19T10:00:00Z\t/home/user/quire-b\n'
+
+    def test_the_worktree_that_merged_last_is_kept_whatever_the_disk_and_the_command(self):
+        for full, mode in ((10, 'prs'), (95, 'prs'), (10, 'clean'), (99, 'clean')):
+            self.assertIn('KEEP /home/user/quire-c', self.decide(self.FINISHED, full, mode), (full, mode))
+
+    def test_only_clean_at_90_percent_removes_and_only_the_older_ones(self):
+        self.assertEqual(self.decide(self.FINISHED, 90, 'clean'), ['REMOVE /home/user/quire-b', 'REMOVE /home/user/quire-a', 'KEEP /home/user/quire-c'])
+        self.assertEqual(self.decide(self.FINISHED, 89, 'clean'), ['REUSABLE /home/user/quire-b', 'REUSABLE /home/user/quire-a', 'KEEP /home/user/quire-c'])
+        self.assertEqual(self.decide(self.FINISHED, 99, 'prs'), ['REUSABLE /home/user/quire-b', 'REUSABLE /home/user/quire-a', 'KEEP /home/user/quire-c'])
+
+    def test_a_lone_finished_worktree_is_never_removed(self):
+        self.assertEqual(self.decide('2026-10-21T10:00:00Z\t/home/user/quire-x\n', 99, 'clean'), ['KEEP /home/user/quire-x'])
+
+    def test_qsweep_removes_nothing_but_in_the_remove_branch_and_only_merged_worktrees(self):
+        text = read_root('.claude', 'skills', 'sweep', 'qsweep')
+        self.assertEqual(text.count('worktree remove'), 2)
+        self.assertEqual(len(re.findall(r'^    REMOVE\) .*worktree remove', text, re.M)), 1)
+        self.assertIn('[ "$_why" = "pull request merged" ] && git -C "$_main" merge-base --is-ancestor', text)
+
+    def test_the_guideline_files_say_the_same_thing(self):
+        for parts in (('CLAUDE.md',), ('.claude', 'orchestration.md'), ('.claude', 'skills', 'sweep', 'SKILL.md')):
+            text = read_root(*parts)
+            self.assertNotIn('removes a finished worktree only when the disk', text, parts)
+        self.assertIn('nobody\ndeletes it', read_root('CLAUDE.md'))
+        self.assertIn('never the one that merged last', read_root('CLAUDE.md'))
+        self.assertIn('Nobody deletes the persistent checkout', read_root('.claude', 'orchestration.md'))
+        self.assertIn('never the persistent checkout', read_root('.claude', 'skills', 'sweep', 'SKILL.md'))
+
+
+class OwnerAttribution(unittest.TestCase):
+    """quire#751 (review of a056d76, finding 2): the owner's name is on a sentence only with the words and the message's timestamp."""
+
+    FILES = (('.claude', 'orchestration.md'), ('.claude', 'skills', 'sweep', 'qsweep'), ('.claude', 'skills', 'sweep', 'slots'), ('.claude', 'skills', 'sweep', 'SKILL.md'))
+
+    def test_every_dated_owner_marker_has_a_full_timestamp(self):
+        for parts in self.FILES:
+            text = read_root(*parts)
+            self.assertIsNone(re.search(r'owner[,:]? \(?\d{4}-\d\d-\d\d(?!T)', text), '/'.join(parts))
+            self.assertIsNone(re.search(r'\(owner, 2026-10-\d\d\)', text), '/'.join(parts))
+
+    def test_no_sweep_file_attributes_a_decision_to_the_maintainer(self):
+        for parts in self.FILES:
+            self.assertNotIn('the maintainer decided', read_root(*parts), '/'.join(parts))
+            self.assertNotIn('as the maintainer decided', read_root(*parts), '/'.join(parts))
+
+    def test_the_reviewers_included_rule_is_the_orchestrators_in_both_files(self):
+        for parts in (('.claude', 'orchestration.md'), ('.claude', 'skills', 'sweep', 'slots')):
+            text = read_root(*parts)
+            hit = [line for line in text.split('\n') if re.search(r'reviewers? included', line, re.I) and 'owner' in line]
+            self.assertTrue(hit, parts)
+            for line in hit:
+                self.assertIn('orchestrator', line, parts)
+                self.assertNotRegex(line, r'\(owner, 2026-10-18\)')
 
 
 class SweepFiles(unittest.TestCase):
@@ -479,7 +577,8 @@ class SweepFiles(unittest.TestCase):
     def test_nothing_depends_on_a_hook_or_a_file_under_the_users_claude_directory(self):
         self.assertFalse(os.path.exists(os.path.join(gl.ROOT, '.claude', 'skills', 'sweep', 'stop-hook-git-check.proposed.sh')))
         for parts in (('.claude', 'agents', 'worker.md'), ('.claude', 'orchestration.md'), ('.claude', 'skills', 'sweep', 'SKILL.md'), ('.claude', 'skills', 'sweep', 'qsweep')):
-            text = read_root(*parts)
+            # the owner's message of 2026-10-21T10:36:06Z is quoted verbatim in orchestration.md and names the withdrawn ticket
+            text = read_root(*parts).replace('quire#754: human-only. You install the stop hook after #752 merges.', '')
             for banned in ('agent-holder', 'quire#754', 'bats#436', 'proposed.sh', 'owner installs', 'LOADED CHECKOUT OFF MAIN'):
                 self.assertNotIn(banned, text, '/'.join(parts))
         worker = read_root('.claude', 'agents', 'worker.md')

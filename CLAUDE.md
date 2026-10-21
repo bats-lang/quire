@@ -134,7 +134,9 @@ edit. What bats does not yet judge is listed in `.claude/rules/ci.md`.
 
 Run `bats check` before every push, so a push that does not type-check never reaches CI. The
 check runs in a checkout that stays (the next ticket is a new branch in it, and nobody
-deletes it or its `build/`), so it is incremental; only the first build of a new checkout is
+deletes it or its `build/`; under disk pressure `qsweep clean` removes only an older worktree whose
+pull request merged, never the one that merged last, a ticket in flight, or the orchestrator's
+checkout), so it is incremental; only the first build of a new checkout is
 cold (10 to 15 minutes), and that one runs in the background and is waited for in the same
 turn. Every local run takes about 10 minutes: a run over a population (the static fixtures,
 the e2e specs, the mutation lemmas) is a random sample of it, drawn with a seed that is
