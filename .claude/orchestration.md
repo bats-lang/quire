@@ -43,7 +43,7 @@ The priorities (p0 to p3), the order of work, the owner's rule on downgrades and
 
 ## Checkouts
 
-The checkouts the agents load (`/home/user/<repo>` for each repository: quire, bats, pwa, bridge, dom, gestures, arith, array, zip, sha256, capacitor-plugins, repository-prototype) stay on `main` with a clean tree, so the CLAUDE.md an agent reads is the merged one (quire#732). Nothing is left on a feature branch there: a checkout with unpushed commits pushes them to their own branch first, and a checkout with uncommitted work has it committed or moved aside before it moves. The orchestrator fast-forwards each one to main (`git fetch origin main && git checkout main && git merge --ff-only origin/main`) at the start of every session and after every compaction.
+The checkouts the agents load (`/home/user/<repo>` for each repository: quire, bats, pwa, bridge, dom, gestures, arith, array, zip, sha256, capacitor-plugins, repository-prototype; the 14 files an agent loads are those 12 repositories' CLAUDE.md and the `.claude/rules/bats.md` of bats and of dom) stay on `main` with a clean tree, so the CLAUDE.md an agent reads is the merged one (quire#732). Nothing is left on a feature branch there: a checkout with unpushed commits pushes them to their own branch first, and a checkout with uncommitted work has it committed or moved aside before it moves. The orchestrator fast-forwards each one to main (`git fetch origin main && git checkout main && git merge --ff-only origin/main`) at the start of every session and after every compaction.
 
 ## Published APIs
 
