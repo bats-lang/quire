@@ -224,6 +224,31 @@ class Brief(unittest.TestCase):
         self.assertTrue(gl.lint_brief(brief, self.TICKET, PHRASES))
 
 
+class Overlap(unittest.TestCase):
+    TICKET = Brief.TICKET
+    BRIEF = 'Every row has its line.\nThe tests pass.\n'
+
+    def test_a_brief_of_a_signature_change_without_the_line_is_refused(self):
+        found = gl.lint_brief(self.BRIEF + 'Change a published signature.\n', self.TICKET, PHRASES)
+        self.assertTrue(any('Overlap' in line for line in found), found)
+
+    def test_a_brief_of_a_signature_change_with_the_line_passes(self):
+        brief = self.BRIEF + 'Change a published signature.\nOverlap: the old form stays beside the new one.\n'
+        self.assertEqual(gl.lint_brief(brief, self.TICKET, PHRASES), [])
+
+    def test_a_review_of_a_signature_change_without_the_check_is_refused(self):
+        found = gl.lint_review(GOOD_REVIEW + '\nThe public signature changed in place.\n', PHRASES)
+        self.assertTrue(any('Overlap check' in line for line in found), found)
+
+    def test_a_review_of_a_signature_change_with_the_check_passes(self):
+        review = GOOD_REVIEW.replace('The Done-when is met.', 'The public signature changed.\nOverlap check: the old form is still there; a test calls it.')
+        self.assertEqual(gl.lint_review(review, PHRASES), [])
+
+    def test_claude_md_and_orchestration_md_carry_the_rule(self):
+        for parts, needle in ((('CLAUDE.md',), 'at least* one version of overlap'), (('.claude', 'orchestration.md'), 'Overlap check:'), (('.claude', 'orchestration.md'), '`Overlap: ')):
+            self.assertIn(needle, read_root(*parts), parts)
+
+
 class FakeApi:
     def __init__(self, comments=()):
         self.comments, self.calls = list(comments), []
