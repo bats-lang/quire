@@ -246,6 +246,43 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
   `pageTiming`. The JSON of a capture only gained fields. `e2e/stall-capture.spec.js` checks the fields,
   the attempt log, and that a stuck page or an unarmed one gives a note and no failure.
 
+## No tracefs in a worker's container: the kernel ring runs in CI only (#757)
+
+Keyword: tracefs. The kernel ring of the flight recorder below starts an ftrace instance through tracefs,
+and a worker's container has no tracefs mounted: `/sys/kernel/tracing` exists and is empty,
+`/sys/kernel/debug/tracing` does not exist, the process is uid 0 (read 2026-10-21). So a run with `CI=true`
+stops before any test:
+
+```
+PREFLIGHT FAILED: kernel ring: no tracefs instances directory (tracefs is not mounted here)
+```
+
+The rule of "A worker's machine matches CI" above is not met here yet for these specs: they cannot run on a
+worker, and CI's run is their first.
+
+| Spec (group, `tests/groups.json`) | Local run | Why |
+|---|---|---|
+| `evidence.spec.js` (`extras`, 32 tests) | 12 pass, 20 fail | The 12 need no kernel ring. 19 of the 20 fail with `run with CI=true or QUIRE_FLIGHT=1` (without `CI=true` the apparatus is off), 1 with `the preflight wrote capabilities.json`. With `CI=true` the preflight stops as above. |
+| `evidence-real.spec.js` (`sync`) | does not run | Each nested run starts the preflight. |
+| `stall-capture.spec.js` (`reading-tools`) | does not run | It cuts and reads the kernel ring. |
+| `sanitizer.spec.js` (`reading-tools`, 3 tests) | does not run | Needs Chromium's AddressSanitizer build (position 1625077, Chromium 149.0.7827.0) and `gen-pwa test` serving `dist/pwa`. |
+| the `sudo -n node` path | does not run | CI runs the watchdog and the ring under `sudo -n` as a non-root user. This container is root, so the in-process root path runs instead. `QUIRE_FLIGHT_VIA_SUDO=1` takes the sudo path on a root machine, but that needs the ring too. |
+
+Run here before a push, where the machine can: `node --check` of each changed file, `bats check`,
+`tests/static/affected_test.py`, `scripts/ci-groups.py matrix`, and the 12 ring-free tests of `evidence.spec.js`.
+
+CI's run is the only run of the rest. It ran them first at quire#749's head e03b7f5 (30 check runs
+successful, `play-internal` skipped): `evidence.spec.js` in the `e2e (extras)` job, `evidence-real.spec.js`
+in `e2e (sync)`, `stall-capture.spec.js` in `e2e (reading-tools)`, and the sanitizer step of `check.yml`
+in the same reading-tools job. A change to `e2e/flight-*.js`, `e2e/preflight.js`, `e2e/evidence*.js` or the
+watchdog is checked by CI's run, not by a local one, so its PR body says which of these it could not run.
+
+On record: this is the container's limit, not a proof that the mount is impossible. The quire#749 worker
+tried to mount tracefs once (2026-10-21) and the harness's permission check refused the command; the command
+and its error text were not kept, and nobody has recorded the kernel's answer. Nobody is asked to work
+around the harness: quire#757 records the limit and holds the research on the mount. quire#713 (closed) is
+the other local-versus-CI gap, speech voices, and does not mention tracefs.
+
 ## The flight recorder and the evidence of a red (#575)
 
 Keyword: flight recorder. The freeze of #575 (a fresh job's renderer, main thread in an untimed futex wait, about
