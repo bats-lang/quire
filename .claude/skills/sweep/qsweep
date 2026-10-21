@@ -21,22 +21,33 @@ if [ "$1" = push ]; then shift; r=$(_pressure); echo "$r"; case "$r" in "runner 
 #   WAIT-FOR-CI         no check-run yet, one not finished, or the aggregate `check` not green: no reviewer starts (a reviewer starts only on green)
 #   READY-FOR-REVIEW    at least one check-run, every one finished, `check` green, no status red, and no review names this head: a reviewer takes the slot
 #   REVIEWED-approved   the newest review names this head and approves
-_next_fix=""; _next_review=""
-for n in $(gh api "repos/bats-lang/quire/pulls?state=open&per_page=50" --jq '.[].number'); do
-  j=$(gh api repos/bats-lang/quire/pulls/$n --jq '[.mergeable_state,.head.sha,.head.ref,.title[0:55],.auto_merge!=null]|@tsv')
-  st=$(echo "$j" | cut -f1); sha=$(echo "$j" | cut -f2); ref=$(echo "$j" | cut -f3); t=$(echo "$j" | cut -f4); am=$(echo "$j" | cut -f5)
-  cr=$(gh api "repos/bats-lang/quire/commits/$sha/check-runs?per_page=100")
-  fails=$(echo "$cr" | jq -r '[.check_runs[]|select(.conclusion=="failure" or .conclusion=="cancelled" or .conclusion=="timed_out")|.name]|join(",")')
-  pend=$(echo "$cr" | jq '[.check_runs[]|select(.status!="completed")]|length')
-  total=$(echo "$cr" | jq '.check_runs|length')
-  # the aggregate `check` job needs every other required job, so it must exist, be finished and be green (a head with no check-run yet is not green)
-  checkok=$(echo "$cr" | jq '[.check_runs[]|select(.name=="check" and .status=="completed" and .conclusion=="success")]|length')
+#
+# ONE rule for quire and for every library repository (quire#751, rows 15 and 19): _read_pr reads a PR and _judge_pr decides what its head is ready for.
+# A reviewer starts only when: at least one check-run exists, every check-run is completed (so `waiting`, `requested`, `queued`, `pending` and `in_progress` all hold it),
+# none ended failure, cancelled, timed_out, action_required, startup_failure or stale, the aggregate `check` is completed and green (it needs every other required job, so a head
+# whose checks are only partly created has no green `check` yet), no commit status is red, and mergeable_state is clean or blocked (blocked is the state of a head whose only missing
+# requirement is the review; dirty is a fix, and unknown, behind, draft, unstable and has_hooks wait). A job that ended skipped or neutral is counted and printed (skipped=N), and
+# passes only because the aggregate `check` is green: a job `check` needs cannot be skipped under a green `check`.
+# A gh call that fails is not dropped: the repository prints its own ERROR line and the NEXT line says it is incomplete (row 19: every repository is read).
+_errfile=/tmp/qsweep-err.$$; _unread=""
+_gh(){ gh api "$@" 2>"$_errfile"; }   # gh's own message of a failed call stays in $_errfile; _why prints it
+_why(){ head -c 160 "$_errfile" | tr '\n' ' '; }
+_read_pr(){  # $1 repository, $2 PR number: sets _st _sha _ref _t _am _total _pend _skipped _fails _checkok _badstatus _rv; a failing call returns 1
+  local r=$1 n=$2 j cr
+  j=$(_gh "repos/bats-lang/$r/pulls/$n" --jq '[.mergeable_state,.head.sha,.head.ref,.title[0:55],.auto_merge!=null]|@tsv') || return 1
+  _st=$(echo "$j" | cut -f1); _sha=$(echo "$j" | cut -f2); _ref=$(echo "$j" | cut -f3); _t=$(echo "$j" | cut -f4); _am=$(echo "$j" | cut -f5)
+  cr=$(_gh "repos/bats-lang/$r/commits/$_sha/check-runs?per_page=100") || return 1
+  _fails=$(echo "$cr" | jq -r '[.check_runs[]|select(.conclusion=="failure" or .conclusion=="cancelled" or .conclusion=="timed_out" or .conclusion=="action_required" or .conclusion=="startup_failure" or .conclusion=="stale")|.name]|join(",")')
+  _pend=$(echo "$cr" | jq '[.check_runs[]|select(.status!="completed")]|length')
+  _skipped=$(echo "$cr" | jq '[.check_runs[]|select(.conclusion=="skipped" or .conclusion=="neutral")]|length')
+  _total=$(echo "$cr" | jq '.check_runs|length')
+  _checkok=$(echo "$cr" | jq '[.check_runs[]|select(.name=="check" and .status=="completed" and .conclusion=="success")]|length')
   # commit statuses (text-lint, adversarial-review): one that failed or errored is a fix
-  badstatus=$(gh api "repos/bats-lang/quire/commits/$sha/status" --jq '[.statuses[]|select(.state=="failure" or .state=="error")|.context]|join(",")')
-  # the newest review comment of a trusted author, by its FIRST line only (reviewer.md, "The comment"):
+  _badstatus=$(_gh "repos/bats-lang/$r/commits/$_sha/status" --jq '[.statuses[]|select(.state=="failure" or .state=="error")|.context]|join(",")') || return 1
+  # the newest review comment of a trusted author, by its FIRST line only (reviewer.md, "The comment"); both forms, in every repository:
   #   Independent review (a separate reviewer agent, not the author) of head <40 hex>: approved|changes needed     (ungated repositories)
   #   ## Adversarial review, with one Verdict: line and one Reviewed: line                                           (gated ones)
-  rv=$(gh api "repos/bats-lang/quire/issues/$n/comments?per_page=100" --jq '
+  _rv=$(_gh "repos/bats-lang/$r/issues/$n/comments?per_page=100" --jq '
     def lines: (.body|split("\n")|map(select(length>0)));
     def info: (lines|.[0]) as $f
       | if ($f|test("^Independent review \\(a separate reviewer agent, not the author\\) of head [0-9a-f]{40}: (approved|changes needed)$"))
@@ -45,42 +56,54 @@ for n in $(gh api "repos/bats-lang/quire/pulls?state=open&per_page=50" --jq '.[]
         then {v:((lines|map(select(test("^Verdict: (approved|changes needed)$")))|.[0]//"Verdict: none")|sub("^Verdict: ";"")), h:((lines|map(select(test("^Reviewed: [0-9a-f]{40}$")))|.[0]//"Reviewed: ")|sub("^Reviewed: ";""))}
         else empty end;
     [.[]|select(.author_association=="OWNER" or .author_association=="MEMBER" or .author_association=="COLLABORATOR")|info]|last
-    | if .==null then "none" else ((.v|gsub(" ";"-"))+(if .h=="'"$sha"'" then "-this-head" else "-older-head" end)) end')
-  if [ "$st" = dirty ] || [ -n "$fails" ] || [ -n "$badstatus" ] || [ "$rv" = "changes-needed-this-head" ]; then ready=FIX-NEEDED; _next_fix="$_next_fix #$n"
-  elif [ "$total" -eq 0 ] || [ "$pend" -gt 0 ] || [ "$checkok" -eq 0 ]; then ready=WAIT-FOR-CI
-  elif [ "$rv" = "approved-this-head" ]; then ready=REVIEWED-approved
-  else ready=READY-FOR-REVIEW; _next_review="$_next_review #$n"; fi
-  echo "#$n [$st] auto-merge=$am checks=$total pending=$pend fails=[$fails] statuses-red=[$badstatus] review=$rv $ready $t ($ref)"
+    | if .==null then "none" else ((.v|gsub(" ";"-"))+(if .h=="'"$_sha"'" then "-this-head" else "-older-head" end)) end') || return 1
+}
+_judge_pr(){  # sets _ready from what _read_pr read
+  if [ "$_st" = dirty ] || [ -n "$_fails" ] || [ -n "$_badstatus" ] || [ "$_rv" = "changes-needed-this-head" ]; then _ready=FIX-NEEDED
+  elif [ "$_total" -eq 0 ] || [ "$_pend" -gt 0 ] || [ "$_checkok" -eq 0 ]; then _ready=WAIT-FOR-CI
+  elif [ "$_st" != clean ] && [ "$_st" != blocked ]; then _ready=WAIT-FOR-CI
+  elif [ "$_rv" = "approved-this-head" ]; then _ready=REVIEWED-approved
+  else _ready=READY-FOR-REVIEW; fi
+}
+_next_fix=""; _next_review=""
+_quire_numbers=$(_gh "repos/bats-lang/quire/pulls?state=open&per_page=50" --jq '.[].number') || { echo "quire ERROR reading the open pull requests: $(_why)"; _unread="$_unread quire"; }
+for n in $_quire_numbers; do
+  if ! _read_pr quire $n; then echo "#$n ERROR reading the pull request: $(_why)"; _unread="$_unread quire#$n"; continue; fi
+  _judge_pr
+  case $_ready in FIX-NEEDED) _next_fix="$_next_fix #$n";; READY-FOR-REVIEW) _next_review="$_next_review #$n";; esac
+  echo "#$n [$_st] auto-merge=$_am checks=$_total pending=$_pend skipped=$_skipped fails=[$_fails] statuses-red=[$_badstatus] review=$_rv $_ready $_t ($_ref)"
 done
 
 _lap "quire PRs done"
-# every library repo quire's agents change: each open PR with its head's checks and whether the newest
-# review comment (a trusted author's, first line "## Adversarial review", Verdict: approved) names exactly that head.
-# READY = checks all green, mergeable_state clean and an approval of this very head: merge it now (do not wait for an event: none arrives).
+# every library repo quire's agents change: each open PR read by the same _read_pr and _judge_pr as quire's, so the same checks, the same two review forms
+# (gated `## Adversarial review` and ungated `Independent review ... of head <sha>`) and the same states.
+# READY-TO-MERGE = REVIEWED-approved and mergeable_state clean: merge it now (do not wait for an event: none arrives).
 # The same one order as the quire PRs above (quire#751, row 19): a library PR with a red check, a conflict or a changes-needed review for its head
 # is a fix; one with every check finished and green and no review of its head is a review. They are added to the NEXT line printed after this loop.
 # The repositories: the libraries and the tools agents change (arith array sha256 zip dom bridge gestures), and bats builder process pwa capacitor-plugins.
 _next_fix_lib=""; _next_review_lib=""
 for r in arith array sha256 zip dom bridge gestures bats builder process pwa capacitor-plugins; do
-  for n in $(gh api "repos/bats-lang/$r/pulls?state=open&per_page=20" --jq '.[].number' 2>/dev/null); do
-    j=$(gh api repos/bats-lang/$r/pulls/$n --jq '[.mergeable_state,.head.sha,.head.ref,.title[0:50]]|@tsv')
-    st=$(echo "$j" | cut -f1); sha=$(echo "$j" | cut -f2); ref=$(echo "$j" | cut -f3); t=$(echo "$j" | cut -f4)
-    chk=$(gh api "repos/bats-lang/$r/commits/$sha/check-runs?per_page=60" --jq '[.check_runs[]|.conclusion//.status]|join(",")')
-    rv=$(gh api "repos/bats-lang/$r/issues/$n/comments?per_page=100" --jq '[.[]|select(.author_association=="OWNER" or .author_association=="MEMBER" or .author_association=="COLLABORATOR")|select(.body|split("\n")[0]=="## Adversarial review")]|last|if .==null then "no-review" elif (.body|contains("Verdict: changes needed")) and (.body|contains("Reviewed: '"$sha"'")) then "changes-needed-this-head" elif (.body|contains("Verdict: approved")) and (.body|contains("Reviewed: '"$sha"'")) then "approved-this-head" else "review-not-for-this-head-or-not-approved" end')
-    ready=""; case ",$chk," in *,failure,*|*,cancelled,*|*,in_progress,*|*,queued,*|*,pending,*) ;; *) [ "$st" = clean ] && [ "$rv" = approved-this-head ] && ready=" READY-TO-MERGE";; esac
+  _numbers=$(_gh "repos/bats-lang/$r/pulls?state=open&per_page=20" --jq '.[].number') || { echo "$r ERROR reading the open pull requests: $(_why)"; _unread="$_unread $r"; continue; }
+  for n in $_numbers; do
+    if ! _read_pr $r $n; then echo "$r #$n ERROR reading the pull request: $(_why)"; _unread="$_unread $r#$n"; continue; fi
+    _judge_pr
     # the gate's own status for this head, with its reason (bridge#200: a comment with two Reviewed lines is refused and says so here)
-    gate=$(gh api "repos/bats-lang/$r/commits/$sha/status" --jq '[.statuses[]|select(.context=="adversarial-review")]|first|if .==null then "none" else .state+": "+.description end' 2>/dev/null)
-    case ",$chk," in *,failure,*|*,cancelled,*|*,timed_out,*) _red=yes;; *) _red=no;; esac
-    case ",$chk," in *,in_progress,*|*,queued,*|*,pending,*) _running=yes;; *) _running=no;; esac
-    if [ "$st" = dirty ] || [ "$_red" = yes ] || [ "$rv" = "changes-needed-this-head" ]; then _next_fix_lib="$_next_fix_lib $r#$n"
-    elif [ -n "$chk" ] && [ "$_running" = no ] && [ "$rv" != "approved-this-head" ]; then _next_review_lib="$_next_review_lib $r#$n"; fi
-    echo "$r #$n [$st] checks=$chk review=$rv gate=[$gate]$ready $t ($ref)"
+    gate=$(_gh "repos/bats-lang/$r/commits/$_sha/status" --jq '[.statuses[]|select(.context=="adversarial-review")]|first|if .==null then "none" else .state+": "+.description end') || gate="ERROR $(_why)"
+    # READY-TO-MERGE: every check finished and green (the same rule as a review), clean, and an approval of this very head
+    merge=""; [ "$_ready" = REVIEWED-approved ] && [ "$_st" = clean ] && merge=" READY-TO-MERGE"
+    case $_ready in FIX-NEEDED) _next_fix_lib="$_next_fix_lib $r#$n";; READY-FOR-REVIEW) _next_review_lib="$_next_review_lib $r#$n";; esac
+    echo "$r #$n [$_st] checks=$_total pending=$_pend skipped=$_skipped fails=[$_fails] statuses-red=[$_badstatus] review=$_rv gate=[$gate] $_ready$merge $_t ($_ref)"
   done
 done
+# a repository or a PR whose call failed was not read: the NEXT line below is incomplete and says so (it never lists a PR it could not read as if nothing were there)
+[ -n "$_unread" ] && echo "UNREAD (the NEXT line is incomplete; look at these by hand):$_unread"
+rm -f "$_errfile"
 # the one NEXT line: the quire PRs and the library PRs together, a fix before a review before a new ticket (orchestration.md, Agents and slots)
 if [ -n "$_next_fix$_next_fix_lib" ]; then echo "NEXT FOR A FREE SLOT: a fix (an author; any author) for$_next_fix$_next_fix_lib"
 elif [ -n "$_next_review$_next_review_lib" ]; then echo "NEXT FOR A FREE SLOT: a review (not by the author) of$_next_review$_next_review_lib"
 else echo "NEXT FOR A FREE SLOT: the oldest ticket of the highest priority (CLAUDE.md, Priorities)"; fi
+# `qsweep prs` stops here: the pull request lines and the NEXT line only (the tests run it against a fixture gh)
+[ "$1" = prs ] && exit 0
 _lap "library PRs done"
 _pressure
 _lap "runner pressure done"
@@ -101,11 +124,11 @@ for d in /home/user/* ; do
   fi
 done
 # the loaded checkouts (/home/user/<repo> of the 12 repositories) stay on main with a clean tree (orchestration.md, Checkouts): a worker works in a worktree of its own,
-# and the stop hook reads the orchestrator's directory, so work left in one fires it on work an agent is still doing (quire#751, row 12)
+# so the user-level stop hook, which reads the orchestrator's directory, has nothing to complain about; STRAY-WORK names a checkout that is not (quire#751, row 12)
 for _r in quire bats pwa bridge dom gestures arith array zip sha256 capacitor-plugins repository-prototype; do
   _d=/home/user/$_r; [ -e "$_d/.git" ] || continue
   _b=$(git -C "$_d" branch --show-current)
-  if [ "$_b" != main ] || [ -n "$(git -C "$_d" status --porcelain | head -1)" ]; then echo "LOADED CHECKOUT OFF MAIN $_d [${_b:-detached}] dirty=$(git -C "$_d" status --porcelain | wc -l): no worker works here; move the work to its own worktree, then fast-forward to main"; fi
+  if [ "$_b" != main ] || [ -n "$(git -C "$_d" status --porcelain | head -1)" ]; then echo "STRAY-WORK $_d (the orchestrator's checkout) [${_b:-detached}] dirty=$(git -C "$_d" status --porcelain | wc -l): no worker works here; move the work to its own worktree, then fast-forward to main"; fi
 done
 echo "stragglers: sweep done"
 _lap "stragglers done"

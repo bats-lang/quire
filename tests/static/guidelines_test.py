@@ -358,6 +358,116 @@ class NextReadsEveryRepository(unittest.TestCase):
             self.assertEqual(handle.read(), read_root('.claude', 'skills', 'sweep', 'qsweep'))
 
 
+FAKE_GH = r'''#!/usr/bin/env python3
+import json, os, subprocess, sys
+args = sys.argv[1:]
+path = args[1].split('?')[0]
+expr = args[args.index('--jq') + 1] if '--jq' in args else None
+fixture = json.load(open(os.environ['QSWEEP_FIXTURE']))
+value = fixture.get(path, [] if path.endswith('/pulls') else {})
+if value == 'FAIL':
+    sys.stderr.write('gh: HTTP 500 (fixture failure for ' + path + ')\n')
+    sys.exit(1)
+text = json.dumps(value)
+if expr is None:
+    print(text)
+else:
+    sys.stdout.write(subprocess.run(['jq', '-r', expr], input=text, capture_output=True, text=True, check=True).stdout)
+'''
+
+
+class QsweepLibraries(unittest.TestCase):
+    """quire#751, rows 15 and 19: a library PR is judged by the rule of a quire PR, in both review forms, and a failing call prints its own line."""
+
+    def run_qsweep(self, fixture):
+        import json
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            os.mkdir(os.path.join(tmp, 'bin'))
+            with open(os.path.join(tmp, 'bin', 'gh'), 'w', encoding='utf-8') as handle:
+                handle.write(FAKE_GH)
+            os.chmod(os.path.join(tmp, 'bin', 'gh'), 0o755)
+            with open(os.path.join(tmp, 'fixture.json'), 'w', encoding='utf-8') as handle:
+                json.dump(fixture, handle)
+            env = dict(os.environ, PATH=os.path.join(tmp, 'bin') + os.pathsep + os.environ['PATH'], QSWEEP_FIXTURE=os.path.join(tmp, 'fixture.json'))
+            done = subprocess.run(['bash', os.path.join(gl.ROOT, '.claude', 'skills', 'sweep', 'qsweep'), 'prs'], capture_output=True, text=True, env=env, check=True)
+        return done.stdout.strip().split('\n')
+
+    @staticmethod
+    def pr(fixture, repository, number, state, runs, review=None, statuses=()):
+        sha = f'{number:040x}'
+        base = f'repos/bats-lang/{repository}'
+        fixture.setdefault(f'{base}/pulls', []).append({'number': number})
+        fixture[f'{base}/pulls/{number}'] = {'mergeable_state': state, 'head': {'sha': sha, 'ref': f'claude/{number}'}, 'title': f'PR {number}', 'auto_merge': None}
+        fixture[f'{base}/commits/{sha}/check-runs'] = {'check_runs': [{'name': name, 'status': status, 'conclusion': conclusion} for name, status, conclusion in runs]}
+        fixture[f'{base}/commits/{sha}/status'] = {'statuses': [{'context': context, 'state': 'failure', 'description': 'red'} for context in statuses]}
+        fixture[f'{base}/issues/{number}/comments'] = [] if review is None else [{'author_association': 'OWNER', 'body': review.replace('SHA', sha)}]
+
+    GREEN = (('build', 'completed', 'success'), ('check', 'completed', 'success'))
+
+    def fixture(self):
+        f = {}
+        # arith: a head whose checks are only partly created (no aggregate `check` yet), and one whose `check` waits
+        self.pr(f, 'arith', 1, 'blocked', (('build', 'completed', 'success'),))
+        self.pr(f, 'arith', 2, 'blocked', (('build', 'completed', 'success'), ('check', 'waiting', None)))
+        # array: green with no review, green with an ungated approval of its head, green with an ungated approval of an older head
+        self.pr(f, 'array', 3, 'blocked', self.GREEN)
+        self.pr(f, 'array', 4, 'clean', self.GREEN, f'Independent review (a separate reviewer agent, not the author) of head SHA: approved\n\nDone.')
+        self.pr(f, 'array', 5, 'blocked', self.GREEN, f'Independent review (a separate reviewer agent, not the author) of head {OTHER}: approved\n\nDone.')
+        # a requested check, a skipped job under a green aggregate, a queued one
+        self.pr(f, 'sha256', 6, 'blocked', (('build', 'requested', None), ('check', 'completed', 'success')))
+        self.pr(f, 'sha256', 7, 'blocked', (('smoke', 'completed', 'skipped'), ('check', 'completed', 'success')))
+        self.pr(f, 'sha256', 8, 'unstable', (('build', 'completed', 'failure'), ('check', 'completed', 'failure')))
+        # zip: its pull request list cannot be read
+        f['repos/bats-lang/zip/pulls'] = 'FAIL'
+        # dom: a conflict; gestures: a pull request whose own calls fail
+        self.pr(f, 'dom', 9, 'dirty', self.GREEN)
+        f['repos/bats-lang/gestures/pulls'] = [{'number': 10}]
+        f['repos/bats-lang/gestures/pulls/10'] = 'FAIL'
+        # bridge (gated): approved for its head, clean; and a review whose verdict is changes needed
+        self.pr(f, 'bridge', 11, 'clean', self.GREEN, '## Adversarial review\n\nReviewed: SHA\n\nVerdict: approved\n')
+        self.pr(f, 'bridge', 12, 'blocked', self.GREEN, '## Adversarial review\n\nReviewed: SHA\n\nVerdict: changes needed\n')
+        return f
+
+    def line_of(self, lines, prefix):
+        found = [line for line in lines if line.startswith(prefix)]
+        self.assertEqual(len(found), 1, (prefix, lines))
+        return found[0]
+
+    def test_a_library_head_is_judged_by_the_rule_of_a_quire_head(self):
+        lines = self.run_qsweep(self.fixture())
+        self.assertIn('WAIT-FOR-CI', self.line_of(lines, 'arith #1 '))    # a partly created check set
+        self.assertIn('WAIT-FOR-CI', self.line_of(lines, 'arith #2 '))    # check is waiting
+        self.assertIn('WAIT-FOR-CI', self.line_of(lines, 'sha256 #6 '))   # a check that is requested
+        self.assertIn('READY-FOR-REVIEW', self.line_of(lines, 'array #3 '))
+        self.assertIn('REVIEWED-approved READY-TO-MERGE', self.line_of(lines, 'array #4 '))   # an ungated approval of this head
+        line = self.line_of(lines, 'array #5 ')   # an ungated approval of an older head is no approval of this one
+        self.assertIn('review=approved-older-head', line)
+        self.assertIn('READY-FOR-REVIEW', line)
+        self.assertIn('skipped=1', self.line_of(lines, 'sha256 #7 '))
+        self.assertIn('READY-FOR-REVIEW', self.line_of(lines, 'sha256 #7 '))
+        self.assertIn('FIX-NEEDED', self.line_of(lines, 'sha256 #8 '))
+        self.assertIn('FIX-NEEDED', self.line_of(lines, 'dom #9 '))
+        self.assertIn('REVIEWED-approved READY-TO-MERGE', self.line_of(lines, 'bridge #11 '))
+        self.assertIn('FIX-NEEDED', self.line_of(lines, 'bridge #12 '))
+
+    def test_the_next_line_lists_only_what_is_ready_and_in_the_one_order(self):
+        lines = self.run_qsweep(self.fixture())
+        self.assertEqual(lines[-1], 'NEXT FOR A FREE SLOT: a fix (an author; any author) for sha256#8 dom#9 bridge#12')
+        without_fixes = self.fixture()
+        for number, repository in ((8, 'sha256'), (9, 'dom'), (12, 'bridge')):
+            without_fixes[f'repos/bats-lang/{repository}/pulls'] = [p for p in without_fixes[f'repos/bats-lang/{repository}/pulls'] if p['number'] != number]
+        lines = self.run_qsweep(without_fixes)
+        self.assertEqual(lines[-1], 'NEXT FOR A FREE SLOT: a review (not by the author) of array#3 array#5 sha256#7')
+
+    def test_a_failing_call_prints_its_own_line_and_says_the_next_line_is_incomplete(self):
+        lines = self.run_qsweep(self.fixture())
+        self.assertIn('fixture failure', self.line_of(lines, 'zip ERROR reading the open pull requests'))
+        self.assertIn('fixture failure', self.line_of(lines, 'gestures #10 ERROR reading the pull request'))
+        self.assertEqual(self.line_of(lines, 'UNREAD'), 'UNREAD (the NEXT line is incomplete; look at these by hand): zip gestures#10')
+
+
 class SweepFiles(unittest.TestCase):
     def test_no_sweep_file_calls_pitboss_a_bats_program(self):
         for parts in (('.claude', 'skills', 'sweep', 'qsweep'), ('.claude', 'skills', 'sweep', 'slots'), ('.claude', 'skills', 'sweep', 'SKILL.md')):
@@ -366,10 +476,36 @@ class SweepFiles(unittest.TestCase):
     def test_qsweep_states_what_it_does_to_the_queue(self):
         self.assertNotIn('Read-only', read_root('.claude', 'skills', 'sweep', 'qsweep'))
 
-    def test_the_stop_hook_proposal_names_its_avenue_and_its_tickets(self):
-        proposal = read_root('.claude', 'skills', 'sweep', 'stop-hook-git-check.proposed.sh')
-        for needed in ('avenue', 'quire#646', 'quire#754', 'bats-lang/bats#436'):
-            self.assertIn(needed, proposal)
+    def test_nothing_depends_on_a_hook_or_a_file_under_the_users_claude_directory(self):
+        self.assertFalse(os.path.exists(os.path.join(gl.ROOT, '.claude', 'skills', 'sweep', 'stop-hook-git-check.proposed.sh')))
+        for parts in (('.claude', 'agents', 'worker.md'), ('.claude', 'orchestration.md'), ('.claude', 'skills', 'sweep', 'SKILL.md'), ('.claude', 'skills', 'sweep', 'qsweep')):
+            text = read_root(*parts)
+            for banned in ('agent-holder', 'quire#754', 'bats#436', 'proposed.sh', 'owner installs', 'LOADED CHECKOUT OFF MAIN'):
+                self.assertNotIn(banned, text, '/'.join(parts))
+        worker = read_root('.claude', 'agents', 'worker.md')
+        self.assertIn('Never in the orchestrator\'s checkout', worker)
+        self.assertIn('git -C /home/user/<repo> worktree add', worker)
+        self.assertIn('STRAY-WORK', read_root('.claude', 'skills', 'sweep', 'qsweep'))
+
+    def test_qsweep_prints_stray_work_for_an_orchestrator_checkout_off_main_or_dirty(self):
+        import subprocess
+        import tempfile
+        text = read_root('.claude', 'skills', 'sweep', 'qsweep')
+        block = re.search(r'^for _r in .*?^done$', text, re.M | re.S).group(0)
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = os.path.join(tmp, 'quire')
+            git = ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-C', repo]
+            subprocess.run(['git', 'init', '-q', '-b', 'main', repo], check=True)
+            subprocess.run(git + ['commit', '-q', '--allow-empty', '-m', 'x'], check=True)
+            script = block.replace('/home/user/$_r', tmp + '/$_r')
+            def run():
+                return subprocess.run(['bash', '-c', script], capture_output=True, text=True, check=True).stdout
+            self.assertEqual(run(), '')
+            open(os.path.join(repo, 'stray'), 'w').close()
+            self.assertIn('STRAY-WORK ' + repo, run())
+            os.remove(os.path.join(repo, 'stray'))
+            subprocess.run(git + ['checkout', '-q', '-b', 'feature'], check=True)
+            self.assertIn('STRAY-WORK ' + repo, run())
 
 
 if __name__ == '__main__':

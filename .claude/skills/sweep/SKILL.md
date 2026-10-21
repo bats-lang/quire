@@ -16,7 +16,7 @@ Install on a machine (the running copy is a copy of these files): `install -m 75
   * `REVIEWED-approved`.
   Then `NEXT FOR A FREE SLOT`: a fix for the PRs above, else a review, else the oldest ticket of the highest priority (`.claude/orchestration.md`, "Agents and slots").
 * The library PRs (arith, array, sha256, zip, dom, bridge, gestures) with their checks, the review and the gate's own status with its reason.
-* `LOADED CHECKOUT OFF MAIN`: a loaded checkout (`/home/user/<repo>`) that is off main or dirty; `STRAGGLER`: work that exists only on this machine; `REUSABLE WORKTREE`: a finished worktree for the next ticket's branch.
+* `STRAY-WORK`: the orchestrator's checkout (`/home/user/<repo>`) that is off main or not clean; `STRAGGLER`: work that exists only on this machine; `REUSABLE WORKTREE`: a finished worktree for the next ticket's branch.
 * `qsweep pressure`: prints `runner pressure: none` and exits 0, or a hold line and exits 1.
 * `qsweep push <git push arguments>`: the pressure check and the push in one command.
 * `qsweep clean`: prune worktrees; remove a finished one only at 90 percent disk (the orchestrator's own working rule, not the owner's).
