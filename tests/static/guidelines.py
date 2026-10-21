@@ -246,7 +246,9 @@ def github(event_name, event, repository, api, phrases, run_url=''):
     """Lint what the event is about and report it; the exit code is 1 when something is wrong."""
     if event_name == 'issues':
         issue = event['issue']
-        findings = lint_text(issue.get('body') or '', f'ticket #{issue["number"]}', phrases)
+        # a table row quotes the mistakes it catalogues (quire#751 itself), so rows and code spans are not linted
+        body = '\n'.join(line for line in (issue.get('body') or '').split('\n') if not line.lstrip().startswith('|'))
+        findings = lint_text(strip_code(body), f'ticket #{issue["number"]}', phrases)
         comments = all_pages(api, f'repos/{repository}/issues/{issue["number"]}/comments')
         mine = [comment for comment in comments if (comment.get('body') or '').startswith(MARKER)]
         if findings:

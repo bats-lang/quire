@@ -226,6 +226,8 @@ class GitHub(unittest.TestCase):
         api = FakeApi([marked])
         self.assertTrue(self.run_event('issues', {'issue': issue}, api))
         self.assertIn(('PATCH', 'repos/o/r/issues/comments/77'), [call[:2] for call in api.calls])
+        quoted = dict(issue, body='| 13 | A step waits: `after a day of sessions`. | x |\nafter a day: in a row\n'.replace('after a day: in a row', '| after a day | y |'))
+        self.assertEqual(self.run_event('issues', {'issue': quoted}, FakeApi()), [])
         api = FakeApi([marked])
         self.assertEqual(self.run_event('issues', {'issue': dict(issue, body='Step 3: look now.')}, api), [])
         self.assertIn(('DELETE', 'repos/o/r/issues/comments/77'), [call[:2] for call in api.calls])
