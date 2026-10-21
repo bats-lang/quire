@@ -40,6 +40,9 @@ guide	4	deletes its worker clone	the orchestrator deletes its worker clone	A che
 guide	5	timeout 598	timeout 598 bats check	The tool's own cap ends a foreground command; a wrapper only kills a cold check at the cap.
 guide	14	ledger says all full	the ledger says all full	Only ListAgents says what runs.
 text	2	fixes\s+#?\d+\s+to\s+refs	change Fixes #368 to Refs #368	Nobody offers a way to ship less than the ticket says, with or without a tail: the verdict is changes needed.
+text	2	fixes\s+#?([nx]|<[^>\s]*>)\s+to\s+refs	change Fixes #N to Refs #N	Nobody offers a way to ship less than the ticket says, with or without a tail: the verdict is changes needed.
 text	2	\b(as|use|open(ed)? it as) refs\b	open it as Refs	A PR that does not meet its Done-when as written is not opened as Refs: the verdict is changes needed.
+text	2	\bas refs\b	it goes in as Refs	A PR that does not meet its Done-when as written is not opened as Refs: the verdict is changes needed.
+text	2	\buse refs\b	use Refs	A PR that does not meet its Done-when as written is not opened as Refs: the verdict is changes needed.
 guide	16	unless the brief says otherwise	new tooling is bats unless the brief says otherwise	A brief does not override CLAUDE.md: non-bats code names the avenue it exhausted.
 guide	14	take a p1 or p2	or take a p1 or p2	CLAUDE.md: a p1 is not started while a p0 is open.

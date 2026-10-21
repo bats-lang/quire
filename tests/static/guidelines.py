@@ -16,10 +16,13 @@ them, and nothing refused the text that made them. This checks, without a compil
   and ends with the generated line;
 * `--review FILE`: the above for a review comment: its first line, the head SHA it
   reviewed, and, in the gate's form of bridge, pwa and capacitor-plugins, exactly one
-  line with "Reviewed:" and exactly one with "Verdict:" (bridge#200);
+  line with "Reviewed:" and exactly one with "Verdict:" (bridge#200). A review quotes a
+  phrase it objects to on a line of its own, `Quoted objection: `<phrase>``; a code span
+  anywhere else in a review is linted as text (an exit clause in backticks is refused);
 * `--github`: what the text-lint workflow runs, from the event's payload: the PR's body
   against its head, and the newest review comment, set as the commit status `text-lint` on the
-  head (a ticket's body: a comment on it); a bot's PR and a relock branch are exempt;
+  head (a ticket's body, its table rows included, with its code spans as quotations: a
+  comment on the ticket, since a ticket has no head); a bot's PR and a relock branch are exempt;
 * `--brief FILE --ticket FILE`: the text rules, and that every line of the ticket's
   Done-when is in the brief word for word (a brief never restates it).
 
@@ -56,6 +59,8 @@ GENERATED = (
 RUNNING_TOOLS = {'bash', 'edit', 'write', 'notebookedit', 'monitor', 'taskstop', 'skill', 'agent'}
 SHA = re.compile(r'\b[0-9a-f]{40}\b')
 FIXES = re.compile(r'\bFixes\s+((?:[\w.-]+/[\w.-]+)?#\d+)', re.IGNORECASE)
+# a reviewer's quotation of a banned phrase: the whole line, the phrase in one code span (reviewer.md, "The comment")
+QUOTED_OBJECTION = re.compile(r'Quoted objection: (`[^`\n]+`)')
 
 
 def load_phrases(path=PHRASES):
@@ -192,9 +197,29 @@ def lint_pr_body(text, head, phrases):
     return findings
 
 
+def quoted_phrase_matches(quoted, phrases):
+    return any(regex.search(quoted) for _scope, _row, regex, _reason, _example in phrases)
+
+
+def review_text(text, phrases):
+    """The review's text for the lint (reviewer.md, "The comment"). A phrase the reviewer objects to is
+    quoted alone on its line, `Quoted objection: `<a phrase of the list>``, and that line is the
+    quotation: it is blanked. Any other code span is the reviewer's own text and is linted, so an exit
+    clause offered in backticks is refused. A line that starts "Quoted objection:" in any other form is refused."""
+    kept, findings = [], []
+    for number, line in enumerate(text.split('\n'), 1):
+        found = QUOTED_OBJECTION.fullmatch(line.strip())
+        if found and quoted_phrase_matches(found.group(1), phrases):
+            kept.append('')
+            continue
+        if line.strip().startswith('Quoted objection:'):
+            findings.append(f'review:{number}: a quoted objection is one line, "Quoted objection: `<a phrase of the list>`" and nothing else on it (reviewer.md, "The comment")')
+        kept.append(line)
+    return findings + lint_text('\n'.join(kept), 'review', phrases)
+
+
 def lint_review(text, phrases, gate_form=False):
-    # a review quotes the phrase it objects to in a code span (reviewer.md), so code spans are not linted
-    findings = lint_text(strip_code(text), 'review', phrases)
+    findings = review_text(text, phrases)
     lines = [line for line in text.split('\n') if line.strip()]
     first = lines[0].strip() if lines else ''
     if gate_form or first == '## Adversarial review':
@@ -284,9 +309,9 @@ def github(event_name, event, repository, api, phrases, run_url=''):
     """Lint what the event is about and report it; the exit code is 1 when something is wrong."""
     if event_name == 'issues':
         issue = event['issue']
-        # a table row quotes the mistakes it catalogues (quire#751 itself), so rows and code spans are not linted
-        body = '\n'.join(line for line in (issue.get('body') or '').split('\n') if not line.lstrip().startswith('|'))
-        findings = lint_text(strip_code(body), f'ticket #{issue["number"]}', phrases)
+        # a ticket's table rows are read like its other lines (row 13 asks for the ticket text); a phrase quoted in a
+        # code span is a quotation of the mistake, as in a guideline file, so the code spans are not linted
+        findings = lint_text(strip_code(issue.get('body') or ''), f'ticket #{issue["number"]}', phrases)
         comments = all_pages(api, f'repos/{repository}/issues/{issue["number"]}/comments')
         mine = [comment for comment in comments if (comment.get('body') or '').startswith(MARKER)]
         if findings:

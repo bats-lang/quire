@@ -174,11 +174,33 @@ class Review(unittest.TestCase):
     def test_the_gate_form_is_demanded_when_asked(self):
         self.assertTrue(self.findings(GOOD_REVIEW, gate=True))
 
-    def test_a_review_may_quote_a_phrase_in_a_code_span(self):
-        self.assertEqual(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'The body says `it passed alone`.')), [])
+    def test_a_quoted_objection_alone_on_its_line_passes(self):
+        quoted = 'Quoted objection: `change Fixes #368 to Refs #368`'
+        self.assertEqual(self.findings(GOOD_REVIEW.replace('The Done-when is met.', quoted)), [])
+        self.assertEqual(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Quoted objection: `it passed alone`')), [])
+
+    def test_a_phrase_in_a_code_span_outside_the_form_is_read_as_the_reviewers_text(self):
+        self.assertTrue(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'The body says `it passed alone`.')))
+
+    def test_an_exit_clause_offered_in_a_code_span_is_refused(self):
+        self.assertTrue(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Use `change Fixes #368 to Refs #368` instead.')))
+        self.assertTrue(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Offer: `Refs` for `Fixes`, `use Refs`.')))
 
     def test_an_exit_clause_in_a_review_is_refused(self):
         self.assertTrue(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Use Refs instead of Fixes.')))
+
+    def test_a_quoted_objection_with_an_offer_on_its_line_is_refused(self):
+        found = self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Quoted objection: `change Fixes #368 to Refs #368` and do that.'))
+        self.assertTrue(any('Quoted objection' in line for line in found), found)
+
+    def test_a_quoted_objection_must_quote_a_phrase_of_the_list(self):
+        found = self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Quoted objection: `ls -la`'))
+        self.assertTrue(any('quoted objection is one line' in line for line in found), found)
+
+    def test_the_placeholder_and_the_as_and_use_forms_are_refused(self):
+        for text in ('change Fixes #N to Refs #N', 'change Fixes #<n> to Refs', 'open it as Refs', 'it goes in as Refs', 'use Refs'):
+            self.assertTrue(gl.lint_text(text, 'x', PHRASES), text)
+        self.assertEqual(gl.lint_text('Fixes #751 closes it, and the Refs line is for a dependency.', 'x', PHRASES), [])
 
 
 class Brief(unittest.TestCase):
@@ -267,11 +289,64 @@ class GitHub(unittest.TestCase):
         api = FakeApi([marked])
         self.assertTrue(self.run_event('issues', {'issue': issue}, api))
         self.assertIn(('PATCH', 'repos/o/r/issues/comments/77'), [call[:2] for call in api.calls])
-        quoted = dict(issue, body='| 13 | A step waits: `after a day of sessions`. | x |\nafter a day: in a row\n'.replace('after a day: in a row', '| after a day | y |'))
+        quoted = dict(issue, body='| 13 | A step waits: `after a day of sessions`. | x |\n')
         self.assertEqual(self.run_event('issues', {'issue': quoted}, FakeApi()), [])
+        plain = dict(issue, body='| 13 | A step waits after a day of sessions. | x |\n')
+        self.assertTrue(self.run_event('issues', {'issue': plain}, FakeApi()))
         api = FakeApi([marked])
         self.assertEqual(self.run_event('issues', {'issue': dict(issue, body='Step 3: look now.')}, api), [])
         self.assertIn(('DELETE', 'repos/o/r/issues/comments/77'), [call[:2] for call in api.calls])
+
+
+SLOT_STEPS = [
+    '(1) a fix, by an author (any author, not necessarily the one who wrote the PR), for a review that asked for changes, a red CI, or a merge conflict',
+    '(2) a review of a PR green on its exact head',
+    '(3) the oldest ticket of the highest priority (CLAUDE.md, Priorities)',
+    'Never a new ticket while a changes-needed review, a red CI or a merge conflict waits for its fix, or a green PR waits for its reviewer',
+]
+
+
+def read_root(*parts):
+    with open(os.path.join(gl.ROOT, *parts), encoding='utf-8') as handle:
+        return handle.read()
+
+
+class FreeSlotOrder(unittest.TestCase):
+    """quire#751, row 14 and finding 3: the order a free slot is filled in is the same words in every file that states it."""
+
+    def test_orchestration_qsweep_and_slots_state_the_same_order(self):
+        for name, text, steps in (('orchestration.md', read_root('.claude', 'orchestration.md'), SLOT_STEPS),
+                                  ('qsweep', read_root('.claude', 'skills', 'sweep', 'qsweep'), SLOT_STEPS),
+                                  ('slots', read_root('.claude', 'skills', 'sweep', 'slots'), SLOT_STEPS[:3])):
+            for step in steps:
+                self.assertIn(step, text, f'{name} does not state: {step}')
+
+    def test_the_sweep_reminder_is_the_order_and_nothing_else(self):
+        reminder = [line for line in read_root('.claude', 'skills', 'sweep', 'qsweep').split('\n') if 'order for a free slot' in line]
+        self.assertEqual(len(reminder), 1, reminder)
+        for step in SLOT_STEPS[:3]:
+            self.assertIn(step, reminder[0])
+
+    def test_the_hourly_trigger_reads_the_section_that_states_the_order(self):
+        text = read_root('.claude', 'orchestration.md')
+        section = text.split('## Agents and slots', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('ListAgents', section)
+        for step in SLOT_STEPS:
+            self.assertIn(step, section)
+
+
+class SweepFiles(unittest.TestCase):
+    def test_no_sweep_file_calls_pitboss_a_bats_program(self):
+        for parts in (('.claude', 'skills', 'sweep', 'qsweep'), ('.claude', 'skills', 'sweep', 'slots'), ('.claude', 'skills', 'sweep', 'SKILL.md')):
+            self.assertNotRegex(read_root(*parts), r'(?i)pitboss[^\n]*bats program', '/'.join(parts))
+
+    def test_qsweep_states_what_it_does_to_the_queue(self):
+        self.assertNotIn('Read-only', read_root('.claude', 'skills', 'sweep', 'qsweep'))
+
+    def test_the_stop_hook_proposal_names_its_avenue_and_its_tickets(self):
+        proposal = read_root('.claude', 'skills', 'sweep', 'stop-hook-git-check.proposed.sh')
+        for needed in ('avenue', 'quire#646', 'quire#754', 'bats-lang/bats#436'):
+            self.assertIn(needed, proposal)
 
 
 if __name__ == '__main__':

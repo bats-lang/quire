@@ -3,7 +3,7 @@ name: sweep
 description: One look at every open PR of quire and the library repositories, the runner pressure, stray checkouts and the slot ledger. Use at a check-in, after a push, before filling a free agent slot, or when a notification says a check failed.
 ---
 
-`qsweep` and `slots` are STOPGAPS kept here (quire#751) until pitboss replaces them (quire#573, a bats program); bats#431 moves the text lint they sit beside. They are non-bats code: bats has no program today that calls the GitHub REST API and reads worktrees, and the avenue exhausted is named in each file's header.
+`qsweep` and `slots` are STOPGAPS kept here (quire#751). The move into bats is bats-lang/bats#435; bats#431 moves the text lint they sit beside. quire#573 (p3) keeps them in the repository as a skill; its comments name pitboss, a Python package in dev-skill-up/pitboss, which is not bats and is not this move. They are non-bats code: bats has no program today that calls the GitHub REST API and reads worktrees, and the avenue exhausted is named in each file's header.
 
 Install on a machine (the running copy is a copy of these files): `install -m 755 .claude/skills/sweep/qsweep .claude/skills/sweep/slots /usr/local/bin/`.
 

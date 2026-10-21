@@ -1,4 +1,8 @@
 #!/bin/bash
+# PROPOSAL (quire#751, rows 5 and 12): the owner's stop hook, ~/.claude/stop-hook-git-check.sh, as it should be. Install: quire#754 (human only).
+# Non-bats code of ours (quire#646). The avenue exhausted: a Claude Code hook is a command line the harness runs, with the stop
+# event's JSON on stdin, and the owner's configuration under ~/.claude is not a bats package. A bats program can be that command line once a
+# bats binary is installed where the hook runs, and how a bats program reads the stdin JSON is open. The move is bats-lang/bats#436.
 
 # Read the JSON input from stdin
 input=$(cat)

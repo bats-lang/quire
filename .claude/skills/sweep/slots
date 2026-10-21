@@ -1,7 +1,7 @@
 #!/bin/sh
-# STOPGAP, kept here so the guidelines point at a file that exists (quire#751, #573): pitboss (quire#573) will replace qsweep and slots.
-# Non-bats code of ours (quire#646): the avenue exhausted is that bats has no program today that calls the GitHub REST API, reads
-# a worktree's git state and prints one sweep; quire#573 builds it in bats, and bats#431 moves the text lint they sit beside.
+# STOPGAP (quire#751): this script is non-bats code of ours (quire#646). The avenue exhausted is that bats has no program today that
+# calls the GitHub REST API, reads a worktree's git state and prints one sweep. The move into bats is bats-lang/bats#435 (filed for it).
+# quire#573 (p3) keeps the script in the repository as a skill; its comments name pitboss, a Python package in dev-skill-up/pitboss, as the replacement.
 # Install on a machine: install -m 755 qsweep slots /usr/local/bin/ (the copy that runs is a copy of these files).
 # Ledger of the two worker slots (one sonnet, one haiku; down from three on 2026-10-17 at the owner's word, quota), kept by hand:
 #   slots                      print the ledger and a loud line for each EMPTY slot
@@ -26,5 +26,5 @@ case "$1" in
   ""|show) ;;
   *) echo "usage: slots [show|set SLOT AGENT TASK|free SLOT|check N]" >&2; exit 2 ;;
 esac
-awk -F'\t' '{ if ($2 == "-") { print "LEDGER SHOWS EMPTY: " $1 " -- after ListAgents confirms it, fill it NOW in the owner'"'"'s order (orchestration.md): a fix for changes-needed or red CI, a review of a green PR, the oldest ticket of the highest priority; never hold it"; e++ } else print "ledger: slot " $1 " was set to: " $3 " (" $2 ") -- not evidence that it runs" } END { print "slots: this ledger is a note kept by hand, not the state of the agents (limit: two agents at once, reviewers included); only ListAgents says what runs" }' "$f"
+awk -F'\t' '{ if ($2 == "-") { print "LEDGER SHOWS EMPTY: " $1 " -- after ListAgents confirms it, fill it NOW, in the order of orchestration.md (Agents and slots): (1) a fix, by an author (any author, not necessarily the one who wrote the PR), for a review that asked for changes, a red CI, or a merge conflict; (2) a review of a PR green on its exact head; (3) the oldest ticket of the highest priority (CLAUDE.md, Priorities); never hold it"; e++ } else print "ledger: slot " $1 " was set to: " $3 " (" $2 ") -- not evidence that it runs" } END { print "slots: this ledger is a note kept by hand, not the state of the agents (limit: two agents at once, reviewers included); only ListAgents says what runs" }' "$f"
 echo "CHECK BEFORE YOU ANSWER: this ledger is kept by hand and goes stale. Run ListAgents now and correlate each running agent with a slot above (a dead agent still shows here; a live one may be missing). Fix the ledger with slots free/set, then act or answer." >&2
