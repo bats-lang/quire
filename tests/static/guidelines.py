@@ -193,7 +193,8 @@ def lint_pr_body(text, head, phrases):
 
 
 def lint_review(text, phrases, gate_form=False):
-    findings = lint_text(text, 'review', phrases)
+    # a review quotes the phrase it objects to in a code span (reviewer.md), so code spans are not linted
+    findings = lint_text(strip_code(text), 'review', phrases)
     lines = [line for line in text.split('\n') if line.strip()]
     first = lines[0].strip() if lines else ''
     if gate_form or first == '## Adversarial review':

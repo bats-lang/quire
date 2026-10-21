@@ -174,6 +174,9 @@ class Review(unittest.TestCase):
     def test_the_gate_form_is_demanded_when_asked(self):
         self.assertTrue(self.findings(GOOD_REVIEW, gate=True))
 
+    def test_a_review_may_quote_a_phrase_in_a_code_span(self):
+        self.assertEqual(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'The body says `it passed alone`.')), [])
+
     def test_an_exit_clause_in_a_review_is_refused(self):
         self.assertTrue(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Use Refs instead of Fixes.')))
 
