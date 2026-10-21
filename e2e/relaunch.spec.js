@@ -69,7 +69,6 @@ for (const how of ['quit', 'killed']) {
   });
 }
 
-// Area: "two screens that differ by a pixel" (e2e.md). Failure: two isolated pixels differ before and after the relaunch. Analysis: quire#546.
 test('scrolled, in the middle of a chapter, the book opens where it was', async ({ context, page }) => {
   await launch(context, page);
   await importFiles(page, [epubFile(book)], 1);

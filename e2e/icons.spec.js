@@ -90,7 +90,7 @@ async function iconsDrawn(page, screen) {
   return found;
 }
 
-// Area: "a page that stops answering" (e2e.md). Failure: the renderer answers no DevTools command at 0 CPU, 90 s timeout. Analysis: quire#575, quire#591.
+// Context for a failure seen in this test: quire#575 and quire#591.
 test('every icon of the library, its search, its menu, Settings and a catalogue is drawn by the icon face', async ({ page }) => {
   const host = 'https://catalogue.test';
   await page.route(url => url.hostname !== 'localhost', route => route.abort());
