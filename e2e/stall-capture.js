@@ -40,7 +40,9 @@
  *     user-space stacks from the fallback tools when a renderer is frozen;
  *   - the kernel's record (`kernel`): each renderer's cgroup and the OOM and
  *     hung-task lines of dmesg, read before the native stacks;
- *   - what the page did before it stopped (`history`, e2e/page-history.js).
+ *   - what the page did before it stopped (`history`, e2e/page-history.js);
+ *   - when the page is frozen, first of all, the flight recorder's two rings, written out
+ *     (`flight`, e2e/flight-recorder.js): the kernel's record of the run's processes and Chrome's trace.
  */
 
 import { execFile } from 'node:child_process';
@@ -48,6 +50,8 @@ import { accessSync, closeSync, constants, existsSync, openSync, readdirSync, re
 import { delimiter, isAbsolute, join } from 'node:path';
 import { bindAttempts } from './attempt-log.js';
 import { keepHistory } from './page-history.js';
+import { keepBoth, startBrowserTrace, traceReady, wanted, ROOT_MOST_MS, TRACE_END_MS } from './flight-recorder.js';
+import { diskEvidence, futexEvidence, futexWordMemory, missingEvidence, pageProbes, sanitizerReports, symbolEvidence } from './evidence.js';
 import { runnerLoad, sampleRunner } from './runner-load.js';
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
@@ -129,7 +133,8 @@ export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS + HELPER_
  * notes, sections and version, the system libraries' notes, dpkg), `sudo tail` for the kernel stacks, gdb (backtraces and core), the two fallback stack tools when gdb gave none, the two fallback tools again for the browser and GPU processes (after the renderers'), and gzip. A capture of a frozen page takes at most
  * CAPTURE_MOST_MS and this.
  */
-export const NATIVE_MOST_MS = COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 8 * HELPER_MS + GDB_MS + GZIP_MS + 2 * FALLBACK_MS
+export const FLIGHT_MOST_MS = ROOT_MOST_MS + 2 * TRACE_END_MS; // the kernel's ring written, Chrome's trace ended and its completion awaited
+export const NATIVE_MOST_MS = FLIGHT_MOST_MS + COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 8 * HELPER_MS + GDB_MS + GZIP_MS + 2 * FALLBACK_MS
   + 2 * FALLBACK_MS; // the browser's and the GPU's fallback tools
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -887,7 +892,7 @@ async function keepCore(corePath, scope, saved, callsFailed) {
  * The native stacks of these renderers (a page judged stalled: see the top
  * of this file). Nothing here throws, and every command is limited.
  */
-export async function nativeStacks(renderers, scope, corePathFor, others = []) {
+export async function nativeStacks(renderers, scope, corePathFor, others = [], before = new Map()) {
   const result = { ptraceScope: '(absent)' };
   try { result.ptraceScope = readFileSync('/proc/sys/kernel/yama/ptrace_scope', 'utf8').trim(); } catch (error) { /* no Yama: ptrace is the kernel's usual rule */ }
   result.root = isRoot;
@@ -898,7 +903,10 @@ export async function nativeStacks(renderers, scope, corePathFor, others = []) {
   result.renderers = await Promise.all(taken.map(async (renderer, index) => {
     // the kernel's view and the addresses first: gdb stops the process
     const { result: entry, maps } = await identity(renderer.pid, scope);
-    entry.kernel = await kernelTasks(renderer.pid, scope);
+    // the capture read it when the freeze was seen, before the rings (a renderer can be gone by now); read again only when that read failed
+    const early = before.get(renderer.pid);
+    entry.kernel = early && early.kernel && early.kernel.tasks ? early.kernel : await kernelTasks(renderer.pid, scope);
+    if (early && early.futexMemory) entry.futexMemory = early.futexMemory;
     // A process in a group stop (SIGSTOP, state T) cannot run the calls that leave the empty
     // reservations out of the core, and a call abandoned there leaves it broken: no core of it
     const main = entry.kernel.tasks && entry.kernel.tasks.find((task) => task.tid === renderer.pid);
@@ -934,12 +942,12 @@ export async function nativeStacks(renderers, scope, corePathFor, others = []) {
 }
 
 /** Where a page's main thread is: see the top of this file. */
-export async function capture(page, armed, reason, browser, save = () => {}, scope = nativeScope(), corePathFor = null) {
+export async function capture(page, armed, reason, browser, save = () => {}, scope = nativeScope(), corePathFor = null, flight = null) {
   armed.capturing = true;
-  try { return await captureArmed(page, armed, reason, browser, save, scope, corePathFor); } finally { armed.capturing = false; }
+  try { return await captureArmed(page, armed, reason, browser, save, scope, corePathFor, flight); } finally { armed.capturing = false; }
 }
 
-async function captureArmed(page, armed, reason, browser, save, scope, corePathFor) {
+async function captureArmed(page, armed, reason, browser, save, scope, corePathFor, flight) {
   const result = { reason, at: new Date().toISOString(), url: page.url(), armed: !armed.error, armError: armed.error };
   result.history = armed.history ? armed.history.snapshot() : 'not available: the page was not watched';
   const session = armed.session;
@@ -964,6 +972,7 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
     answers = evaluated.answered;
   }
   let processes = null;
+  const before = new Map(); // a frozen renderer's pid -> { kernel, futexMemory }, read before the rings and the native step
   const kernelOf = (list) => kernelEvidence(Array.isArray(list) ? list.filter((process) => process.type === 'renderer').map((process) => process.pid) : [], scope).catch((error) => ({ error: String(error && error.stack || error) }));
   if (!answers) {
     // No answer, and only then: the renderers that also used (almost) no CPU
@@ -986,10 +995,24 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
       if (busy.length) {
         result.presumedBusy = `renderer ${busy.map((process) => `${process.pid} used ${process.cpuSeconds} s of CPU`).join(', ')} over ${CPU_WINDOW_MS / 1000} s, so the page is presumed busy, not frozen, and nothing is attached`;
       } else if (renderers.length) {
+        // everything /proc holds of the frozen processes is read now, before the rings and the native step, which take tens of seconds
+        // and outlast the test: a context that closes under them takes the renderers, and a read made after finds /proc/<pid> gone
+        // (quire#575: the futex word's memory, ENOENT on a runner). Reading changes nothing in a renderer. Keyword: capture before close.
+        for (const process of processes) {
+          process.threads = threadStates(process.pid);
+          process.mainThread = mainThreadWait(process.pid);
+          process.channels = openChannels(process.pid);
+        }
+        for (const renderer of renderers) {
+          const kernel = await kernelTasks(renderer.pid, scope);
+          before.set(renderer.pid, { kernel, futexMemory: await futexWordMemory(kernel, renderer.pid) });
+        }
+        // the rings (flight recorder): what led up to the freeze, before anything touches the renderer
+        if (flight) result.flight = await flight().catch((error) => ({ error: String(error && error.stack || error) }));
         // before the stacks, which a teardown can cut off
         result.kernel = await kernelOf(processes);
         save(result);
-        result.native = await nativeStacks(renderers, scope, corePathFor, processes.filter((process) => process.type !== 'renderer' && process.cpuSeconds !== null)).catch((error) => ({ error: String(error && error.stack || error) }));
+        result.native = await nativeStacks(renderers, scope, corePathFor, processes.filter((process) => process.type !== 'renderer' && process.cpuSeconds !== null), before).catch((error) => ({ error: String(error && error.stack || error) }));
         save(result);
       }
     }
@@ -1024,9 +1047,10 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
   processes = processes || await cpu;
   if (Array.isArray(processes)) {
     for (const process of processes) {
-      process.threads = threadStates(process.pid);
-      process.mainThread = mainThreadWait(process.pid);
-      process.channels = openChannels(process.pid);
+      // a frozen process's were read before the rings (above)
+      if (!process.threads) process.threads = threadStates(process.pid);
+      if (!process.mainThread) process.mainThread = mainThreadWait(process.pid);
+      if (!process.channels) process.channels = openChannels(process.pid);
     }
     result.rendererCpu = processes.filter((process) => process.type === 'renderer');
     result.otherProcesses = processes.filter((process) => process.type !== 'renderer');
@@ -1035,6 +1059,14 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
   }
   if (!result.kernel) result.kernel = await kernelOf(processes);
   result.machine = machineState();
+  // what identifies each class (evidence.js): the futex word and its candidates for a signaller, the symbols,
+  // the disk, and for a page that answers its service worker and whether it produces frames
+  try {
+    result.futex = await futexEvidence(result.native, result.flight && result.flight.kernel && result.flight.kernel.file);
+    result.symbols = symbolEvidence(result.native);
+    result.disk = diskEvidence();
+    if (answers) Object.assign(result, await pageProbes(page));
+  } catch (error) { result.evidenceError = String(error && error.stack || error); }
   // the runner's load over the last minute, and the page's attempts and long
   // tasks (#600): a slow page is told from a slow runner by these
   try { result.runnerLoad = runnerLoad(LOAD_WINDOW_MS); } catch (error) { result.runnerLoad = `not available: ${String(error && error.message || error)}`; }
@@ -1061,6 +1093,7 @@ function verdict(result) {
 
 export function summary(result) {
   const lines = [`[stall-capture] ${result.reason}: ${result.url}`, `  ${result.verdict}`];
+  if (result.test) lines.push(`  test: ${result.test} (${result.project}); the page was ${result.pageAgeMs} ms old at the capture, armed after ${result.armedAfterMs} ms`);
   if (result.answers) lines.push(`  answers: interrupt ${result.answers.interrupt.answered}, task ${result.answers.task.answered}`);
   if (result.paused) for (const frame of result.paused.frames.slice(0, 12)) {
     lines.push(`    at ${frame.functionName} (${frame.url}:${frame.line}:${frame.column})`);
@@ -1074,6 +1107,24 @@ export function summary(result) {
       if (process.threads) lines.push(`  renderer ${process.pid} threads: ${process.threads.join('; ')}`);
       if (process.mainThread) lines.push(`  renderer ${process.pid} main thread: syscall ${process.mainThread.syscall}; kernel stack ${process.mainThread.kernelStack.replace(/\s+/g, ' ').slice(0, 300)}`);
       if (process.channels) lines.push(`  renderer ${process.pid} open: ${process.channels.join(', ')}`);
+    }
+  }
+  for (const each of result.futex || []) {
+    if (each.notInFutex) { lines.push(`  futex: renderer ${each.pid} ${each.notInFutex}`); continue; }
+    const ring = each.ring && each.ring.waiter ? each.ring : null;
+    lines.push(`  futex: renderer ${each.pid} main thread waits on 0x${each.address} (op ${each.op}, ${each.untimed ? 'NO timeout' : 'with a timeout'}); word and neighbours ${each.memory && (each.memory.bytes || each.memory.error)}`);
+    if (ring) lines.push(`    ring: ${ring.onAddress.events} events on the word, wakers ${ring.onAddress.wakers.map((w) => `${w.task}-${w.tid}`).join(', ') || 'none'}; waiter slept ${ring.waiter.sleepingMs} ms, woken last ${ring.waiter.wokenLast ? `by ${ring.waiter.wokenLast.by} ${ring.waiter.silentMs} ms before the end` : 'never in the ring'}`);
+    lines.push(`    candidates: ${(each.candidates || []).map((c) => `${c.comm}/${c.tid} ${c.state} ${c.wchan}`).join('; ')}`);
+  }
+  for (const each of result.symbols || []) lines.push(`  symbols: renderer ${each.pid}: ${each.state}; ${each.named} of ${each.frames} main-thread frames named`);
+  if (result.serviceWorker) lines.push(`  service worker: ${JSON.stringify(result.serviceWorker).slice(0, 300)}; frames: ${JSON.stringify(result.frames)}`);
+  if (result.disk) lines.push(`  disk: ${result.disk.map((d) => `${d.path} ${d.error || `${Math.round(d.freeBytes / 1048576)} MiB free, ${d.freeInodes} inodes free`}`).join('; ')}`);
+  if (result.flight) {
+    const { kernel, browserTrace, error } = result.flight;
+    if (error) lines.push(`  flight recorder: ${error}`);
+    for (const [name, each] of [['kernel ring', kernel], ['browser trace', browserTrace]]) {
+      if (!each) continue;
+      lines.push(`  flight ${name}: ${each.file ? `${each.file} (${each.bytes} bytes${each.lines ? `, ${each.lines} of ${each.seen} events` : ''}${each.dataLoss ? ', the ring wrapped' : ''})` : (each.unavailable || each.error)}`);
     }
   }
   if (result.native) {
@@ -1144,6 +1195,8 @@ export function summary(result) {
 export function stallWatch(browser, testInfo) {
   const armed = new Map();     // page -> its armed session (a promise)
   const ready = new Map();     // page -> its armed session, once armed
+  const seen = new Map();      // page -> when the watch first saw it, and how long arming took
+  const state = { frozen: false, captureFile: null, flight: null, browserGone: false }; // what the failure check reads (missingEvidence)
   const watchedContexts = new Set();
   const running = new Set();   // captures in progress
   const scope = nativeScope(); // what they run outside node
@@ -1158,7 +1211,9 @@ export function stallWatch(browser, testInfo) {
     if (stopped || armed.has(page) || page.isClosed()) return;
     const pending = arm(page);
     armed.set(page, pending);
-    pending.then((done) => ready.set(page, done));
+    seen.set(page, { at: Date.now() });
+    page.on('crash', () => crashed(`page crashed (its renderer died)`));
+    pending.then((done) => { ready.set(page, done); seen.get(page).armedAfterMs = Date.now() - seen.get(page).at; });
     probe(page);
   };
   const watchContext = (context) => {
@@ -1177,8 +1232,15 @@ export function stallWatch(browser, testInfo) {
     const path = testInfo.outputPath(`stall-capture-${count}.json`);
     // written when the native stacks are in and again at the end, so what the
     // native step found survives a teardown that does not wait for the rest
-    const save = (partial) => { try { writeFileSync(path, JSON.stringify(partial, null, 2)); } catch (error) { /* the output directory is gone: the test is over */ } };
-    const result = await capture(page, armedPage, reason, browser, save, scope, (pid) => testInfo.outputPath(`stall-core-${count}-${pid}.core`));
+    // which test, how old the page was, when it was armed (G5, G6 of #575): a deliberate freeze names its test
+    const first = seen.get(page);
+    const identity = { test: testInfo.title, project: testInfo.project.name, pageAgeMs: first ? Date.now() - first.at : null, armedAfterMs: first && first.armedAfterMs !== undefined ? first.armedAfterMs : null };
+    const save = (partial) => { try { writeFileSync(path, JSON.stringify({ ...identity, ...partial }, null, 2)); } catch (error) { /* the output directory is gone: the test is over */ } };
+    const number = count;
+    const result = await capture(page, armedPage, reason, browser, save, scope, (pid) => testInfo.outputPath(`stall-core-${count}-${pid}.core`),
+      async () => { const kept = await keepBoth(browser, (name) => testInfo.outputPath(`flight-${number}-${name}`)); state.flight = kept; await attachFlight(testInfo, kept); return kept; });
+    Object.assign(result, identity);
+    if (result.flight) { state.frozen = true; state.captureFile = path; if (!state.captureResult) state.captureResult = result; }
     save(result);
     await testInfo.attach(`stall-capture-${count}`, { path, contentType: 'application/json' }).catch(() => {});
     console.error(summary(result));
@@ -1186,6 +1248,29 @@ export function stallWatch(browser, testInfo) {
     for (const waiter of waiters.splice(0)) waiter();
     return result;
   };
+  // A renderer or the browser died (#599-class: a crash is not a freeze, and the record is the kernel's: the signal, the exit, dmesg)
+  const crashed = (reason, browserGone = false) => {
+    if (stopped && !browserGone) return;
+    const job = (async () => {
+      count += 1;
+      const number = count;
+      const path = testInfo.outputPath(`crash-${number}.json`);
+      state.browserGone = state.browserGone || browserGone;
+      const flight = await keepBoth(browser, (name) => testInfo.outputPath(`flight-${number}-${name}`));
+      state.flight = flight;
+      state.frozen = true;
+      state.captureFile = path;
+      const log = await kernelLog(scope).catch((error) => ({ unavailable: String(error) }));
+      const body = { reason, at: new Date().toISOString(), test: testInfo.title, project: testInfo.project.name, flight, kernelLog: log, disk: diskEvidence(), sanitizer: sanitizerReports() };
+      try { writeFileSync(path, JSON.stringify(body, null, 2)); } catch (gone) { /* the output directory is gone */ }
+      await attachFlight(testInfo, flight);
+      await testInfo.attach(`crash-${number}`, { path, contentType: 'application/json' }).catch(() => {});
+      console.error(`[stall-capture] ${reason}: kernel ring ${flight.kernel.file || flight.kernel.unavailable || flight.kernel.error}; browser trace ${flight.browserTrace.file || flight.browserTrace.unavailable || flight.browserTrace.error}`);
+    })().catch((error) => console.error(`[stall-capture] crash evidence failed: ${error && error.stack || error}`));
+    running.add(job);
+    job.finally(() => running.delete(job));
+  };
+  const onDisconnected = () => crashed('the browser process went away while the test ran (crash or kill)', true);
   const start = (page, reason) => {
     starts.push(page);
     for (const waiter of waiters.splice(0)) waiter();
@@ -1263,6 +1348,10 @@ export function stallWatch(browser, testInfo) {
     return context;
   };
 
+  // every test records, a @serial one too: its budget keeps headroom over a loaded runner and fails a turn that costs twice as much, and the recorder costs
+  // about 7% (a red in the @serial run had no record when it was exempt, quire#575)
+  startBrowserTrace(browser);
+  browser.on('disconnected', onDisconnected);
   scan();
   const scanTimer = setInterval(() => { scan(); nearTimeout(); }, SCAN_EVERY_MS);
 
@@ -1295,13 +1384,14 @@ export function stallWatch(browser, testInfo) {
       const pending = armed.get(page);
       return pending ? (await pending).session : null;
     },
-    async stop() {
+    /**
+     * The test is over: no capture starts, and the ones running are waited for, but not for ever (a native step started at the margin
+     * before the timeout would hold the teardown). The `context` fixture calls it before the context closes, because a closed context
+     * takes its renderers with it and a capture still reading one finds `/proc/<pid>` gone (quire#575: `kernel view of renderer N`).
+     * Keyword: capture before close.
+     */
+    async settle() {
       stopped = true;
-      browser.newContext = newContext;
-      clearInterval(scanTimer);
-      for (const context of watchedContexts) context.off('page', watchPage);
-      // the captures running are waited for, but not for ever: a native step
-      // started at the margin before the timeout would hold the teardown
       const settled = await within(Promise.all([...running]), TEARDOWN_MS);
       if (!settled.answered) {
         // a capture still running outside node (gdb attached to a renderer that
@@ -1310,12 +1400,54 @@ export function stallWatch(browser, testInfo) {
         await within(scope.abort(), HELPER_MS);
         await within(Promise.all([...running]), 1500);
       }
+    },
+    async stop() {
+      stopped = true;
+      browser.newContext = newContext;
+      clearInterval(scanTimer);
+      for (const context of watchedContexts) context.off('page', watchPage);
+      await this.settle();
       await keepEvidence();
+      browser.off('disconnected', onDisconnected);
+      // a test that failed with no frozen page leaves the rings too: any red has its history (a timeout with the page
+      // answering, a network or service worker stall, a harness error), and the rings go on for the tests after it
+      const failed = testInfo.status && testInfo.status !== 'skipped' && testInfo.status !== testInfo.expectedStatus;
+      if (failed && !state.flight && wanted()) {
+        state.browserGone = !browser.isConnected();
+        state.flight = await keepBoth(browser, (name) => testInfo.outputPath(`flight-failed-${name}`)).catch((error) => ({ kernel: { error: String(error) }, browserTrace: { error: String(error) } }));
+        await attachFlight(testInfo, state.flight);
+      }
       leaveSampler();
       for (const pending of armed.values()) {
         const arming = await within(pending, COMMAND_MS);
         if (arming.value && arming.value.session) arming.value.session.detach().catch(() => {});
       }
+      // a red whose evidence is missing is its own failure, named, and the one to fix first
+      const missing = await this.verify();
+      if (missing.length) throw new Error(`EVIDENCE MISSING: ${missing.join('; ')}`);
+      // a freeze a test made on purpose, in a test that passed, is not kept: the record is for a red (the files are tens of MB)
+      if (state.flight && !failed && testInfo.status === testInfo.expectedStatus && !process.env.QUIRE_KEEP_FLIGHT) {
+        for (const entry of [state.flight.kernel, state.flight.browserTrace]) if (entry && entry.file) { try { unlinkSync(entry.file); } catch (gone) { /* it was not there */ } }
+      }
     },
+    /** What a failing test is missing of its evidence (the fields, named); none when it passed. */
+    async verify() {
+      return missingEvidence({ status: testInfo.status, expectedStatus: testInfo.expectedStatus, frozen: state.frozen, captureFile: state.captureFile, captureResult: state.captureResult, flight: state.flight, browserGone: state.browserGone, cutOnPurpose: state.cutOnPurpose });
+    },
+    /** The browser's trace ring is on, or this throws PREFLIGHT FAILED. */
+    async ready() {
+      await traceReady(browser);
+    },
+    state,
   };
+}
+
+/** The record's two files as attachments of the test, so the report names them: the job-level check finds a red's record there. */
+async function attachFlight(testInfo, flight) {
+  for (const [name, entry] of [['flight-kernel', flight && flight.kernel], ['flight-browser-trace', flight && flight.browserTrace]]) {
+    if (entry && entry.file) await testInfo.attach(name, { path: entry.file, contentType: 'application/gzip' }).catch(() => {});
+  }
+  // whether the kernel ring reaches the red (the job-level check reads it)
+  const reach = flight && flight.kernel && flight.kernel.reachFile;
+  if (reach) await testInfo.attach('flight-kernel-reach', { path: reach, contentType: 'application/json' }).catch(() => {});
 }

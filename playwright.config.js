@@ -18,8 +18,9 @@ const chromiumArgs = [
 // With the variable already set to the value Chromium sets, setenv replaces
 // one pointer in place and the array is never freed. The value is the one
 // Chromium writes itself, so the browser does the same as before.
-const chromiumEnv = { ...process.env, FC_FONTATIONS: '1' };
-const chromiumLaunch = { args: chromiumArgs, env: chromiumEnv };
+// The sanitizer step of check.yml (quire#575) runs an AddressSanitizer build of Chromium: its path, and where its reports go
+const chromiumEnv = { ...process.env, FC_FONTATIONS: '1', ...(process.env.QUIRE_SANITIZER_LOGS ? { ASAN_OPTIONS: `log_path=${process.env.QUIRE_SANITIZER_LOGS}/asan:detect_leaks=0:symbolize=1` } : {}) };
+const chromiumLaunch = { args: chromiumArgs, env: chromiumEnv, ...(process.env.QUIRE_BROWSER_EXECUTABLE ? { executablePath: process.env.QUIRE_BROWSER_EXECUTABLE } : {}) };
 
 // Android's System WebView on a Pixel, as the app's pages see it
 const ANDROID_USER_AGENT = 'Mozilla/5.0 (Linux; Android 15; Pixel 8 Build/AP4A.250105.002; wv) '

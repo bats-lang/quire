@@ -393,24 +393,12 @@ jobs:
       - name: Install gdb
         if: env.GROUP_RUN == 'yes'
         continue-on-error: true
-        run: |
-          started=$(date +%s)
-          installed=no
-          for attempt in 1 2 3; do
-            if sudo apt-get update -q && sudo apt-get install -y -q gdb elfutils; then installed=yes; break; fi
-            [ "$attempt" -lt 3 ] && sleep $((attempt * 5))
-          done
-          # libc6-dbg of exactly the installed libc6, never an upgrade of libc6 in the middle of a job
-          # (it is pinned to its libc6's version); without it only libc's exported functions are named
-          libc_version=$(dpkg-query -W -f='${Version}' libc6)
-          sudo apt-get install -y -q --no-upgrade "libc6-dbg=$libc_version" \
-            || echo "libc6-dbg $libc_version is not available: libc's internal functions stay unnamed"
-          echo "Install gdb: installed=$installed after $(( $(date +%s) - started )) s"
-          [ "$installed" = yes ]
+        uses: ./.github/actions/stall-tools
 
       # Each spec of the group, and only those: the filters must name
       # exactly as many files as the group lists
       - name: Run e2e tests
+        id: tests
         if: env.GROUP_RUN == 'yes'
         run: |
           specs=$(scripts/ci-groups.py members e2e ${{ matrix.group }})
@@ -422,9 +410,60 @@ jobs:
           # alone on one worker first, then the others; each run's JSON
           # report in the timings directory (serial.json, parallel.json)
           mkdir -p "$RUNNER_TEMP/e2e-timings"
-          ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/e2e-timings" -- --reporter=list,html,json $specs
+          ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/e2e-timings" -- --reporter=list,html,json,./e2e/evidence-reporter.js $specs
         env:
           PLAYWRIGHT_HTML_OPEN: never
+
+      # A red whose evidence is missing is its own failure, named, and the one to fix first (#575): a test
+      # that failed with EVIDENCE MISSING (the stall watch's check), or a timeout that left no kernel ring
+      - name: Evidence check
+        if: always() && env.GROUP_RUN == 'yes'
+        run: node e2e/evidence-check.js "$RUNNER_TEMP/e2e-timings" --results test-results --require-report
+
+      # Chromium's public AddressSanitizer build (pinned by file and SHA-256; position 1625077, Chromium 149.0.7827.0, the
+      # branch of the headless shell the suite runs; the server's md5 of the file was checked against the download), run on
+      # the app's first screen: a memory error in the browser is named where a release build hangs or dies later
+      # (#575). A STOPGAP with the rest of the evidence tooling: it belongs in pwa's e2e-setup (bats-lang/pwa#132)
+      - name: Download Chromium's AddressSanitizer build
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        run: |
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/asan.zip" https://storage.googleapis.com/chromium-browser-asan/linux-release/asan-linux-release-1625077.zip
+          echo "1e4744f206e8a2eca53b3184ff673e1dbed7cdcad146a0f2efc42bdde65749bc  $RUNNER_TEMP/asan.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/asan.zip" -d "$RUNNER_TEMP/asan" chrome '*.pak' icudtl.dat '*.bin' '*.so' libvulkan.so.1 'locales/*' chrome_crashpad_handler vk_swiftshader_icd.json
+          rm "$RUNNER_TEMP/asan.zip"
+          sudo apt-get install -y -q libpci3
+
+      - name: Run the app's first screen under AddressSanitizer
+        id: sanitizer
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        run: |
+          mkdir -p "$QUIRE_SANITIZER_LOGS"
+          ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/sanitizer-timings" -- --output=test-results-sanitizer --reporter=list,json,./e2e/evidence-reporter.js e2e/sanitizer.spec.js
+        env:
+          PLAYWRIGHT_HTML_OPEN: never
+          QUIRE_BROWSER_EXECUTABLE: ${{ runner.temp }}/asan/chrome
+          QUIRE_SANITIZER_LOGS: ${{ runner.temp }}/sanitizer-reports
+          QUIRE_REQUIRE_SANITIZER: '1'
+          QUIRE_RUNNER_EVIDENCE: test-results-sanitizer/runner-evidence
+
+      - name: Sanitizer reports
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        run: node e2e/evidence-check.js --sanitizer "$QUIRE_SANITIZER_LOGS"
+        env:
+          QUIRE_SANITIZER_LOGS: ${{ runner.temp }}/sanitizer-reports
+
+      - name: Evidence check of the sanitizer run
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        run: node e2e/evidence-check.js "$RUNNER_TEMP/sanitizer-timings" --results test-results-sanitizer --require-report
+
+      - name: Upload sanitizer reports
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-sanitizer-reports
+          path: ${{ runner.temp }}/sanitizer-reports/
+          if-no-files-found: ignore
+          retention-days: 30
 
       # Each test's time per project and spec (#461), kept for every run
       # so the groups are balanced by measurement, not guessing: sum
@@ -458,7 +497,11 @@ jobs:
             test-results/**/stall-capture-*.json
             test-results/**/runner-load-*.json
             test-results/**/page-timing-*.json
-          if-no-files-found: ignore
+            test-results/**/flight-*.gz
+            test-results/**/crash-*.json
+            flight-watchdog/**
+          # the watchdog's heartbeat is always there, so a job with nothing to upload had no watchdog: an error, not an ignore (#575)
+          if-no-files-found: error
           retention-days: 30
 
       # The core of a renderer that froze (e2e/stall-capture.js): written, gzipped
@@ -481,6 +524,7 @@ jobs:
           name: e2e-screenshots-${{ matrix.group }}
           path: |
             test-results/
+            test-results-sanitizer/
             !test-results/**/stall-core-*
           retention-days: 14
 

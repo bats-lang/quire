@@ -110,9 +110,20 @@ export function card(page, text) {
   return cards(page).filter({ hasText: text });
 }
 
-/** The cards' titles, in the order shown (a card's first line) */
+/** The cards' titles, in the order shown (a card's first line), read in one
+    evaluation: a locator's allInnerTexts finds the cards in one call and reads
+    them in a second, and a library that is drawn again between the two (the
+    cards replaced) gives the text of the detached cards, which has no line
+    breaks, so a whole card was the "title" (#575, library-records QLB4 on CI,
+    job 119175168267: the read cards had isConnected false) */
 export async function titles(page) {
-  return (await cards(page).allInnerTexts()).map(t => t.split('\n')[0].trim());
+  // the regions are found by their role and accessible name (aria-label), as `cards` finds them, in the same evaluation that reads the cards
+  return page.evaluate(() => ['Continue reading', 'Books']
+    .flatMap(name => [...document.querySelectorAll(`[role=region][aria-label="${name}"]`)])
+    .filter(region => region.checkVisibility({ visibilityProperty: true }))
+    .flatMap(region => [...region.querySelectorAll('[role=group]')])
+    .filter(group => group.checkVisibility({ visibilityProperty: true }))
+    .map(group => group.innerText.split('\n')[0].trim()));
 }
 
 /** The library's search box, whose presence says the library is shown */

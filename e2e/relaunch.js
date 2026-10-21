@@ -264,6 +264,42 @@ async function pixelsChanged(page, before, after) {
   }, [before.screen.toString('base64'), after.screen.toString('base64'), LEVELS]);
 }
 
+/**
+ * Where two screenshots differ, and what the page has at each place (#546: two isolated pixels differed after a relaunch, and a
+ * count says nothing of where): the first 50 differing pixels with both colours, and the elements and text at each. Keyword: pixel diff.
+ */
+export async function pixelDiff(page, before, after) {
+  const points = await page.evaluate(async ([first, second, levels]) => {
+    const pixels = async base64 => {
+      const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob());
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const context = canvas.getContext('2d');
+      context.drawImage(bitmap, 0, 0);
+      return context.getImageData(0, 0, bitmap.width, bitmap.height);
+    };
+    const [a, b] = [await pixels(first), await pixels(second)];
+    if (a.width !== b.width || a.height !== b.height) return { sizes: [[a.width, a.height], [b.width, b.height]], list: [], count: a.width * a.height };
+    const list = [];
+    let count = 0;
+    for (let k = 0; k < a.data.length; k += 4) {
+      if (Math.abs(a.data[k] - b.data[k]) > levels || Math.abs(a.data[k + 1] - b.data[k + 1]) > levels || Math.abs(a.data[k + 2] - b.data[k + 2]) > levels) {
+        count++;
+        if (list.length < 50) { const at = k / 4; list.push({ x: at % a.width, y: Math.floor(at / a.width), before: Array.from(a.data.slice(k, k + 3)), after: Array.from(b.data.slice(k, k + 3)) }); }
+      }
+    }
+    return { list, count };
+  }, [before.screen.toString('base64'), after.screen.toString('base64'), LEVELS]);
+  if (points.list) {
+    // the page's pixels are device pixels; the elements are asked at CSS pixels
+    points.dom = await page.evaluate(list => list.slice(0, 10).map(({ x, y }) => {
+      const scale = window.devicePixelRatio || 1;
+      const css = [x / scale, y / scale];
+      return { at: [x, y], stack: document.elementsFromPoint(css[0], css[1]).map(e => `${e.tagName.toLowerCase()}#${e.id}.${e.className}`).slice(0, 6) };
+    }), points.list).catch(() => 'the page did not answer');
+  }
+  return points;
+}
+
 /** The two captures are the same: each part compared on its own, so a
     failure says which differs (and, for stored records, which ones; for
     the screen, both screenshots are attached). page is any page open */
@@ -284,6 +320,8 @@ export async function sameState(page, before, after) {
       writeFileSync(path, taken.screen);
       await test.info().attach(`screen ${name}`, { path, contentType: 'image/png' });
     }
+    // where they differ and what the page has there, so a stray pixel is a place and an element, not a count
+    await test.info().attach('pixel-diff', { body: JSON.stringify(await pixelDiff(page, before, after), null, 1), contentType: 'application/json' });
   }
   expect(changed, 'the pixels of the screen that changed').toBe(0);
 }

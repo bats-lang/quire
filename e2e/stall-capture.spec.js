@@ -23,6 +23,8 @@ import { test, expect } from './fixtures.js';
 import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
+import { gunzipSync } from 'node:zlib';
+import { keepBrowserTrace, keepKernel, ringSeen, serialRun, startBrowserTrace, startKernel, stopKernel, wanted } from './flight-recorder.js';
 import { arm, capture, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
@@ -305,6 +307,101 @@ test('a renderer that is frozen (no CPU, no answer) has its native stacks captur
   expect(capture.kernel.cgroups.map((each) => each.pid)).toEqual(expect.arrayContaining(pids));
   expect(capture.kernel.kernelLog).toBeTruthy();
   await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
+});
+
+// Keyword: flight recorder (#575). Where the rings run (CI, or QUIRE_FLIGHT=1 for the worker) a frozen
+// renderer's capture holds both written out; where they do not it says why, and nothing fails.
+test('a frozen renderer\'s capture holds the flight recorder\'s kernel ring and Chrome\'s trace, or says why not (#575)', async ({ page, browser, stallWatch }, testInfo) => {
+  desktopOnly(testInfo);
+  test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
+  await page.setContent('<!doctype html><title>Frozen</title><p>Frozen</p>');
+  for (let i = 0; i < 5; i += 1) await page.evaluate(() => 1);
+  const pids = await rendererPids(browser);
+  const capture = await frozen(pids, () => stallWatch.next(page, 20000 + NATIVE_MOST_MS));
+  expect(capture.test, 'the capture names its test (G6 of #575)').toBe(testInfo.title);
+  expect(capture.pageAgeMs, 'and the page\'s age at the capture, armed after (G5)').toBeGreaterThan(0);
+  expect(capture.armedAfterMs).toBeGreaterThanOrEqual(0);
+  expect(capture.flight, 'a frozen renderer\'s capture has the flight recorder\'s record').toBeTruthy();
+  expect(capture.flight.error).toBeUndefined();
+  for (const [name, ring] of [['kernel', capture.flight.kernel], ['browserTrace', capture.flight.browserTrace]]) {
+    if (!wanted()) { expect(ring.unavailable, `${name} says it is not recording`).toMatch(/not recording/); continue; }
+    if (ring.unavailable || ring.error) { expect(`${ring.unavailable || ring.error}`, `${name} says why it cannot`).toMatch(/\w{4}/); continue; }
+    expect(ring.bytes, `${name} ring has content`).toBeGreaterThan(100);
+  }
+  if (capture.flight.kernel.file) {
+    const seen = await ringSeen(capture.flight.kernel.file, { futex: /sys_futex/, wakeup: /sched_wakeup/ });
+    expect(seen.futex, 'the kernel ring holds the run\'s futex calls').not.toBeNull();
+    expect(seen.wakeup, 'and its wakeups').not.toBeNull();
+  }
+  if (capture.flight.browserTrace.file) {
+    const trace = JSON.parse(gunzipSync(readFileSync(capture.flight.browserTrace.file)).toString());
+    const events = trace.traceEvents || trace;
+    expect(events.length, 'Chrome\'s trace holds events').toBeGreaterThan(100);
+    expect(new Set(events.map((event) => event.cat)).size, 'of more than one category').toBeGreaterThan(1);
+  }
+  expect(summary(capture)).toContain('flight kernel ring');
+  await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
+});
+
+test('the kernel ring starts for a process tree, keeps its futex calls and wakeups, and is removed (#575)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const env = { CI: 'true' };
+  const started = await startKernel(env);
+  if (!started.instance) {
+    // no tracefs, or sudo refused: said, not failed
+    expect(started.error, 'the ring says why it did not start').toMatch(/\w{4}/);
+    return;
+  }
+  try {
+    expect(env.QUIRE_FLIGHT_INSTANCE).toBe(started.instance);
+    // this process is the tree's root: its own waits and wakeups are the record
+    await new Promise((resolve) => { const timer = setTimeout(resolve, 50); timer.ref(); });
+    await page_free_work();
+    const out = testInfo.outputPath('kernel.txt.gz');
+    const kept = await keepKernel(out, env);
+    expect(kept.error, JSON.stringify(kept)).toBeUndefined();
+    expect(kept.lines).toBeGreaterThan(0);
+    const seen = await ringSeen(out, { header: /# the last/, events: /sys_futex|sched_switch|sched_wakeup/, clock: /clock: mono/ });
+    expect(seen.header).not.toBeNull();
+    expect(seen.events).not.toBeNull();
+    expect(seen.clock, 'timestamps are CLOCK_MONOTONIC (the clock of Chrome\'s trace)').not.toBeNull();
+  } finally {
+    const stopped = await stopKernel(started);
+    expect(stopped.removed, JSON.stringify(stopped)).toBe(true);
+  }
+});
+
+// a little work in this process: timers and a worker thread's messages are futex waits and wakes
+async function page_free_work() {
+  const { Worker } = await import('node:worker_threads');
+  const worker = new Worker('require("worker_threads").parentPort.postMessage(1)', { eval: true });
+  await new Promise((resolve) => worker.once('message', resolve));
+  await worker.terminate();
+}
+
+test('with neither CI nor QUIRE_FLIGHT, or with QUIRE_NO_RECORDER, nothing is recorded and the capture says so (#575)', async ({ browser }, testInfo) => {
+  desktopOnly(testInfo);
+  for (const env of [{}, { CI: 'true', QUIRE_NO_RECORDER: '1' }, { QUIRE_FLIGHT: '1', QUIRE_NO_RECORDER: '1' }]) {
+    expect(wanted(env), JSON.stringify(env)).toBe(false);
+    expect(await startKernel(env)).toBeNull();
+    expect((await keepKernel(testInfo.outputPath('x.gz'), env)).unavailable).toMatch(/not recording/);
+  }
+  expect(wanted({ CI: 'true' })).toBe(process.platform === 'linux');
+  expect(wanted({ QUIRE_FLIGHT: '1' })).toBe(process.platform === 'linux');
+  expect(wanted({ CI: '0' })).toBe(false);
+  expect(startBrowserTrace(browser, {})).toBeNull();
+});
+
+test('the run of the @serial tests is told from the other by its command line, as gen-pwa passes it (#575)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  expect(serialRun(['node', 'playwright', 'test', '--project=x', '--grep', '@serial', 'e2e/a.spec.js'])).toBe(true);
+  expect(serialRun(['test', '--grep=@serial'])).toBe(true);
+  expect(serialRun(['test', '-g', '@serial'])).toBe(true);
+  expect(serialRun(['test', '--grep-invert', '@serial'])).toBe(false);
+  expect(serialRun(['test', '--grep-invert=@serial'])).toBe(false);
+  expect(serialRun(['test', '--grep', 'dictionary'])).toBe(false);
+  expect(serialRun(['test'])).toBe(false);
+  expect(serialRun(['test', '--grep'])).toBe(false);
 });
 
 /**
@@ -739,6 +836,7 @@ function stateOf(pid) {
 
 test('teardown ends a gdb attached to a hung renderer: gdb lets go and the renderer runs again', async ({ page, browser, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
+  stallWatch.state.cutOnPurpose = 'whole capture'; // this test ends the whole capture itself (a gdb that stays), before it keeps anything: nothing of it is owed
   test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
   const real = spawnSync('sh', ['-c', 'command -v gdb'], { encoding: 'utf8' }).stdout.trim();
   if (!real) unavailable('gdb is not installed on this machine');
@@ -789,6 +887,7 @@ test('teardown ends a gdb attached to a hung renderer: gdb lets go and the rende
 
 test('teardown does not wait for a native capture to end: stop() returns within its bound', async ({ page, browser, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
+  stallWatch.state.cutOnPurpose = 'whole capture'; // the teardown here ends the whole capture, before it keeps anything: nothing of it is owed
   await page.setContent('<!doctype html><title>Frozen</title><p>Frozen</p>');
   const pids = await rendererPids(browser);
   await frozen(pids, async () => {
@@ -800,8 +899,9 @@ test('teardown does not wait for a native capture to end: stop() returns within 
   });
 });
 
-test('the kernel evidence is saved before the native step, which a teardown can cut off (#575)', async ({ page, browser }, testInfo) => {
+test('the kernel evidence is saved before the native step, which a teardown can cut off (#575)', async ({ page, browser, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
+  stallWatch.state.cutOnPurpose = 'native step'; // the freeze here is cut off by the teardown on purpose, in the native step: the rings are owed, that step's fields are not
   test.setTimeout(testInfo.timeout + CAPTURE_MOST_MS + NATIVE_MOST_MS);
   await page.setContent('<!doctype html><title>Frozen</title><p>Frozen</p>');
   const armed = await arm(page);
