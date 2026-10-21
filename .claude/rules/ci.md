@@ -184,8 +184,9 @@ each kind selects) and prints each path's reason in its summary. Rules:
   step**, so `check` is unchanged (it rejects a skipped job). Not a workflow
   path filter: GitHub leaves a required check "Pending" for ever then.
 * **Fail closed**: a path no rule names, a diff that cannot be read, an empty
-  diff, a deletion under `e2e/` select everything (so do `.claude/**` files for
-  now, #680). A merge queue's group, a push, the nightly run and a dispatch run
+  diff, a deletion under `e2e/` select everything. The guideline files (`CLAUDE.md`,
+  `.claude/**`) select the `checkers` group only (`tests/static/guidelines.py` reads them,
+  #751), and nothing else. A merge queue's group, a push, the nightly run and a dispatch run
   every group; the mutation groups keep their own rule.
 * A new path, spec or fixture kind needs its rule: `tests/static/affected_test.py`
   (in `checkers`) tests the table on `tests/static/affected/cases.json`, that
@@ -230,6 +231,15 @@ less than CI's), `lld`, the compiler built from the commit in `.github/bats-vers
 commit `.github/repository-version` names. Locally run `bats check --repository <the clone>`,
 or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
 
+* **The command** (quire#751): in the checkout that stays, `bats with-env ~/quire.env bats check`,
+  where the env file sets `BATS_SLOTS=1` (never 2), `BATS_LOCK_DIR`, `BATS_CACHE_DIR` and
+  `BATS_REPOSITORY`. No `timeout` wrapper: the Bash tool's own cap of 600000 ms ends a foreground
+  command, and a wrapper below it kills a cold check for nothing. The first build of a new checkout
+  runs with `run_in_background` and its log is read until it ends, in the same turn. A push is
+  `qsweep push <arguments>`, which holds when `qsweep pressure` does not say `runner pressure: none`.
+* **A run over a population is a sample** (quire#751): about 10 minutes, the members drawn at random
+  with a seed that is printed (`python3 -c 'import random; r = random.Random(SEED); ...'`), and the
+  PR says the sample, its seed and size and why it suffices; the whole population is CI's.
 * Two bats in one checkout take turns (a lock on `bats.toml`). Two checkouts take turns by
   bats's opt-in machine-wide slots: with `BATS_SLOTS=N` (1 to 64) `check`, `build`, `test` and
   `run`'s build each hold one of N `flock` files in `BATS_LOCK_DIR`. `gen-pwa test` uses the
@@ -251,5 +261,5 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   Chromium this Playwright expects (it never downloads one), and runs the `@serial` tests alone
   and then the others. A `--grep` or `--workers` of the caller's makes it one run. A change to
   a spec or a static fixture runs that group too where the machine can (`tests/static/run.sh`,
-  `gen-pwa test -- <spec>`); what it cannot run is left to CI and said in the PR. Playwright
+  `gen-pwa test -- <spec>`); the rest of the population is CI's. Playwright
   1.58 or later is required (`.claude/rules/e2e.md`).

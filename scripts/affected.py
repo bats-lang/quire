@@ -217,14 +217,15 @@ RULES = [
     ], ALL, ALL),
     # What the app is built from
     Rule('the app', ['src/**', 'assets/**', 'scripts/sync-clients.*'], ALL, ALL),
+    # The agents' guidelines (CLAUDE.md and `.claude/`: rules, orchestration notes, agents,
+    # skills and settings) are read by one static checker, guidelines.py (#751), which refuses
+    # the phrases that made the agents' mistakes come back (#680 first had them read by none)
+    Rule('the agents\' guidelines', ['CLAUDE.md', '.claude/**'], NONE, only_checkers),
     # Notes nothing reads, and the workflows that are runs of their own
     Rule('docs and other workflows', [
-        'README.md', 'CLAUDE.md', 'ANDROID.md', 'implementation-plan.md', 'plan.txt',
+        'README.md', 'ANDROID.md', 'implementation-plan.md', 'plan.txt',
         'success.txt', 'ux-review/**', 'reports/**',
-        # The agents' settings, rules, orchestration notes, agents and skills (#680):
-        # no workflow, script or test reads `.claude/`
-        '.claude/**',
-        '.github/workflows/deploy.yml', '.github/workflows/mutation.yml',
+        '.github/workflows/deploy.yml', '.github/workflows/text-lint.yml', '.github/workflows/mutation.yml',
         '.github/workflows/relock.yml', '.github/workflows/sync-identity.yml',
         '.github/workflows/sync-providers.yml', '.github/workflows/supersede.yml',
     ], NONE, NONE),

@@ -1,0 +1,48 @@
+# The phrases agents' texts may not hold (quire#751). One per line, tab separated:
+#   scope  row  regex (case-insensitive, Python)  an example it must match (tested)  what to do instead
+# scope `text`: a brief, a ticket, a PR body, a review comment, a hand-back; the same
+#   phrases are refused in a guideline file outside a code span.
+# scope `guide`: a guideline file only (a rule the owner never wrote, or one that
+#   contradicts the owner's).
+# The row is the class of mistake in quire#751's table. Quoting a phrase in a guideline
+# file is done inside a code span; a PR body or a brief cannot quote one.
+text	1	provisional verdict	my provisional verdict is approved	A review is the posted comment; a verdict anywhere else is no review.
+text	2	instead of fixes	change Refs instead of Fixes	Nobody offers a way to ship less than the ticket says: the verdict is changes needed, and the finding is to do the Done-when as written.
+text	2	unless (the )?(owner )?narrow	Refs unless the owner narrows it	Nobody narrows a ticket in a review or a brief: the Done-when as written is the standard.
+text	2	or narrow(ing)?\b	do it or narrow	Narrowing is the owner's, never offered.
+text	3	\bpartly\b	the ticket is partly done	Partly is not a state: the Done-when is met as written or the work goes on.
+text	3	\bpartially\b	partially done	Partially is not a state: the Done-when is met as written or the work goes on.
+text	3	hand-?picked	a hand-picked six fixtures	A local sample is random, with its seed and size named; the Done-when's own command runs in CI on the whole population.
+text	6	passed (this time|alone|on (a )?re-?run)	it passed alone	A red test is root-caused; "it passed again" is not a cause.
+text	6	pass(es)? (alone|this time|on (a )?re-?run)	it passes alone	A red test is root-caused; "it passes again" is not a cause.
+text	6	nothing touches it	contention, nothing touches it	A red test is root-caused; "nothing touches it" is not a cause.
+text	23	\bcontention\b	failed under contention	A red test is root-caused or the test is made robust; "contention" is not a cause.
+text	10	honest	honest points	State the fact; the word adds nothing and offers an exit.
+text	10	\bfrank(ly)?\b	frankly it works	State the fact; the word adds nothing and offers an exit.
+text	10	not run locally	Not run locally: the e2e	Run what the change needs; what CI runs is CI's and is not a caveat.
+text	16	or say what is true	do X or say what is true	A brief never offers an alternative to the Done-when.
+text	16	or remove the (claim|sentence|line)	or remove the sentence	A claim is never weakened: the code is made to match it.
+text	13	after a (day|week|month)\b	after a day of sessions	A step that waits for time is done now.
+text	13	after (a|\d+) sessions?\b	after 3 sessions	A step that waits for time is done now.
+text	13	(the )?next (capture|run|occurrence)\b	at the next capture	A step that waits for a recurrence is done now: produce what the wait would produce.
+text	13	wait and see	wait and see	A ticket whose only content is waiting is closed; the work is done now.
+text	14	holding the slot	holding the slot for the next fix	A free slot is filled the same turn, in the owner's order.
+text	18	blocked on evidence	blocked on evidence	Producing the evidence is the work.
+text	18	waiting for evidence	waiting for evidence	Producing the evidence is the work.
+text	20	waiting for (a|the) "?go"?\b	waiting for a go	An interrupt that killed agents means restart them fresh; nobody waits for a go.
+text	21	stop measuring	stop measuring	The Done-when is measured as written.
+text	21	narrow the measurement	narrow the measurement	The Done-when is measured as written.
+text	10	haven'?t verified	I haven't verified	Run the check and say what it printed.
+guide	22	\bno sed\b	No sed.	The owner's rule is only that checked-in code and YAML do not depend on sed; workers may use any tool to edit.
+guide	22	never redirect output to	never redirect output to the null device	The owner's rule is only: do not create, move, link, delete or truncate anything under /dev.
+guide	4	delete the build and clone directories	Delete the build and clone directories	A checkout is persistent: the next ticket is a new branch in it.
+guide	4	deletes its worker clone	the orchestrator deletes its worker clone	A checkout is persistent: the next ticket is a new branch in it.
+guide	5	timeout 598	timeout 598 bats check	The tool's own cap ends a foreground command; a wrapper only kills a cold check at the cap.
+guide	14	ledger says all full	the ledger says all full	Only ListAgents says what runs.
+text	2	fixes\s+#?\d+\s+to\s+refs	change Fixes #368 to Refs #368	Nobody offers a way to ship less than the ticket says, with or without a tail: the verdict is changes needed.
+text	2	fixes\s+#?([nx]|<[^>\s]*>)\s+to\s+refs	change Fixes #N to Refs #N	Nobody offers a way to ship less than the ticket says, with or without a tail: the verdict is changes needed.
+text	2	\b(as|use|open(ed)? it as) refs\b	open it as Refs	A PR that does not meet its Done-when as written is not opened as Refs: the verdict is changes needed.
+text	2	\bas refs\b	it goes in as Refs	A PR that does not meet its Done-when as written is not opened as Refs: the verdict is changes needed.
+text	2	\buse refs\b	use Refs	A PR that does not meet its Done-when as written is not opened as Refs: the verdict is changes needed.
+guide	16	unless the brief says otherwise	new tooling is bats unless the brief says otherwise	A brief does not override CLAUDE.md: non-bats code names the avenue it exhausted.
+guide	14	take a p1 or p2	or take a p1 or p2	CLAUDE.md: a p1 is not started while a p0 is open.

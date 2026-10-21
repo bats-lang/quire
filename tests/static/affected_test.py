@@ -378,7 +378,7 @@ class Cases(unittest.TestCase):
         def mutation(members):
             asked.append(members)
             return members[0] == 'mutation/chunk'
-        result = run_plan([('M', 'CLAUDE.md')], mutation=mutation)
+        result = run_plan([('M', 'README.md')], mutation=mutation)
         self.assertEqual(result['static']['mutation-chunk'], {'members': 'mutation/chunk', 'bats': True})
         self.assertEqual(result['static']['mutation-crc-1'], {'members': '', 'bats': False})
         self.assertEqual(len(asked), sum(1 for members in GROUPS['static'].values()

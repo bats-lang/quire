@@ -1,0 +1,49 @@
+name: text-lint
+
+# What agents write is held to the phrases and the form of tests/static/guidelines.py
+# (quire#751): a PR body (its first line, the head it describes, its evidence, one ticket),
+# the newest review comment (its verdict, its head, the gate's one Reviewed line), and a
+# ticket's text. The result is the commit status `text-lint` on the PR's head, so a stale
+# body or a review with an exit clause shows red beside the checks; a ticket gets a comment.
+#
+# STOPGAP (CLAUDE.md, "Pipeline and tooling improvements belong in bats or pwa"): a second app
+# would copy this workflow, so its move is bats-lang/bats#431 and this file is deleted when
+# that lands. Waiting would cost more than the move: the same mistakes came back every session.
+# The avenue exhausted for non-bats code (quire#646): bats has no command that reads the text of
+# a comment or of a markdown file, and bats-lang/bats#431 (with bats#435 for the sweep tools) is
+# the ticket that adds one; a workflow that calls it replaces this file.
+#
+# Safe on pull_request_target: it runs the script as the default branch has it, checks out
+# nothing of the PR and passes the PR's text to the script in the event payload only, never
+# through a shell, so no code of the PR runs (the same reasoning as bridge's review gate).
+# It is not a required check: it reports.
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+  issue_comment:
+    types: [created, edited]
+  issues:
+    types: [opened, edited]
+
+permissions: {}
+
+concurrency:
+  group: text-lint-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    # a comment of the workflow's own bot is the lint's answer, not a text to lint
+    if: github.event.comment.user.type != 'Bot'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      statuses: write
+      pull-requests: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Lint the text of the event
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tests/static/guidelines.py --github
