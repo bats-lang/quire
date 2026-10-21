@@ -41,6 +41,10 @@ The priorities (p0 to p3), the order of work, the owner's rule on downgrades and
 * A PR merges only after an independent review comment for its head. Gated repositories (bridge, pwa, capacitor-plugins) need the exact form their CLAUDE.md gives; a push, an update-branch or a merge of main voids an approval. Use merge, not squash. quire merges through the queue (`enable_pr_auto_merge` MERGE); the others by `merge_pull_request`.
 * A PR that adopts new package versions runs `bats lock --repository <dir>` and commits `bats.lock`.
 
+## Checkouts
+
+The checkouts the agents load (`/home/user/<repo>` for each repository: quire, bats, pwa, bridge, dom, gestures, arith, array, zip, sha256, capacitor-plugins, repository-prototype; the 14 files an agent loads are those 12 repositories' CLAUDE.md and the `.claude/rules/bats.md` of bats and of dom) stay on `main` with a clean tree, so the CLAUDE.md an agent reads is the merged one (quire#732). Nothing is left on a feature branch there: a checkout with unpushed commits pushes them to their own branch first, and a checkout with uncommitted work has it committed or moved aside before it moves. The orchestrator fast-forwards each one to main (`git fetch origin main && git checkout main && git merge --ff-only origin/main`) at the start of every session and after every compaction.
+
 ## Published APIs
 
 * **API changes are additive** (owner, 2026-10-19). A change to a published package's API keeps the old signatures and adds the new ones beside them, named in words. Dependents move one at a time, in PRs of their own, under their normal CI; removal of the old form is a separate ticket once every dependent has moved. No lockstep publish, and no archive built outside a dependent's CI. Reason: process#62 replaced `spawn*`, pwa's published archive then failed repository-prototype `verify` in #359, and the fix was process#65, which is additive.
