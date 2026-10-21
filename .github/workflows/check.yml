@@ -297,8 +297,11 @@ jobs:
           QUIRE_MUTATION_BASE: ${{ steps.scope.outputs.base != 'none' && steps.scope.outputs.base || '' }}
         run: tests/static/run.sh $FIXTURES_COLD "${BATS_REPOSITORY:-none}" $GROUP_MEMBERS
 
+      # One saver: every group restores the app's build/ but only the app
+      # group saves it, because the six jobs would reserve one key (name plus
+      # commit) and five would print "Cache save failed" (keyword: build cache, #622)
       - name: Save the compiler cache
-        if: env.GROUP_BATS == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'push')
+        if: matrix.group == 'app' && env.GROUP_BATS == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'push')
         uses: ./.github/actions/build-cache
         with:
           mode: save
