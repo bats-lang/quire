@@ -177,7 +177,7 @@ const GOLDEN = [
 ];
 
 for (const mode of MODES) {
-  // Area: "a page that was slow, not frozen" (e2e.md). Failure: not captured with enough data are why the runner was about twice as slow when this spec failed (2026-10-14) and the 2026-10-15 failure with a different signature (the bars never came up, "Previous page" not visible in 15 s). Analysis: quire#600 (follow-up quire#604).
+  // Area: "a page that was slow, not frozen" (e2e.md). Failures: 2026-10-14 (the runner looked about twice as slow) and 2026-10-15 (a different signature, the bars never came up, "Previous page" not visible in 15 s); a red here is read from runner-load.json and page-timing.json in the e2e-stall-captures artifact (#715, #749). Analysis: quire#600 (follow-up quire#604).
   test(`${mode}: highlights at, across and after the cuts of a text over 64 KiB paint their own text, after a reload and a restored backup`, async ({ browser, page }, testInfo) => {
     // #600: this test failed on a runner twice as slow as usual, 71 s where it
     // takes 24 s; what each step may take follows the layout measured below
