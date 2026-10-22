@@ -158,6 +158,11 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
 * **gdb is ended with KILL, never TERM or INT** (`stop()` after `TEARDOWN_MS`): a gdb ended by
   TERM or INT stays attached and the renderer stays stopped. Every external command runs in
   its own process group under `timeout -s KILL` inside sudo.
+* **The teardown test's gdb stays without writing a core (#807).** Its stand-in
+  (`stall-capture.spec.js`, 'teardown ends a gdb attached to a hung renderer') drops the capture's
+  `madvise` calls and `generate-core-file` before it appends its `shell sleep`: a CI renderer's core took
+  until `timeout -s KILL` ended gdb (run 39716613681: 748 MB, 32 s), before the stay, so there was no gdb
+  for the test to find. Cores are checked by the other tests of the spec.
 * **Nothing is installed by the capture.** gdb comes from the e2e jobs' `Install gdb` step in
   `check.yml` (a stopgap that never fails a job; pwa's e2e-setup action should install it,
   bats-lang/pwa#109); `QUIRE_STALL_GDB` names another. Without gdb, or with ptrace or sudo
