@@ -851,7 +851,28 @@ test('teardown ends a gdb attached to a hung renderer: gdb lets go and the rende
   // this test's own number in the stay's command (`sleep <marker>`), so what it looks for and kills is
   // what it started, never another run's or another checkout's
   const marker = 100000 + Math.floor(Math.random() * 899999);
-  writeFileSync(standIn, `#!/bin/sh\n[ "$1" = --version ] && exec ${real} --version\nexec ${real} "$@" -ex 'shell sleep ${marker}'\n`);
+  // The stand-in leaves out the capture's core commands (the madvise calls and generate-core-file): the
+  // stay runs after every `-ex`, and a core of a CI renderer took until `timeout -s KILL` ended gdb
+  // (run 39716613681: 748 MB written at 32 s), before the stay, so no gdb was left to find (#807, e2e
+  // keyword stall-capture). This test is about teardown ending a gdb that is attached; cores have their own tests.
+  writeFileSync(standIn, [
+    '#!/bin/sh',
+    `[ "$1" = --version ] && exec ${real} --version`,
+    'remaining=$#',
+    'while [ "$remaining" -gt 0 ]; do',
+    '  argument=$1; shift; remaining=$((remaining - 1))',
+    '  if [ "$argument" = -ex ] && [ "$remaining" -gt 0 ]; then',
+    '    command=$1; shift; remaining=$((remaining - 1))',
+    '    case "$command" in',
+    "      generate-core-file*|'call (int)madvise'*) continue ;;",
+    '    esac',
+    '    set -- "$@" "$argument" "$command"',
+    '  else',
+    '    set -- "$@" "$argument"',
+    '  fi',
+    'done',
+    `exec ${real} "$@" -ex 'shell sleep ${marker}'`,
+    ''].join('\n'));
   chmodSync(standIn, 0o755);
   const kept = process.env.QUIRE_STALL_GDB;
   const processes = () => spawnSync('ps', ['-eo', 'stat=,args='], { encoding: 'utf8' }).stdout.split('\n').map((line) => line.trim());
