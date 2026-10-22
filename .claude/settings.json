@@ -5,7 +5,8 @@
       "Bash(uvx pitboss clean-container)",
       "Bash(uvx pitboss clean-container --no-dry-run)",
       "Bash(uvx --from git+https://github.com/dev-skill-up/pitboss pitboss clean-container)",
-      "Bash(uvx --from git+https://github.com/dev-skill-up/pitboss pitboss clean-container --no-dry-run)"
+      "Bash(uvx --from git+https://github.com/dev-skill-up/pitboss pitboss clean-container --no-dry-run)",
+      "Edit(/.claude/rules/ci.md)"
     ]
   }
 }
