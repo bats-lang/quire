@@ -55,15 +55,20 @@ test.use({ trace: 'off', screenshot: 'off' });
 async function arrange(page, mode) {
   await openReadingSettings(page, 'Page');
   const started = Date.now();
-  if (mode === 'pages') {
-    // one page a screen, whatever the window (a wide one shows a spread at Auto)
-    await readingSettings(page).getByRole('group', { name: 'Pages on screen' }).getByRole('button', { name: 'One', exact: true }).click();
-  } else if (mode === 'scrolled') {
-    await readingSettings(page).getByRole('group', { name: 'Layout' }).getByRole('button', { name: 'Scroll', exact: true }).click();
-  } else {
-    await readingSettings(page).getByRole('group', { name: 'Pages on screen' }).getByRole('button', { name: 'Two', exact: true }).click();
-  }
-  await page.keyboard.press('Escape');
+  // one page a screen, whatever the window (a wide one shows a spread at Auto)
+  const [group, choice] = mode === 'pages' ? ['Pages on screen', 'One'] : mode === 'scrolled' ? ['Layout', 'Scroll'] : ['Pages on screen', 'Two'];
+  // the choice and the Escape are one script (#809): the choice lays the
+  // chapter out inside its handler (a megabyte of one word on a phone holds
+  // the main thread for 10 s), and the Escape sent by the harness after a
+  // separate click reached the page as a keyup with no keydown after such a
+  // block (run 39725356584: no keydown in the renderer's trace, the
+  // dialog's data-hide stayed 0 for 15 s with the main thread idle), so no
+  // input of the harness lies between them, as in #522's test below
+  await page.evaluate(([group, choice]) => {
+    const button = [...document.querySelectorAll(`#typography-panel [aria-label="${group}"] button`)].find(candidate => candidate.textContent === choice);
+    button.click();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  }, [group, choice]);
   // the dialog is hidden at once (#522: its data-hide flips within a few
   // milliseconds of the key, measured), but whether Playwright finds it
   // hidden needs the page laid out, and the columns just chosen are laid

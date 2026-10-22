@@ -96,7 +96,7 @@ machine slows both. Standing decisions:
 * **Close does not wait for the layout** (#522): Chrome lays the columns out in the next frame,
   and Playwright's `toBeHidden` waits behind it, so a test asserts the app's part by its
   attribute (`arrange`), waits as long as the layout for the dialog gone (`slow`), and
-  dispatches the click on Two and the Escape in one script. The timeout is not raised.
+  dispatches the click on Two and the Escape in one script (`arrange` too, #809: after a 10 s click the harness's own Escape reached the page as a keyup with no keydown, so the hide never came). The timeout is not raised.
 * **The anchor is found by binary search, not by hit test** (`_first_on_or_after` in
   `_anchor_now`): content nodes are numbered in document order and flow in it, so where they
   start grows with the number (`_page_axis` says which way); undrawn ones are stepped over (at

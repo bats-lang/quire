@@ -158,6 +158,11 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
 * **gdb is ended with KILL, never TERM or INT** (`stop()` after `TEARDOWN_MS`): a gdb ended by
   TERM or INT stays attached and the renderer stays stopped. Every external command runs in
   its own process group under `timeout -s KILL` inside sudo.
+* **The teardown test's gdb stays without writing a core (#807).** Its stand-in
+  (`stall-capture.spec.js`, 'teardown ends a gdb attached to a hung renderer') drops the capture's
+  `madvise` calls and `generate-core-file` before it appends its `shell sleep`: a CI renderer's core took
+  until `timeout -s KILL` ended gdb (run 39716613681: 748 MB, 32 s), before the stay, so there was no gdb
+  for the test to find. Cores are checked by the other tests of the spec.
 * **Nothing is installed by the capture.** gdb comes from the e2e jobs' `Install gdb` step in
   `check.yml` (a stopgap that never fails a job; pwa's e2e-setup action should install it,
   bats-lang/pwa#109); `QUIRE_STALL_GDB` names another. Without gdb, or with ptrace or sudo
@@ -271,7 +276,7 @@ only for a red. The design, with the research and what each means cannot find, i
   crashes or a browser that goes away writes `crash-<n>.json` (the reason, both rings, dmesg, the disk, a sanitizer's reports); the kernel ring holds the signal and the exit.
 * **The watchdog** (`e2e/flight-watchdog.js`, started as root by global setup, outside every worker and browser): every second it looks at the renderers of the run; one whose
   main thread has been in an untimed futex wait with no CPU used for 10 s is written out to `flight-watchdog/` (the threads, the word and its neighbours, the ring's view of the word,
-  stacks), whatever the stall watch does (off, unarmed, dead or stuck). It also keeps every tick of its own that came late by 300 ms or more, with the steal time that passed
+  stacks), whatever the stall watch does (off, unarmed, dead or stuck). Its output and the ring's holds go to SUDO_UID and SUDO_GID when sudo set them (`ownerOf`, `ownTree`, quire#767), so a root run leaves nothing a non-root run cannot rewrite. It also keeps every tick of its own that came late by 300 ms or more, with the steal time that passed
   (`host-stalls-*.json`): a stall of the machine shows as a gap of everything at once.
 * **The apparatus fails closed; `EVIDENCE MISSING` is the last net (`e2e/preflight.js`).** Before any test, global setup
   proves every part works, or the job is red with `PREFLIGHT FAILED: <part>: <why>`: `sudo -n` usable; the output directory

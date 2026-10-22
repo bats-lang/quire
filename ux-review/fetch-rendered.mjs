@@ -3,7 +3,9 @@
 import { chromium } from 'playwright';
 import { writeFileSync } from 'node:fs';
 const [name, url, wait = '4000'] = process.argv.slice(2);
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] });
+// the browser the locked Playwright expects, unless QUIRE_BROWSER_EXECUTABLE names another (#776: no path pinned by hand)
+const browserPath = process.env.QUIRE_BROWSER_EXECUTABLE ? { executablePath: process.env.QUIRE_BROWSER_EXECUTABLE } : {};
+const browser = await chromium.launch({ ...browserPath, args: ['--no-sandbox'] });
 const ctx = await browser.newContext({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36', viewport: { width: 1280, height: 900 } });
 const page = await ctx.newPage();
 let status = 0;
