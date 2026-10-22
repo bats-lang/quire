@@ -145,7 +145,26 @@ commit; `npm ci`, retried on a dropped connection, Playwright checked against
 
 Which tool moves which pin here (#760; CLAUDE.md, "CI is pinned"): Dependabot
 (`.github/dependabot.yml`, weekly, `cooldown` 7 days) moves the npm versions and `package-lock.json`
-of the root `package.json`. That is the only `package.json` in quire: `ux-review/` has none, and its
+of the root `package.json`.
+
+One pull request for every update (#795; the first run had opened eight at once, each a whole
+`check` run, and `qsweep pressure` held every push and merge): the file defines one top-level
+`multi-ecosystem-groups` group, `dependencies` (weekly, `patterns: ["*"]`), and the `npm` and
+`github-actions` entries join it with `multi-ecosystem-group: dependencies`; the `cooldown` and the
+`bats-lang/*` ignore stay on their entries. The docs: a plain `groups` rule is per ecosystem ("You
+must configure groups per individual package ecosystem",
+https://docs.github.com/en/code-security/tutorials/secure-your-dependencies/optimizing-pr-creation-version-updates),
+and `multi-ecosystem-groups` is the key to "Define groups that span multiple package ecosystems to
+get a single Dependabot pull request"; "Updates across multiple package ecosystems in the same group
+are combined into a single pull request", and it "Require[s] the `patterns` key", `["*"]` meaning all
+dependencies (https://docs.github.com/en/code-security/concepts/supply-chain-security/multi-ecosystem-updates,
+https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference).
+The docs' examples are docker and terraform and name no npm and github-actions pair, so that one PR
+holds both is shown by the Dependabot run after the config merges (the readings are on #795), not by
+the docs. If it opens two, the fallback is `open-pull-requests-limit: 0` in each entry and the
+updates carried by the relock PR (a ticket in repository-prototype first).
+
+That is the only `package.json` in quire: `ux-review/` has none, and its
 Playwright config runs on the root's install. A Playwright bump brings the Chromium its version
 needs. The docs: "Each version of Playwright needs specific versions of browser binaries to
 operate." (playwright.dev/docs/browsers), so the browser moves with `@playwright/test` and no
