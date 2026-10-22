@@ -177,7 +177,7 @@ const GOLDEN = [
 ];
 
 for (const mode of MODES) {
-  // Area: "a page that was slow, not frozen" (e2e.md). Failure: what was missing from the capture is the 10-14 click window and the 10-15 'bars never came up'. Analysis: quire#600 (follow-up quire#604).
+  // Area: "a page that was slow, not frozen" (e2e.md). Failure: not captured with enough data are why the runner was about twice as slow when this spec failed (2026-10-14) and the 2026-10-15 failure with a different signature (the bars never came up, "Previous page" not visible in 15 s). Analysis: quire#600 (follow-up quire#604).
   test(`${mode}: highlights at, across and after the cuts of a text over 64 KiB paint their own text, after a reload and a restored backup`, async ({ browser, page }, testInfo) => {
     // #600: this test failed on a runner twice as slow as usual, 71 s where it
     // takes 24 s; what each step may take follows the layout measured below
