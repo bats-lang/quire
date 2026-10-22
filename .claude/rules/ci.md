@@ -143,6 +143,19 @@ Both jobs that use Node install it with pwa's `e2e-setup` action (called by
 commit; `npm ci`, retried on a dropped connection, Playwright checked against
 `playwright-minimum`). Quire holds no install logic of its own (CLAUDE.md, "Pipeline and tooling improvements belong in bats or pwa").
 
+Which tool moves which pin here (#760; CLAUDE.md, "CI is pinned"): Dependabot
+(`.github/dependabot.yml`, weekly, `cooldown` 7 days) moves the npm versions and `package-lock.json`
+of the root `package.json`. That is the only `package.json` in quire: `ux-review/` has none, and its
+Playwright config runs on the root's install. A Playwright bump brings the Chromium its version
+needs. The docs: "Each version of Playwright needs specific versions of browser binaries to
+operate." (playwright.dev/docs/browsers), so the browser moves with `@playwright/test` and no
+browser is pinned by hand in CI. A bump is a pull request like any other and runs the whole e2e
+suite; a pixel or timing difference it shows is a finding to fix, not a test to relax. The floor
+`playwright-minimum` (1.58, the fake clock) stays where it is. Dependabot's documentation names
+`.github/workflows` and the root `action.yml` for github-actions, and not the local composite actions
+(`.github/actions/build-cache`, `stall-tools`, which pin `actions/cache`): whether those are read is
+shown by the first Dependabot run, not by the docs. The hand-pinned Chromium of `ux-review/` is #761.
+
 ### The mutation check in CI (#594)
 
 The nine proof modules in `tests/static/mutation_modules.txt` are hours of
