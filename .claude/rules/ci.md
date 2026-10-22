@@ -263,3 +263,37 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   a spec or a static fixture runs that group too where the machine can (`tests/static/run.sh`,
   `gen-pwa test -- <spec>`); the rest of the population is CI's. Playwright
   1.58 or later is required (`.claude/rules/e2e.md`).
+
+## Running the e2e flight recorder on a local machine: tracefs and a non-root user (quire#765)
+
+The flight recorder (`e2e/flight-tracefs.js`) and the watchdog (`e2e/flight-watchdog.js`) read
+the kernel's tracing filesystem and run their root steps through `sudo -n`, as CI does on its
+runner. `flight-tracefs.js` sets `TRACEFS = /sys/kernel/tracing`; where that directory is not a
+mounted tracefs, a red run says `EVIDENCE MISSING` and not the cause.
+
+* **The mount.** On the machine this section was written on, `mount` lists
+  `nodev on /sys/kernel/tracing type tracefs (rw,relatime)`. The form that gives that line is
+  `mount -t tracefs nodev /sys/kernel/tracing`. It works as uid 0 in this container; the four
+  specs below ran with it in place.
+* **Who runs the specs.** As uid 0, the specs run without any `sudo`. A run as another user
+  needs a user the runner creates for it and a `sudo -n` grant the runner writes; nothing in the
+  repo creates either. The user's env file must be readable by that user.
+* **The four specs that passed** (root, `CI=true`, the commands of `.claude/rules/e2e.md`):
+  `e2e/evidence.spec.js` 34 passed, 62 skipped; `e2e/evidence-real.spec.js` 25 passed and the
+  serial test passed; `e2e/stall-capture.spec.js` 64 passed and the serial test passed;
+  `e2e/sanitizer.spec.js` against the AddressSanitizer build of Chromium, 9 passed. The raw outputs
+  are on quire#765 (comments 6325766934, 6325769509, 6325792430 and 6325769875).
+* **A non-root run** (`sudo -u <user> -H env CI=true ...` with the worktree owned by `<user>`):
+  `e2e/evidence.spec.js` passed with 34 passed, 62 skipped (comment 6325792780);
+  `e2e/stall-capture.spec.js` passed with 64 passed and the serial test passed (comment
+  6329897260); `e2e/evidence-real.spec.js` passed on an output directory that held no root-owned
+  file. Two defects came from those runs and are filed as p0: a root run leaves
+  `test-results/**/watchdog/` owned by root, and the next run as the user fails to unlink it with
+  `EACCES` (quire#767); and `PWA_TEST_LOCK_DIR` on the machine was root-owned, so the run printed
+  `a lock file in PWA_TEST_LOCK_DIR could not be opened: running without the machine's lock`
+  (quire#768).
+* **The ASan browser** for `e2e/sanitizer.spec.js` is the archive `check.yml` names, checked against
+  the SHA-256 `check.yml` pins. Its central directory records mode 0755 for `chrome` and
+  `chrome_crashpad_handler`, and `unzip` (what `check.yml` uses) restores that mode; a `bsdtar`
+  extraction on the machine gave 0664 instead (quire#765, comment 6325973318). The extracted
+  browser is about 4.4 GB.
