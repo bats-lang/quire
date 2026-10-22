@@ -3,7 +3,10 @@
 import { defineConfig } from '@playwright/test';
 
 const args = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-software-rasterizer'];
-const base = { browserName: 'chromium', launchOptions: { args, executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' } };
+// The browser is the one the locked @playwright/test expects (playwright install chromium), as the root config's;
+// QUIRE_BROWSER_EXECUTABLE overrides it there and here (#776: no browser path is pinned by hand)
+const browserPath = process.env.QUIRE_BROWSER_EXECUTABLE ? { executablePath: process.env.QUIRE_BROWSER_EXECUTABLE } : {};
+const base = { browserName: 'chromium', launchOptions: { args, ...browserPath } };
 
 export default defineConfig({
   testDir: '.',
