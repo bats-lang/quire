@@ -21,7 +21,7 @@ jobs:
     outputs:
       groups: ${{ steps.groups.outputs.groups }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: groups
         run: |
           echo "groups=$(scripts/ci-groups.py matrix | sed -n 's/^static=//p' | python3 -c 'import json,sys; print(json.dumps([g for g in json.load(sys.stdin) if g.startswith("mutation-")]))')" >> "$GITHUB_OUTPUT"
@@ -36,7 +36,7 @@ jobs:
         group: ${{ fromJSON(needs.plan.outputs.groups) }}
     name: mutation (${{ matrix.group }})
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
       - name: Set up bats
