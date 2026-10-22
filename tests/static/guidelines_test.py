@@ -224,6 +224,43 @@ class Brief(unittest.TestCase):
         self.assertTrue(gl.lint_brief(brief, self.TICKET, PHRASES))
 
 
+class Overlap(unittest.TestCase):
+    TICKET = Brief.TICKET
+    BRIEF = 'Every row has its line.\nThe tests pass.\n'
+
+    def test_a_brief_of_a_signature_change_without_the_line_is_refused(self):
+        found = gl.lint_brief(self.BRIEF + 'Change a published signature.\n', self.TICKET, PHRASES)
+        self.assertTrue(any('Overlap' in line for line in found), found)
+
+    def test_a_brief_of_a_signature_change_with_the_line_passes(self):
+        brief = self.BRIEF + 'Change a published signature.\nOverlap: the old form stays beside the new one.\n'
+        self.assertEqual(gl.lint_brief(brief, self.TICKET, PHRASES), [])
+
+    def test_a_review_of_a_signature_change_without_the_check_is_refused(self):
+        found = gl.lint_review(GOOD_REVIEW + '\nThe author changes the public signature in place.\n', PHRASES)
+        self.assertTrue(any('Overlap check' in line for line in found), found)
+
+    def test_a_review_of_a_signature_change_with_the_check_passes(self):
+        review = GOOD_REVIEW.replace('The Done-when is met.', 'It changes the public signature.\nOverlap check: the old form is still there; a test calls it.')
+        self.assertEqual(gl.lint_review(review, PHRASES), [])
+
+    def test_a_brief_with_only_the_review_line_is_refused(self):
+        brief = self.BRIEF + 'Change a published signature.\nOverlap check: the old form is still there.\n'
+        self.assertTrue(any('Overlap' in line for line in gl.lint_brief(brief, self.TICKET, PHRASES)))
+
+    def test_a_text_that_says_no_signature_changed_is_not_refused(self):
+        self.assertEqual(gl.lint_brief(self.BRIEF + 'No published signature changed.\n', self.TICKET, PHRASES), [])
+        self.assertEqual(gl.lint_review(GOOD_REVIEW + '\nNo public signature changed.\n', PHRASES), [])
+
+    def test_a_review_with_only_the_brief_line_is_refused(self):
+        found = gl.lint_review(GOOD_REVIEW + '\nIt changes the public signature.\nOverlap: the old form stays.\n', PHRASES)
+        self.assertTrue(any('Overlap check' in line for line in found), found)
+
+    def test_claude_md_and_orchestration_md_carry_the_rule(self):
+        for parts, needle in ((('CLAUDE.md',), 'at least* one version of overlap'), (('.claude', 'orchestration.md'), 'Overlap check:'), (('.claude', 'orchestration.md'), '`Overlap: ')):
+            self.assertIn(needle, read_root(*parts), parts)
+
+
 class FakeApi:
     def __init__(self, comments=()):
         self.comments, self.calls = list(comments), []
@@ -260,6 +297,29 @@ class GitHub(unittest.TestCase):
         self.assertTrue(self.run_event('pull_request_target', {'pull_request': pull}, api))
         self.assertEqual(self.status(api)['state'], 'failure')
         self.assertIn('describes head', self.status(api)['description'])
+
+    def test_a_finding_with_a_four_byte_character_gives_a_description_github_accepts(self):
+        # text-lint status ASCII (quire#764): GitHub refuses a status description with a 4-byte character
+        description = gl.status_description('PR body: ends with \U0001F916 Generated with [Claude Code]')
+        self.assertTrue(description.isascii())
+        self.assertLessEqual(len(description), 140)
+        self.assertIn('robot', description)
+
+    def test_a_description_is_ascii_and_at_most_140_whatever_the_finding(self):
+        for finding in ('caf\u00e9 \u2014 \U0001F916' * 30, '\U0001F916' * 200, 'plain'):
+            description = gl.status_description(finding)
+            self.assertTrue(description.isascii())
+            self.assertLessEqual(len(description), 140)
+
+    def test_a_wrong_footer_posts_a_status_with_the_finding_in_ascii(self):
+        api = FakeApi()
+        pull = dict(PULL, body=GOOD_BODY.replace('\U0001F916 Generated with [Claude Code](https://claude.ai/code)\n', 'done\n'))
+        findings = self.run_event('pull_request_target', {'pull_request': pull}, api)
+        description = self.status(api)['description']
+        self.assertTrue(description.isascii())
+        self.assertLessEqual(len(description), 140)
+        self.assertIn('generated-by line', description)
+        self.assertTrue(findings)
 
     def test_a_bot_and_a_relock_branch_are_exempt(self):
         for pull in (dict(PULL, user={'login': 'dependabot[bot]'}, body=''), dict(PULL, head={'sha': HEAD, 'ref': 'relock/2026-10-21'}, body='')):
