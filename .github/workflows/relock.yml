@@ -18,7 +18,7 @@ permissions:
 jobs:
   relock:
     # main of repository-prototype at 3873e58 (after #372): its runners are ubuntu-24.04 (#352 there)
-    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@d256b6e3c2f5a580dc8a0039de86ea416358f5ae
+    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@6b1ae8df2bca5e9105036b9b69f2296553ea1999
     secrets: inherit
     with:
       workflow-pins: |
