@@ -267,8 +267,10 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
 ## Running the e2e flight recorder on a local machine: tracefs and a non-root user (quire#765)
 
 The flight recorder reads the kernel's tracing filesystem and runs its root steps through
-`sudo -n`, as CI does on its runner: `e2e/flight-recorder.js` calls `sudo -n` at its lines 46 and
-296 (the ring's steps, in `e2e/flight-tracefs.js`), and `e2e/preflight.js` checks `sudo -n true`
+`sudo -n`, as CI does on its runner: in `e2e/flight-recorder.js` the ring's `asRoot` (line 46)
+runs `sudo -n` on `ROOT_SCRIPT`, which is `e2e/flight-tracefs.js` (line 23 of
+`e2e/flight-recorder.js`); line 296 is the `sudo -n` spawn of `e2e/flight-watchdog.js`
+(`WATCHDOG_SCRIPT`, line 286), not a ring step; and `e2e/preflight.js` checks `sudo -n true`
 at line 116. The watchdog (`e2e/flight-watchdog.js`) makes no `sudo` call; it gives its output to
 the user `sudo` ran for (`SUDO_UID`, line 34). `flight-tracefs.js` sets
 `TRACEFS = /sys/kernel/tracing`. Where that directory is not a mounted tracefs, the recorder
@@ -294,25 +296,27 @@ reports `the kernel ring did not start (no tracefs, or sudo refused: see the run
 * **Does the mount survive a container restart.** The ticket's reading is that it does not:
   `/proc/mounts` is per boot, and nothing writes the mount to disk. This session did not restart
   its container, so that is the ticket's reading, not a restart test. The mount is set again at
-  the start of each session by the environment's setup script, which is not in the repo. The
-  setup-script page could not be read in this session (it returned a message about a failed
-  script with no command named), so the line above is not checked against that page; the owner
-  adds it to the environment's Setup script.
+  the start of each session by the environment's setup script, which is not in the repo: the
+  script holds the line above (the owner's confirmation with a screenshot, quire#785).
 * **Who runs the specs.** As uid 0, the specs run without any `sudo`. A run as another user
   (comment 6329897260 ran as user `quireci`, `sudo -u quireci -H env CI=true ...`) needs a user
   and a `sudo -n` grant. The ticket records no `useradd` and no `sudoers.d` command for that user,
   so neither is given here; in this container `getent passwd quireci` is empty and
-  `/etc/sudoers.d` holds only its `README`. The user's env file must be readable by that user.
-* **The four specs that passed** (root, `CI=true`, the commands of `.claude/rules/e2e.md`):
+  `/etc/sudoers.d` holds only its `README`. The run of comment 6325792780 passed as `quireci` with an env file that user read, so the file
+  must be readable by that user.
+* **The four specs that passed** (root; each command is `CI=true bats with-env <env> ./dist/debug/gen-pwa test -- <spec>`,
+  shown in the comment that holds the run, for example 6325766934; `.claude/rules/e2e.md` has no
+  `CI=true`):
   `e2e/evidence.spec.js` 34 passed, 62 skipped; `e2e/evidence-real.spec.js` 25 passed and the
-  serial test passed; `e2e/stall-capture.spec.js` 64 passed and the serial test passed;
+  serial test passed; `e2e/stall-capture.spec.js` 64 passed (its comment holds only the last 150 lines, so the serial
+  line is not shown there);
   `e2e/sanitizer.spec.js` against the AddressSanitizer build of Chromium, 9 passed. The raw outputs
   are on quire#765 (comments 6325766934, 6325769509, 6325792430 and 6325769875).
 * **A non-root run** (`sudo -u <user> -H env CI=true ...` with the worktree owned by `<user>`):
   `e2e/evidence.spec.js` passed with 34 passed, 62 skipped (comment 6325792780);
   `e2e/stall-capture.spec.js` passed with 64 passed and the serial test passed (comment
-  6329897260); `e2e/evidence-real.spec.js` passed on an output directory that held no root-owned
-  file. Two defects came from those runs and are filed as p0: a root run leaves
+  6329897260); `e2e/evidence-real.spec.js` failed on `EACCES` until the root-owned output directory was
+  removed, then passed with 25 passed and the serial test (quire#767's body). Two defects came from those runs and are filed as p0: a root run leaves
   `test-results/**/watchdog/` owned by root, and the next run as the user fails to unlink it with
   `EACCES` (quire#767); and `PWA_TEST_LOCK_DIR` on the machine was root-owned, so the run printed
   `a lock file in PWA_TEST_LOCK_DIR could not be opened: running without the machine's lock`
