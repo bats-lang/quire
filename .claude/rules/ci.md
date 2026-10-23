@@ -300,3 +300,76 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   a spec or a static fixture runs that group too where the machine can (`tests/static/run.sh`,
   `gen-pwa test -- <spec>`); the rest of the population is CI's. Playwright
   1.58 or later is required (`.claude/rules/e2e.md`).
+
+## Running the e2e flight recorder on a local machine: tracefs and a non-root user (quire#765)
+
+The flight recorder reads the kernel's tracing filesystem and runs its root steps through
+`sudo -n`, as CI does on its runner: in `e2e/flight-recorder.js` the ring's `asRoot` (line 46)
+runs `sudo -n` on `ROOT_SCRIPT`, which is `e2e/flight-tracefs.js` (line 23 of
+`e2e/flight-recorder.js`); line 296 is the `sudo -n` spawn of `e2e/flight-watchdog.js`
+(`WATCHDOG_SCRIPT`, line 286), not a ring step; and `e2e/preflight.js` checks `sudo -n true`
+at line 116. The watchdog (`e2e/flight-watchdog.js`) makes no `sudo` call; it gives its output to
+the user `sudo` ran for (`SUDO_UID`, line 34). `flight-tracefs.js` sets
+`TRACEFS = /sys/kernel/tracing`. Where that directory is not a mounted tracefs, the recorder
+reports `the kernel ring did not start (no tracefs, or sudo refused: see the run's first lines)`
+(`e2e/flight-recorder.js` line 89).
+
+* **The mount.** The command is `mount -t tracefs nodev /sys/kernel/tracing`, run as uid 0. Run
+  on 2026-10-21 in a container where tracefs was not yet mounted, it printed `rc=0` and the line
+  `nodev /sys/kernel/tracing tracefs rw,relatime 0 0` in `/proc/mounts` (quire#765's ticket body).
+  Run again on 2026-10-22 where it was already mounted, it failed with exit 32:
+
+  ```
+  $ mount -t tracefs nodev /sys/kernel/tracing; echo rc=$?
+  mount: /sys/kernel/tracing: nodev already mounted on /sys/kernel/tracing.
+  rc=32
+  $ grep tracefs /proc/mounts
+  nodev /sys/kernel/tracing tracefs rw,relatime 0 0
+  ```
+
+  A setup script must therefore mount only when the line is missing. Its line, tested here
+  on the already-mounted path (exit 0 and no second mount), is
+  `grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing`.
+* **Does the mount survive a container restart.** The ticket's reading is that it does not:
+  `/proc/mounts` is per boot, and nothing writes the mount to disk. This session did not restart
+  its container, so that is the ticket's reading, not a restart test. The mount is set again at
+  the start of each session by the environment's setup script, which is not in the repo: the
+  script holds the line above (the owner's confirmation with a screenshot, quire#785).
+* **Who runs the specs.** As uid 0, the specs run without any `sudo`. A run as another user
+  (comment 6329897260 ran as user `quireci`, `sudo -u quireci -H env CI=true ...`) needs a user
+  and a `sudo -n` grant. The ticket records no `useradd` and no `sudoers.d` command for that user,
+  so neither is given here; in this container `getent passwd quireci` is empty and
+  `/etc/sudoers.d` holds only its `README`. The run of comment 6325792780 passed as `quireci` with an env file that user read, so the file
+  must be readable by that user.
+* **The four specs that passed** (root; each command is `CI=true bats with-env <env> ./dist/debug/gen-pwa test -- <spec>`,
+  shown in the comment that holds the run, for example 6325766934; `.claude/rules/e2e.md` has no
+  `CI=true`):
+  `e2e/evidence.spec.js` 34 passed, 62 skipped; `e2e/evidence-real.spec.js` 25 passed and the
+  serial test passed; `e2e/stall-capture.spec.js` 64 passed (its comment holds only the last 150 lines, so the serial
+  line is not shown there);
+  `e2e/sanitizer.spec.js` against the AddressSanitizer build of Chromium, 9 passed. The raw outputs
+  are on quire#765 (comments 6325766934, 6325769509, 6325792430 and 6325769875).
+* **A non-root run** (`sudo -u <user> -H env CI=true ...` with the worktree owned by `<user>`):
+  `e2e/evidence.spec.js` passed with 34 passed, 62 skipped (comment 6325792780);
+  `e2e/stall-capture.spec.js` passed with 64 passed and the serial test passed (comment
+  6329897260); `e2e/evidence-real.spec.js` failed on `EACCES` until the root-owned output directory was
+  removed, then passed with 25 passed and the serial test (quire#767's body). Two defects came from those runs and are filed as p0: a root run leaves
+  `test-results/**/watchdog/` owned by root, and the next run as the user fails to unlink it with
+  `EACCES` (quire#767); and `PWA_TEST_LOCK_DIR` on the machine was root-owned, so the run printed
+  `a lock file in PWA_TEST_LOCK_DIR could not be opened: running without the machine's lock`
+  (quire#768).
+* **The ASan browser** for `e2e/sanitizer.spec.js` is the archive `check.yml` names, checked against
+  the SHA-256 `check.yml` pins (`.github/workflows/check.yml` lines 430 to 434, the install):
+
+  ```
+  curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/asan.zip" https://storage.googleapis.com/chromium-browser-asan/linux-release/asan-linux-release-1625077.zip
+  echo "1e4744f206e8a2eca53b3184ff673e1dbed7cdcad146a0f2efc42bdde65749bc  $RUNNER_TEMP/asan.zip" | sha256sum -c -
+  unzip -q "$RUNNER_TEMP/asan.zip" -d "$RUNNER_TEMP/asan" chrome '*.pak' icudtl.dat '*.bin' '*.so' libvulkan.so.1 'locales/*' chrome_crashpad_handler vk_swiftshader_icd.json
+  rm "$RUNNER_TEMP/asan.zip"
+  sudo apt-get install -y -q libpci3
+  ```
+
+  Its central directory records mode 0755 for `chrome` and `chrome_crashpad_handler`, and `unzip`
+  (what `check.yml` uses) restores that mode. A `bsdtar` extraction on the machine gave 0664
+  instead (quire#765, comment 6325973318), and that run needed `chmod 0755` on the two before it
+  could spawn them (comment 6325769875). The extracted browser is about 4.4 GB.
