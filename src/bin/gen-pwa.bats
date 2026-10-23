@@ -159,8 +159,10 @@ fn _generate (): void = let
      published under on Google Play. It opens EPUBs, and is shared
      them; and it is opened at quire:// addresses, as Dropbox's sign-in
      in the system's browser comes back (quire://oauth/dropbox): its
-     intent filters are written again, with that scheme's *)
-  val () = $P.create_android("Quire", "dev.middlefield.quire", "../pwa", "dist/android", "application/epub+zip")
+     intent filters are written again, with that scheme's. The locked
+     form: its build-android.sh installs from scripts/android/pnpm-lock.yaml
+     (copied beside it by check.yml), keyword: android lock *)
+  val () = $P.create_android_locked("Quire", "dev.middlefield.quire", "../pwa", "dist/android", "application/epub+zip")
   val () = _android_version()
 in
   if _intent_filters() then println! ("Android project generated in dist/android/")
