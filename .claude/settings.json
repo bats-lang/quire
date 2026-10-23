@@ -6,6 +6,8 @@
       "Bash(uvx pitboss clean-container --no-dry-run)",
       "Bash(uvx --from git+https://github.com/dev-skill-up/pitboss pitboss clean-container)",
       "Bash(uvx --from git+https://github.com/dev-skill-up/pitboss pitboss clean-container --no-dry-run)",
+      "Bash(grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing)",
+      "Bash(mount -t tracefs nodev /sys/kernel/tracing)",
       "Edit(/.claude/rules/ci.md)"
     ]
   }
