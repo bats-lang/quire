@@ -181,7 +181,7 @@ jobs:
       # pwa's action (quire#637). The WASM smoke tests need no browsers, which
       # are restored from the cache here
       - name: Set up Node.js and Playwright
-        uses: bats-lang/pwa/.github/actions/e2e-setup@de812f3cb8710c6d2ed1e488948635926faf0b27 # pwa main (no release tag; relock.yml moves it, #777)
+        uses: bats-lang/pwa/.github/actions/e2e-setup@2dd91d3b4d60e8ddf9c27c51821d4af5cbfe2040 # pwa main at #160 (no release tag; relock.yml moves it, #777)
         with:
           playwright-minimum: "1.58"
 
@@ -369,7 +369,7 @@ jobs:
       # 1.58 is the least Playwright the suite may run on: its fake clock needs it (keyword: the fake clock)
       - name: Set up Node.js and Playwright
         if: env.GROUP_RUN == 'yes'
-        uses: bats-lang/pwa/.github/actions/e2e-setup@de812f3cb8710c6d2ed1e488948635926faf0b27 # pwa main (no release tag; relock.yml moves it, #777)
+        uses: bats-lang/pwa/.github/actions/e2e-setup@2dd91d3b4d60e8ddf9c27c51821d4af5cbfe2040 # pwa main at #160 (no release tag; relock.yml moves it, #777)
         with:
           playwright-minimum: "1.58"
 
@@ -571,7 +571,7 @@ jobs:
   android:
     needs: build
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@2dd91d3b4d60e8ddf9c27c51821d4af5cbfe2040 # pwa main after #124 (no release tag)
+    uses: bats-lang/pwa/.github/workflows/android.yml@2dd91d3b4d60e8ddf9c27c51821d4af5cbfe2040 # pwa main at #160 (no release tag)
     secrets: inherit
     with:
       artifact: quire-android
@@ -581,7 +581,7 @@ jobs:
       # quire#623; replaces sync-identity.yml's own steps). pwa-ref is the
       # pin above (a reusable workflow cannot read the commit it was called
       # at); the SHA-1 is the committed one (scripts/sync-clients.env)
-      pwa-ref: de812f3cb8710c6d2ed1e488948635926faf0b27
+      pwa-ref: 2dd91d3b4d60e8ddf9c27c51821d4af5cbfe2040
       play-signing-sha1: ${{ needs.build.outputs.play_signing_sha1 }}
       require-signed: true
       publish: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -612,7 +612,7 @@ jobs:
   play-internal:
     needs: [check, android]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: bats-lang/pwa/.github/workflows/play-release.yml@de812f3cb8710c6d2ed1e488948635926faf0b27 # pwa main after #124 (no release tag)
+    uses: bats-lang/pwa/.github/workflows/play-release.yml@de812f3cb8710c6d2ed1e488948635926faf0b27 # pwa main at #159 (no release tag)
     permissions:
       contents: read
       id-token: write
