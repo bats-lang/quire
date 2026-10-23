@@ -3,6 +3,7 @@
 
 import { test, expect, onAndroid } from './fixtures.js';
 import { readFileSync } from 'node:fs';
+import { reloadSettled } from './legacy-library.js';
 import {
   start, readBook, place, showChrome, toLibrary, openBook, selectText, marks, chapters, dialog,
   control, selectionButton, selectionPick, reload, pagedBook, librarySearch, libraryShown,
@@ -204,15 +205,12 @@ test('annotations stored before print pages were kept (QA1) still load', async (
   await selectionButton(page, 'Note').click();
   await writeNote(page, 'Written before');
   await toLibrary(page);
-  await reload(page);
-  // the app loaded again before its store is rewritten and it is
-  // reloaded: a reload while the last one is still loading aborts the
-  // loader's fetch of app.wasm, which the page reports as an error
-  // ("Failed to fetch", bridge.js), and the rewrite would race the
-  // app's own reads at startup
+  // the rewrite waits for the sync as the app opens to end (keyword: sync as the app opens, #782)
+  await reloadSettled(page);
   await expect(libraryShown(page)).toBeVisible();
   expect(await storeAsQA1(page)).toBe(1);
-  await page.reload();
+  // the book opens after the sync as the app opens ends (keyword: sync as the app opens, #782)
+  await reloadSettled(page);
   await openBook(page, 'Older Notes');
   await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'Para 2.0' });
   const md = await exportMarkdown(page);
