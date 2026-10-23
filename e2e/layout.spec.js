@@ -816,7 +816,7 @@ test('the library menu is reachable under the banner of records that cannot be u
   await start(page);
   await syncEnded(page);
   await forgetRecords(page);
-  const unreadable ={ idHigh: 0x1234567, idLow: 0x0abcdef, title: 'Alpha Tales', author: 'Ann Writer' };
+  const unreadable = { idHigh: 0x1234567, idLow: 0x0abcdef, title: 'Alpha Tales', author: 'Ann Writer' };
   await put(page, 'lib', [...legacyLibrary(6, [], [unreadable, { idHigh: 0x2345678, idLow: 0x1bcdef0, title: 'Beta Notes', author: 'Bo Author' }])]);
   await reloadSettled(page);
   await expect(cards(page)).toHaveCount(2);
