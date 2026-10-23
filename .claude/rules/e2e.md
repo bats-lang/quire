@@ -111,6 +111,18 @@ The skips of `e2e/` that depend on the machine and not on the project are
 `stall-capture.spec.js` (gdb); every other `test.skip` is on the project
 (Android or a browser, touch or mouse), so it skips the same on CI.
 
+## The android project syncs as the app opens (#515, #782)
+
+Keyword: sync as the app opens. In the android project the app has the Android store
+(`Filesystem`, played by `androidApp`) and runs a sync round as it opens: it writes the sync
+file and reads every book's annotations record (`annot_sync_json`, `_annotations_take` in
+`src/sync.bats`) and stores each again (`annot_sync_store`, `src/annot.bats`), then writes
+`sync-state`. A spec that changes the store (`put`, `forgetRecords`, `storeAsQA1`) while that round
+is under way can have its change overwritten by a store of what the round read before it (a
+record rewritten as "QA1", with no print pages, stored again as "QA3" with its labels). Such a spec reloads with `reloadSettled`
+(`e2e/legacy-library.js`), which removes `sync-state` and waits for the round to write it, before
+it changes the store and before it opens the book it changed. The other projects do not sync.
+
 ## Nothing of one book shows in the next (#435)
 
 `e2e/two-books.spec.js` opens a book that has every per-book feature (Alpha:

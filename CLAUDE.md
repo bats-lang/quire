@@ -100,8 +100,11 @@ is not a fix.
 **We do not write shell scripts (or any non-bats code of our own) unless all other avenues
 are exhausted.** We self-host in bats, implement in bats, build tooling in bats;
 dependencies on other tools are fine; only what is impossible in bats (like getting bats to
-run) is not bats. A PR that adds non-bats code of ours names the avenue it exhausted
-(quire#646).
+run) is not bats. Our own code is bats; the only non-bats code is what is impossible in
+bats, a dependency's own format, or a third-party tool used as it is. A workflow `run:`
+step that does more than call one bats subcommand or one third-party tool is code we
+wrote. A PR that adds non-bats code of ours names the avenue it exhausted, and the
+reviewer rejects it without that (quire#646, quire#731).
 
 **No mtimes in freshness.** Nothing that decides whether an output is fresh (a build, a
 cache, a memo, a test selection) reads a file's time: it compares content hashes (bats#254).
