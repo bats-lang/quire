@@ -24,8 +24,13 @@ The pins and the relock are in CLAUDE.md. Specifics:
   image's headers and libraries are not judged (bats#394, which holds bats#338 and bats#380; "Not judged yet" below) (#622).
 * A publish never turns main red: until a lock names a package release, quire does not use
   it, so package releases publish first and the quire PR with the new lock follows.
-* GITHUB_TOKEN cannot change workflow files, so the relock PR lists pwa's `android.yml` pin
-  as not moved (no `RELOCK_TOKEN`): move it in a PR of its own.
+* The relock moves a workflow pin with `RELOCK_TOKEN` (set in quire) and lists it as not
+  moved without one. It moves the pin's `uses:` line only, never a `pwa-ref:` input, which
+  repeats the pin: relock PR #755 moved `android.yml` to 6a96e60 and left `pwa-ref` at
+  ea8a14a (fixed by hand in #777). So `play-release.yml` is not in `workflow-pins` (#777);
+  each relock PR that moves `android.yml` also moves its `pwa-ref` by hand, with the same
+  commit, until the relock moves it (bats-lang/repository-prototype#385, its `relock-pins.yml`).
+  `e2e-setup` has no `pwa-ref` and is moved whole (#777).
 
 ### The compiler's cache (#460, #622)
 

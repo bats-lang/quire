@@ -18,11 +18,14 @@ permissions:
 jobs:
   relock:
     # main of repository-prototype at 3873e58 (after #372): its runners are ubuntu-24.04 (#352 there)
-    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@6b1ae8df2bca5e9105036b9b69f2296553ea1999
+    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@6b1ae8df2bca5e9105036b9b69f2296553ea1999 # repository-prototype main after #387 (no release tag)
     secrets: inherit
     with:
+      # pwa's e2e-setup has no pwa-ref copy of its pin, so the relock moves it whole (#777).
+      # play-release.yml is not listed: its pwa-ref copy of the pin stays (ci.md, "CI is pinned").
       workflow-pins: |
         bats-lang/pwa/.github/workflows/android.yml
+        bats-lang/pwa/.github/actions/e2e-setup
         bats-lang/repository-prototype/.github/workflows/relock-pins.yml
         bats-lang/bats/.github/actions/setup
         bats-lang/repository-prototype/.github/actions/check-aggregate
