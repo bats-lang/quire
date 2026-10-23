@@ -18,7 +18,7 @@ permissions:
 jobs:
   relock:
     # main of repository-prototype at 3873e58 (after #372): its runners are ubuntu-24.04 (#352 there)
-    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@802e8fee5f10fe74266d5c720d4ba641e1a1bb2c
+    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@802e8fee5f10fe74266d5c720d4ba641e1a1bb2c # repository-prototype main 802e8fe
     secrets: inherit
     with:
       # pwa's e2e-setup has no pwa-ref copy of its pin, so the relock moves it whole (#777).
