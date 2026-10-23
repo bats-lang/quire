@@ -32,6 +32,21 @@ The pins and the relock are in CLAUDE.md. Specifics:
   commit, until the relock moves it (bats-lang/repository-prototype#385, its `relock-pins.yml`).
   `e2e-setup` has no `pwa-ref` and is moved whole (#777).
 
+### The Android project's lock (keyword: android lock, #735)
+
+`gen-pwa` writes the Android project with pwa's `create_android_locked`, whose `build-android.sh`
+refuses to run without a `pnpm-lock.yaml` beside it and installs with `pnpm install
+--frozen-lockfile`. The lock is quire's, `scripts/android/pnpm-lock.yaml`; `check.yml`'s `build`
+job copies it to `dist/android/` after `gen-pwa`, and the `android` job's install fails when it
+and the generated `package.json` disagree.
+
+* **Moving it.** The plugin versions and commits come from bridge's table (the locked bridge
+  version), so a PR that changes `bats.lock` or what `gen-pwa` writes into `package.json`
+  regenerates the lock in the same PR, and runs the same CI. In a clean directory holding
+  `dist/android/package.json` and a `pnpm-workspace.yaml` of `nodeLinker: hoisted`, with the pnpm
+  of `dist/android/fetch-pnpm.sh`: `corepack pnpm@<its version> install --lockfile-only`. Commit the
+  file it writes, unedited.
+
 ### The compiler's cache (#460, #622)
 
 A pull request's jobs restore what bats kept in the newest earlier run

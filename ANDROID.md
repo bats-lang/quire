@@ -146,7 +146,9 @@ anything tied to the signing key.
 ## Building locally
 
 `bats build` then `dist/debug/gen-pwa` writes `dist/pwa` and
-`dist/android`. With Node 22 or 24 (the script runs pnpm through the
+`dist/android`. The script installs from the committed lock (`scripts/android/pnpm-lock.yaml`) and refuses to
+run without it beside the script, so copy it there first (`cp scripts/android/pnpm-lock.yaml
+dist/android/`). With Node 22 or 24 (the script runs pnpm through the
 corepack they ship; Node 25 ships none), a JDK 21 and the Android SDK
 (`ANDROID_HOME`):
 

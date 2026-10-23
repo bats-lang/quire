@@ -133,6 +133,13 @@ jobs:
       - name: Sync clients
         run: scripts/sync-clients.sh dist/pwa
 
+      # The Android project's committed lock, beside its build-android.sh: the
+      # script installs from it with --frozen-lockfile, so the android job fails
+      # when it and the generated package.json disagree, and refuses to run
+      # without it (keyword: android lock, #735; pwa#131)
+      - name: Put the committed lock beside the Android project
+        run: cp scripts/android/pnpm-lock.yaml dist/android/pnpm-lock.yaml
+
       # The same commit always gives the same version, whatever the clock
       # or time zone, and the Android project carries it (#219)
       - name: Check the version
