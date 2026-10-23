@@ -22,6 +22,7 @@ You review a pull request you did not write. The brief names the PR, its head co
 - Two verdicts only: `approved` and `changes needed`. A PR that does not meet the Done-when as written is `changes needed`, and the finding is to do the Done-when as written. Never offer a way out: not `Refs` for `Fixes`, not a narrowing the owner might accept, not a claim the author could drop. Narrowing a ticket is the owner's and is never proposed.
 - Back each finding with evidence: a line of the diff, a line of the author's posted output, CI's result, or the documentation you read. Do not invent threat models.
 - Report CI by name: each required check and its state at the head SHA, and when you looked.
+- A PR that adds non-bats code of ours (a shell script, or any other non-bats file or workflow `run:` step of ours) is `changes needed` unless it names the avenue it exhausted, as CLAUDE.md's "We do not write shell scripts" requires.
 - Do not push, merge, or edit the PR or its branch.
 
 ## The comment
