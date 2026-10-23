@@ -8,7 +8,7 @@ import { test, expect } from './fixtures.js';
 import {
   epubFile, importFiles, openBook, card, placeChanged, toLibrary, bookPage, place, chapters, openReadingSettings, readingSettings, fixedLayoutBook, readFixed, fixedPlace, japaneseChapters,
 } from './helpers.js';
-import { launch, relaunch, rested, chapterShown, nextChapter } from './relaunch.js';
+import { launch, relaunch, rested, settled, chapterShown, nextChapter } from './relaunch.js';
 import { legacyLibrary, store, put, forgetRecords, syncEnded, reloadSettled } from './legacy-library.js';
 
 const paged = { title: 'Stable', author: 'Stability', rawChapters: chapters(1, 90) };
@@ -183,6 +183,8 @@ test('scrolled, a hand scroll within one screenful is the place a window swap ke
   await bookPage(page).evaluate(doc => { doc.scrollTop = doc.clientHeight; });
   await scrollRested(page);
   const first = await topParagraph(page);
+  // the layout's own records (counts, fonts) have ended, so only the hand scroll can record the place (#664)
+  await settled(page);
   // a hand scroll of less than half a screen, so the screenful is the same,
   // far enough that another paragraph is at the top
   await scrollListening(page);
@@ -217,6 +219,8 @@ test('scrolled, a hand scroll within one screenful is the place the book opens a
   await bookPage(page).evaluate(doc => { doc.scrollTop = doc.clientHeight; });
   await scrollRested(page);
   const first = await topParagraph(page);
+  // the layout's own records (counts, fonts) have ended, so only the hand scroll can record the place (#664)
+  await settled(page);
   await scrollListening(page);
   await bookPage(page).evaluate(doc => {
     const start = doc.scrollTop;

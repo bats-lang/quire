@@ -135,7 +135,10 @@ key, the merge queue, the Node packages, the mutation check and which groups a c
 are in `.claude/rules/ci.md`, which loads when CI files are touched.
 
 Which tool moves which pin (`.github/dependabot.yml`, weekly, a 7-day cooldown, one pull request
-per update; #760, the detail in `.claude/rules/ci.md`, "Node's packages"): the daily relock moves
+for all the updates of both ecosystems, from one `multi-ecosystem-groups` group with `patterns:
+["*"]`: "Define groups that span multiple package ecosystems to get a single Dependabot pull
+request", https://docs.github.com/en/code-security/concepts/supply-chain-security/multi-ecosystem-updates;
+#760, #795, the detail in `.claude/rules/ci.md`, "Node's packages"): the daily relock moves
 the compiler, the package repository and the workflow pins it names. Dependabot moves quire's
 actions by commit with their release comments, except the `bats-lang/*` ones, and the npm versions
 and `package-lock.json` of the root `package.json`, which carries `@playwright/test` and so the

@@ -24,8 +24,13 @@ The pins and the relock are in CLAUDE.md. Specifics:
   image's headers and libraries are not judged (bats#394, which holds bats#338 and bats#380; "Not judged yet" below) (#622).
 * A publish never turns main red: until a lock names a package release, quire does not use
   it, so package releases publish first and the quire PR with the new lock follows.
-* GITHUB_TOKEN cannot change workflow files, so the relock PR lists pwa's `android.yml` pin
-  as not moved (no `RELOCK_TOKEN`): move it in a PR of its own.
+* The relock moves a workflow pin with `RELOCK_TOKEN` (set in quire) and lists it as not
+  moved without one. It moves the pin's `uses:` line only, never a `pwa-ref:` input, which
+  repeats the pin: relock PR #755 moved `android.yml` to 6a96e60 and left `pwa-ref` at
+  ea8a14a (fixed by hand in #777). So `play-release.yml` is not in `workflow-pins` (#777);
+  each relock PR that moves `android.yml` also moves its `pwa-ref` by hand, with the same
+  commit, until the relock moves it (bats-lang/repository-prototype#385, its `relock-pins.yml`).
+  `e2e-setup` has no `pwa-ref` and is moved whole (#777).
 
 ### The compiler's cache (#460, #622)
 
@@ -145,7 +150,26 @@ commit; `npm ci`, retried on a dropped connection, Playwright checked against
 
 Which tool moves which pin here (#760; CLAUDE.md, "CI is pinned"): Dependabot
 (`.github/dependabot.yml`, weekly, `cooldown` 7 days) moves the npm versions and `package-lock.json`
-of the root `package.json`. That is the only `package.json` in quire: `ux-review/` has none, and its
+of the root `package.json`.
+
+One pull request for every update (#795; the first run had opened eight at once, each a whole
+`check` run, and `qsweep pressure` held every push and merge): the file defines one top-level
+`multi-ecosystem-groups` group, `dependencies` (weekly, `patterns: ["*"]`), and the `npm` and
+`github-actions` entries join it with `multi-ecosystem-group: dependencies`; the `cooldown` and the
+`bats-lang/*` ignore stay on their entries. The docs: a plain `groups` rule is per ecosystem ("You
+must configure groups per individual package ecosystem",
+https://docs.github.com/en/code-security/tutorials/secure-your-dependencies/optimizing-pr-creation-version-updates),
+and `multi-ecosystem-groups` is the key to "Define groups that span multiple package ecosystems to
+get a single Dependabot pull request"; "Updates across multiple package ecosystems in the same group
+are combined into a single pull request", and it "Require[s] the `patterns` key", `["*"]` meaning all
+dependencies (https://docs.github.com/en/code-security/concepts/supply-chain-security/multi-ecosystem-updates,
+https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference).
+The docs' examples are docker and terraform and name no npm and github-actions pair, so that one PR
+holds both is shown by the Dependabot run after the config merges (the readings are on #795), not by
+the docs. If it opens two, the fallback is `open-pull-requests-limit: 0` in each entry and the
+updates carried by the relock PR (a ticket in repository-prototype first).
+
+That is the only `package.json` in quire: `ux-review/` has none, and its
 Playwright config runs on the root's install. A Playwright bump brings the Chromium its version
 needs. The docs: "Each version of Playwright needs specific versions of browser binaries to
 operate." (playwright.dev/docs/browsers), so the browser moves with `@playwright/test` and no
@@ -276,3 +300,76 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   a spec or a static fixture runs that group too where the machine can (`tests/static/run.sh`,
   `gen-pwa test -- <spec>`); the rest of the population is CI's. Playwright
   1.58 or later is required (`.claude/rules/e2e.md`).
+
+## Running the e2e flight recorder on a local machine: tracefs and a non-root user (quire#765)
+
+The flight recorder reads the kernel's tracing filesystem and runs its root steps through
+`sudo -n`, as CI does on its runner: in `e2e/flight-recorder.js` the ring's `asRoot` (line 46)
+runs `sudo -n` on `ROOT_SCRIPT`, which is `e2e/flight-tracefs.js` (line 23 of
+`e2e/flight-recorder.js`); line 296 is the `sudo -n` spawn of `e2e/flight-watchdog.js`
+(`WATCHDOG_SCRIPT`, line 286), not a ring step; and `e2e/preflight.js` checks `sudo -n true`
+at line 116. The watchdog (`e2e/flight-watchdog.js`) makes no `sudo` call; it gives its output to
+the user `sudo` ran for (`SUDO_UID`, line 34). `flight-tracefs.js` sets
+`TRACEFS = /sys/kernel/tracing`. Where that directory is not a mounted tracefs, the recorder
+reports `the kernel ring did not start (no tracefs, or sudo refused: see the run's first lines)`
+(`e2e/flight-recorder.js` line 89).
+
+* **The mount.** The command is `mount -t tracefs nodev /sys/kernel/tracing`, run as uid 0. Run
+  on 2026-10-21 in a container where tracefs was not yet mounted, it printed `rc=0` and the line
+  `nodev /sys/kernel/tracing tracefs rw,relatime 0 0` in `/proc/mounts` (quire#765's ticket body).
+  Run again on 2026-10-22 where it was already mounted, it failed with exit 32:
+
+  ```
+  $ mount -t tracefs nodev /sys/kernel/tracing; echo rc=$?
+  mount: /sys/kernel/tracing: nodev already mounted on /sys/kernel/tracing.
+  rc=32
+  $ grep tracefs /proc/mounts
+  nodev /sys/kernel/tracing tracefs rw,relatime 0 0
+  ```
+
+  A setup script must therefore mount only when the line is missing. Its line, tested here
+  on the already-mounted path (exit 0 and no second mount), is
+  `grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing`.
+* **Does the mount survive a container restart.** The ticket's reading is that it does not:
+  `/proc/mounts` is per boot, and nothing writes the mount to disk. This session did not restart
+  its container, so that is the ticket's reading, not a restart test. The mount is set again at
+  the start of each session by the environment's setup script, which is not in the repo: the
+  script holds the line above (the owner's confirmation with a screenshot, quire#785).
+* **Who runs the specs.** As uid 0, the specs run without any `sudo`. A run as another user
+  (comment 6329897260 ran as user `quireci`, `sudo -u quireci -H env CI=true ...`) needs a user
+  and a `sudo -n` grant. The ticket records no `useradd` and no `sudoers.d` command for that user,
+  so neither is given here; in this container `getent passwd quireci` is empty and
+  `/etc/sudoers.d` holds only its `README`. The run of comment 6325792780 passed as `quireci` with an env file that user read, so the file
+  must be readable by that user.
+* **The four specs that passed** (root; each command is `CI=true bats with-env <env> ./dist/debug/gen-pwa test -- <spec>`,
+  shown in the comment that holds the run, for example 6325766934; `.claude/rules/e2e.md` has no
+  `CI=true`):
+  `e2e/evidence.spec.js` 34 passed, 62 skipped; `e2e/evidence-real.spec.js` 25 passed and the
+  serial test passed; `e2e/stall-capture.spec.js` 64 passed (its comment holds only the last 150 lines, so the serial
+  line is not shown there);
+  `e2e/sanitizer.spec.js` against the AddressSanitizer build of Chromium, 9 passed. The raw outputs
+  are on quire#765 (comments 6325766934, 6325769509, 6325792430 and 6325769875).
+* **A non-root run** (`sudo -u <user> -H env CI=true ...` with the worktree owned by `<user>`):
+  `e2e/evidence.spec.js` passed with 34 passed, 62 skipped (comment 6325792780);
+  `e2e/stall-capture.spec.js` passed with 64 passed and the serial test passed (comment
+  6329897260); `e2e/evidence-real.spec.js` failed on `EACCES` until the root-owned output directory was
+  removed, then passed with 25 passed and the serial test (quire#767's body). Two defects came from those runs and are filed as p0: a root run leaves
+  `test-results/**/watchdog/` owned by root, and the next run as the user fails to unlink it with
+  `EACCES` (quire#767); and `PWA_TEST_LOCK_DIR` on the machine was root-owned, so the run printed
+  `a lock file in PWA_TEST_LOCK_DIR could not be opened: running without the machine's lock`
+  (quire#768).
+* **The ASan browser** for `e2e/sanitizer.spec.js` is the archive `check.yml` names, checked against
+  the SHA-256 `check.yml` pins (`.github/workflows/check.yml` lines 430 to 434, the install):
+
+  ```
+  curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/asan.zip" https://storage.googleapis.com/chromium-browser-asan/linux-release/asan-linux-release-1625077.zip
+  echo "1e4744f206e8a2eca53b3184ff673e1dbed7cdcad146a0f2efc42bdde65749bc  $RUNNER_TEMP/asan.zip" | sha256sum -c -
+  unzip -q "$RUNNER_TEMP/asan.zip" -d "$RUNNER_TEMP/asan" chrome '*.pak' icudtl.dat '*.bin' '*.so' libvulkan.so.1 'locales/*' chrome_crashpad_handler vk_swiftshader_icd.json
+  rm "$RUNNER_TEMP/asan.zip"
+  sudo apt-get install -y -q libpci3
+  ```
+
+  Its central directory records mode 0755 for `chrome` and `chrome_crashpad_handler`, and `unzip`
+  (what `check.yml` uses) restores that mode. A `bsdtar` extraction on the machine gave 0664
+  instead (quire#765, comment 6325973318), and that run needed `chmod 0755` on the two before it
+  could spawn them (comment 6325769875). The extracted browser is about 4.4 GB.

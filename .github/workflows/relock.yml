@@ -21,8 +21,11 @@ jobs:
     uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@d256b6e3c2f5a580dc8a0039de86ea416358f5ae
     secrets: inherit
     with:
+      # pwa's e2e-setup has no pwa-ref copy of its pin, so the relock moves it whole (#777).
+      # play-release.yml is not listed: its pwa-ref copy of the pin stays (ci.md, "CI is pinned").
       workflow-pins: |
         bats-lang/pwa/.github/workflows/android.yml
+        bats-lang/pwa/.github/actions/e2e-setup
         bats-lang/repository-prototype/.github/workflows/relock-pins.yml
         bats-lang/bats/.github/actions/setup
         bats-lang/repository-prototype/.github/actions/check-aggregate
