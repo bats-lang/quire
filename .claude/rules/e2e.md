@@ -118,10 +118,8 @@ Keyword: sync as the app opens. In the android project the app has the Android s
 file and reads every book's annotations record (`annot_sync_json`, `_annotations_take` in
 `src/sync.bats`) and stores each again (`annot_sync_store`, `src/annot.bats`), then writes
 `sync-state`. A spec that changes the store (`put`, `forgetRecords`, `storeAsQA1`) while that round
-is under way can have its change overwritten by a store of what the round read before it
-(#782: a record rewritten as "QA1", with no print pages, was stored again as "QA3" with its
-labels, and the citation said ", page 4"; once in a few hundred runs on a quiet runner, 16 of
-20 with the page's CPU slowed 4 times). Such a spec reloads with `reloadSettled`
+is under way can have its change overwritten by a store of what the round read before it (a
+record rewritten as "QA1", with no print pages, stored again as "QA3" with its labels). Such a spec reloads with `reloadSettled`
 (`e2e/legacy-library.js`), which removes `sync-state` and waits for the round to write it, before
 it changes the store and before it opens the book it changed. The other projects do not sync.
 

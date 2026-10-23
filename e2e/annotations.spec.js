@@ -205,11 +205,6 @@ test('annotations stored before print pages were kept (QA1) still load', async (
   await selectionButton(page, 'Note').click();
   await writeNote(page, 'Written before');
   await toLibrary(page);
-  // the app loaded again before its store is rewritten and it is
-  // reloaded: a reload while the last one is still loading aborts the
-  // loader's fetch of app.wasm, which the page reports as an error
-  // ("Failed to fetch", bridge.js), and the rewrite would race the
-  // app's own reads at startup
   // the rewrite waits for the sync as the app opens to end (keyword: sync as the app opens, #782)
   await reloadSettled(page);
   await expect(libraryShown(page)).toBeVisible();
