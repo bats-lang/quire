@@ -6,10 +6,10 @@
 
 import { test, expect } from './fixtures.js';
 import {
-  epubFile, importFiles, openBook, card, placeChanged, toLibrary, reload, bookPage, place, chapters, openReadingSettings, readingSettings, fixedLayoutBook, readFixed, fixedPlace, japaneseChapters,
+  epubFile, importFiles, openBook, card, placeChanged, toLibrary, bookPage, place, chapters, openReadingSettings, readingSettings, fixedLayoutBook, readFixed, fixedPlace, japaneseChapters,
 } from './helpers.js';
 import { launch, relaunch, rested, settled, chapterShown, nextChapter } from './relaunch.js';
-import { legacyLibrary, store, put, forgetRecords } from './legacy-library.js';
+import { legacyLibrary, store, put, forgetRecords, syncEnded, reloadSettled } from './legacy-library.js';
 
 const paged = { title: 'Stable', author: 'Stability', rawChapters: chapters(1, 90) };
 const vertical = { title: '縦書き', author: 'Stability', language: 'ja', rtl: true, rawChapters: japaneseChapters(1, 60) };
@@ -332,9 +332,10 @@ for (let version = 1; version <= 6; version++) {
       const stored = by === 'page'
         ? { chapter: 3, chapters: 5, page: at.p - 1, pages: at.t, anchor: -1 }
         : { chapter: 3, chapters: 5, page: 0, pages: 0, anchor: node };
+      await syncEnded(page);
       await forgetRecords(page);
       await put(page, 'lib', [...legacyLibrary(version, [], [{ idHigh, idLow, title: opts.title, author: opts.author, ...stored }])]);
-      await reload(page);
+      await reloadSettled(page);
       await openBook(page, opts.title);
       await expect.poll(async () => (await place(page)).ch).toBe(at.ch);
       await expect.poll(() => onScreen(page, top)).toBe(true);

@@ -8,11 +8,11 @@ import {
   start, epubFile, importFiles, readBook, openBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
-  reload, readingSettings, openReadingSettings, openShelf, emptyTrashDialog, shelfTitle, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
+  readingSettings, openReadingSettings, openShelf, emptyTrashDialog, shelfTitle, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
   rawMouse,
 } from './helpers.js';
 import { failLibrary, healReads, stubReads } from './storage-stub.js';
-import { legacyLibrary, bookKey, store, put, forgetRecords } from './legacy-library.js';
+import { legacyLibrary, bookKey, store, put, forgetRecords, syncEnded, reloadSettled } from './legacy-library.js';
 import { checkPageMargins } from './page-margins.js';
 import { coveredByBanner, textContrastShort, cardMoreBoxes } from './controls-shown.js';
 import { fits } from './fits.js';
@@ -814,15 +814,16 @@ for (const [name, text, button, banner] of [
 // none of the library's controls
 test('the library menu is reachable under the banner of records that cannot be used', async ({ page }) => {
   await start(page);
+  await syncEnded(page);
   await forgetRecords(page);
   const unreadable = { idHigh: 0x1234567, idLow: 0x0abcdef, title: 'Alpha Tales', author: 'Ann Writer' };
   await put(page, 'lib', [...legacyLibrary(6, [], [unreadable, { idHigh: 0x2345678, idLow: 0x1bcdef0, title: 'Beta Notes', author: 'Bo Author' }])]);
-  await reload(page);
+  await reloadSettled(page);
   await expect(cards(page)).toHaveCount(2);
   // cut inside its header: no chunk to keep, so the record cannot be used (a cut after it is used, #614)
   const record = (await store(page))[bookKey(unreadable)].slice(0, 6);
   await put(page, bookKey(unreadable), record);
-  await reload(page);
+  await reloadSettled(page);
   await expect(page.getByRole('alert')).toContainText('Some books in your library could not be read');
   await expect(page.getByRole('alert').getByRole('button', { name: 'Copy details' })).toBeVisible();
   expect(await coveredByBanner(page)).toEqual([]);

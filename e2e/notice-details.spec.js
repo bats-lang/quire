@@ -6,7 +6,7 @@
 // author, no file name.
 
 import { test, expect } from './fixtures.js';
-import { legacyLibrary, hex7, bookKey, store, put, forgetRecords } from './legacy-library.js';
+import { legacyLibrary, hex7, bookKey, store, put, forgetRecords, syncEnded, reloadSettled } from './legacy-library.js';
 import {
   start, epubFile, importFiles, readBook, toLibrary, openBook, chapters, reload, libraryMenu, menuItem, cards,
 } from './helpers.js';
@@ -24,14 +24,15 @@ const OWN_WORDS = ['Alpha Tales', 'Ann Writer', 'Beta Notes', 'Bo Author', 'Kept
 
 async function startWithRecords(page, damage) {
   await start(page);
+  await syncEnded(page);
   await forgetRecords(page);
   await put(page, 'lib', [...legacyLibrary(6, ['To read'], books)]);
-  await reload(page);
+  await reloadSettled(page);
   await expect(cards(page)).toHaveCount(2);
   const stored = await store(page);
   const record = damage(stored[bookKey(books[0])].slice());
   await put(page, bookKey(books[0]), record);
-  await reload(page);
+  await reloadSettled(page);
 }
 
 /** The notice offers Copy details and Report; the copy holds every text
@@ -83,14 +84,15 @@ for (const [name, damage, failure, fault] of [
 test('a damaged collections record is offered with its details', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await start(page);
+  await syncEnded(page);
   await forgetRecords(page);
   await put(page, 'lib', [...legacyLibrary(6, ['To read'], books)]);
-  await reload(page);
+  await reloadSettled(page);
   await expect(cards(page)).toHaveCount(2);
   const stored = await store(page);
   const record = stored['library/index'].slice(0, 6);
   await put(page, 'library/index', record);
-  await reload(page);
+  await reloadSettled(page);
   await expectDetails(page, ['Failure: CollectionsNotReadCanSetAside', 'Collections record: damaged, ']);
 });
 
