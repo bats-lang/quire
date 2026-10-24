@@ -227,7 +227,7 @@ PRIORITY_P1 = re.compile(r'(?i)\bp1\b')
 
 
 def lint_overlap(text, name, line_form, line_name):
-    """Overlap rule (quire#762, #822, CLAUDE.md): a text that changes a published signature carries the overlap line, and the ticket that removes the old form is p2, never p1."""
+    """Overlap rule (quire#762, #822, CLAUDE.md): a text that changes a published signature carries the overlap line, and the ticket that removes the old form is p2."""
     findings = []
     if SIGNATURE_CHANGE.search(text) and not line_form.search(text):
         findings.append(f'{name}: it names a change to a published signature and has no line "{line_name}" (CLAUDE.md, "Breaking changes keep at least one published version of overlap")')

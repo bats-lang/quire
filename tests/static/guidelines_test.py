@@ -277,7 +277,7 @@ class Overlap(unittest.TestCase):
     def test_the_rule_texts_say_p2_and_never_p1_for_the_removal_ticket(self):
         for parts in (('CLAUDE.md',), ('.claude', 'orchestration.md')):
             for line in read_root(*parts).split('\n'):
-                if gl.REMOVAL_LINE.search(line) and 'transcript line' not in line and 'never p1' not in line:
+                if gl.REMOVAL_LINE.search(line):
                     self.assertFalse(gl.PRIORITY_P1.search(line), (parts, line[:100]))
 
     def test_claude_md_and_orchestration_md_carry_the_rule(self):
