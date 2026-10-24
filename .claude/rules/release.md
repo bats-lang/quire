@@ -31,8 +31,8 @@ commit, and that the Android project carries the version and its code.
 Every push to main that passes the whole check is released to Google Play's internal testing
 track by `check.yml`'s `play-internal` job, which calls pwa's reusable workflow
 `play-release.yml` by commit (the script, its stub of Play and its test live in pwa): the
-run's own `release-aab`, the commit's first line as its notes. The caller passes the same
-commit twice, as `uses:` and as `pwa-ref`, and its public names as `with:` inputs. It signs in
+run's own `release-aab`, the commit's first line as its notes. The caller passes `android.yml`'s pin commit as `pwa-ref` (the relock moves it with that pin, ci.md,
+"CI is pinned"), and its public names as `with:` inputs. It signs in
 by Workload Identity Federation, whose provider admits only a push to main of this
 repository, so no key exists and no other run can release. Production is a promotion in the
 Play Console; ANDROID.md says how.

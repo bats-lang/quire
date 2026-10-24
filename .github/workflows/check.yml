@@ -587,8 +587,8 @@ jobs:
       # of a Play app signing SHA-1 that is the upload key's (pwa#96,
       # quire#623; replaces sync-identity.yml's own steps). pwa-ref is the
       # pin above (a reusable workflow cannot read the commit it was called
-      # at); the SHA-1 is the committed one (scripts/sync-clients.env)
-      pwa-ref: de812f3cb8710c6d2ed1e488948635926faf0b27
+      # at; the relock moves it with the pin, #821); the SHA-1 is the committed one (scripts/sync-clients.env)
+      pwa-ref: 60ef4627e682652290a82cc6364313b6a4c23b58
       play-signing-sha1: ${{ needs.build.outputs.play_signing_sha1 }}
       require-signed: true
       publish: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -612,8 +612,8 @@ jobs:
   # its release notes. Production stays a promotion made in the Play
   # Console (ANDROID.md). The release is pwa's reusable workflow (pwa#90,
   # moved there by quire#623), called by commit like android.yml:
-  # pwa-ref is the same commit as the pin (a reusable workflow cannot read
-  # the commit it was called at). It signs in by Workload Identity
+  # pwa-ref is android.yml's pin above, which the relock moves with that pin
+  # (#821); play-release.yml itself stays at the commit named below. It signs in by Workload Identity
   # Federation, so no key is stored; the names below are public, and
   # Google admits only a push to main of this repository (ANDROID.md)
   play-internal:
@@ -624,7 +624,7 @@ jobs:
       contents: read
       id-token: write
     with:
-      pwa-ref: de812f3cb8710c6d2ed1e488948635926faf0b27
+      pwa-ref: 60ef4627e682652290a82cc6364313b6a4c23b58
       package: dev.middlefield.quire
       workload-identity-provider: projects/162611675413/locations/global/workloadIdentityPools/github/providers/quire
       service-account: quire-play-release@spring-duality-395520.iam.gserviceaccount.com
