@@ -1,6 +1,6 @@
 {
   "name": "Quire",
-  "variant": "web build in Chromium 140 (desktop project; run of w3c/epub-tests at 54092b4233)",
+  "variant": "web build in Chromium 149 (desktop and android projects of quire's Playwright configuration; run of w3c/epub-tests at 54092b4233)",
   "ref": "https://github.com/bats-lang/quire",
   "tests": {
     "cnt-css-fonts_ot": true,
@@ -131,6 +131,7 @@
     "ocf-url_origin": "n/a",
     "ocf-url_parse-leaking-relative": "n/a",
     "ocf-url_parse-path-absolute": "n/a",
+    "ocf-url_relative": true,
     "ocf-zip-comp": true,
     "ocf-zip-mult": true,
     "pkg-collections-unknown": true,
@@ -177,7 +178,7 @@
     "pub-cmt-svg": true,
     "pub-cmt-webp": true,
     "pub-data-urls_browsing-context": true,
-    "pub-data-urls_top-level-content": true,
+    "pub-data-urls_top-level-content": false,
     "pub-external-links": true,
     "pub-external-links_consent": true,
     "pub-file-urls": true,

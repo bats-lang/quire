@@ -379,28 +379,13 @@ jobs:
         uses: bats-lang/pwa/.github/actions/e2e-setup@60ef4627e682652290a82cc6364313b6a4c23b58 # pwa main 60ef462
         with:
           playwright-minimum: "1.58"
+          stall-tools: "true"
 
       # A font with Japanese characters: the vertical book's shots are
       # empty boxes without one (quire#359; vertical.spec.js checks it)
       - name: Install a CJK font
         if: env.GROUP_RUN == 'yes'
         run: sudo apt-get install -y -q fonts-noto-cjk
-
-      # gdb, for the stall capture's native stacks and core of a frozen renderer
-      # (e2e/stall-capture.js, quire#575 and #591), elfutils (eu-stack, the capture's
-      # fallback when gdb cannot attach; unversioned like libgmp-dev and lld, the runner
-      # image bounds them), and libc6-dbg, which names the
-      # C library's internal functions in them (7 MB to download, 11 MB installed;
-      # without it only the exported ones are named; the time is printed). A STOPGAP: pwa's e2e-setup
-      # action should install it and keep the runner's passwordless sudo
-      # (bats-lang/pwa#109); this step goes when that lands. A diagnostic for a
-      # rare freeze must not turn a job red, so the index is updated, the install
-      # retried, and a failure goes on (the capture uses gdb only if it is there,
-      # and the specs that need it skip, saying why, when it is not).
-      - name: Install gdb
-        if: env.GROUP_RUN == 'yes'
-        continue-on-error: true
-        uses: ./.github/actions/stall-tools
 
       # Each spec of the group, and only those: the filters must name
       # exactly as many files as the group lists

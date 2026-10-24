@@ -175,9 +175,9 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
   `madvise` calls and `generate-core-file` before it appends its `shell sleep`: a CI renderer's core took
   until `timeout -s KILL` ended gdb (run 39716613681: 748 MB, 32 s), before the stay, so there was no gdb
   for the test to find. Cores are checked by the other tests of the spec.
-* **Nothing is installed by the capture.** gdb comes from the e2e jobs' `Install gdb` step in
-  `check.yml` (a stopgap that never fails a job; pwa's e2e-setup action should install it,
-  bats-lang/pwa#109); `QUIRE_STALL_GDB` names another. Without gdb, or with ptrace or sudo
+* **Nothing is installed by the capture.** gdb comes from pwa's e2e-setup action, which the e2e jobs of
+  `check.yml` call with `stall-tools: "true"` (every apt call bounded, a failure never fails
+  the job; bats-lang/pwa#178, quire#820); `QUIRE_STALL_GDB` names another. Without gdb, or with ptrace or sudo
   refused, the e2e run as before and nothing goes red: the capture records `native.unavailable`
   and the spec's native tests skip with that reason, on CI too.
 * **When gdb gives no stacks** (not installed, or the kernel refuses its attach) the capture asks
@@ -314,7 +314,7 @@ only for a red. The design, with the research and what each means cannot find, i
   Every job logs `[preflight]`, `[capabilities]` and `[cost]` (the loop of page cycles with the rings off and on, at the start of each run), and the monitor logs `[monitor] started` and `[monitor] stopped: <checks, heartbeats read, ring events>`. Every capture keeps `capabilities.json` (perf counters, symbol files) and logs a `::notice` when it changes.
   `e2e/evidence-real.spec.js` induces each part's failure in a nested Playwright run on the real path: for the preflight, `sudo -n` (a command that asks for a password, `QUIRE_FLIGHT_SUDO`), the output directory (a file where it has to be), a required event the kernel lacks (`QUIRE_FLIGHT_REQUIRE_EVENT`), a ring on that takes no event of the run (scoped to another process, `QUIRE_FLIGHT_TRACE_PID`), a watchdog alive that never beats (`QUIRE_FLIGHT_WATCHDOG_SCRIPT`, `QUIRE_FLIGHT_FIRST_BEAT_MS`), the browser's trace ring (a browser whose Tracing is already taken); for the monitor, a watchdog stopped with SIGSTOP and a ring whose events are all switched off (`QUIRE_FLIGHT_BEAT_STALE_MS`, `QUIRE_FLIGHT_RING_QUIET_MS` shorten the real limits; the condition and the code that ends the run are the real ones). Those variables are set by no job, only by those tests. A failed preflight stops the ring and the watchdog it had started.
   **The watchdog counts the main thread's CPU, not the process's** (`mainThreadTicks`): a frozen renderer's other threads tick now and then (1 tick in 3 s measured on Chrome 149), and a process-wide count started the clock again at each one, so a freeze could go unreported. Tested deterministically on a /proc of its own (`the watchdog counts the CPU of the main thread`); `QUIRE_NO_STALL_WATCH=1` (set by no job) makes the stall watch do nothing at all, and `a freeze with the stall watch off` shows the watchdog writes the freeze and the check passes with the watch off.
-  **The rr proof is read each job from rr itself** (`capabilities`): `perf stat -e cycles` and `rr --version` and `rr record true` (the `stall-tools` action installs rr; not installed is logged as such), with the answer in `capabilities.json` and the `[capabilities]` line, and a `::notice` when rr works.
+  **The rr proof is read each job from rr itself** (`capabilities`): `perf stat -e cycles` and `rr --version` and `rr record true` (e2e-setup's `stall-tools` input installs rr; not installed is logged as such), with the answer in `capabilities.json` and the `[capabilities]` line, and a `::notice` when rr works.
   **`cutOnPurpose`** (a test of the capture's own teardown) says what it cuts: `'whole capture'` owes nothing of the capture, `'native step'` owes both rings and not the native step's fields (`missingEvidence`).
 * **A red without its record is its own failure.** A test that timed out, or whose renderer froze or crashed, and has no kernel ring (written and with events) or no
   browser trace (unless the browser itself is gone) fails its teardown with `EVIDENCE MISSING: <field>`; `e2e/evidence-check.js` (the job's `Evidence check` step) turns that into the

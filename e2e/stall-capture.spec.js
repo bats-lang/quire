@@ -461,7 +461,7 @@ test('without gdb the capture of a frozen renderer says so and carries on', asyn
 
 /** A directory with an executable stand-in for a stack tool, first on PATH while `during` runs. */
 async function withTools(tools, during) {
-  const directory = mkdtempSync(join(tmpdir(), 'stall-tools-'));
+  const directory = mkdtempSync(join(tmpdir(), 'stack-tool-stubs-'));
   const kept = process.env.PATH;
   try {
     for (const [name, script] of Object.entries(tools)) { writeFileSync(join(directory, name), `#!/bin/sh\n${script}\n`); chmodSync(join(directory, name), 0o755); }
