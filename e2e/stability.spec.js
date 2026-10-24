@@ -207,6 +207,48 @@ test('scrolled, a hand scroll within one screenful is the place a window swap ke
   await expect.poll(() => topParagraph(page)).toBe(top);
 });
 
+/** A hand scroll of less than half a screen down the page, far enough
+    that another paragraph is at the top, then the app rests */
+async function scrollByHand(page) {
+  await scrollListening(page);
+  await bookPage(page).evaluate(doc => {
+    const start = doc.scrollTop;
+    const firstTop = () => { const c = doc.getBoundingClientRect(); for (const e of doc.querySelectorAll('p')) { const r = e.getClientRects()[0]; if (r && r.top >= c.top - 2 && r.top < c.bottom) return e; } return null; };
+    const was = firstTop();
+    while (doc.scrollTop - start < doc.clientHeight * 0.45 && firstTop() === was) doc.scrollTop += 10;
+  });
+  await scrollRested(page);
+}
+
+// the app closed after the hand scroll (quit, or killed with no event) and
+// opened again shows the paragraph now at the top, every time (#784)
+for (const how of ['killed', 'quit']) {
+  test(`scrolled, a hand scroll within one screenful is the place the app opens at again after it is ${how}`, async ({ context, page }) => {
+    await launch(context, page);
+    await importFiles(page, [epubFile(paged)], 1);
+    await openBook(page, paged.title);
+    await change(page, 'Page', sheet => group(sheet, 'Layout', 'Scroll'));
+    await scrollListening(page);
+    await bookPage(page).evaluate(doc => { doc.scrollTop = doc.clientHeight; });
+    await scrollRested(page);
+    const first = await topParagraph(page);
+    // the layout's own records (counts, fonts) have ended, so only the hand scroll can record the place (#664)
+    await settled(page);
+    await scrollByHand(page);
+    const top = await topParagraph(page);
+    expect(top).toBeTruthy();
+    expect(top).not.toBe(first);
+    const next = await relaunch(page, how);
+    await expect(bookPage(next)).toBeVisible();
+    // the layout settles (fonts and counts come in) as the clock runs, and the place is found again
+    await rested(next);
+    await expect.poll(() => topParagraph(next)).toBe(top);
+    // and it stays there
+    await rested(next);
+    expect(await topParagraph(next)).toBe(top);
+  });
+}
+
 // the same hand scroll, and the book closed and opened again: the place kept
 // is the paragraph at the top, whichever phone or desktop shape (#485)
 test('scrolled, a hand scroll within one screenful is the place the book opens at again', async ({ page }) => {

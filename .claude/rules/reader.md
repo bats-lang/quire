@@ -53,6 +53,13 @@ QLB6 opens at its stored place (`e2e/legacy-library.js`).
 * Scrolled, a hand scroll within one screenful is a move too (#485): the place
   is the node now at the top of what is seen (`reader_scrolled`, `_scroll_set`),
   and a layout made anew shows that node at the top (`_show_target`).
+* **Opens at the screenful** (#784): a book reopened scrolled by hand within one screenful
+  shows the paragraph now at the top, every time. The opening page is shown again whenever
+  the layout is counted anew while opening (`_settle`'s count change, `_relayout`: the
+  insets and the window arrive right after the first show), and showing the page alone
+  is the screenful's start; scrolled, it is shown with the node the place is kept by
+  (`_opening_anchor`). `e2e/stability.spec.js`, "a hand scroll within one screenful is the
+  place the app opens at again after it is killed" and "...quit".
 * Keys: the arrows, Page Up and Down, Space (Shift for back), the volume keys
   when the reader chooses (the app's), MediaTrackNext and MediaTrackPrevious (a
   page turner's multimedia mode; the others in the field send the arrows or Page
