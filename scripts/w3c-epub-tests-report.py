@@ -4,7 +4,8 @@
 The verdicts are in VERDICTS below, decided from the surveys of
 scripts/w3c-epub-tests-survey.mjs, -probe.mjs and -narration.mjs, run on
 the suite's EPUBs (built as tests/generateEpubs.sh builds them) in the
-desktop project, and from the tests of e2e/w3c-epub-tests.spec.js.
+desktop and the android project (quire#827), and from the tests of
+e2e/w3c-epub-tests.spec.js.
 
 usage: scripts/w3c-epub-tests-report.py <clone of w3c/epub-tests>
 
@@ -153,6 +154,7 @@ VERDICTS = {
     'ocf-url_link-path-absolute': (T, 'a path-absolute address ("/OEBPS/images/photograph.png") is resolved from the container root, for images and links'),
     'ocf-url_link-relative': (T, ''),
     'ocf-url_manifest': (T, ''),
+    'ocf-url_relative': (T, 'a package document in an arbitrary folder (foo/BAR/baz.opf, named by container.xml) is found, and its manifest\'s relative href is resolved from that folder'),
     'ocf-url_origin': (N, 'needs scripting, which Quire does not run'),
     'ocf-url_parse-leaking-relative': (N, 'needs scripting, which Quire does not run'),
     'ocf-url_parse-path-absolute': (N, 'needs scripting, which Quire does not run'),
@@ -206,7 +208,7 @@ VERDICTS = {
     'pub-cmt-webp': (T, ''),
     # Publication Resources, Manifest Fallbacks
     'pub-data-urls_browsing-context': (T, 'an img with a data: URL of png, jpeg, gif, webp or svg in base64 is shown (decoded here, up to 512 KiB of text); not offered to the image viewer'),
-    'pub-data-urls_top-level-content': (T, 'an img with a data: URL is shown as the reflowable case is (measured on a reflowable page, not on a fixed-layout one)'),
+    'pub-data-urls_top-level-content': (F, 'an img whose src is a data: URL of a percent-encoded (not base64) svg is replaced by an empty data URL (src="data:,"), so the picture is not drawn; measured on the test\'s own fixed-layout page (quire#827; a base64 data URL, as pub-data-urls_browsing-context uses, is drawn)'),
     'pub-external-links': (T, 'a link out asks first, in the note overlay, and opens in a new tab on the reader\'s word'),
     'pub-external-links_consent': (T, 'a mailto: link asks first, in the note overlay, and opens the mail application on the reader\'s word'),
     'pub-file-urls': (T, 'iframes are not shown, so no file: URL is loaded'),
@@ -243,13 +245,20 @@ VERDICTS = {
 LEVELS = ('must', 'should', 'may', 'deprecated')
 
 
+def package_path(test):
+    """The package document the test's container.xml names first (ocf-url_relative keeps it in foo/BAR, not EPUB/)"""
+    container = ET.parse(os.path.join(test, 'META-INF', 'container.xml')).getroot()
+    rootfile = next(e for e in container.iter() if e.tag.endswith('}rootfile') or e.tag == 'rootfile')
+    return os.path.join(test, rootfile.get('full-path'))
+
+
 def read_tests(clone):
     ns = {'o': 'http://www.idpf.org/2007/opf', 'dc': 'http://purl.org/dc/elements/1.1/'}
     tests = {}
     for name in sorted(os.listdir(os.path.join(clone, 'tests'))):
-        path = os.path.join(clone, 'tests', name, 'EPUB', 'package.opf')
-        if not os.path.exists(path) or name.startswith('xx-'):
+        if name.startswith('xx-') or not os.path.isdir(os.path.join(clone, 'tests', name)):
             continue
+        path = package_path(os.path.join(clone, 'tests', name))
         root = ET.parse(path).getroot()
         level = 'must'
         for meta in root.iter('{%s}meta' % ns['o']):
@@ -304,7 +313,7 @@ def main(clone):
 
     report = {
         'name': 'Quire',
-        'variant': 'web build in Chromium 140 (desktop project; run of w3c/epub-tests at %s)' % commit[:10],
+        'variant': 'web build in Chromium 149 (desktop and android projects of quire\'s Playwright configuration; run of w3c/epub-tests at %s)' % commit[:10],
         'ref': 'https://github.com/bats-lang/quire',
         'tests': {id: VERDICTS[id][0] for id in sorted(tests)},
     }
@@ -320,12 +329,20 @@ def main(clone):
         '# Quire against the W3C EPUB 3 test suite (quire#419)',
         '',
         f'The suite is w3c/epub-tests at commit `{commit}`. Every test EPUB was built as `tests/generateEpubs.sh` builds it',
-        '(`zip`, with the `mimetype` first), imported into Quire\'s web build in Playwright\'s Chromium (the desktop project, 1024 by 768)',
-        'and opened, by `scripts/w3c-epub-tests-survey.mjs` (what the reader shows), `scripts/w3c-epub-tests-probe.mjs`',
+        '(`zip`, with the `mimetype` first), imported into Quire\'s web build in Playwright\'s Chromium, in the `desktop` project (1024 by 768)',
+        'and in the `android` project (412 by 915, touch, the WebView\'s user agent, the safe-area insets and the app\'s Capacitor, as `e2e/fixtures.js` plays them), and opened, by `scripts/w3c-epub-tests-survey.mjs` (what the reader shows), `scripts/w3c-epub-tests-probe.mjs`',
         '(the contents panel, a link followed, two books in one library, the reading direction, bookmarks) and',
         '`scripts/w3c-epub-tests-narration.mjs` (Read aloud on each Media Overlays book). The verdicts are in',
-        '`scripts/w3c-epub-tests-report.py`, which writes this file and `reports/quire.json`. The android project and the',
-        'Android app itself were not run.',
+        '`scripts/w3c-epub-tests-report.py`, which writes this file and `reports/quire.json`. A test is `true` when it passes in both',
+        'projects, or in the one where its question can be asked (a synthetic spread is drawn only where the window is wide: on the 412 px',
+        'android window `auto` and `landscape` spreads show one page at a time, which those values allow, and `both` draws the spread). The',
+        'Android app itself (the APK on a device) was not run; the android project plays its Capacitor in the page.',
+        '`scripts/w3c-epub-tests-compare.py` lists where the two projects\' surveys differ: 33 tests, all of them a spread shown as one place on desktop and as two on android (and one page count).',
+        '',
+        'Built other than `generateEpubs.sh` builds them: the nine Media Overlays books whose audio is MP4 (Playwright\'s Chromium has no',
+        'AAC decoder) carry the same recording as MP3 under the same name, and `ocf-zip-comp` (bzip2 entries) and `ocf-zip-mult`',
+        '(`zip -s 300k`, as the suite\'s `ocf-zip-mult.z01` was made) are built as their descriptions ask, since the recipe makes a plain',
+        'Deflate archive that cannot show the case.',
         '',
         '## Counts',
         '',

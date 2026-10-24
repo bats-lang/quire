@@ -162,7 +162,7 @@ test('ocf-url_link-path-absolute (must): a path-absolute address in the content 
   expect((await pictures(page))[0].loaded).toBe(true);
 });
 
-test('pub-data-urls_browsing-context, pub-data-urls_top-level-content (must): an image given as a data URL is shown in the page', async ({ page }) => {
+test('pub-data-urls_browsing-context (must): an image given as a base64 data URL is shown in the page', async ({ page }) => {
   await start(page);
   await readW3cBook(page, 'data-url-image', 'Image as a data URL');
   await expect.poll(async () => (await pictures(page))[0]?.settled).toBe(true);
