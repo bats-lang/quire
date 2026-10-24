@@ -269,6 +269,10 @@
     "mutation-fields-record": [
       "mutation/fields",
       "mutation/record"
+    ],
+    "mutation-bytesarr-cut": [
+      "mutation/bytesarr",
+      "mutation/cut"
     ]
   }
 }

@@ -48,6 +48,10 @@ prfn tuple_of {a:int} (): (LE(a, a), LE(a, a)) = (LE_refl(), LE_refl())
 #pub prfun grow {a:int} (x: LE(a, a)): LE(a, a)
 
 primplement grow {a} (x) = grow(x)
+
+#pub prfun named_args {a:int} (step: LE(a, a), other: LE(a, a)): LE(a, a)
+
+primplement named_args {a} (step, other) = step
 """
 
 
@@ -139,7 +143,7 @@ class Declarations(unittest.TestCase):
 
     def test_lemmas_found(self):
         self.assertEqual([l.name for l in self.lemmas()],
-                         ['le_trans', 'le_twice', 'vacuous_guard', 'exists_len', 'tuple_of', 'grow'])
+                         ['le_trans', 'le_twice', 'vacuous_guard', 'exists_len', 'tuple_of', 'grow', 'named_args'])
 
     def test_statement_and_sorts(self):
         by_name = {l.name: l for l in self.lemmas()}
@@ -158,6 +162,12 @@ class Declarations(unittest.TestCase):
         self.assertIn('#pub prfun grow {a:int} {mutant_fresh: int} (x: LE(a, a)): LE(mutant_fresh, a)', text)
         self.assertIn('primplement grow {a} {mutant_fresh: int} (x) = grow(x)', text)
         self.assertTrue(first <= text.split('\n').index('primplement grow {a} {mutant_fresh: int} (x) = grow(x)') + 1 <= last)
+
+    def test_a_declaration_that_names_its_arguments_gives_a_copy_that_names_each_once(self):
+        lemmas, mutants = mc.build(MODULE.split('\n'), {'named_args'})
+        text = mc.text_of(mutants[0])
+        self.assertIn('(step: LE(a, a), other: LE(a, a))', text)
+        self.assertNotIn('step: step', text)
 
     def test_a_copy_is_named_and_keeps_the_body(self):
         lemma = self.lemmas()[0]

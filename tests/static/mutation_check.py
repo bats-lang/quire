@@ -437,7 +437,9 @@ class Lemma:
         if d.binders() != i.binders():
             self.skipped = 'binder names differ'
             return None
-        args = ', '.join(f'{n}: {t}' for n, t in zip(impl_args, decl_args)) if any(decl_args) else ''
+        # a declaration may name its arguments (`cells_set: SETC(..)`): the implementation's name is kept
+        args = ', '.join(f'{n}: {re.sub(r"^\w+\s*:\s*", "", t.strip())}'
+                         for n, t in zip(impl_args, decl_args)) if any(decl_args) else ''
         if re.search(rf"(?<![\w']){re.escape(self.name)}(?![\w'])", i.body or ''):
             self.inplace = True
         return 'prfn', ''.join(d.quantifiers), '', args, d.result, i.body

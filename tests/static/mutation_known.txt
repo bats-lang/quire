@@ -19,3 +19,9 @@ src/seq.bats | _rest_shorter_bad | bound+1 | a true, stronger bound
 # DECODES_magic holds for any kind, so `kind + 1` is as true as `kind`.
 src/record.bats | _not_quire_proof | arg2+1 | DECODES_magic holds for any kind
 src/record.bats | _not_quire_proof | arg1:fresh | DECODES_magic holds for any spec list too (record.bats:127): the magic differs before any spec is read
+#
+# Two premises that cannot both hold: WHITE(code) and NOTWHITE(code) (STARTS and CONTINUES) name
+# disjoint ranges of a byte, and the proof is the case split in which every pair is contradictory,
+# so any false conclusion is proved from them; `[1 == 0]` and `[1 == 2]` are the same statement.
+src/cut.bats | white_not_white | * | the premises are contradictory by the disjoint ranges of the byte: the lemma's purpose
+src/cut.bats | starts_not_continues | * | the premises are contradictory by the disjoint ranges of the byte: the lemma's purpose
