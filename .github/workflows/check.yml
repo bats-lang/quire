@@ -109,7 +109,7 @@ jobs:
           echo "play_signing_sha1=$sha1" >> "$GITHUB_OUTPUT"
 
       - name: Set up bats
-        uses: bats-lang/bats/.github/actions/setup@efae4e6ca4826b954c3144a4ee10d2cc3a5f341f # the setup action (bats#280)
+        uses: bats-lang/bats/.github/actions/setup@554e3a03c2d615ad8da8bf6e333be201c88d9a12 # bats main 554e3a0
 
       # A pull request and the merge queue's group start from the newest
       # build of the same toolchain (main's, or the pull request's own earlier
@@ -188,7 +188,7 @@ jobs:
       # pwa's action (quire#637). The WASM smoke tests need no browsers, which
       # are restored from the cache here
       - name: Set up Node.js and Playwright
-        uses: bats-lang/pwa/.github/actions/e2e-setup@d2aae75d2646ad7f22f4f992c069cb88280dff00 # pwa main (no release tag; relock.yml moves it, #777)
+        uses: bats-lang/pwa/.github/actions/e2e-setup@60ef4627e682652290a82cc6364313b6a4c23b58 # pwa main 60ef462
         with:
           playwright-minimum: "1.58"
 
@@ -270,7 +270,7 @@ jobs:
 
       - name: Set up bats
         if: env.GROUP_BATS == 'yes'
-        uses: bats-lang/bats/.github/actions/setup@efae4e6ca4826b954c3144a4ee10d2cc3a5f341f # the setup action (bats#280)
+        uses: bats-lang/bats/.github/actions/setup@554e3a03c2d615ad8da8bf6e333be201c88d9a12 # bats main 554e3a0
 
       # What bats keeps of the static run, in the directory run.sh works in
       # (QUIRE_STATIC_WORK): the app's build/, which every group shares, and
@@ -376,7 +376,7 @@ jobs:
       # 1.58 is the least Playwright the suite may run on: its fake clock needs it (keyword: the fake clock)
       - name: Set up Node.js and Playwright
         if: env.GROUP_RUN == 'yes'
-        uses: bats-lang/pwa/.github/actions/e2e-setup@d2aae75d2646ad7f22f4f992c069cb88280dff00 # pwa main (no release tag; relock.yml moves it, #777)
+        uses: bats-lang/pwa/.github/actions/e2e-setup@60ef4627e682652290a82cc6364313b6a4c23b58 # pwa main 60ef462
         with:
           playwright-minimum: "1.58"
 
@@ -559,7 +559,7 @@ jobs:
       # not a pass, and a job missing from needs fails (repository-prototype's
       # check-aggregate, #328, called by commit)
       - name: Every group passed
-        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@802e8fee5f10fe74266d5c720d4ba641e1a1bb2c # check-aggregate at repository-prototype main (#345, #347)
+        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@f02c83c7b233d2139f81e73a9e7444d9791cf5be # repository-prototype main f02c83c
         with:
           jobs: plan build static e2e
           results: ${{ toJSON(needs) }}
@@ -578,7 +578,7 @@ jobs:
   android:
     needs: build
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@d2aae75d2646ad7f22f4f992c069cb88280dff00 # pwa main (no release tag; relock.yml moves it, #777)
+    uses: bats-lang/pwa/.github/workflows/android.yml@60ef4627e682652290a82cc6364313b6a4c23b58 # pwa main 60ef462
     secrets: inherit
     with:
       artifact: quire-android
