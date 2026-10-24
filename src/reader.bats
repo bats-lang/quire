@@ -4891,6 +4891,12 @@ fn _place_kept (page: Int, total: Int): @(Int, Int) =
   else if _scrolled() && page > 0 && page >= total - 1 then @(~1, ~1)
   else @(page, !_anchor_last)
 
+(* Opening, laid out as when the place was kept, the page alone is shown, as
+   it was kept; scrolled, the node the place is kept by too, since a hand
+   scroll within the screenful is where that node is, and the page alone
+   would be the screenful's start (#784, reader.md "opens at the screenful") *)
+fn _opening_anchor (): Int = if _scrolled() then !_anchor_kept else ~1
+
 (* How many pages the chapter has now, as it is laid out *)
 fn _pages_now (): Int = let
   val () = _measure_literal("page")
@@ -4926,7 +4932,7 @@ fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
                come in): that very page *)
             else if count_now <> page_count && _opening_pages(count_now) then let
               val () = _measure_pagination()
-            in _show_target(!_dated_page, ~1) end
+            in _show_target(!_dated_page, _opening_anchor()) end
             else if count_now <> page_count then let
               val @(target_page, target_anchor) = _place_kept(page, page_count)
               val () = _measure_pagination()
@@ -5230,7 +5236,7 @@ in
     val count_now = (case+ reading_get() of @(_, page_count, _, _) => (page_count: Int)): Int
   in
     (* opening, laid out as when the place was kept: that very page *)
-    if _opening_pages(count_now) then _show_target(!_dated_page, ~1)
+    if _opening_pages(count_now) then _show_target(!_dated_page, _opening_anchor())
     else _show_kept(page, anchor)
   end
 end
