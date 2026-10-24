@@ -18,10 +18,10 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up bats
-        uses: bats-lang/bats/.github/actions/setup@554e3a03c2d615ad8da8bf6e333be201c88d9a12 # bats main 554e3a0
+        uses: bats-lang/bats/.github/actions/setup@8bdd8b205c8e91355b71acf133a62de5935f56a3 # bats main 8bdd8b2
 
       # The version is the date and short SHA of the commit deployed
       # (#219): HEAD's, which bats writes as the commit's facts

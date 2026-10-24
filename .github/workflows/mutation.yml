@@ -21,7 +21,7 @@ jobs:
     outputs:
       groups: ${{ steps.groups.outputs.groups }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - id: groups
         run: |
           echo "groups=$(scripts/ci-groups.py matrix | sed -n 's/^static=//p' | python3 -c 'import json,sys; print(json.dumps([g for g in json.load(sys.stdin) if g.startswith("mutation-")]))')" >> "$GITHUB_OUTPUT"
@@ -36,11 +36,11 @@ jobs:
         group: ${{ fromJSON(needs.plan.outputs.groups) }}
     name: mutation (${{ matrix.group }})
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 2
       - name: Set up bats
-        uses: bats-lang/bats/.github/actions/setup@554e3a03c2d615ad8da8bf6e333be201c88d9a12 # bats main 554e3a0
+        uses: bats-lang/bats/.github/actions/setup@8bdd8b205c8e91355b71acf133a62de5935f56a3 # bats main 8bdd8b2
       - name: Mutation check
         env:
           QUIRE_STATIC_WORK: ${{ runner.temp }}/quire-static
