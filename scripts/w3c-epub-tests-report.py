@@ -337,6 +337,7 @@ def main(clone):
         'projects, or in the one where its question can be asked (a synthetic spread is drawn only where the window is wide: on the 412 px',
         'android window `auto` and `landscape` spreads show one page at a time, which those values allow, and `both` draws the spread). The',
         'Android app itself (the APK on a device) was not run; the android project plays its Capacitor in the page.',
+        '`scripts/w3c-epub-tests-compare.py` lists where the two projects\' surveys differ: 33 tests, all of them a spread shown as one place on desktop and as two on android (and one page count).',
         '',
         'Built other than `generateEpubs.sh` builds them: the nine Media Overlays books whose audio is MP4 (Playwright\'s Chromium has no',
         'AAC decoder) carry the same recording as MP3 under the same name, and `ocf-zip-comp` (bzip2 entries) and `ocf-zip-mult`',
