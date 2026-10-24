@@ -222,11 +222,19 @@ OVERLAP_BRIEF = re.compile(r'^\s*Overlap:', re.MULTILINE)
 OVERLAP_REVIEW = re.compile(r'^\s*Overlap check:', re.MULTILINE)
 
 
+REMOVAL_LINE = re.compile(r'(?i)removal ticket|removes? the old form|remove the old (?:form|version)|remove the deprecated')
+PRIORITY_P1 = re.compile(r'(?i)\bp1\b')
+
+
 def lint_overlap(text, name, line_form, line_name):
-    """Overlap rule (quire#762, CLAUDE.md): a text that changes a published signature carries the overlap line."""
+    """Overlap rule (quire#762, #822, CLAUDE.md): a text that changes a published signature carries the overlap line, and the ticket that removes the old form is p2, never p1."""
+    findings = []
     if SIGNATURE_CHANGE.search(text) and not line_form.search(text):
-        return [f'{name}: it names a change to a published signature and has no line "{line_name}" (CLAUDE.md, "Breaking changes keep at least one published version of overlap")']
-    return []
+        findings.append(f'{name}: it names a change to a published signature and has no line "{line_name}" (CLAUDE.md, "Breaking changes keep at least one published version of overlap")')
+    for number, line in enumerate(text.split('\n'), 1):
+        if REMOVAL_LINE.search(line) and PRIORITY_P1.search(line):
+            findings.append(f'{name}:{number}: the ticket that removes an old form is p2, never p1 (CLAUDE.md, "Breaking changes keep at least one published version of overlap")')
+    return findings
 
 
 def lint_review(text, phrases, gate_form=False):
