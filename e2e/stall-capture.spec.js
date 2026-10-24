@@ -885,7 +885,11 @@ test('teardown ends a gdb attached to a hung renderer: gdb lets go and the rende
     hung = await hangPage(page, stallWatch);
     const pids = await rendererPids(browser);
     // gdb has attached, written the stacks and the core, and stays
-    for (let waited = 0; !staying() && waited < 45000; waited += 250) await new Promise((resolve) => setTimeout(resolve, 250));
+    // e2e stall-capture: the native step follows the kernel ring and Chrome's trace, which ended 47.5 s after the hang on a CI
+    // runner (run 40081059903, job 120837242373), so a fixed 45 s gave up before gdb started and the finally below put the real
+    // gdb back; it waits for the stay, or for the capture to end without one, within the capture's own bound
+    const captured = () => !!(stallWatch.captures[0] && stallWatch.captures[0].result);
+    for (let waited = 0; !staying() && !captured() && waited < NATIVE_MOST_MS; waited += 250) await new Promise((resolve) => setTimeout(resolve, 250));
     if (!staying()) {
       const capture = stallWatch.captures[0] && stallWatch.captures[0].result;
       if (capture && capture.native && capture.native.unavailable) unavailable(capture.native.unavailable);
