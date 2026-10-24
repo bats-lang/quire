@@ -25,12 +25,15 @@ The pins and the relock are in CLAUDE.md. Specifics:
 * A publish never turns main red: until a lock names a package release, quire does not use
   it, so package releases publish first and the quire PR with the new lock follows.
 * The relock moves a workflow pin with `RELOCK_TOKEN` (set in quire) and lists it as not
-  moved without one. It moves the pin's `uses:` line only, never a `pwa-ref:` input, which
-  repeats the pin: relock PR #755 moved `android.yml` to 6a96e60 and left `pwa-ref` at
-  ea8a14a (fixed by hand in #777). So `play-release.yml` is not in `workflow-pins` (#777);
-  each relock PR that moves `android.yml` also moves its `pwa-ref` by hand, with the same
-  commit, until the relock moves it (bats-lang/repository-prototype#385, its `relock-pins.yml`).
-  `e2e-setup` has no `pwa-ref` and is moved whole (#777).
+  moved without one. It moves each pin's `uses:` line, and with `pin-copies` in `relock.yml`
+  (`bats-lang/pwa/.github/workflows/android.yml pwa-ref`) every `pwa-ref:` line of the files that
+  call `android.yml` to the same commit. `pwa-ref` repeats the pin because a reusable workflow
+  cannot read its own ref, and pwa's workflows check pwa out at it; two copies of one commit
+  drift at every relock unless one tool writes both (#821). So every `pwa-ref:` of `check.yml`
+  equals the commit of its `android.yml@` pin, `play-internal`'s included, and a `pwa-ref` line
+  is a plain 40-hex value (a quoted or computed one is refused by the relock).
+  `play-release.yml` is not in `workflow-pins`; it is called at its own commit. `e2e-setup` has
+  no `pwa-ref` and is moved whole.
 
 ### The Android project's lock (keyword: android lock, #735)
 

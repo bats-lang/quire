@@ -17,15 +17,20 @@ permissions:
 
 jobs:
   relock:
-    # main of repository-prototype at 3873e58 (after #372): its runners are ubuntu-24.04 (#352 there)
-    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@f02c83c7b233d2139f81e73a9e7444d9791cf5be # repository-prototype main f02c83c
+    # main of repository-prototype at 61817b0: has pin-copies (#385 there, #421), which f02c83c lacks
+    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@61817b0516ad77524ce349b8c2ab3ba978436729 # repository-prototype main 61817b0
     secrets: inherit
     with:
       # pwa's e2e-setup has no pwa-ref copy of its pin, so the relock moves it whole (#777).
-      # play-release.yml is not listed: its pwa-ref copy of the pin stays (ci.md, "CI is pinned").
+      # play-release.yml is not listed: it is called at its own commit, and only its pwa-ref input follows android.yml (pin-copies below).
       workflow-pins: |
         bats-lang/pwa/.github/workflows/android.yml
         bats-lang/pwa/.github/actions/e2e-setup
         bats-lang/repository-prototype/.github/workflows/relock-pins.yml
         bats-lang/bats/.github/actions/setup
         bats-lang/repository-prototype/.github/actions/check-aggregate
+      # check.yml repeats android.yml's commit as pwa-ref, which pwa's android.yml and
+      # play-release.yml read (a reusable workflow cannot read its own ref): the relock
+      # writes the new commit into every pwa-ref line of the files that call android.yml (#821)
+      pin-copies: |
+        bats-lang/pwa/.github/workflows/android.yml pwa-ref
