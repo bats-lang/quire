@@ -1,22 +1,29 @@
 # Quire against the W3C EPUB 3 test suite (quire#419)
 
 The suite is w3c/epub-tests at commit `54092b4233253e9aac80e93ec4782b380b4b3403`. Every test EPUB was built as `tests/generateEpubs.sh` builds it
-(`zip`, with the `mimetype` first), imported into Quire's web build in Playwright's Chromium (the desktop project, 1024 by 768)
-and opened, by `scripts/w3c-epub-tests-survey.mjs` (what the reader shows), `scripts/w3c-epub-tests-probe.mjs`
+(`zip`, with the `mimetype` first), imported into Quire's web build in Playwright's Chromium, in the `desktop` project (1024 by 768)
+and in the `android` project (412 by 915, touch, the WebView's user agent, the safe-area insets and the app's Capacitor, as `e2e/fixtures.js` plays them), and opened, by `scripts/w3c-epub-tests-survey.mjs` (what the reader shows), `scripts/w3c-epub-tests-probe.mjs`
 (the contents panel, a link followed, two books in one library, the reading direction, bookmarks) and
 `scripts/w3c-epub-tests-narration.mjs` (Read aloud on each Media Overlays book). The verdicts are in
-`scripts/w3c-epub-tests-report.py`, which writes this file and `reports/quire.json`. The android project and the
-Android app itself were not run.
+`scripts/w3c-epub-tests-report.py`, which writes this file and `reports/quire.json`. A test is `true` when it passes in both
+projects, or in the one where its question can be asked (a synthetic spread is drawn only where the window is wide: on the 412 px
+android window `auto` and `landscape` spreads show one page at a time, which those values allow, and `both` draws the spread). The
+Android app itself (the APK on a device) was not run; the android project plays its Capacitor in the page.
+
+Built other than `generateEpubs.sh` builds them: the nine Media Overlays books whose audio is MP4 (Playwright's Chromium has no
+AAC decoder) carry the same recording as MP3 under the same name, and `ocf-zip-comp` (bzip2 entries) and `ocf-zip-mult`
+(`zip -s 300k`, as the suite's `ocf-zip-mult.z01` was made) are built as their descriptions ask, since the recipe makes a plain
+Deflate archive that cannot show the case.
 
 ## Counts
 
 | level | pass | fail | n/a | total |
 | --- | ---: | ---: | ---: | ---: |
-| must | 113 | 10 | 16 | 139 |
+| must | 113 | 11 | 16 | 140 |
 | should | 19 | 14 | 5 | 38 |
 | may | 1 | 0 | 0 | 1 |
 | deprecated | 17 | 9 | 1 | 27 |
-| all | 150 | 33 | 22 | 205 |
+| all | 150 | 34 | 22 | 206 |
 
 The suite lists `deprecated` tests (the `fxl-*` and `lay-fxl-*` ones, which the `lay-pp-*` ones replace); they are in
 the table too, and in `reports/quire.json`, as the suite's own template has them.
@@ -39,6 +46,7 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 | `pkg-dir_but_not_content` | must | a Hebrew book's page is set right to left, as its reading direction is (by decision, quire#416: a book in Hebrew or Arabic whose spine names no direction reads right to left, as Readium reads it; the page is one CSS column flow, so its direction is the columns' order, and a list or a paragraph in the book inherits it). The suite's pass criterion is a content document with no dir staying left to right, which 13 of the 13 reading systems that answered meet by laying each document out on its own; Quire's single flow cannot without giving up the Hebrew heuristic or marking every block | 13/13 | policy |
 | `pkg-lang_but_not_content` | must | the OPF's dc:language is the page's language where the chapter names none, so a q gets French quotation marks in a French book (by decision: browsers hyphenate and pick quotation marks only for text whose language is known, and the package's language is the only one a book declares; the earlier test in reader.spec.js holds it, and a book that names none is 'und', not English). 11 of the 15 reading systems that answered show a content document with no language in their own, the suite's criterion | 11/15 | policy |
 | `pub-cmt-jxl` | must | the image is not decoded: Chromium (and Android's WebView) have no JPEG XL decoder | 0/2 | platform |
+| `pub-data-urls_top-level-content` | must | an img whose src is a data: URL of a percent-encoded (not base64) svg is replaced by an empty data URL (src="data:,"), so the picture is not drawn; measured on the test's own fixed-layout page (quire#827; a base64 data URL, as pub-data-urls_browsing-context uses, is drawn) | 14/15 | next |
 | `css-epub-hyphens` | should | the book's own CSS is dropped by design (the reader's Hyphenation setting is the reader's) | 7/18 | policy |
 | `css-epub-line-break` | should | the book's own CSS is dropped by design | 3/15 | policy |
 | `css-epub-text-align-last` | should | the book's own CSS is dropped by design | 1/19 | policy |
@@ -163,6 +171,7 @@ Caveats of a pass, where there is one:
 * `nav-spine_in-spine-no-list-style`: the contents panel is not numbered
 * `ocf-font_obfuscation_bis`: the font is not displayed (no embedded font is ever used)
 * `ocf-url_link-path-absolute`: a path-absolute address ("/OEBPS/images/photograph.png") is resolved from the container root, for images and links
+* `ocf-url_relative`: a package document in an arbitrary folder (foo/BAR/baz.opf, named by container.xml) is found, and its manifest's relative href is resolved from that folder
 * `ocf-zip-comp`: an archive with an entry compressed by anything but Deflate or stored is refused (the suite's EPUB is built with Deflate, so it cannot show the case; the e2e test makes a bzip2 entry)
 * `ocf-zip-mult`: an archive whose end record names more than one disk is refused (the suite's EPUB is one zip; the e2e test makes a split archive's end record)
 * `pkg-creator-order`: the first dc:creator is used
@@ -187,7 +196,6 @@ Caveats of a pass, where there is one:
 * `pub-cmt-mp4`: an audio element is made with the browser's controls and the book's entry as its source (AAC in MP4 is played by the engine; Chromium's headless build, which the e2e suite runs, has no AAC decoder, so the e2e test plays the mp3 and checks the controls of all)
 * `pub-cmt-opus`: an audio element is made with the browser's controls and the book's entry as its source (Opus is played by the engine; Chromium's headless build, which the e2e suite runs, has no AAC decoder, so the e2e test plays the mp3 and checks the controls of all)
 * `pub-data-urls_browsing-context`: an img with a data: URL of png, jpeg, gif, webp or svg in base64 is shown (decoded here, up to 512 KiB of text); not offered to the image viewer
-* `pub-data-urls_top-level-content`: an img with a data: URL is shown as the reflowable case is (measured on a reflowable page, not on a fixed-layout one)
 * `pub-external-links`: a link out asks first, in the note overlay, and opens in a new tab on the reader's word
 * `pub-external-links_consent`: a mailto: link asks first, in the note overlay, and opens the mail application on the reader's word
 * `pub-file-urls`: iframes are not shown, so no file: URL is loaded

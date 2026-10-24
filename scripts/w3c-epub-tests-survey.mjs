@@ -4,46 +4,42 @@
 // description can be judged against it. It decides nothing itself: the
 // verdicts are in reports/quire.json and reports/quire-w3c-epub-tests.md.
 //
-//   node scripts/w3c-epub-tests-survey.mjs <dir of .epub> <out dir> [base url] [id ...]
+//   node scripts/w3c-epub-tests-survey.mjs <desktop|android> <dir of .epub> <out dir> [base url] [id ...]
 //
 // The app must be served (npx serve dist/pwa). One JSON file per test in
 // <out dir>/<id>.json and a screenshot of each chapter's first page.
-import { chromium } from '@playwright/test';
+import { projectOf, launch, newPage, pageDoc, cards, settled, pageKey, domClick, domClickMoves } from './w3c-epub-tests-project.mjs';
 import { readdirSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-const [dir, out, base = 'http://localhost:3748', ...only] = process.argv.slice(2);
+const [projectName, dir, out, base = 'http://localhost:3748', ...only] = process.argv.slice(2);
+const project = projectOf(projectName);
 mkdirSync(out, { recursive: true });
 const ids = readdirSync(dir).filter(f => f.endsWith('.epub')).map(f => f.slice(0, -5))
   .filter(id => only.length === 0 || only.includes(id)).sort();
 
-const launch = () => chromium.launch({ args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'] });
 let browser = await launch();
 
 async function survey(id) {
-  const result = { id, errors: [], chapters: [] };
-  const ctx = await browser.newContext({ viewport: { width: 1024, height: 768 } });
-  const page = await ctx.newPage();
+  const result = { id, project, errors: [], chapters: [] };
+  const { context: ctx, page } = await newPage(browser, project);
   page.on('pageerror', e => result.errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') result.errors.push('console: ' + m.text()); });
   try {
     await page.goto(base + '/');
-    await page.getByRole('searchbox', { name: 'Search the library' }).waitFor({ timeout: 15000 });
-    await page.getByLabel('Import EPUB').setInputFiles(join(dir, id + '.epub'));
-    const card = page.getByRole('region', { name: /^(Continue reading|Books)$/ }).getByRole('group');
-    await Promise.race([
-      card.first().waitFor({ timeout: 20000 }).catch(() => {}),
-      page.waitForTimeout(20000),
-    ]);
+    await page.locator('#import-file').waitFor({ state: 'attached', timeout: 15000 });
+    await page.locator('#import-file').setInputFiles(join(dir, id + '.epub'));
+    const card = cards(page);
+    await card.first().waitFor({ timeout: 20000 }).catch(() => {});
     result.cards = await card.allInnerTexts();
     result.banner = await page.evaluate(() => [...document.querySelectorAll('[role=alert]')]
       .map(e => e.innerText.trim()).filter(Boolean));
     if (result.cards.length === 0) { result.opened = false; await ctx.close(); return result; }
     await card.first().click();
-    const doc = page.getByRole('document', { name: 'Page' });
+    const doc = pageDoc(page);
     try { await doc.waitFor({ timeout: 15000 }); } catch { result.opened = false; result.banner = await page.evaluate(() => document.body.innerText.slice(0, 600)); await ctx.close(); return result; }
     result.opened = true;
-    await page.waitForTimeout(1500);
+    await settled(page);
     let last = '';
     for (let n = 0; n < 14; n++) {
       const ind = await page.getByRole('status', { name: 'Page', includeHidden: true }).textContent().catch(() => '');
@@ -65,20 +61,12 @@ async function survey(id) {
       const key = heading + '|' + snap.textContent.slice(0, 200);
       if (key === last) break;
       last = key;
-      const moved = await page.evaluate(() => {
-        const b = [...document.querySelectorAll('button')].find(b => /^Next chapter/.test(b.textContent.trim()));
-        if (!b || b.disabled) return false;
-        b.click(); return true;
-      });
-      if (!moved) break;
-      await page.waitForTimeout(1200);
+      if (!(await domClickMoves(page, 'Next chapter'))) break;
     }
     // the contents
-    await page.evaluate(() => {
-      const b = [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Contents' || b.textContent.trim() === 'Contents');
-      if (b) b.click();
-    });
-    await page.waitForTimeout(800);
+    await domClick(page, 'Contents');
+    await page.getByRole('dialog', { name: /Contents/ }).first().waitFor({ timeout: 3000 }).catch(() => {});
+    await settled(page);
     result.contents = await page.evaluate(() => [...document.querySelectorAll('[role=dialog]')]
       .filter(d => d.offsetParent !== null && /Contents/.test(d.getAttribute('aria-label') || d.innerText.slice(0, 30)))
       .map(d => d.innerText.trim()).join('\n---\n'));
@@ -99,6 +87,6 @@ for (const id of ids) {
   clearTimeout(timer);
   if (r.hung) { try { browser.process().kill('SIGKILL'); } catch {} browser = await launch(); }
   writeFileSync(file, JSON.stringify(r, null, 1));
-  console.log(id, r.hung ? 'HUNG' : r.opened, r.chapters.length, r.errors.length);
+  console.log(project, id, r.hung ? 'HUNG' : r.opened, r.chapters.length, r.errors.length);
 }
 await browser.close().catch(() => {});
