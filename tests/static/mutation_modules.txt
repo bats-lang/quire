@@ -3,7 +3,9 @@
 # over about 25 minutes on an idle pool (11 for the app's check, the rest the mutants; keyword: mutation groups).
 # `smoke` marks the modules a change to the checker alone runs, whole.
 src/bytes.bats 2
+src/bytesarr.bats
 src/chunk.bats
+src/cut.bats
 src/crc.bats 5
 src/fields.bats
 src/seq.bats
