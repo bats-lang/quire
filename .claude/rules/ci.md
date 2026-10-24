@@ -192,7 +192,7 @@ browser is pinned by hand in CI. A bump is a pull request like any other and run
 suite; a pixel or timing difference it shows is a finding to fix, not a test to relax. The floor
 `playwright-minimum` (1.58, the fake clock) stays where it is. Dependabot's documentation names
 `.github/workflows` and the root `action.yml` for github-actions, and not the local composite actions
-(`.github/actions/build-cache`, `stall-tools`, which pin `actions/cache`): whether those are read is
+(`.github/actions/build-cache`, which pins `actions/cache`): whether those are read is
 shown by the first Dependabot run, not by the docs. The hand-pinned Chromium of `ux-review/` is #761.
 
 ### The mutation check in CI (#594)
