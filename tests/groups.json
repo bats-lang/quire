@@ -1,6 +1,7 @@
 {
   "e2e": {
     "library": [
+      "book-id.spec.js",
       "folders.spec.js",
       "keys.spec.js",
       "media.spec.js",
