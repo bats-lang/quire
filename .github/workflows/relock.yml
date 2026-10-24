@@ -18,7 +18,7 @@ permissions:
 jobs:
   relock:
     # main of repository-prototype at 61817b0: has pin-copies (#385 there, #421), which f02c83c lacks
-    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@61817b0516ad77524ce349b8c2ab3ba978436729 # repository-prototype main 61817b0
+    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@27c4400526b73660e3c23d960748599658bce275 # repository-prototype main 27c4400
     secrets: inherit
     with:
       # pwa's e2e-setup has no pwa-ref copy of its pin, so the relock moves it whole (#777).
