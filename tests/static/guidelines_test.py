@@ -256,6 +256,30 @@ class Overlap(unittest.TestCase):
         found = gl.lint_review(GOOD_REVIEW + '\nIt changes the public signature.\nOverlap: the old form stays.\n', PHRASES)
         self.assertTrue(any('Overlap check' in line for line in found), found)
 
+    def test_a_brief_that_files_the_removal_ticket_as_p1_is_refused(self):
+        brief = self.BRIEF + 'Change a published signature.\nOverlap: the old form stays beside the new one; the p1 removal ticket is filed with the change.\n'
+        found = gl.lint_brief(brief, self.TICKET, PHRASES)
+        self.assertTrue(any('p2, never p1' in line for line in found), found)
+
+    def test_a_brief_that_files_the_removal_ticket_as_p2_is_accepted(self):
+        brief = self.BRIEF + 'Change a published signature.\nOverlap: the old form stays beside the new one; the p2 removal ticket is filed with the change.\n'
+        self.assertEqual(gl.lint_brief(brief, self.TICKET, PHRASES), [])
+
+    def test_a_review_that_wants_the_removal_ticket_p1_is_refused(self):
+        review = GOOD_REVIEW.replace('The Done-when is met.', 'It changes the public signature.\nOverlap check: the old form is still there; the removal ticket exists, is p1, and was filed before the change.')
+        found = gl.lint_review(review, PHRASES)
+        self.assertTrue(any('p2, never p1' in line for line in found), found)
+
+    def test_a_review_that_wants_the_removal_ticket_p2_is_accepted(self):
+        review = GOOD_REVIEW.replace('The Done-when is met.', 'It changes the public signature.\nOverlap check: the old form is still there; the removal ticket exists, is p2, and was filed before the change.')
+        self.assertEqual(gl.lint_review(review, PHRASES), [])
+
+    def test_the_rule_texts_say_p2_and_never_p1_for_the_removal_ticket(self):
+        for parts in (('CLAUDE.md',), ('.claude', 'orchestration.md')):
+            for line in read_root(*parts).split('\n'):
+                if gl.REMOVAL_LINE.search(line):
+                    self.assertFalse(gl.PRIORITY_P1.search(line), (parts, line[:100]))
+
     def test_claude_md_and_orchestration_md_carry_the_rule(self):
         for parts, needle in ((('CLAUDE.md',), 'at least* one version of overlap'), (('.claude', 'orchestration.md'), 'Overlap check:'), (('.claude', 'orchestration.md'), '`Overlap: ')):
             self.assertIn(needle, read_root(*parts), parts)

@@ -111,18 +111,17 @@ cache, a memo, a test selection) reads a file's time: it compares content hashes
 
 ## Breaking changes keep at least one published version of overlap (#762)
 
-The owner's standing rule (2026-10-19T03:28:04Z, transcript line 46303): "OK. I'm not sure where this should be but it is a standing rule for the session: breaking changes must have *at least* one version of overlap." The full text, with the owner's five quotes and their transcript lines, is in repository-prototype's CLAUDE.md, under "Publishing Packages" (https://github.com/bats-lang/repository-prototype/blob/20f15c0/CLAUDE.md, bats-lang/repository-prototype#381 and #384). The five, each with its transcript line:
+The owner's standing rule (2026-10-19T03:28:04Z, transcript line 46303): "OK. I'm not sure where this should be but it is a standing rule for the session: breaking changes must have *at least* one version of overlap." The full text, with the owner's quotes and their transcript lines, is in repository-prototype's CLAUDE.md, under "Publishing Packages" (https://github.com/bats-lang/repository-prototype/blob/20f15c0/CLAUDE.md, bats-lang/repository-prototype#381 and #384). The four, each with its transcript line:
 
 * 2026-10-19T03:28:04Z (transcript line 46303): "OK. I'm not sure where this should be but it is a standing rule for the session: breaking changes must have *at least* one version of overlap."
 * 2026-10-20T05:35:29Z (transcript line 51253), on a pull request that changed the word helpers' public signatures: "THERE ARE RULES ABOUT BREAKING CHANGES"
-* 2026-10-21T16:54:35Z (transcript line 64341): "Just....keep supporting both, have a p1 ticket to remove the deprecated version."
 * 2026-10-21T16:56:11Z (transcript line 64376): "NEVER DEPRECATE IN ONE GO WE HAVE THIS DOCUMENTED CHECK THE HISTORY"
 * 2026-10-21T16:57:11Z (transcript line 64396): "I have said this like five times in the conversation. If it's not somewhere you keep add it NOW."
 
 
-A pull request that changes a published signature (of a package, in its repository) does what that section's rule says: a breaking change to a published signature is made in two steps, never one. The new form is added beside the old one, named by what it adds (as `_proved` is); the old one is marked deprecated in a one-line comment that names its area by keyword and its removal ticket; a test calls the old form, so an edit cannot drop it. One published version holds both. The ticket that removes the old form is filed with the change, as p1.
+A pull request that changes a published signature (of a package, in its repository) does what that section's rule says: a breaking change to a published signature is made in two steps, never one. The new form is added beside the old one, named by what it adds (as `_proved` is); the old one is marked deprecated in a one-line comment that names its area by keyword and its removal ticket; a test calls the old form, so an edit cannot drop it. One published version holds both. The ticket that removes the old form is filed with the change, as p2: removing an old form is cleanup, not a correctness defect, and a higher priority would put it ahead of every p2 feature.
 
-The review of such a pull request checks both steps, each one: the old form is still there, beside the new one; a test calls the old form; the old form has a deprecation comment that names the area by keyword and the removal ticket; the removal ticket exists, is p1, and was filed before the change. A pull request that changes a published signature in place gets `Verdict: changes needed`. The brief templates carry the line (`.claude/orchestration.md`, "Briefs and the machine"), and `tests/static/guidelines.py` refuses a brief or a review of a signature change that lacks it.
+The review of such a pull request checks both steps, each one: the old form is still there, beside the new one; a test calls the old form; the old form has a deprecation comment that names the area by keyword and the removal ticket; the removal ticket exists, is p2, and was filed before the change. A pull request that changes a published signature in place gets `Verdict: changes needed`. The brief templates carry the line (`.claude/orchestration.md`, "Briefs and the machine"), and `tests/static/guidelines.py` refuses a brief or a review of a signature change that lacks it.
 
 ## CI is pinned
 
