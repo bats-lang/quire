@@ -38,7 +38,7 @@ import proof_sources as sources  # noqa: E402
 
 # the constructors whose atoms exclude each other: no single shift makes them satisfiable
 COVERED_ELSEWHERE = {'FALSEP_mk': 'falsep-made-at-zero, falsep-made-at-one, falsep-made-at-wide-value'}
-# an atom whose left side steps by two (2*low_half + 1) has the same integers when its bound moves by one: it moves by two
+# an atom whose left side steps by two (2*low_half + 1) has the same integers when its bound moves by one (accept/by-hand-step1-odd-parity.dats): it moves by two
 SHIFT_BY = {('STEP1_odd', '2*low_half + 1 < 65536'): 2}
 OPERATORS = [('<=', 'le'), ('>=', 'ge'), ('==', 'eq'), ('!=', 'ne'), ('<', 'lt'), ('>', 'gt')]
 
