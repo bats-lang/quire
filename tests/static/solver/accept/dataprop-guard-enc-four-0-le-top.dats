@@ -1,6 +1,6 @@
 #include "share/atspre_staload.hats"
 (* quire src/text_relation.bats ENC, copied: see gen_guards.py.
-   False variant: the guard atom `0 <= top` of ENC_four shifted by 1: `0 <= (top) + 1` *)
+   Redundant guard atom `0 <= top` of ENC_four: the others imply it (65536 <= point and point == 262144 * top + 4096 * high + 64 * middle + low with high, middle, low <= 63 leave no top below 0), so the constructor is still made with it shifted to `0 <= (top) + 1` *)
 datasort bytes =
   | bnil of ()
   | bcons of (int, bytes)

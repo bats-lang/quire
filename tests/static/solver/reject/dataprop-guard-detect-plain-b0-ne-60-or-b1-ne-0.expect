@@ -1,0 +1,3 @@
+line 215
+function probe_b0_ne_60_or_b1_ne_0
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eapp(S2Ecst(||); S2Eapp(S2Ecst(!=); S2Evar(b0(_)), S2Eintinf(60)), S2Eapp(S2Ecst(!=); S2Evar(b1(_)), S2Eintinf(0))))

@@ -40,6 +40,12 @@ import proof_sources as sources  # noqa: E402
 COVERED_ELSEWHERE = {'FALSEP_mk': 'falsep-made-at-zero, falsep-made-at-one, falsep-made-at-wide-value'}
 # an atom whose left side steps by two (2*low_half + 1) has the same integers when its bound moves by one (accept/by-hand-step1-odd-parity.dats): it moves by two
 SHIFT_BY = {('STEP1_odd', '2*low_half + 1 < 65536'): 2}
+# an atom the others imply (the solver, with the atom one weaker, still proves the constructor's own atom): the probe
+# is accepted, so it is written to accept/ as the proof that the atom is redundant, not to reject/ as a false variant
+REDUNDANT = {
+    ('ENC_three', '0 <= high'): '2048 <= point and point == 4096 * high + 64 * middle + low with middle, low <= 63 leave no high below 0',
+    ('ENC_four', '0 <= top'): '65536 <= point and point == 262144 * top + 4096 * high + 64 * middle + low with high, middle, low <= 63 leave no top below 0',
+}
 OPERATORS = [('<=', 'le'), ('>=', 'ge'), ('==', 'eq'), ('!=', 'ne'), ('<', 'lt'), ('>', 'gt')]
 
 
@@ -234,10 +240,15 @@ def main(argv):
             continue
         controls.setdefault((source, block.first_line), (block, [], dataprop))[1].append(control)
         listing[-1][4].append((atom, weaken(atom, SHIFT_BY.get((name, atom), 1)), fixture))
-        header = (f'(* quire {source} {dataprop}, copied: see gen_guards.py.\n'
-                  f'   False variant: the guard atom `{atom}` of {name} shifted by {SHIFT_BY.get((name, atom), 1)}: `{weaken(atom, SHIFT_BY.get((name, atom), 1)) or "dropped"}` *)\n')
+        redundant = REDUNDANT.get((name, atom))
+        if redundant:
+            header = (f'(* quire {source} {dataprop}, copied: see gen_guards.py.\n'
+                      f'   Redundant guard atom `{atom}` of {name}: the others imply it ({redundant}), so the constructor is still made with it shifted to `{weaken(atom)}` *)\n')
+        else:
+            header = (f'(* quire {source} {dataprop}, copied: see gen_guards.py.\n'
+                      f'   False variant: the guard atom `{atom}` of {name} shifted by {SHIFT_BY.get((name, atom), 1)}: `{weaken(atom, SHIFT_BY.get((name, atom), 1)) or "dropped"}` *)\n')
         body = sources.fixture_text(world, [block], header)
-        files[HERE / 'reject' / f'{fixture}.dats'] = body + '\n' + re.sub(r'\$[A-Z]+\.', '', text) + '\n'
+        files[HERE / ('accept' if redundant else 'reject') / f'{fixture}.dats'] = body + '\n' + re.sub(r'\$[A-Z]+\.', '', text) + '\n'
     satisfiable_seen = 0
     for fixture, source, block, dataprop, name, text in satisfiable(world, ('src/', 'css:')):
         satisfiable_seen += 1
