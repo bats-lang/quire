@@ -13,3 +13,5 @@ src/schema.bats 2
 src/record.bats
 src/bookrec.bats 1 smoke
 src/indexrec.bats 1 smoke
+src/text_relation.bats
+src/text_labels.bats
