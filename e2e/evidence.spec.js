@@ -23,7 +23,7 @@ import { missingFields } from './evidence-check.js';
 import { futexAnalysis, ringContent } from './flight-recorder.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { Watchdog } from './flight-watchdog.js';
-import { LOCK_NAME, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
+import { LOCK_NAME, LOCK_UNREADABLE_MS, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
 
 function desktopOnly(testInfo) {
   test.skip(testInfo.project.name !== 'desktop', 'the renderer and the machine do not depend on the project: once, in desktop, is enough');
@@ -626,6 +626,87 @@ test('a ring lock that cannot be had in its limit leaves a record, runs the acti
   expect(withRingLock(free, () => 'ran', { most: 300 })).toBe('ran');
   expect(lockFailuresIn(free)).toEqual([]);
   expect(existsSync(join(free, LOCK_NAME)), 'and given back').toBe(false);
+});
+
+test('a ring lock that is empty, is not a time, or is older than the stale limit is taken; a live one is refused (ring lock, unreadable lock)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const limits = { most: 1500, stale: 60000 };
+  const taken = (name, content) => {
+    const dir = testInfo.outputPath(name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, LOCK_NAME), content);
+    const result = { ran: withRingLock(dir, () => 'ran', limits), records: lockFailuresIn(dir) };
+    return { ...result, left: existsSync(join(dir, LOCK_NAME)) };
+  };
+  // a run that hit ENOSPC while writing the lock leaves it empty
+  expect.soft(taken('empty', ''), 'an empty lock is taken, with no record').toEqual({ ran: 'ran', records: [], left: false });
+  expect.soft(taken('text', 'not-a-time 99\n'), 'a lock with text that is not a number is taken').toEqual({ ran: 'ran', records: [], left: false });
+  const old = new Date(Date.now() - 120000).toISOString();
+  expect.soft(taken('old', `${old} 4242\n`), 'a lock older than the stale limit is taken').toEqual({ ran: 'ran', records: [], left: false });
+  // a live lock (younger than the limit) is still refused: the limit passes, a record is left, and the lock stays
+  const write = console.error;
+  console.error = () => {};
+  let refused;
+  try {
+    const dir = testInfo.outputPath('live-again');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, LOCK_NAME), `${new Date().toISOString()} 4242\n`);
+    refused = { ran: withRingLock(dir, () => 'ran', { most: 300, stale: 60000 }), records: lockFailuresIn(dir), left: existsSync(join(dir, LOCK_NAME)) };
+  } finally { console.error = write; }
+  expect(refused.ran, 'the action still runs').toBe('ran');
+  expect(refused.records, 'a live lock is not taken: a record says it was not had').toHaveLength(1);
+  expect(refused.records[0].text).toMatch(/did not get the ring lock .*4242\)/);
+  expect(refused.left, 'and the live holder\'s lock stays').toBe(true);
+});
+
+// A live holder as another process plays it: `steps` is [[ms, 'write' | 'unlink', content]], from the moment the script starts, on the lock `path`.
+const holderScript = `
+const { writeFileSync, unlinkSync, renameSync } = require('node:fs');
+const [path, steps] = [process.argv[1], JSON.parse(process.argv[2])];
+const begun = Date.now();
+for (const [ms, action, content] of steps) {
+  while (Date.now() - begun < ms) { /* wait */ }
+  if (action === 'write') writeFileSync(path, content.replace('NOW', new Date().toISOString() + ' ' + process.pid + '\\n'), content.startsWith('NEW') ? { flag: 'wx' } : {});
+  else if (action === 'swap') { writeFileSync(path + '.next', content); renameSync(path + '.next', path); } // another holder's lock in the first one's place, at one instant
+  else unlinkSync(path);
+}
+`;
+const UNREADABLE_BRIEF_MS = 40; // a live holder's lock is empty this long: less than the window
+const REPLACED_AT_MS = LOCK_UNREADABLE_MS - 50; // the first lock has been seen unreadable almost for the whole window when another holder's takes its place
+const REPLACEMENT_VALID_AT_MS = REPLACED_AT_MS + 100; // the replacement is unreadable for this long, past the window of the first lock's timer but within its own
+const REPLACEMENT_GIVEN_BACK_AT_MS = REPLACEMENT_VALID_AT_MS + 300;
+
+const playHolder = (dir, steps) => {
+  const path = join(dir, LOCK_NAME);
+  const child = spawn(process.execPath, ['-e', holderScript, path, JSON.stringify(steps)], { stdio: 'inherit' });
+  const closed = new Promise((resolve) => child.on('close', resolve));
+  const waitUntil = Date.now() + 5000;
+  while (!existsSync(path) && Date.now() < waitUntil) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+  return { began: Date.now(), closed };
+};
+
+test('a ring lock that is unreadable only briefly, or that another holder replaced while its timer ran, is not taken (ring lock, unreadable lock)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const limits = { most: 3000, stale: 60000 };
+  const outcome = async (name, steps) => {
+    const dir = testInfo.outputPath(name);
+    mkdirSync(dir, { recursive: true });
+    const holder = playHolder(dir, steps);
+    const ran = withRingLock(dir, () => ({ elapsed: Date.now() - holder.began, lockThere: existsSync(join(dir, LOCK_NAME)) }), limits);
+    await holder.closed;
+    return { ...ran, records: lockFailuresIn(dir) };
+  };
+  // a live holder that has made its lock and has not written it yet (empty for 40 ms): the waiter waits for its release
+  const brief = await outcome('brief', [[0, 'write', 'NEW'], [UNREADABLE_BRIEF_MS, 'write', 'NOW'], [REPLACEMENT_GIVEN_BACK_AT_MS, 'unlink']]);
+  expect.soft(brief.elapsed, 'a lock unreadable for less than the window is waited for, not taken').toBeGreaterThanOrEqual(REPLACEMENT_GIVEN_BACK_AT_MS - 50);
+  expect.soft(brief.records, 'and no record').toEqual([]);
+  // one unreadable lock is seen, given back, and another holder's lock begins unreadable: that is a new lock, its timer starts again
+  const replaced = await outcome('replaced', [
+    [0, 'write', 'NEW'],
+    [REPLACED_AT_MS, 'swap', 'partial'], [REPLACEMENT_VALID_AT_MS, 'write', 'NOW'], [REPLACEMENT_GIVEN_BACK_AT_MS, 'unlink'],
+  ]);
+  expect.soft(replaced.elapsed, 'the other holder\'s lock is not taken down while it is live').toBeGreaterThanOrEqual(REPLACEMENT_GIVEN_BACK_AT_MS - 50);
+  expect.soft(replaced.records, 'and no record').toEqual([]);
 });
 
 test('a capture leaves the ring recording on every outcome, the last of two readers resumes it, and a ring left paused is not a record of the next red', async ({}, testInfo) => {
