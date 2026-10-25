@@ -1,4 +1,3 @@
 function _static_conv_snoc_other_way
 line 3
 unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Evar(enc(_)); S2Evar(octets(_))))
-/home/user/quire-845-static-work/app/src/text_relation.bats: 166120(line=2938, offs=30) -- 166126(line=2938, offs=36): warning(3): the constraint [S2Eeqeq(S2Evar(octets(_)); S2Evar(enc(_)))] cannot be translated into a form accepted by the constraint solver.
