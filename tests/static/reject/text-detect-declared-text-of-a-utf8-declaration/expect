@@ -1,0 +1,5 @@
+function _static_text_of_utf8
+line 2
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(DECLSCAN); S2Evar(cells(_)), S2Eintinf(5), S2Eapp(S2Ecst(SrcUtf16); S2Eapp(S2Ecst(LittleEndian); )))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

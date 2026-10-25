@@ -1,3 +1,5 @@
 function _static_little_as_big
-line 1
-PLACEHOLDER
+line 2
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(UNIT16); S2Evar(cells(_)), S2Eapp(S2Ecst(BigEndian); ), S2Evar(i(_)), S2Eapp(S2Ecst(add_int_int); S2Evar(first(_)), S2Eapp(S2Ecst(mul_int_int); S2Eintinf(256), S2Evar(second(_)))))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

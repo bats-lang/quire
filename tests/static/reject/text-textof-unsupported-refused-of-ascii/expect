@@ -1,3 +1,0 @@
-function _static_unsupported_ascii_refused
-line 1
-unsolved constraint: C3NSTRprop(C3TKmain(); S2Eapp(S2Ecst(!=); S2EVar(_->S2Eintinf(1)), S2Eintinf(1)))

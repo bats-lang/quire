@@ -1,3 +1,5 @@
 function _static_not_unsupported_refusal
-line 1
-PLACEHOLDER
+line 2
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(TEXTOF); S2Evar(cells(_)), S2Eapp(S2Ecst(PlanConvert); ), S2Eapp(S2Ecst(TOUT_bytes); S2Evar(total(_))))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

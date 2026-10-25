@@ -1,3 +1,5 @@
 function _static_wide_flagged_ascii
 line 2
-unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Eintinf(2); S2Eintinf(1)))
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(UTF8RUN); S2Evar(cells(_)), S2Evar(i(_)), S2Eapp(S2Ecst(add_int_int); S2Evar(i(_)), S2Eintinf(2)), S2Eapp(S2Ecst(SpreadAscii); ))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

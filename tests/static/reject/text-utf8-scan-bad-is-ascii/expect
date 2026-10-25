@@ -1,0 +1,5 @@
+function _static_bad_is_ascii
+line 2
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(UTF8SCAN); S2Evar(cells(_)), S2Evar(from(_)), S2Eapp(S2Ecst(ScannedAscii); ))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

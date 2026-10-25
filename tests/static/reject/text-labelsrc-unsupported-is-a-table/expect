@@ -1,3 +1,5 @@
 function _static_unsupported_is_a_table
 line 1
-unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Eintinf(3); S2Eintinf(4)))
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(LABELSRC); S2Evar(cells(_)), S2Evar(from(_)), S2Evar(count(_)), S2Eapp(S2Ecst(SrcTable); S2Eapp(S2Ecst(Cp1250); )))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

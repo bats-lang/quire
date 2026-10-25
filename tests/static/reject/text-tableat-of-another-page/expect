@@ -1,0 +1,5 @@
+function _static_another_page
+line 1
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(TABLEAT); S2Eapp(S2Ecst(Cp1251); ), S2Eintinf(128), S2Eintinf(8364))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

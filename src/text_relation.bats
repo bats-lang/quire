@@ -2013,7 +2013,7 @@ primplement enc_len {point}{octets} (enc) =
   | ENC_three() => LEN_cons(LEN_cons(LEN_cons(LEN_nil())))
   | ENC_four() => LEN_cons(LEN_cons(LEN_cons(LEN_cons(LEN_nil()))))
 
-(* CONV(cells, source, from, to, octets): the document in the source with that number, from `from` to `to`, a character at a time
+(* CONV(cells, source, from, to, octets): the document in the source, from `from` to `to`, a character at a time
    (STEPOF), becomes the UTF-8 bytes octets (the bytes of each character's code point, ENC, one after another) *)
 #pub dataprop CONV($A.cells, tsrc, int, int, bytes) =
   | {cells:$A.cells}{source:tsrc}{i:nat} CONV_none(cells, source, i, i, bnil())

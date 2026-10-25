@@ -1,3 +1,3 @@
 function _static_conv_other_point
-line 1
-PLACEHOLDER
+line 3
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Eapp(S2Ecst(add_int_int); S2Evar(point(_)), S2Eintinf(1)); S2Evar(point(_))))

@@ -1,0 +1,6 @@
+function _static_table_of_another_page
+line 1
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(STEPOF); S2Evar(cells(_)), S2Eapp(S2Ecst(SrcTable); S2Eapp(S2Ecst(Cp1252); )), S2Evar(i(_)), S2Eapp(S2Ecst(add_int_int); S2Evar(i(_)), S2Eintinf(1)), S2Evar(point(_)))].
+mismatch of static terms (equal):
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

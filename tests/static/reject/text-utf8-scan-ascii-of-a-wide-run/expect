@@ -1,0 +1,5 @@
+function _static_ascii_of_wide
+line 2
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(UTF8RUN); S2Evar(cells(_)), S2Evar(from(_)), S2Evar(n(_)), S2Eapp(S2Ecst(SpreadAscii); ))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

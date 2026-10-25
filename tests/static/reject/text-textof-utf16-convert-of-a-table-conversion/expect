@@ -1,0 +1,5 @@
+function _static_utf16_convert_of_table
+line 3
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(CONV); S2Evar(cells(_)), S2Eapp(S2Ecst(SrcUtf16); S2Evar(order(_))), S2Evar(mark(_)), S2Evar(n(_)), S2Evar(octets(_)))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

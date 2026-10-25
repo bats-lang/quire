@@ -1,0 +1,5 @@
+function _static_single_as_is_of_unsupported
+line 3
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(DETECT); S2Evar(cells(_)), S2Eapp(S2Ecst(SrcTable); S2Eapp(S2Ecst(Cp1252); )), S2Evar(mark(_)))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

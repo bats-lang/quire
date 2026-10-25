@@ -1,3 +1,5 @@
 function _static_single_convert_of_valid
-line 1
-PLACEHOLDER
+line 3
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(UTF8SCAN); S2Evar(cells(_)), S2Eintinf(0), S2Eapp(S2Ecst(ScannedRefused); ))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

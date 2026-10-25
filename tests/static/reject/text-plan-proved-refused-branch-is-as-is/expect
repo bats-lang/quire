@@ -1,3 +1,5 @@
 function _static_refused_branch_is_as_is
 line 9
-unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Eintinf(2); S2Eintinf(0)))
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(TEXTOF); S2Evar(cells(_)), S2Eapp(S2Ecst(PlanAsIs); ), S2Evar(out(_)))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

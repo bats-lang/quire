@@ -1,0 +1,5 @@
+function _static_unit_of_single_source
+line 1
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(STEPOF); S2Evar(cells(_)), S2Eapp(S2Ecst(SrcTable); S2Eapp(S2Ecst(Cp1252); )), S2Evar(i(_)), S2Eapp(S2Ecst(add_int_int); S2Evar(i(_)), S2Eintinf(2)), S2Evar(unit(_)))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

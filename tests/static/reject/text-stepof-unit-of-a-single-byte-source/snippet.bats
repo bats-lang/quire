@@ -1,0 +1,1 @@
+prfn _static_unit_of_single_source {cells:$A.cells}{order:byteorder}{i:nat}{unit:int | unit < 55296} (one: UNIT16(cells, order, i, unit)): STEPOF(cells, SrcTable(Cp1252()), i, i + 2, unit) = STEPOF_unit(one)
