@@ -171,6 +171,10 @@ false claim.
   branch (the division terms and the hypotheses are in the context), the proof's result one more
   (rejected at the cast, which has every division of the body in it), or, for a function with no copy
   (`implement`, `fun`), the same claims written by hand (`vacuity-by-hand-*`).
+  A guard written as a `stadef` (sha256's `cube_fraction_*`, `sqrt_fraction*`) is not unfolded where its arguments are
+  variables, only where they are literals, so its fixtures call the guard at the literal word of the first constant
+  (accept) and at the word one off (reject); the array `iarr_*` rows are the int range, with a `[1 == 2]` probe and the
+  largest int plus one (#876).
 * Python, as every `tests/static` checker: they extend and import `proofs_audit.py`, `mutation_check.py`
   and `solver.py`, which read text and run patsopt, before any bats program is built.
 
