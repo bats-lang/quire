@@ -439,10 +439,17 @@ class Table(unittest.TestCase):
                 self.assertEqual((picked.e2e, picked.static), (af.ALL, af.ALL))
 
     def test_the_mutation_files_are_not_a_fixture(self):
-        for path in ('tests/static/mutation_check.py', 'tests/static/mutation_known.txt', 'tests/static/proofs_audit.py'):
+        for path in ('tests/static/mutation_check.py', 'tests/static/mutation_known.txt'):
             with self.subTest(path):
                 name, picked = af.classify(path, 'M', af.Tree(str(ROOT)))
                 self.assertEqual(picked.static, frozenset(['checkers']))
+
+    def test_the_proofs_audit_selects_its_checker_and_the_fixtures_it_names(self):
+        for path in ('tests/static/proofs_audit.py', 'tests/static/proofs_audit_test.py',
+                     'tests/static/proofs_audit_verdicts.txt', 'tests/static/proof_sources.py'):
+            with self.subTest(path):
+                name, picked = af.classify(path, 'M', af.Tree(str(ROOT)))
+                self.assertEqual((picked.e2e, picked.static), (af.NONE, frozenset(['checkers', 'solver'])))
 
 
 class Readers(unittest.TestCase):

@@ -190,6 +190,10 @@ def only_solver(path, status, tree):
     return frozenset(['solver'])
 
 
+def checkers_and_solver(path, status, tree):
+    return frozenset([CHECKERS, 'solver'])
+
+
 class Rule:
     def __init__(self, name, globs, e2e, static):
         self.name = name
@@ -244,6 +248,11 @@ RULES = [
     # The static tests
     Rule('a static fixture', ['tests/static/accept/*/**', 'tests/static/reject/*/**'], NONE, static_fixture),
     Rule('the solver fixtures', ['tests/static/solver.py', 'tests/static/solver/**'], NONE, only_solver),
+    # The proofs audit and its verdicts (the audit and its test are `checkers`; the verdicts name the
+    # solver fixtures, and the fixtures are written from the same sources: proof_sources.py)
+    Rule('the proofs audit', ['tests/static/proofs_audit.py', 'tests/static/proofs_audit_test.py',
+                              'tests/static/proofs_audit_verdicts.txt', 'tests/static/proof_sources.py'],
+         NONE, checkers_and_solver),
     Rule('the static checkers', ['tests/static/**'], NONE, only_checkers),
 ]
 

@@ -1,0 +1,44 @@
+# Verdicts of the HIGH rows of tests/static/proofs_audit.py (quire#840 over src/, #841 over the locked packages):
+# for each, whether its context can be contradictory, and the reject fixtures of tests/static/solver/ that show it cannot.
+# A context that is contradictory proves any claim; each fixture puts a false claim in the context of the row, and the
+# solver rejects it, with the error in its .expect. A row is keyed by scope (quire, or the package), file, the declaration
+# it is in, and its kind: a relock that moves a line changes nothing here, a new row needs a verdict, and
+# `proofs_audit.py --fail-on high` fails without one. The format is in proofs_audit.py.
+#
+# The gestures row of the first audit (tracker.bats:414, `d * scale_one() / d0` of a pinch) is gone: it was arithmetic on plain
+# ints in a function body, flagged only because a prval stood in the same block; the audit now takes a proof construct to be
+# the lines a proof line begins and the lines it holds, and the solver has no claim to make about that line.
+#
+# scope | file | proof | kind | fixtures | reason
+quire | src/crc.bats | xor_exists | nested | vacuity-crc-xor-exists-even-even, vacuity-crc-xor-exists-even-odd, vacuity-crc-xor-exists-odd-even, vacuity-crc-xor-exists-odd-odd | a probe in each of the four cases of the halving: the context with the divisions of left and right is satisfiable
+quire | src/crc.bats | step1_exists | nested | vacuity-crc-step1-exists-low-even, vacuity-crc-step1-exists-low-odd-xor, vacuity-crc-step1-exists-low-odd-result | a probe in the even case and in the odd case, before the xor and at the result: the context with the divisions is satisfiable
+quire | src/crc.bats | shift2 | nested | vacuity-crc-shift2-first, vacuity-crc-shift2-second | a probe at each of the two steps of shift2: the context with the divisions of r is satisfiable
+quire | src/crc.bats | shift4 | nested | vacuity-crc-shift4-first, vacuity-crc-shift4-second | a probe at each of the two steps of shift4: the context with the divisions of r is satisfiable
+quire | src/crc.bats | shift8 | nested | vacuity-crc-shift8-first, vacuity-crc-shift8-second | a probe at each of the two steps of shift8: the context with the divisions of r is satisfiable
+quire | src/palette.bats | SHADE | nonlinear | dataprop-satisfiable-shadec, dataprop-guard-shadec-100-times-shaded-r-le-r-times-100-minus-strength-plus-50, dataprop-guard-shadec-g-times-100-minus-strength-plus-50-lt-100-times-shaded-g-plus-100, dataprop-guard-shadec-100-times-shaded-b-le-b-times-100-minus-strength-plus-50, shade-38f55f-at-10-channel0-off-by-one, shade-572ed6-at-33-channel1-off-by-one, shade-7c38b0-at-10-channel2-off-by-one | the guards of SHADEc hold of some values, and each product of a channel by the strength is shifted by one and rejected (the three channels, lines 234 to 236)
+quire | src/settings.bats | _voices_size | nonlinear | vacuity-by-hand-settings-voices-size | count * (2 + 3 + VOICE_NAME_MAX) is a product by a constant (255, #define): linear; the step of the recursion with the bound 6 less is rejected
+quire | src/stardict.bats | _digits | wide-literal | vacuity-by-hand-stardict-digits-total | 2147483647 is the bound of total; the step total * 10 + digit with 9 more is rejected, under the solver that computes in infinite precision
+arith | src/lib.bats | xor_zero_right | nested | vacuity-arith-xor-zero-right | a probe in the even case of go (a == 2*(a/2)): the context is satisfiable
+arith | src/lib.bats | xor_zero_left | nested | vacuity-arith-xor-zero-left | a probe in the even case of go (a == 2*(a/2)): the context is satisfiable
+arith | src/lib.bats | xor_self | nested | vacuity-arith-xor-self | a probe in the even case of go (a == 2*(a/2)): the context is satisfiable
+arith | src/lib.bats | xor_half | nested | vacuity-arith-xor-half-xor-00, vacuity-arith-xor-half-xor-01, vacuity-arith-xor-half-xor-10, vacuity-arith-xor-half-xor-11 | a probe with the divisions of a, b and c in each of the four cases of the match
+arith | src/lib.bats | rotr_digits_2 | nested | vacuity-arith-rotr-digits-2 | the result of rotr_digits_2 one more is rejected at the cast, which has the divisions of both steps in it
+arith | src/lib.bats | rotr_digits_4 | nested | vacuity-arith-rotr-digits-4 | the result of rotr_digits_4 one more is rejected at the cast, which has the divisions of both steps in it
+arith | src/lib.bats | rotr_digits_8 | nested | vacuity-arith-rotr-digits-8 | the result of rotr_digits_8 one more is rejected at the cast, which has the divisions of both steps in it
+arith | src/lib.bats | rotr_by_16 | nested | vacuity-arith-rotr-by-16 | the result of rotr_by_16 one more is rejected at the cast, which has the divisions of both steps in it
+arith | src/lib.bats | shr_digits_2 | nested | vacuity-arith-shr-digits-2 | the result of shr_digits_2 one more is rejected at the cast, which has the divisions of both steps in it
+arith | src/lib.bats | shr_digits_4 | nested | vacuity-arith-shr-digits-4 | the result of shr_digits_4 one more is rejected at the cast, which has the divisions of both steps in it
+arith | src/lib.bats | shr_digits_8 | nested | vacuity-arith-shr-digits-8 | the result of shr_digits_8 one more is rejected at the cast, which has the divisions of both steps in it
+arith | src/lib.bats | shr_by_16 | nested | vacuity-arith-shr-by-16 | the result of shr_by_16 one more is rejected at the cast, which has the divisions of both steps in it
+arith | src/lib.bats | rotr_step_1 | nested | vacuity-arith-rotr-step-1 | the static content of rotr_step_1 (the lemma at the halves divided by 2, cast to h and l) with the result one more is rejected
+arith | src/lib.bats | rotr_step_2 | nested | vacuity-arith-rotr-step-2 | the static content of rotr_step_2 (the lemma at the halves divided by 4, cast to h and l) with the result one more is rejected
+arith | src/lib.bats | rotr_step_4 | nested | vacuity-arith-rotr-step-4 | the static content of rotr_step_4 (the lemma at the halves divided by 16, cast to h and l) with the result one more is rejected
+arith | src/lib.bats | rotr_step_8 | nested | vacuity-arith-rotr-step-8 | the static content of rotr_step_8 (the lemma at the halves divided by 256, cast to h and l) with the result one more is rejected
+arith | src/lib.bats | shr_step_1 | nested | vacuity-arith-shr-step-1 | the static content of shr_step_1 (the lemma at the halves divided by 2, cast to h and l) with the result one more is rejected
+arith | src/lib.bats | shr_step_2 | nested | vacuity-arith-shr-step-2 | the static content of shr_step_2 (the lemma at the halves divided by 4, cast to h and l) with the result one more is rejected
+arith | src/lib.bats | shr_step_4 | nested | vacuity-arith-shr-step-4 | the static content of shr_step_4 (the lemma at the halves divided by 16, cast to h and l) with the result one more is rejected
+arith | src/lib.bats | shr_step_8 | nested | vacuity-arith-shr-step-8 | the static content of shr_step_8 (the lemma at the halves divided by 256, cast to h and l) with the result one more is rejected
+css | src/contrast.bats | CONTRAST | nonlinear | dataprop-satisfiable-contrast-lighter-first, dataprop-satisfiable-contrast-lighter-second, contrast-ffffff-on-000000-claims-211, contrast-767676-on-ffffff-claims-46, contrast-777777-on-ffffff-claims-45 | the guards of both constructors hold of some values, and a ratio one tenth over the largest the constructors admit is rejected for 25 pairs of colours (the boundary pairs among them)
+css | src/harmony.bats | HUE | nonlinear | dataprop-satisfiable-hue-r-g-b, dataprop-satisfiable-hue-r-g-b-up, dataprop-satisfiable-hue-r-g-b-down, dataprop-satisfiable-hue-g-r-b, dataprop-satisfiable-hue-g-r-b-up, dataprop-satisfiable-hue-g-r-b-down, dataprop-satisfiable-hue-g-b-r, dataprop-satisfiable-hue-g-b-r-up, dataprop-satisfiable-hue-g-b-r-down, dataprop-satisfiable-hue-b-g-r, dataprop-satisfiable-hue-b-g-r-up, dataprop-satisfiable-hue-b-g-r-down, dataprop-satisfiable-hue-b-r-g, dataprop-satisfiable-hue-b-r-g-up, dataprop-satisfiable-hue-b-r-g-down, dataprop-satisfiable-hue-r-b-g, dataprop-satisfiable-hue-r-b-g-up, dataprop-satisfiable-hue-r-b-g-down, harmony-chroma-036682-claims-126 | the guards of each of the 18 constructors hold of some values, and a chroma one over the largest a hue admits is rejected
+css | src/harmony.bats | SATNEAR | nonlinear | dataprop-satisfiable-satnearc, harmony-calm-036682-saturated, harmony-calm-178dc7-saturated | the guards of SATNEARc hold of some values, and a colour claimed calm that is saturated is rejected
+wasm.bats-packages.dev_bridge | src/timer.bats | epoch_millis | wide-literal | vacuity-by-hand-bridge-epoch-millis, vacuity-by-hand-bridge-epoch-millis-satisfiable | 1073741824 is the bound of the low part (2^30); the context of the bound is satisfiable, and the milliseconds one less than the next high part are rejected

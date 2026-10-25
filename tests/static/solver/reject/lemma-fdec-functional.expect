@@ -1,0 +1,47 @@
+line 155
+function _fdec_functional
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(EQFD); S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_nil); )), S2Eapp(S2Ecst(fd_bad); ))].
+
+line 155
+function _fdec_functional
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_nil); ))
+The needed term is: S2Eapp(S2Ecst(fd_bad); )
+
+line 155
+function _fdec_functional
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(EQFD); S2EVar(_->S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_nil); ))), S2EVar(_->S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_nil); ))))
+The needed term is: S2Eapp(S2Ecst(EQFD); S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_nil); )), S2Eapp(S2Ecst(fd_bad); ))
+
+line 169
+function _fdec_functional
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(EQFD); S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_i32); S2Evar(number$_), S2Evar(contents$_))), S2Eapp(S2Ecst(fd_bad); ))].
+
+line 169
+function _fdec_functional
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_i32); S2Evar(number$_), S2Evar(contents$_)))
+The needed term is: S2Eapp(S2Ecst(fd_bad); )
+
+line 169
+function _fdec_functional
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(EQFD); S2EVar(_->S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_i32); S2Evar(number$_), S2Evar(contents$_)))), S2EVar(_->S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_i32); S2Evar(number$_), S2Evar(contents$_)))))
+The needed term is: S2Eapp(S2Ecst(EQFD); S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_i32); S2Evar(number$_), S2Evar(contents$_))), S2Eapp(S2Ecst(fd_bad); ))
+
+line 195
+function _fdec_functional
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(EQFD); S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_str); S2Evar(text$_), S2Evar(contents$_))), S2Eapp(S2Ecst(fd_bad); ))].
+
+line 195
+function _fdec_functional
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_str); S2Evar(text$_), S2Evar(contents$_)))
+The needed term is: S2Eapp(S2Ecst(fd_bad); )
+
+line 195
+function _fdec_functional
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(EQFD); S2EVar(_->S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_str); S2Evar(text$_), S2Evar(contents$_)))), S2EVar(_->S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_str); S2Evar(text$_), S2Evar(contents$_)))))
+The needed term is: S2Eapp(S2Ecst(EQFD); S2Eapp(S2Ecst(fd_ok); S2Eapp(S2Ecst(fv_str); S2Evar(text$_), S2Evar(contents$_))), S2Eapp(S2Ecst(fd_bad); ))

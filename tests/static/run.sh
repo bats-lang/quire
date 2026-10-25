@@ -175,6 +175,16 @@ else echo "FAIL literals:"; cat "$TMP/literals.log"; fail=1; fi
 if python3 "$ROOT/tests/static/keys.py" "$ROOT/src" > "$TMP/keys.log" 2>&1; then echo "ok   keys: $(tail -1 "$TMP/keys.log")"
 else echo "FAIL keys:"; cat "$TMP/keys.log"; fail=1; fi
 
+# The HIGH rows of the proofs audit each have a verdict, and the verdict's fixtures are there (proofs_audit.py,
+# quire#840 over src/ and #841 over the locked packages); the audit's own cases, a row injected without a
+# verdict among them
+if python3 "$ROOT/tests/static/proofs_audit_test.py" > "$TMP/proofs_audit_test.log" 2>&1; then echo "ok   proofs_audit_test: $(tail -1 "$TMP/proofs_audit_test.log")"
+else echo "FAIL proofs_audit_test:"; cat "$TMP/proofs_audit_test.log"; fail=1; fi
+if python3 "$ROOT/tests/static/proofs_audit.py" --fail-on high "$ROOT/src" > "$TMP/proofs_audit.log" 2>&1; then echo "ok   proofs_audit src: $(tail -1 "$TMP/proofs_audit.log")"
+else echo "FAIL proofs_audit src:"; grep -E '^(NO|BAD) VERDICT' "$TMP/proofs_audit.log"; fail=1; fi
+if python3 "$ROOT/tests/static/proofs_audit.py" --fail-on high --lock "$ROOT/bats.lock" --repository "$repository" > "$TMP/proofs_audit_lock.log" 2>&1; then echo "ok   proofs_audit lock: $(tail -1 "$TMP/proofs_audit_lock.log")"
+else echo "FAIL proofs_audit lock:"; grep -E '^(NO|BAD) VERDICT' "$TMP/proofs_audit_lock.log"; fail=1; fi
+
 # A group added to the records is "added", with the library of the table
 # before it (groups.py, quire#515): the app's own, and the checker's fixtures,
 # each a checkout's scripts/record_tables.py and e2e/old-library.spec.js
@@ -255,10 +265,17 @@ fi
 # The solver's own fixtures (solver.py, quire#594): true and false statements
 # of the shapes the proofs use, run by the patsopt on the machine (CI's is the
 # infinite-precision build; the -int build is known to accept 5 of the false
-# ones), so a move back to a solver that cannot be trusted fails here
+# ones), so a move back to a solver that cannot be trusted fails here. Each reject fixture says how it is
+# rejected (its .expect). The fixtures written from the sources (quire#837 to #841: the palette's luminance
+# constants, the lemmas no mutation reaches, the guard of each dataprop constructor, the contexts the audit
+# flags) are written again from the modules and the locked packages and must be what is committed
 if named solver; then
   if python3 "$ROOT/tests/static/solver.py" > "$TMP/solver.log" 2>&1; then echo "ok   solver: $(tail -1 "$TMP/solver.log")"
   else echo "FAIL solver:"; grep -v '^ok' "$TMP/solver.log"; fail=1; fi
+  for generator in gen_luminance gen_lemmas gen_guards gen_vacuity; do
+    if python3 "$ROOT/tests/static/solver/$generator.py" --check --lock "$ROOT/bats.lock" --repository "$repository" > "$TMP/$generator.log" 2>&1; then echo "ok   solver/$generator: $(tail -1 "$TMP/$generator.log")"
+    else echo "FAIL solver/$generator:"; cat "$TMP/$generator.log"; fail=1; fi
+  done
 fi
 
 # The fixtures (bats-lang/bats#267): `bats fixtures` copies the checkout to

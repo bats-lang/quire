@@ -1,0 +1,3 @@
+line 6
+function step
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eapp(S2Ecst(<=); S2Eapp(S2Ecst(+); S2Eapp(S2Ecst(+); S2Eapp(S2Ecst(+); S2Eapp(S2Ecst(+); S2Eintinf(2), S2Evar(code_len(_))), S2Evar(name_len(_))), S2Evar(rest(_))), S2Eintinf(6)), S2Eapp(S2Ecst(*); S2Eapp(S2Ecst(+); S2Evar(count(_)), S2Eintinf(1)), S2Eapp(S2Ecst(+); S2Eapp(S2Ecst(+); S2Eintinf(2), S2Eintinf(3)), S2Eintinf(255)))))
