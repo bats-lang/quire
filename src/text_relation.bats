@@ -9,7 +9,9 @@
 #use array as A
 
 staload "bytes.sats"
+staload "bytesarr.sats"
 staload "text_labels.sats"
+staload "text_codes.sats"
 
 (* BYTEAT(cells, i, value): the byte at i of the cells is value, or -1 when i is outside them *)
 #pub dataprop BYTEAT($A.cells, int, int) =
@@ -1463,76 +1465,656 @@ primplement utf8scan_functional {cells}{from}{first,second} (one, other) =
        in case+ falsity of FALSEP_mk() =/=> () end
      | UTF8SCAN_bad(_, _) => ())
 
-(* What a document becomes: nothing (it is refused), cells, or something a later piece of quire#608 defines *)
+(* Cell i of cells that are longer than i is some value *)
+#pub prfun nth_exists {cells:$A.cells}{n,i:nat | i < n} ($A.CLEN(cells, n)): [value:int] $A.NTH(cells, i, value)
+
+prfun _nth_exists {cells:$A.cells}{n,i:nat | i < n} .<i>. (length: $A.CLEN(cells, n)): [value:int] $A.NTH(cells, i, value) =
+  case+ length of
+  | $A.CLEN_nil() =/=> ()
+  | $A.CLEN_cons(rest_length) =>
+    sif i == 0 then $A.NTH_here() else $A.NTH_there(_nth_exists{..}{n - 1, i - 1}(rest_length))
+
+primplement nth_exists {cells}{n,i} (length) = _nth_exists(length)
+
+(* Cells that are long enough hold some bytes from i, count of them *)
+#pub prfun holds_exists {cells:$A.cells}{i,count,n:nat | i + count <= n} ($A.CLEN(cells, n)): [octets:bytes] HOLDS(cells, i, octets, count)
+
+prfun _holds_exists {cells:$A.cells}{i,count,n:nat | i + count <= n} .<count>. (length: $A.CLEN(cells, n)): [octets:bytes] HOLDS(cells, i, octets, count) =
+  sif count == 0 then HOLDS_nil(length)
+  else HOLDS_cons(nth_exists{cells}{n, i}(length), _holds_exists{cells}{i + 1, count - 1, n}(length))
+
+primplement holds_exists {cells}{i,count,n} (length) = _holds_exists(length)
+
+(* Any byte string followed by another is some byte string *)
+#pub prfun append_exists {front,back:bytes}{count:nat} (LEN(front, count)): [joined:bytes] APPEND(front, back, joined)
+
+prfun _append_exists {front,back:bytes}{count:nat} .<count>. (front_len: LEN(front, count)): [joined:bytes] APPEND(front, back, joined) =
+  case+ front_len of
+  | LEN_nil() => APPEND_nil()
+  | LEN_cons(rest_len) => APPEND_cons(_append_exists(rest_len))
+
+primplement append_exists {front,back}{count} (front_len) = _append_exists(front_len)
+
+(* UNIT16(cells, source, i, unit): the two bytes at i are the 16-bit unit (source 1: little endian, 2: big endian) *)
+#pub dataprop UNIT16($A.cells, int, int, int) =
+  | {cells:$A.cells}{i:nat}{first,second:int | 0 <= first; first < 256; 0 <= second; second < 256}
+    UNIT16_le(cells, 1, i, first + 256 * second) of ($A.NTH(cells, i, first), $A.NTH(cells, i + 1, second))
+  | {cells:$A.cells}{i:nat}{first,second:int | 0 <= first; first < 256; 0 <= second; second < 256}
+    UNIT16_be(cells, 2, i, 256 * first + second) of ($A.NTH(cells, i, first), $A.NTH(cells, i + 1, second))
+
+(* Two bytes make one unit *)
+#pub prfun unit16_functional {cells:$A.cells}{source:int}{i:nat}{first,second:int}
+  (UNIT16(cells, source, i, first), UNIT16(cells, source, i, second)): [first == second] void
+
+primplement unit16_functional {cells}{source}{i}{first,second} (one, other) =
+  case+ one of
+  | UNIT16_le(first_one, second_one) =>
+    (case+ other of
+     | UNIT16_le(first_other, second_other) => let
+         prval () = $A.nth_functional(first_one, first_other)
+         prval () = $A.nth_functional(second_one, second_other)
+       in () end)
+  | UNIT16_be(first_one, second_one) =>
+    (case+ other of
+     | UNIT16_be(first_other, second_other) => let
+         prval () = $A.nth_functional(first_one, first_other)
+         prval () = $A.nth_functional(second_one, second_other)
+       in () end)
+
+(* A unit is within the cells *)
+#pub prfun unit16_in_len {cells:$A.cells}{source:int}{i,n:nat}{unit:int} (UNIT16(cells, source, i, unit), $A.CLEN(cells, n)): [i + 1 < n] void
+
+primplement unit16_in_len {cells}{source}{i,n}{unit} (unit_proof, length) =
+  case+ unit_proof of
+  | UNIT16_le(_, second) => $A.nth_in_len(second, length)
+  | UNIT16_be(_, second) => $A.nth_in_len(second, length)
+
+(* A unit is of 16 bits *)
+#pub prfun unit16_range {cells:$A.cells}{source:int}{i:nat}{unit:int} (UNIT16(cells, source, i, unit)): [0 <= unit; unit < 65536] void
+
+primplement unit16_range {cells}{source}{i}{unit} (unit_proof) =
+  case+ unit_proof of
+  | UNIT16_le(_, _) => ()
+  | UNIT16_be(_, _) => ()
+
+(* STEPOF(cells, source, from, to, point): one character of a document in the source with that number is the bytes
+   [from, to) of the cells, and stands for the code point. UTF-16 (1 little endian, 2 big endian): a unit that is no half of a
+   pair is its own code point; a high half and a low half are one character beyond U+FFFF; a half alone, or a lone byte at the
+   end, is U+FFFD (65533). A single-byte encoding (4 on): a byte under 128 is itself, the others are what the table says *)
+#pub dataprop STEPOF($A.cells, int, int, int, int) =
+  | {cells:$A.cells}{source:int | source == 1 || source == 2}{i,n:nat | n <= i + 1}{first:int}
+    STEPOF_truncated(cells, source, i, i + 1, 65533) of ($A.NTH(cells, i, first), $A.CLEN(cells, n))
+  | {cells:$A.cells}{source:int | source == 1 || source == 2}{i:nat}{unit:int | unit < 55296 || 57344 <= unit}
+    STEPOF_unit(cells, source, i, i + 2, unit) of UNIT16(cells, source, i, unit)
+  | {cells:$A.cells}{source:int | source == 1 || source == 2}{i:nat}{high,low:int | 55296 <= high; high < 56320; 56320 <= low; low < 57344}
+    STEPOF_pair(cells, source, i, i + 4, 65536 + 1024 * (high - 55296) + (low - 56320)) of (UNIT16(cells, source, i, high), UNIT16(cells, source, i + 2, low))
+  | {cells:$A.cells}{source:int | source == 1 || source == 2}{i,n:nat | n <= i + 3}{high:int | 55296 <= high; high < 56320}
+    STEPOF_high_at_end(cells, source, i, i + 2, 65533) of (UNIT16(cells, source, i, high), $A.CLEN(cells, n))
+  | {cells:$A.cells}{source:int | source == 1 || source == 2}{i:nat}{high,next:int | 55296 <= high; high < 56320; next < 56320 || 57344 <= next}
+    STEPOF_high_alone(cells, source, i, i + 2, 65533) of (UNIT16(cells, source, i, high), UNIT16(cells, source, i + 2, next))
+  | {cells:$A.cells}{source:int | source == 1 || source == 2}{i:nat}{low:int | 56320 <= low; low < 57344}
+    STEPOF_low_alone(cells, source, i, i + 2, 65533) of UNIT16(cells, source, i, low)
+  | {cells:$A.cells}{source:int | 4 <= source; source <= 17}{i:nat}{value:int | 0 <= value; value < 128}
+    STEPOF_ascii(cells, source, i, i + 1, value) of $A.NTH(cells, i, value)
+  | {cells:$A.cells}{source:int | 4 <= source; source <= 17}{i:nat}{value:int | 128 <= value; value < 256}{point:int}
+    STEPOF_table(cells, source, i, i + 1, point) of ($A.NTH(cells, i, value), TABLEAT(source, value, point))
+
+(* A character at a place is one character *)
+#pub prfun stepof_functional {cells:$A.cells}{source:int}{i:nat}{first_to,second_to,first_point,second_point:int}
+  (STEPOF(cells, source, i, first_to, first_point), STEPOF(cells, source, i, second_to, second_point))
+  : [first_to == second_to && first_point == second_point] void
+
+primplement stepof_functional {cells}{source}{i}{first_to,second_to,first_point,second_point} (one, other) =
+  case+ one of
+  | STEPOF_truncated(one_nth, one_len) =>
+    (case+ other of
+     | STEPOF_truncated(other_nth, other_len) => ()
+     | STEPOF_unit(other_unit) => let
+         prval () = unit16_in_len(other_unit, one_len)
+       in () end
+     | STEPOF_pair(other_unit, other_next) => let
+         prval () = unit16_in_len(other_unit, one_len)
+       in () end
+     | STEPOF_high_at_end(other_unit, other_len) => let
+         prval () = unit16_in_len(other_unit, one_len)
+       in () end
+     | STEPOF_high_alone(other_unit, other_next) => let
+         prval () = unit16_in_len(other_unit, one_len)
+       in () end
+     | STEPOF_low_alone(other_unit) => let
+         prval () = unit16_in_len(other_unit, one_len)
+       in () end
+     | STEPOF_ascii(other_nth) => ()
+     | STEPOF_table(other_nth, other_tab) => ())
+  | STEPOF_unit(one_unit) =>
+    (case+ other of
+     | STEPOF_truncated(other_nth, other_len) => let
+         prval () = unit16_in_len(one_unit, other_len)
+       in () end
+     | STEPOF_unit(other_unit) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_pair(other_unit, other_next) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_high_at_end(other_unit, other_len) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_high_alone(other_unit, other_next) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_low_alone(other_unit) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_ascii(other_nth) => ()
+     | STEPOF_table(other_nth, other_tab) => ())
+  | STEPOF_pair(one_unit, one_next) =>
+    (case+ other of
+     | STEPOF_truncated(other_nth, other_len) => let
+         prval () = unit16_in_len(one_unit, other_len)
+       in () end
+     | STEPOF_unit(other_unit) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_pair(other_unit, other_next) => let
+         prval () = unit16_functional(one_unit, other_unit)
+         prval () = unit16_functional(one_next, other_next)
+       in () end
+     | STEPOF_high_at_end(other_unit, other_len) => let
+         prval () = unit16_functional(one_unit, other_unit)
+         prval () = unit16_in_len(one_next, other_len)
+       in () end
+     | STEPOF_high_alone(other_unit, other_next) => let
+         prval () = unit16_functional(one_unit, other_unit)
+         prval () = unit16_functional(one_next, other_next)
+       in () end
+     | STEPOF_low_alone(other_unit) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_ascii(other_nth) => ()
+     | STEPOF_table(other_nth, other_tab) => ())
+  | STEPOF_high_at_end(one_unit, one_len) =>
+    (case+ other of
+     | STEPOF_truncated(other_nth, other_len) => let
+         prval () = unit16_in_len(one_unit, other_len)
+       in () end
+     | STEPOF_unit(other_unit) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_pair(other_unit, other_next) => let
+         prval () = unit16_functional(one_unit, other_unit)
+         prval () = unit16_in_len(other_next, one_len)
+       in () end
+     | STEPOF_high_at_end(other_unit, other_len) => ()
+     | STEPOF_high_alone(other_unit, other_next) => let
+         prval () = unit16_functional(one_unit, other_unit)
+         prval () = unit16_in_len(other_next, one_len)
+       in () end
+     | STEPOF_low_alone(other_unit) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_ascii(other_nth) => ()
+     | STEPOF_table(other_nth, other_tab) => ())
+  | STEPOF_high_alone(one_unit, one_next) =>
+    (case+ other of
+     | STEPOF_truncated(other_nth, other_len) => let
+         prval () = unit16_in_len(one_unit, other_len)
+       in () end
+     | STEPOF_unit(other_unit) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_pair(other_unit, other_next) => let
+         prval () = unit16_functional(one_unit, other_unit)
+         prval () = unit16_functional(one_next, other_next)
+       in () end
+     | STEPOF_high_at_end(other_unit, other_len) => let
+         prval () = unit16_functional(one_unit, other_unit)
+         prval () = unit16_in_len(one_next, other_len)
+       in () end
+     | STEPOF_high_alone(other_unit, other_next) => ()
+     | STEPOF_low_alone(other_unit) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_ascii(other_nth) => ()
+     | STEPOF_table(other_nth, other_tab) => ())
+  | STEPOF_low_alone(one_unit) =>
+    (case+ other of
+     | STEPOF_truncated(other_nth, other_len) => let
+         prval () = unit16_in_len(one_unit, other_len)
+       in () end
+     | STEPOF_unit(other_unit) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_pair(other_unit, other_next) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_high_at_end(other_unit, other_len) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_high_alone(other_unit, other_next) => let
+         prval () = unit16_functional(one_unit, other_unit)
+       in () end
+     | STEPOF_low_alone(other_unit) => ()
+     | STEPOF_ascii(other_nth) => ()
+     | STEPOF_table(other_nth, other_tab) => ())
+  | STEPOF_ascii(one_nth) =>
+    (case+ other of
+     | STEPOF_truncated(other_nth, other_len) => ()
+     | STEPOF_unit(other_unit) => ()
+     | STEPOF_pair(other_unit, other_next) => ()
+     | STEPOF_high_at_end(other_unit, other_len) => ()
+     | STEPOF_high_alone(other_unit, other_next) => ()
+     | STEPOF_low_alone(other_unit) => ()
+     | STEPOF_ascii(other_nth) => let
+         prval () = $A.nth_functional(one_nth, other_nth)
+       in () end
+     | STEPOF_table(other_nth, other_tab) => let
+         prval () = $A.nth_functional(one_nth, other_nth)
+       in () end)
+  | STEPOF_table(one_nth, one_tab) =>
+    (case+ other of
+     | STEPOF_truncated(other_nth, other_len) => ()
+     | STEPOF_unit(other_unit) => ()
+     | STEPOF_pair(other_unit, other_next) => ()
+     | STEPOF_high_at_end(other_unit, other_len) => ()
+     | STEPOF_high_alone(other_unit, other_next) => ()
+     | STEPOF_low_alone(other_unit) => ()
+     | STEPOF_ascii(other_nth) => let
+         prval () = $A.nth_functional(one_nth, other_nth)
+       in () end
+     | STEPOF_table(other_nth, other_tab) => let
+         prval () = $A.nth_functional(one_nth, other_nth)
+         prval () = tableat_functional(one_tab, other_tab)
+       in () end)
+
+(* A character is within the cells, and ends within them *)
+#pub prfun stepof_bounds {cells:$A.cells}{source:int}{i,n:nat}{to,point:int} (STEPOF(cells, source, i, to, point), $A.CLEN(cells, n)): [i < to; to <= n] void
+
+primplement stepof_bounds {cells}{source}{i,n}{to,point} (step, length) =
+  case+ step of
+  | STEPOF_truncated(first, _) => $A.nth_in_len(first, length)
+  | STEPOF_unit(unit_proof) => unit16_in_len(unit_proof, length)
+  | STEPOF_pair(_, low) => unit16_in_len(low, length)
+  | STEPOF_high_at_end(high, _) => unit16_in_len(high, length)
+  | STEPOF_high_alone(high, _) => unit16_in_len(high, length)
+  | STEPOF_low_alone(low) => unit16_in_len(low, length)
+  | STEPOF_ascii(value) => $A.nth_in_len(value, length)
+  | STEPOF_table(value, _) => $A.nth_in_len(value, length)
+
+(* ENC(point, octets): the code point is the UTF-8 bytes octets (Unicode, table 3-6: one to four bytes; the digits of 64 are
+   named, so that no division is stated) *)
+#pub dataprop ENC(int, bytes) =
+  | {point:int | 0 <= point; point < 128} ENC_one(point, bcons(point, bnil()))
+  | {point,high,low:int | 2 <= high; high < 32; 0 <= low; low < 64; point == 64 * high + low}
+    ENC_two(point, bcons(192 + high, bcons(128 + low, bnil())))
+  | {point,a,b,c:int | 0 <= a; a < 16; 0 <= b; b < 64; 0 <= c; c < 64; 2048 <= point; point == 4096 * a + 64 * b + c}
+    ENC_three(point, bcons(224 + a, bcons(128 + b, bcons(128 + c, bnil()))))
+  | {point,a,b,c,d:int | 0 <= a; a < 5; 0 <= b; b < 64; 0 <= c; c < 64; 0 <= d; d < 64; 65536 <= point; point == 262144 * a + 4096 * b + 64 * c + d}
+    ENC_four(point, bcons(240 + a, bcons(128 + b, bcons(128 + c, bcons(128 + d, bnil())))))
+
+(* Digits of 64 are unique *)
+prfn digit64_unique {high_one,low_one,high_two,low_two:int | 0 <= low_one; low_one < 64; 0 <= low_two; low_two < 64; 64 * high_one + low_one == 64 * high_two + low_two}
+  (): [high_one == high_two && low_one == low_two] void = ()
+
+(* A code point is one byte string *)
+#pub prfun enc_functional {point:int}{first,second:bytes} (ENC(point, first), ENC(point, second)): EQB(first, second)
+
+primplement enc_functional {point}{first,second} (one, other) =
+  case+ one of
+  | ENC_one() =>
+    (case+ other of
+     | ENC_one() => EQB_refl()
+     | ENC_two() => falsep_eqb(contradiction{0}())
+     | ENC_three() => falsep_eqb(contradiction{0}())
+     | ENC_four() => falsep_eqb(contradiction{0}()))
+  | ENC_two{point_one, high_one, low_one}() =>
+    (case+ other of
+     | ENC_one() => falsep_eqb(contradiction{0}())
+     | ENC_two{point_two, high_two, low_two}() => let
+         prval () = digit64_unique{high_one, low_one, high_two, low_two}()
+       in EQB_refl() end
+     | ENC_three() => falsep_eqb(contradiction{0}())
+     | ENC_four() => falsep_eqb(contradiction{0}()))
+  | ENC_three{point_one, a_one, b_one, c_one}() =>
+    (case+ other of
+     | ENC_one() => falsep_eqb(contradiction{0}())
+     | ENC_two() => falsep_eqb(contradiction{0}())
+     | ENC_three{point_two, a_two, b_two, c_two}() => let
+         prval () = digit64_unique{64 * a_one + b_one, c_one, 64 * a_two + b_two, c_two}()
+         prval () = digit64_unique{a_one, b_one, a_two, b_two}()
+       in EQB_refl() end
+     | ENC_four() => falsep_eqb(contradiction{0}()))
+  | ENC_four{point_one, a_one, b_one, c_one, d_one}() =>
+    (case+ other of
+     | ENC_one() => falsep_eqb(contradiction{0}())
+     | ENC_two() => falsep_eqb(contradiction{0}())
+     | ENC_three() => falsep_eqb(contradiction{0}())
+     | ENC_four{point_two, a_two, b_two, c_two, d_two}() => let
+         prval () = digit64_unique{64 * (64 * a_one + b_one) + c_one, d_one, 64 * (64 * a_two + b_two) + c_two, d_two}()
+         prval () = digit64_unique{64 * a_one + b_one, c_one, 64 * a_two + b_two, c_two}()
+         prval () = digit64_unique{a_one, b_one, a_two, b_two}()
+       in EQB_refl() end)
+
+(* A code point is some bytes long *)
+#pub prfun enc_len {point:int}{octets:bytes} (ENC(point, octets)): [count:nat] LEN(octets, count)
+
+primplement enc_len {point}{octets} (enc) =
+  case+ enc of
+  | ENC_one() => LEN_cons(LEN_nil())
+  | ENC_two() => LEN_cons(LEN_cons(LEN_nil()))
+  | ENC_three() => LEN_cons(LEN_cons(LEN_cons(LEN_nil())))
+  | ENC_four() => LEN_cons(LEN_cons(LEN_cons(LEN_cons(LEN_nil()))))
+
+(* CONV(cells, source, from, to, octets): the document in the source with that number, from `from` to `to`, a character at a time
+   (STEPOF), becomes the UTF-8 bytes octets (the bytes of each character's code point, ENC, one after another) *)
+#pub dataprop CONV($A.cells, int, int, int, bytes) =
+  | {cells:$A.cells}{source:int}{i:nat} CONV_none(cells, source, i, i, bnil())
+  | {cells:$A.cells}{source:int}{i,j,m:nat | i < j; j <= m}{point:int}{enc,rest,octets:bytes}
+    CONV_more(cells, source, i, m, octets) of (STEPOF(cells, source, i, j, point), ENC(point, enc), CONV(cells, source, j, m, rest), APPEND(enc, rest, octets))
+
+(* A conversion gives one byte string *)
+#pub prfun conv_functional {cells:$A.cells}{source:int}{from,to:nat | from <= to}{first,second:bytes}
+  (CONV(cells, source, from, to, first), CONV(cells, source, from, to, second)): EQB(first, second)
+
+prfun _conv_functional {cells:$A.cells}{source:int}{from,to:nat | from <= to}{first,second:bytes} .<to - from>.
+  (one: CONV(cells, source, from, to, first), other: CONV(cells, source, from, to, second)): EQB(first, second) =
+  case+ one of
+  | CONV_none() =>
+    (case+ other of
+     | CONV_none() => EQB_refl()
+     | CONV_more(_, _, _, _) => falsep_eqb(contradiction{0}()))
+  | CONV_more(step_one, enc_one, rest_one, append_one) =>
+    (case+ other of
+     | CONV_none() => falsep_eqb(contradiction{0}())
+     | CONV_more(step_other, enc_other, rest_other, append_other) => let
+         prval () = stepof_functional(step_one, step_other)
+         prval EQB_refl() = enc_functional(enc_one, enc_other)
+         prval EQB_refl() = _conv_functional(rest_one, rest_other)
+       in append_functional(append_one, append_other) end)
+
+primplement conv_functional {cells}{source}{from,to}{first,second} (one, other) = _conv_functional(one, other)
+
+(* A conversion followed by one more character is a conversion *)
+#pub prfun conv_snoc {cells:$A.cells}{source:int}{from,mid,after:nat | from <= mid; mid < after}{point:int}{octets,enc,joined:bytes}
+  (CONV(cells, source, from, mid, octets), STEPOF(cells, source, mid, after, point), ENC(point, enc), APPEND(octets, enc, joined))
+  : CONV(cells, source, from, after, joined)
+
+prfun _conv_snoc {cells:$A.cells}{source:int}{from,mid,after:nat | from <= mid; mid < after}{point:int}{octets,enc,joined:bytes} .<mid - from>.
+  (conv: CONV(cells, source, from, mid, octets), step: STEPOF(cells, source, mid, after, point), enc: ENC(point, enc), joined: APPEND(octets, enc, joined))
+  : CONV(cells, source, from, after, joined) =
+  case+ conv of
+  | CONV_none() => (case+ joined of APPEND_nil() => CONV_more(step, enc, CONV_none(), append_nil(enc_len(enc))))
+  | CONV_more(step_head, enc_head, rest, append_head) => let
+      prval (append_rest, append_joined) = append_assoc(append_head, joined)
+    in CONV_more(step_head, enc_head, _conv_snoc(rest, step, enc, append_rest), append_joined) end
+
+primplement conv_snoc {cells}{source}{from,mid,after}{point}{octets,enc,joined} (conv, step, enc, joined) = _conv_snoc(conv, step, enc, joined)
+
+prfun _holds_after_set_later {cells,cells_after:$A.cells}{i,count,at:nat | i + count <= at}{value:int}{octets:bytes} .<count>.
+  (cells_set: $A.SETC(cells, at, value, cells_after), holds: HOLDS(cells, i, octets, count)): HOLDS(cells_after, i, octets, count) =
+  case+ holds of
+  | HOLDS_nil(length) => HOLDS_nil($A.setc_len(cells_set, length))
+  | HOLDS_cons(cell, rest) => HOLDS_cons($A.setc_nth_other(cells_set, cell), _holds_after_set_later(cells_set, rest))
+
+(* Setting a cell past the ones a list is held from, and no further than where the list ends, leaves them held *)
+#pub prfun holds_after_set_later {cells,cells_after:$A.cells}{i,count,at:nat | i + count <= at}{value:int}{octets:bytes}
+  (cells_set: $A.SETC(cells, at, value, cells_after), holds: HOLDS(cells, i, octets, count)): HOLDS(cells_after, i, octets, count)
+
+primplement holds_after_set_later {cells,cells_after}{i,count,at}{value}{octets} (cells_set, holds) = _holds_after_set_later(cells_set, holds)
+
+(* One more byte, held, after the bytes held *)
+#pub prfun holds_snoc {cells:$A.cells}{i,count:nat}{value:int}{octets,joined:bytes}
+  (HOLDS(cells, i, octets, count), $A.NTH(cells, i + count, value), APPEND(octets, bcons(value, bnil()), joined)): HOLDS(cells, i, joined, count + 1)
+
+prfun _holds_snoc {cells:$A.cells}{i,count:nat}{value:int}{octets,joined:bytes} .<count>.
+  (holds: HOLDS(cells, i, octets, count), cell: $A.NTH(cells, i + count, value), joined: APPEND(octets, bcons(value, bnil()), joined)): HOLDS(cells, i, joined, count + 1) =
+  case+ holds of
+  | HOLDS_nil(length) =>
+    (case+ joined of
+     | APPEND_nil() => let
+         prval () = $A.nth_in_len(cell, length)
+       in HOLDS_cons(cell, HOLDS_nil(length)) end)
+  | HOLDS_cons(head, rest) =>
+    (case+ joined of APPEND_cons(joined_rest) => HOLDS_cons(head, _holds_snoc(rest, cell, joined_rest)))
+
+primplement holds_snoc {cells}{i,count}{value}{octets,joined} (holds, cell, joined) = _holds_snoc(holds, cell, joined)
+
+(* The cells held from 0 for p bytes, with the cell p set to a byte, hold the bytes and that byte *)
+#pub prfun holds_push {cells,cells_after:$A.cells}{p:nat}{value:int}{octets,joined:bytes}
+  (HOLDS(cells, 0, octets, p), $A.SETC(cells, p, value, cells_after), APPEND(octets, bcons(value, bnil()), joined)): HOLDS(cells_after, 0, joined, p + 1)
+
+primplement holds_push {cells,cells_after}{p}{value}{octets,joined} (holds, cells_set, joined) =
+  holds_snoc(holds_after_set_later(cells_set, holds), $A.setc_nth_same(cells_set), joined)
+
+(* Whether a unit is the first half of a pair, or the second *)
+fn _is_high {unit:int} (unit: int unit): bool(55296 <= unit && unit < 56320) =
+  if unit >= 55296 then (if unit < 56320 then true else false) else false
+
+fn _is_low {unit:int} (unit: int unit): bool(56320 <= unit && unit < 57344) =
+  if unit >= 56320 then (if unit < 57344 then true else false) else false
+
+(* The 16-bit unit of the two bytes at i, in the order of the source *)
+fn _unit16 {l:agz}{n:pos}{cells:$A.cells}{source:int | source == 1 || source == 2}{i:nat | i + 1 < n}
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), i: int i)
+  : [unit:int] (UNIT16(cells, source, i, unit) | int unit) = let
+  val (first_cell | first) = $A.cborrow_get(data, i)
+  val (second_cell | second) = $A.cborrow_get(data, i + 1)
+in
+  case+ source of
+  | LabelUtf16Le() => (UNIT16_le(first_cell, second_cell) | first + 256 * second)
+  | LabelUtf16Be() => (UNIT16_be(first_cell, second_cell) | 256 * first + second)
+end
+
+(* The character at i of a UTF-16 document, with the proof of it *)
+fn _step16 {l:agz}{n:pos}{cells:$A.cells}{source:int | source == 1 || source == 2}{i:nat | i < n}
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), i: int i)
+  : [to,point:int | 0 <= point; point < 1114112] (STEPOF(cells, source, i, to, point) | int to, int point) = let
+  val (first_cell | first) = $A.cborrow_get(data, i)
+in
+  if i + 1 >= n then (STEPOF_truncated(first_cell, length) | i + 1, 65533)
+  else let
+      val (unit_proof | unit) = _unit16(length | data, n, source, i)
+      prval () = unit16_range(unit_proof)
+    in
+      if _is_high(unit) then
+        (if i + 3 < n then let
+             val (next_proof | next) = _unit16(length | data, n, source, i + 2)
+             prval () = unit16_range(next_proof)
+           in
+             if _is_low(next) then (STEPOF_pair(unit_proof, next_proof) | i + 4, 65536 + 1024 * (unit - 55296) + (next - 56320))
+             else (STEPOF_high_alone(unit_proof, next_proof) | i + 2, 65533)
+           end
+         else (STEPOF_high_at_end(unit_proof, length) | i + 2, 65533))
+      else if _is_low(unit) then (STEPOF_low_alone(unit_proof) | i + 2, 65533)
+      else (STEPOF_unit(unit_proof) | i + 2, unit)
+    end
+end
+
+(* The character at i of a single-byte document, with the proof of it *)
+fn _step_single {l:agz}{n:pos}{cells:$A.cells}{source:int | 4 <= source; source <= 17}{i:nat | i < n}
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), i: int i)
+  : [to,point:int | 0 <= point; point < 1114112] (STEPOF(cells, source, i, to, point) | int to, int point) = let
+  val (cell | value) = $A.cborrow_get(data, i)
+in
+  if value < 128 then (STEPOF_ascii(cell) | i + 1, value)
+  else let
+      val (table | point) = text_table_point(source, value)
+    in (STEPOF_table(cell, table) | i + 1, point) end
+end
+
+(* The character at i of a document that is converted, with the proof of it *)
+fn _step_proved {l:agz}{n:pos}{cells:$A.cells}{source:int | source == 1 || source == 2 || (4 <= source && source <= 17)}{i:nat | i < n}
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), i: int i)
+  : [to,point:int | 0 <= point; point < 1114112] (STEPOF(cells, source, i, to, point) | int to, int point) =
+  case+ source of
+  | LabelUtf16Le() => _step16(length | data, n, source, i)
+  | LabelUtf16Be() => _step16(length | data, n, source, i)
+  | LabelCp1250() => _step_single(length | data, n, source, i)
+  | LabelCp1251() => _step_single(length | data, n, source, i)
+  | LabelCp1252() => _step_single(length | data, n, source, i)
+  | LabelCp1253() => _step_single(length | data, n, source, i)
+  | LabelCp1254() => _step_single(length | data, n, source, i)
+  | LabelCp1255() => _step_single(length | data, n, source, i)
+  | LabelCp1256() => _step_single(length | data, n, source, i)
+  | LabelCp1257() => _step_single(length | data, n, source, i)
+  | LabelIso88592() => _step_single(length | data, n, source, i)
+  | LabelIso88595() => _step_single(length | data, n, source, i)
+  | LabelIso88597() => _step_single(length | data, n, source, i)
+  | LabelIso88598() => _step_single(length | data, n, source, i)
+  | LabelIso885915() => _step_single(length | data, n, source, i)
+  | LabelKoi8r() => _step_single(length | data, n, source, i)
+
+(* x as 64 times a number and a digit *)
+fn _split64 {x:nat} (x: int x): [high,low:nat | x == 64 * high + low; low < 64] (int high, int low) = let
+  val high = x / 64
+in (high, x - 64 * high) end
+
+(* The UTF-8 bytes of a code point, with the proof of them and how many they are *)
+fn _enc_count {point:int | 0 <= point; point < 1114112} (point: int point)
+  : [enc:bytes][count:nat] (ENC(point, enc), LEN(enc, count) | int count) =
+  if point < 128 then (ENC_one() , LEN_cons(LEN_nil()) | 1)
+  else if point < 2048 then let
+      val [high:int, low:int] (high_digit, low_digit) = _split64(point)
+    in (ENC_two{point, high, low}(), LEN_cons(LEN_cons(LEN_nil())) | 2) end
+  else if point < 65536 then let
+      val [rest:int, c:int] (rest_digit, c_digit) = _split64(point)
+      val [a:int, b:int] (a_digit, b_digit) = _split64(rest_digit)
+    in (ENC_three{point, a, b, c}(), LEN_cons(LEN_cons(LEN_cons(LEN_nil()))) | 3) end
+  else let
+      val [rest:int, d:int] (rest_digit, d_digit) = _split64(point)
+      val [rest_two:int, c:int] (rest_two_digit, c_digit) = _split64(rest_digit)
+      val [a:int, b:int] (a_digit, b_digit) = _split64(rest_two_digit)
+    in (ENC_four{point, a, b, c, d}(), LEN_cons(LEN_cons(LEN_cons(LEN_cons(LEN_nil())))) | 4) end
+
+(* Writes a byte at p of an array whose cells hold the bytes written from 0, and holds them with it *)
+fn _put_byte {lo:agz}{size:pos}{oc:$A.cells}{p:nat | p < size}{written:bytes}{value:int | 0 <= value; value < 256}
+  (holds: HOLDS(oc, 0, written, p), written_len: LEN(written, p), out_len: $A.CLEN(oc, size) | out: $A.barr(lo, size, oc), p: int p, value: int value)
+  : [oc2:$A.cells][joined:bytes] (HOLDS(oc2, 0, joined, p + 1), $A.CLEN(oc2, size), LEN(joined, p + 1), APPEND(written, bcons(value, bnil()), joined) | $A.barr(lo, size, oc2)) = let
+  val (cells_set | out_after) = $A.barr_set(out, p, value)
+  prval appended = append_exists{written, bcons(value, bnil())}(written_len)
+  prval holds_after = holds_push(holds, cells_set, appended)
+  prval joined_len = append_len(appended, written_len, LEN_cons(LEN_nil()))
+in (holds_after, $A.setc_len(cells_set, out_len), joined_len, appended | out_after) end
+
+(* Writes the UTF-8 bytes of a code point, whose bytes are given and are k, after the p bytes written *)
+fn _write_point {lo:agz}{size:pos}{oc:$A.cells}{p,k:nat | p + k < size}{written:bytes}{point:int | 0 <= point; point < 1114112}{given:bytes}
+  (holds: HOLDS(oc, 0, written, p), written_len: LEN(written, p), out_len: $A.CLEN(oc, size), given_enc: ENC(point, given), given_len: LEN(given, k)
+   | out: $A.barr(lo, size, oc), p: int p, point: int point)
+  : [oc2:$A.cells][joined:bytes] (HOLDS(oc2, 0, joined, p + k), $A.CLEN(oc2, size), LEN(joined, p + k), APPEND(written, given, joined) | $A.barr(lo, size, oc2), int(p + k)) =
+  if point < 128 then let
+      prval EQB_refl() = enc_functional(ENC_one(), given_enc)
+      prval EQI_refl() = len_functional(given_len, LEN_cons(LEN_nil()))
+      val (holds_one, len_one, joined_len_one, appended_one | out_one) = _put_byte(holds, written_len, out_len | out, p, point)
+    in (holds_one, len_one, joined_len_one, appended_one | out_one, p + 1) end
+  else if point < 2048 then let
+      val [high:int, low:int] (high_digit, low_digit) = _split64(point)
+      prval EQB_refl() = enc_functional(ENC_two{point, high, low}(), given_enc)
+      prval EQI_refl() = len_functional(given_len, LEN_cons(LEN_cons(LEN_nil())))
+      val (holds_one, len_one, joined_len_one, appended_one | out_one) = _put_byte(holds, written_len, out_len | out, p, 192 + high_digit)
+      val (holds_two, len_two, joined_len_two, appended_two | out_two) = _put_byte(holds_one, joined_len_one, len_one | out_one, p + 1, 128 + low_digit)
+      prval (APPEND_cons(APPEND_nil()), appended) = append_assoc(appended_one, appended_two)
+    in (holds_two, len_two, joined_len_two, appended | out_two, p + 2) end
+  else if point < 65536 then let
+      val [rest:int, c:int] (rest_digit, c_digit) = _split64(point)
+      val [a:int, b:int] (a_digit, b_digit) = _split64(rest_digit)
+      prval EQB_refl() = enc_functional(ENC_three{point, a, b, c}(), given_enc)
+      prval EQI_refl() = len_functional(given_len, LEN_cons(LEN_cons(LEN_cons(LEN_nil()))))
+      val (holds_one, len_one, joined_len_one, appended_one | out_one) = _put_byte(holds, written_len, out_len | out, p, 224 + a_digit)
+      val (holds_two, len_two, joined_len_two, appended_two | out_two) = _put_byte(holds_one, joined_len_one, len_one | out_one, p + 1, 128 + b_digit)
+      val (holds_three, len_three, joined_len_three, appended_three | out_three) = _put_byte(holds_two, joined_len_two, len_two | out_two, p + 2, 128 + c_digit)
+      prval (APPEND_cons(APPEND_nil()), appended_pair) = append_assoc(appended_one, appended_two)
+      prval (APPEND_cons(APPEND_cons(APPEND_nil())), appended) = append_assoc(appended_pair, appended_three)
+    in (holds_three, len_three, joined_len_three, appended | out_three, p + 3) end
+  else let
+      val [rest:int, d:int] (rest_digit, d_digit) = _split64(point)
+      val [rest_two:int, c:int] (rest_two_digit, c_digit) = _split64(rest_digit)
+      val [a:int, b:int] (a_digit, b_digit) = _split64(rest_two_digit)
+      prval EQB_refl() = enc_functional(ENC_four{point, a, b, c, d}(), given_enc)
+      prval EQI_refl() = len_functional(given_len, LEN_cons(LEN_cons(LEN_cons(LEN_cons(LEN_nil())))))
+      val (holds_one, len_one, joined_len_one, appended_one | out_one) = _put_byte(holds, written_len, out_len | out, p, 240 + a_digit)
+      val (holds_two, len_two, joined_len_two, appended_two | out_two) = _put_byte(holds_one, joined_len_one, len_one | out_one, p + 1, 128 + b_digit)
+      val (holds_three, len_three, joined_len_three, appended_three | out_three) = _put_byte(holds_two, joined_len_two, len_two | out_two, p + 2, 128 + c_digit)
+      val (holds_four, len_four, joined_len_four, appended_four | out_four) = _put_byte(holds_three, joined_len_three, len_three | out_three, p + 3, 128 + d_digit)
+      prval (APPEND_cons(APPEND_nil()), appended_pair) = append_assoc(appended_one, appended_two)
+      prval (APPEND_cons(APPEND_cons(APPEND_nil())), appended_triple) = append_assoc(appended_pair, appended_three)
+      prval (APPEND_cons(APPEND_cons(APPEND_cons(APPEND_nil()))), appended) = append_assoc(appended_triple, appended_four)
+    in (holds_four, len_four, joined_len_four, appended | out_four, p + 4) end
+
+(* Writes the converted document from i on, one character at a time, as the conversion of it that is to be written says *)
+fun _fill_loop {l:agz}{n:pos}{cells:$A.cells}{source:int | source == 1 || source == 2 || (4 <= source && source <= 17)}{i:nat | i <= n}
+  {lo:agz}{size:pos}{oc:$A.cells}{p:nat}{written,rest,total:bytes}{m:nat | m + 1 == size} .<n - i>.
+  (length: $A.CLEN(cells, n), remaining: CONV(cells, source, i, n, rest), appended: APPEND(written, rest, total), total_len: LEN(total, m),
+   holds: HOLDS(oc, 0, written, p), written_len: LEN(written, p), out_len: $A.CLEN(oc, size)
+   | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), i: int i, out: $A.barr(lo, size, oc), p: int p)
+  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, size) | $A.barr(lo, size, oc2)) =
+  if i >= n then let
+      prval CONV_none() = remaining
+      prval EQB_refl() = append_nil_eq(written_len, appended)
+      prval EQI_refl() = len_functional(written_len, total_len)
+    in (holds, out_len | out) end
+  else let
+      prval CONV_more(step_proof, enc_proof, rest_proof, appended_char) = remaining
+      val (step | to, point) = _step_proved(length | data, n, source, i)
+      prval () = stepof_functional(step, step_proof)
+      prval rest_len = append_len_rest(appended, written_len, total_len)
+      prval enc_length = enc_len(enc_proof)
+      prval after_len = append_len_rest(appended_char, enc_length, rest_len)
+      val (holds_after, len_after, joined_len, appended_written | out_after, p_after) =
+        _write_point(holds, written_len, out_len, enc_proof, enc_length | out, p, point)
+      prval (appended_enc, appended_rest) = append_assoc_rev(appended_char, appended)
+      prval EQB_refl() = append_functional(appended_enc, appended_written)
+    in _fill_loop(length, rest_proof, appended_rest, total_len, holds_after, joined_len, len_after | data, n, source, to, out_after, p_after) end
+
+(* The conversion of the document from i on, with the proof of it and of the number of bytes it makes *)
+fun _size_loop {l:agz}{n:pos}{cells:$A.cells}{source:int | source == 1 || source == 2 || (4 <= source && source <= 17)}{mark,i:nat | mark <= i; i <= n}
+  {octets:bytes}{total:nat} .<n - i>.
+  (length: $A.CLEN(cells, n), conv: CONV(cells, source, mark, i, octets), total_len: LEN(octets, total)
+   | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), i: int i, total: int total)
+  : [all:bytes][size:nat] (CONV(cells, source, mark, n, all), LEN(all, size) | int size) =
+  if i >= n then (conv, total_len | total)
+  else let
+    val (step | to, point) = _step_proved(length | data, n, source, i)
+    prval () = stepof_bounds(step, length)
+    val [enc:bytes] [count:int] (enc_proof, enc_length | enc_count) = _enc_count(point)
+    prval appended = append_exists{octets, enc}(total_len)
+    prval joined_len = append_len(appended, total_len, enc_length)
+    prval conv_after = conv_snoc(conv, step, enc_proof, appended)
+  in _size_loop(length, conv_after, joined_len | data, n, source, to, total + enc_count) end
+
+(* The conversion of the document from mark, with the proof of it and of the number of bytes it makes *)
+fn _converted_size {l:agz}{n:pos}{cells:$A.cells}{source:int | source == 1 || source == 2 || (4 <= source && source <= 17)}{mark:nat | mark <= n}
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), mark: int mark)
+  : [all:bytes][size:nat] (CONV(cells, source, mark, n, all), LEN(all, size) | int size) =
+  _size_loop(length, CONV_none(), LEN_nil() | data, n, source, mark, 0)
+
+(* What a document becomes: nothing (it is refused), or some bytes *)
 #pub datasort textout =
   | TOUT_none of ()
-  | TOUT_later of ()
-  | TOUT_some of ($A.cells)
-
-(* EQCELLS(first, second): two cells are one *)
-#pub dataprop EQCELLS($A.cells, $A.cells) =
-  | {same:$A.cells} EQCELLS_refl(same, same)
+  | TOUT_bytes of (bytes)
 
 (* EQOUT(first, second): two outcomes are one *)
 #pub dataprop EQOUT(textout, textout) =
   | {same:textout} EQOUT_refl(same, same)
 
-(* DROPPED(cells, count, rest): rest is the cells without the first count *)
-#pub dataprop DROPPED($A.cells, int, $A.cells) =
-  | {cells:$A.cells} DROPPED_none(cells, 0, cells)
-  | {cell:int}{cells,rest:$A.cells}{count:nat} DROPPED_more($A.ccons(cell, cells), count + 1, rest) of DROPPED(cells, count, rest)
-
-(* Dropping some cells leaves one rest *)
-#pub prfun dropped_functional {cells:$A.cells}{count:nat}{first,second:$A.cells}
-  (DROPPED(cells, count, first), DROPPED(cells, count, second)): EQCELLS(first, second)
-
-prfun _dropped_functional {cells:$A.cells}{count:nat}{first,second:$A.cells} .<count>.
-  (one: DROPPED(cells, count, first), other: DROPPED(cells, count, second)): EQCELLS(first, second) =
-  case+ one of
-  | DROPPED_none() => (case+ other of DROPPED_none() => EQCELLS_refl())
-  | DROPPED_more(rest_one) =>
-    (case+ other of
-     | DROPPED_more(rest_other) => let
-         prval EQCELLS_refl() = _dropped_functional(rest_one, rest_other)
-       in EQCELLS_refl() end)
-
-primplement dropped_functional {cells}{count}{first,second} (one, other) = _dropped_functional(one, other)
-
-(* Cells that are long enough have their first cells dropped, and what is left is as long as the rest *)
-#pub prfun dropped_exists {cells:$A.cells}{count,n:nat | count <= n} ($A.CLEN(cells, n))
-  : [rest:$A.cells] (DROPPED(cells, count, rest), $A.CLEN(rest, n - count))
-
-prfun _dropped_exists {cells:$A.cells}{count,n:nat | count <= n} .<count>.
-  (length: $A.CLEN(cells, n)): [rest:$A.cells] (DROPPED(cells, count, rest), $A.CLEN(rest, n - count)) =
-  sif count == 0 then (DROPPED_none(), length)
-  else
-    (case+ length of
-     | $A.CLEN_nil() =/=> ()
-     | $A.CLEN_cons(rest_length) => let
-         prval (dropped, rest_dropped) = _dropped_exists{..}{count - 1, n - 1}(rest_length)
-       in (DROPPED_more(dropped), rest_dropped) end)
-
-primplement dropped_exists {cells}{count,n} (length) = _dropped_exists(length)
-
 (* TEXTOF(cells, plan, output): the document in the cells needs the plan with that number (0 none: it is as it is, 1 made into
-   UTF-8, 2 refused) and becomes the output: the cells themselves, the cells without a byte order mark, nothing (refused), or
-   something the conversion of UTF-16 and of the single-byte encodings defines (TOUT_later, quire#846 and quire#847).
-   Refused is the claim that no reading of the document exists: the bytes are not UTF-8 (UTF8SCAN's bad case, which
-   utf8run_bad_not_complete makes exclusive of a reading), or are nothing after their byte order mark, or say an encoding
-   Quire has no table for and are not ASCII only *)
+   UTF-8, 2 refused) and becomes the output: the bytes of the cells (as it is), the bytes of the cells after a byte order mark of
+   three, the UTF-8 bytes of its characters (CONV, UTF-16 and the single-byte encodings), or nothing (refused). Refused is the
+   claim that no reading of the document exists: the bytes are not UTF-8 (UTF8SCAN's bad case, which utf8run_bad_not_complete
+   makes exclusive of a reading), or are nothing after their byte order mark, or say an encoding Quire has no table for and are
+   not ASCII only *)
 #pub dataprop TEXTOF($A.cells, int, textout) =
-  | {cells:$A.cells}{verdict:int | 0 < verdict}
-    TEXTOF_utf8_as_is(cells, 0, TOUT_some(cells)) of (DETECT(cells, 0, 0), UTF8SCAN(cells, 0, verdict))
-  | {cells:$A.cells}{mark:nat}
-    TEXTOF_unsupported_as_is(cells, 0, TOUT_some(cells)) of (DETECT(cells, 3, mark), UTF8SCAN(cells, 0, 1))
-  | {cells:$A.cells}{source:int | 4 <= source; source <= 17}{mark:nat}{verdict:int | 0 < verdict}
-    TEXTOF_single_as_is(cells, 0, TOUT_some(cells)) of (DETECT(cells, source, mark), UTF8SCAN(cells, 0, verdict))
-  | {cells:$A.cells}{n:nat | 3 < n}{verdict:int | 0 < verdict}{rest:$A.cells}
-    TEXTOF_bom_dropped(cells, 1, TOUT_some(rest)) of (DETECT(cells, 0, 3), UTF8SCAN(cells, 3, verdict), $A.CLEN(cells, n), DROPPED(cells, 3, rest), $A.CLEN(rest, n - 3))
-  | {cells:$A.cells}{source:int | source == 1 || source == 2}{mark,n:nat | mark < n}
-    TEXTOF_utf16_convert(cells, 1, TOUT_later) of (DETECT(cells, source, mark), $A.CLEN(cells, n))
-  | {cells:$A.cells}{source:int | 4 <= source; source <= 17}{mark:nat}
-    TEXTOF_single_convert(cells, 1, TOUT_later) of (DETECT(cells, source, mark), UTF8SCAN(cells, 0, 0))
+  | {cells:$A.cells}{verdict:int | 0 < verdict}{n:nat}{octets:bytes}
+    TEXTOF_utf8_as_is(cells, 0, TOUT_bytes(octets)) of (DETECT(cells, 0, 0), UTF8SCAN(cells, 0, verdict), $A.CLEN(cells, n), HOLDS(cells, 0, octets, n))
+  | {cells:$A.cells}{mark,n:nat}{octets:bytes}
+    TEXTOF_unsupported_as_is(cells, 0, TOUT_bytes(octets)) of (DETECT(cells, 3, mark), UTF8SCAN(cells, 0, 1), $A.CLEN(cells, n), HOLDS(cells, 0, octets, n))
+  | {cells:$A.cells}{source:int | 4 <= source; source <= 17}{mark,n:nat}{verdict:int | 0 < verdict}{octets:bytes}
+    TEXTOF_single_as_is(cells, 0, TOUT_bytes(octets)) of (DETECT(cells, source, mark), UTF8SCAN(cells, 0, verdict), $A.CLEN(cells, n), HOLDS(cells, 0, octets, n))
+  | {cells:$A.cells}{n:nat | 3 < n}{verdict:int | 0 < verdict}{octets:bytes}
+    TEXTOF_bom_dropped(cells, 1, TOUT_bytes(octets)) of (DETECT(cells, 0, 3), UTF8SCAN(cells, 3, verdict), $A.CLEN(cells, n), HOLDS(cells, 3, octets, n - 3))
+  | {cells:$A.cells}{source:int | source == 1 || source == 2}{mark,n:nat | mark < n}{octets:bytes}
+    TEXTOF_utf16_convert(cells, 1, TOUT_bytes(octets)) of (DETECT(cells, source, mark), $A.CLEN(cells, n), CONV(cells, source, mark, n, octets))
+  | {cells:$A.cells}{source:int | 4 <= source; source <= 17}{mark,n:nat | mark <= n}{octets:bytes}
+    TEXTOF_single_convert(cells, 1, TOUT_bytes(octets)) of (DETECT(cells, source, mark), UTF8SCAN(cells, 0, 0), $A.CLEN(cells, n), CONV(cells, source, mark, n, octets))
   | {cells:$A.cells}{mark:nat}
     TEXTOF_utf8_invalid(cells, 2, TOUT_none) of (DETECT(cells, 0, mark), UTF8SCAN(cells, mark, 0))
   | {cells:$A.cells}{mark,n:nat | 0 < mark; n <= mark}{verdict:int | 0 < verdict}
@@ -1554,117 +2136,127 @@ primplement falsep_textof {first_plan,second_plan}{first_out,second_out} (falsit
 
 primplement textof_functional {cells}{first_plan,second_plan}{first_out,second_out} (one, other) =
   case+ one of
-  | TEXTOF_utf8_as_is(one_detect, one_scan) =>
+  | TEXTOF_utf8_as_is(one_detect, one_scan, one_len, one_holds) =>
     (case+ other of
-     | TEXTOF_utf8_as_is(other_detect, other_scan) => (EQI_refl(), EQOUT_refl())
-     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_as_is(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf16_convert(other_detect, other_len) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_convert(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-         prval () = utf8scan_functional(one_scan, other_scan)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf16_empty(other_detect, other_len) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end)
-  | TEXTOF_unsupported_as_is(one_detect, one_scan) =>
-    (case+ other of
-     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_unsupported_as_is(other_detect, other_scan) => (EQI_refl(), EQOUT_refl())
-     | TEXTOF_single_as_is(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf16_convert(other_detect, other_len) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_convert(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf16_empty(other_detect, other_len) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-         prval () = utf8scan_functional(one_scan, other_scan)
-       in falsep_textof(contradiction{0}()) end)
-  | TEXTOF_single_as_is(one_detect, one_scan) =>
-    (case+ other of
-     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_as_is(other_detect, other_scan) => (EQI_refl(), EQOUT_refl())
-     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf16_convert(other_detect, other_len) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_convert(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-         prval () = utf8scan_functional(one_scan, other_scan)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf16_empty(other_detect, other_len) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end)
-  | TEXTOF_bom_dropped(one_detect, one_scan, one_len, one_dropped, one_rest_len) =>
-    (case+ other of
-     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_as_is(other_detect, other_scan) => let
-         prval () = detect_functional(one_detect, other_detect)
-       in falsep_textof(contradiction{0}()) end
-     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
-         prval EQCELLS_refl() = dropped_functional(one_dropped, other_dropped)
+     | TEXTOF_utf8_as_is(other_detect, other_scan, other_len, other_holds) => let
+         prval () = clen_functional(one_len, other_len)
+         prval EQB_refl() = holds_functional(one_holds, other_holds)
        in (EQI_refl(), EQOUT_refl()) end
-     | TEXTOF_utf16_convert(other_detect, other_len) => let
+     | TEXTOF_unsupported_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_convert(other_detect, other_scan) => let
+     | TEXTOF_single_as_is(other_detect, other_scan, other_len, other_holds) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_holds) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_convert(other_detect, other_len, other_conv) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_convert(other_detect, other_scan, other_len, other_conv) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = utf8scan_functional(one_scan, other_scan)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_empty(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end)
+  | TEXTOF_unsupported_as_is(one_detect, one_scan, one_len, one_holds) =>
+    (case+ other of
+     | TEXTOF_utf8_as_is(other_detect, other_scan, other_len, other_holds) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_as_is(other_detect, other_scan, other_len, other_holds) => let
+         prval () = clen_functional(one_len, other_len)
+         prval EQB_refl() = holds_functional(one_holds, other_holds)
+       in (EQI_refl(), EQOUT_refl()) end
+     | TEXTOF_single_as_is(other_detect, other_scan, other_len, other_holds) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_holds) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_convert(other_detect, other_len, other_conv) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_convert(other_detect, other_scan, other_len, other_conv) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_empty(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = utf8scan_functional(one_scan, other_scan)
+       in falsep_textof(contradiction{0}()) end)
+  | TEXTOF_single_as_is(one_detect, one_scan, one_len, one_holds) =>
+    (case+ other of
+     | TEXTOF_utf8_as_is(other_detect, other_scan, other_len, other_holds) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_as_is(other_detect, other_scan, other_len, other_holds) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_as_is(other_detect, other_scan, other_len, other_holds) => let
+         prval () = clen_functional(one_len, other_len)
+         prval EQB_refl() = holds_functional(one_holds, other_holds)
+       in (EQI_refl(), EQOUT_refl()) end
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_holds) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_convert(other_detect, other_len, other_conv) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_convert(other_detect, other_scan, other_len, other_conv) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = utf8scan_functional(one_scan, other_scan)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_empty(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end)
+  | TEXTOF_bom_dropped(one_detect, one_scan, one_len, one_holds) =>
+    (case+ other of
+     | TEXTOF_utf8_as_is(other_detect, other_scan, other_len, other_holds) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_as_is(other_detect, other_scan, other_len, other_holds) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_as_is(other_detect, other_scan, other_len, other_holds) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_holds) => let
+         prval () = clen_functional(one_len, other_len)
+         prval EQB_refl() = holds_functional(one_holds, other_holds)
+       in (EQI_refl(), EQOUT_refl()) end
+     | TEXTOF_utf16_convert(other_detect, other_len, other_conv) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_convert(other_detect, other_scan, other_len, other_conv) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
      | TEXTOF_utf8_invalid(other_detect, other_scan) => let
@@ -1681,22 +2273,26 @@ primplement textof_functional {cells}{first_plan,second_plan}{first_out,second_o
      | TEXTOF_unsupported_refused(other_detect, other_scan) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end)
-  | TEXTOF_utf16_convert(one_detect, one_len) =>
+  | TEXTOF_utf16_convert(one_detect, one_len, one_conv) =>
     (case+ other of
-     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+     | TEXTOF_utf8_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+     | TEXTOF_unsupported_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_as_is(other_detect, other_scan) => let
+     | TEXTOF_single_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf16_convert(other_detect, other_len) => (EQI_refl(), EQOUT_refl())
-     | TEXTOF_single_convert(other_detect, other_scan) => let
+     | TEXTOF_utf16_convert(other_detect, other_len, other_conv) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = clen_functional(one_len, other_len)
+         prval EQB_refl() = conv_functional(one_conv, other_conv)
+       in (EQI_refl(), EQOUT_refl()) end
+     | TEXTOF_single_convert(other_detect, other_scan, other_len, other_conv) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
      | TEXTOF_utf8_invalid(other_detect, other_scan) => let
@@ -1712,25 +2308,29 @@ primplement textof_functional {cells}{first_plan,second_plan}{first_out,second_o
      | TEXTOF_unsupported_refused(other_detect, other_scan) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end)
-  | TEXTOF_single_convert(one_detect, one_scan) =>
+  | TEXTOF_single_convert(one_detect, one_scan, one_len, one_conv) =>
     (case+ other of
-     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+     | TEXTOF_utf8_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+     | TEXTOF_unsupported_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_as_is(other_detect, other_scan) => let
+     | TEXTOF_single_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
          prval () = utf8scan_functional(one_scan, other_scan)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf16_convert(other_detect, other_len) => let
+     | TEXTOF_utf16_convert(other_detect, other_len, other_conv) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_convert(other_detect, other_scan) => (EQI_refl(), EQOUT_refl())
+     | TEXTOF_single_convert(other_detect, other_scan, other_len, other_conv) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = clen_functional(one_len, other_len)
+         prval EQB_refl() = conv_functional(one_conv, other_conv)
+       in (EQI_refl(), EQOUT_refl()) end
      | TEXTOF_utf8_invalid(other_detect, other_scan) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
@@ -1745,24 +2345,24 @@ primplement textof_functional {cells}{first_plan,second_plan}{first_out,second_o
        in falsep_textof(contradiction{0}()) end)
   | TEXTOF_utf8_invalid(one_detect, one_scan) =>
     (case+ other of
-     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+     | TEXTOF_utf8_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
          prval () = utf8scan_functional(one_scan, other_scan)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+     | TEXTOF_unsupported_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_as_is(other_detect, other_scan) => let
+     | TEXTOF_single_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
          prval () = utf8scan_functional(one_scan, other_scan)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf16_convert(other_detect, other_len) => let
+     | TEXTOF_utf16_convert(other_detect, other_len, other_conv) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_convert(other_detect, other_scan) => let
+     | TEXTOF_single_convert(other_detect, other_scan, other_len, other_conv) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
      | TEXTOF_utf8_invalid(other_detect, other_scan) => (EQI_refl(), EQOUT_refl())
@@ -1778,23 +2378,23 @@ primplement textof_functional {cells}{first_plan,second_plan}{first_out,second_o
        in falsep_textof(contradiction{0}()) end)
   | TEXTOF_bom_only(one_detect, one_scan, one_len) =>
     (case+ other of
-     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+     | TEXTOF_utf8_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+     | TEXTOF_unsupported_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_as_is(other_detect, other_scan) => let
+     | TEXTOF_single_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
          prval () = clen_functional(one_len, other_len)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf16_convert(other_detect, other_len) => let
+     | TEXTOF_utf16_convert(other_detect, other_len, other_conv) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_convert(other_detect, other_scan) => let
+     | TEXTOF_single_convert(other_detect, other_scan, other_len, other_conv) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
      | TEXTOF_utf8_invalid(other_detect, other_scan) => let
@@ -1810,23 +2410,23 @@ primplement textof_functional {cells}{first_plan,second_plan}{first_out,second_o
        in falsep_textof(contradiction{0}()) end)
   | TEXTOF_utf16_empty(one_detect, one_len) =>
     (case+ other of
-     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+     | TEXTOF_utf8_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+     | TEXTOF_unsupported_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_as_is(other_detect, other_scan) => let
+     | TEXTOF_single_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf16_convert(other_detect, other_len) => let
+     | TEXTOF_utf16_convert(other_detect, other_len, other_conv) => let
          prval () = detect_functional(one_detect, other_detect)
          prval () = clen_functional(one_len, other_len)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_convert(other_detect, other_scan) => let
+     | TEXTOF_single_convert(other_detect, other_scan, other_len, other_conv) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
      | TEXTOF_utf8_invalid(other_detect, other_scan) => let
@@ -1841,23 +2441,23 @@ primplement textof_functional {cells}{first_plan,second_plan}{first_out,second_o
        in falsep_textof(contradiction{0}()) end)
   | TEXTOF_unsupported_refused(one_detect, one_scan) =>
     (case+ other of
-     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+     | TEXTOF_utf8_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+     | TEXTOF_unsupported_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
          prval () = utf8scan_functional(one_scan, other_scan)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_as_is(other_detect, other_scan) => let
+     | TEXTOF_single_as_is(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_holds) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_utf16_convert(other_detect, other_len) => let
+     | TEXTOF_utf16_convert(other_detect, other_len, other_conv) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
-     | TEXTOF_single_convert(other_detect, other_scan) => let
+     | TEXTOF_single_convert(other_detect, other_scan, other_len, other_conv) => let
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
      | TEXTOF_utf8_invalid(other_detect, other_scan) => let
@@ -1870,6 +2470,115 @@ primplement textof_functional {cells}{first_plan,second_plan}{first_out,second_o
          prval () = detect_functional(one_detect, other_detect)
        in falsep_textof(contradiction{0}()) end
      | TEXTOF_unsupported_refused(other_detect, other_scan) => (EQI_refl(), EQOUT_refl()))
+
+(* Bytes held are as many as they are held for *)
+#pub prfun holds_len {cells:$A.cells}{i,count:nat}{octets:bytes} (HOLDS(cells, i, octets, count)): LEN(octets, count)
+
+prfun _holds_len {cells:$A.cells}{i,count:nat}{octets:bytes} .<count>. (holds: HOLDS(cells, i, octets, count)): LEN(octets, count) =
+  case+ holds of
+  | HOLDS_nil(_) => LEN_nil()
+  | HOLDS_cons(_, rest) => LEN_cons(_holds_len(rest))
+
+primplement holds_len {cells}{i,count}{octets} (holds) = _holds_len(holds)
+
+(* From a contradiction, bytes held *)
+#pub prfun falsep_holds {cells:$A.cells}{i:int}{octets:bytes}{count:int} (FALSEP()): HOLDS(cells, i, octets, count)
+
+primplement falsep_holds {cells}{i}{octets}{count} (falsity) = case+ falsity of FALSEP_mk() =/=> ()
+
+(* From a contradiction, a conversion *)
+#pub prfun falsep_conv {cells:$A.cells}{source,from,to:int}{octets:bytes} (FALSEP()): CONV(cells, source, from, to, octets)
+
+primplement falsep_conv {cells}{source,from,to}{octets} (falsity) = case+ falsity of FALSEP_mk() =/=> ()
+
+(* Copies the bytes held from i in the cells to the array, one at a time *)
+fun _copy_loop {l:agz}{n:pos}{cells:$A.cells}{i,c:nat | i + c <= n}{lo:agz}{size:pos}{oc:$A.cells}{p:nat}{written,rest,total:bytes}{m:nat | m + 1 == size} .<c>.
+  (remaining: HOLDS(cells, i, rest, c), appended: APPEND(written, rest, total), total_len: LEN(total, m),
+   holds: HOLDS(oc, 0, written, p), written_len: LEN(written, p), out_len: $A.CLEN(oc, size)
+   | data: !$A.cborrow(l, n, cells), n: int n, i: int i, c: int c, out: $A.barr(lo, size, oc), p: int p)
+  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, size) | $A.barr(lo, size, oc2)) =
+  if c <= 0 then let
+      prval HOLDS_nil(_) = remaining
+      prval EQB_refl() = append_nil_eq(written_len, appended)
+      prval EQI_refl() = len_functional(written_len, total_len)
+    in (holds, out_len | out) end
+  else let
+      prval HOLDS_cons(cell_held, rest_held) = remaining
+      val (cell | value) = $A.cborrow_get(data, i)
+      prval () = $A.nth_functional(cell, cell_held)
+      prval rest_len = append_len_rest(appended, written_len, total_len)
+      prval held_len = holds_len(remaining)
+      prval EQI_refl() = len_functional(rest_len, held_len)
+      val (holds_after, len_after, joined_len, appended_one | out_after) = _put_byte(holds, written_len, out_len | out, p, value)
+      prval (appended_front, appended_rest) = append_assoc_rev(APPEND_cons(APPEND_nil()), appended)
+      prval EQB_refl() = append_functional(appended_front, appended_one)
+    in _copy_loop(rest_held, appended_rest, total_len, holds_after, joined_len, len_after | data, n, i + 1, c - 1, out_after, p + 1) end
+
+(* The conversion of a document that needs one, and is detected as UTF-16 *)
+#pub prfun textof_utf16_conv {cells:$A.cells}{source,mark:int | source == 1 || source == 2}{n:nat}{total:bytes}
+  (TEXTOF(cells, 1, TOUT_bytes(total)), DETECT(cells, source, mark), $A.CLEN(cells, n)): CONV(cells, source, mark, n, total)
+
+primplement textof_utf16_conv {cells}{source,mark}{n}{total} (plan, detect, length) =
+  case+ plan of
+  | TEXTOF_utf16_convert(plan_detect, plan_length, conv) => let
+      prval () = detect_functional(plan_detect, detect)
+      prval () = clen_functional(plan_length, length)
+    in conv end
+  | TEXTOF_bom_dropped(plan_detect, _, _, _) => let
+      prval () = detect_functional(plan_detect, detect)
+    in falsep_conv(contradiction{0}()) end
+  | TEXTOF_single_convert(plan_detect, _, _, _) => let
+      prval () = detect_functional(plan_detect, detect)
+    in falsep_conv(contradiction{0}()) end
+
+(* The conversion of a document that needs one, and is detected as a single-byte encoding *)
+#pub prfun textof_single_conv {cells:$A.cells}{source,mark:int | 4 <= source; source <= 17}{n:nat}{total:bytes}
+  (TEXTOF(cells, 1, TOUT_bytes(total)), DETECT(cells, source, mark), $A.CLEN(cells, n)): CONV(cells, source, mark, n, total)
+
+primplement textof_single_conv {cells}{source,mark}{n}{total} (plan, detect, length) =
+  case+ plan of
+  | TEXTOF_single_convert(plan_detect, _, plan_length, conv) => let
+      prval () = detect_functional(plan_detect, detect)
+      prval () = clen_functional(plan_length, length)
+    in conv end
+  | TEXTOF_bom_dropped(plan_detect, _, _, _) => let
+      prval () = detect_functional(plan_detect, detect)
+    in falsep_conv(contradiction{0}()) end
+  | TEXTOF_utf16_convert(plan_detect, _, _) => let
+      prval () = detect_functional(plan_detect, detect)
+    in falsep_conv(contradiction{0}()) end
+
+(* The bytes of a document that needs one, and is detected as UTF-8 with a byte order mark, are the bytes after the mark *)
+#pub prfun textof_bom_holds {cells:$A.cells}{mark:int}{n:nat}{total:bytes}
+  (TEXTOF(cells, 1, TOUT_bytes(total)), DETECT(cells, 0, mark), $A.CLEN(cells, n)): [mark == 3; 3 < n] HOLDS(cells, 3, total, n - 3)
+
+primplement textof_bom_holds {cells}{mark}{n}{total} (plan, detect, length) =
+  case+ plan of
+  | TEXTOF_bom_dropped(plan_detect, _, plan_length, held) => let
+      prval () = detect_functional(plan_detect, detect)
+      prval () = clen_functional(plan_length, length)
+    in held end
+  | TEXTOF_utf16_convert(plan_detect, _, _) => let
+      prval () = detect_functional(plan_detect, detect)
+    in falsep_holds(contradiction{0}()) end
+  | TEXTOF_single_convert(plan_detect, _, _, _) => let
+      prval () = detect_functional(plan_detect, detect)
+    in falsep_holds(contradiction{0}()) end
+
+(* A document that needs a conversion is not in an encoding Quire has no table for *)
+#pub prfun textof_not_unsupported {cells:$A.cells}{mark:int}{total:bytes} (TEXTOF(cells, 1, TOUT_bytes(total)), DETECT(cells, 3, mark)): FALSEP()
+
+primplement textof_not_unsupported {cells}{mark}{total} (plan, detect) =
+  case+ plan of
+  | TEXTOF_bom_dropped(plan_detect, _, _, _) => let
+      prval () = detect_functional(plan_detect, detect)
+    in contradiction{0}() end
+  | TEXTOF_utf16_convert(plan_detect, _, _) => let
+      prval () = detect_functional(plan_detect, detect)
+    in contradiction{0}() end
+  | TEXTOF_single_convert(plan_detect, _, _, _) => let
+      prval () = detect_functional(plan_detect, detect)
+    in contradiction{0}() end
 
 (* The byte order mark of a document is within it *)
 #pub prfun detect_mark_in_len {cells:$A.cells}{source,mark:int}{n:nat}
@@ -1899,31 +2608,57 @@ primplement detect_utf8_mark {cells}{mark} (detect) =
 (* The plan of a document, as a value *)
 #pub datatype text_plan_ix(int) = ProvedAsIs(0) | ProvedConvert(1) | ProvedRefused(2)
 
+(* The detection of UTF-8: the bytes held after a byte order mark are the output *)
 fn _after_utf8 {n:pos}{cells:$A.cells}{mark:nat | mark <= n}{verdict:int | 0 < verdict}
   (length: $A.CLEN(cells, n), detect: DETECT(cells, 0, mark), scan: UTF8SCAN(cells, mark, verdict) | n: int n, mark: int mark)
   : [plan:int][out:textout] (TEXTOF(cells, plan, out) | text_plan_ix(plan)) =
-  if mark = 0 then (TEXTOF_utf8_as_is(detect, scan) | ProvedAsIs())
+  if mark = 0 then let
+      prval held = holds_exists{cells}{0, n, n}(length)
+    in (TEXTOF_utf8_as_is(detect, scan, length, held) | ProvedAsIs()) end
   else if n - mark <= 0 then (TEXTOF_bom_only(detect, scan, length) | ProvedRefused())
   else let
     prval () = detect_utf8_mark(detect)
-    prval (dropped, rest_len) = dropped_exists{..}{3, n}(length)
-  in (TEXTOF_bom_dropped(detect, scan, length, dropped, rest_len) | ProvedConvert()) end
+    prval held = holds_exists{cells}{3, n - 3, n}(length)
+  in (TEXTOF_bom_dropped(detect, scan, length, held) | ProvedConvert()) end
 
-fn _utf16 {n:pos}{cells:$A.cells}{source:int | source == 1 || source == 2}{mark:nat | mark <= n}
-  (length: $A.CLEN(cells, n), detect: DETECT(cells, source, mark) | n: int n, mark: int mark)
+(* The output of a document in UTF-16, with the proof of it and the number of bytes it makes *)
+fn _convert_utf16 {l:agz}{n:pos}{cells:$A.cells}{source:int | source == 1 || source == 2}{mark:nat | mark < n}
+  (length: $A.CLEN(cells, n), detect: DETECT(cells, source, mark) | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), mark: int mark)
+  : [total:bytes][size:nat] (TEXTOF(cells, 1, TOUT_bytes(total)), LEN(total, size) | int size) = let
+  val (conv, total_len | size) = _converted_size(length | data, n, source, mark)
+in (TEXTOF_utf16_convert(detect, length, conv), total_len | size) end
+
+(* The output of a document in a single-byte encoding that is not UTF-8, with the proof of it and the number of bytes it makes *)
+fn _convert_single {l:agz}{n:pos}{cells:$A.cells}{source:int | 4 <= source; source <= 17}{mark:nat | mark <= n}
+  (length: $A.CLEN(cells, n), detect: DETECT(cells, source, mark), scan: UTF8SCAN(cells, 0, 0)
+   | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), mark: int mark)
+  : [total:bytes][size:nat] (TEXTOF(cells, 1, TOUT_bytes(total)), LEN(total, size) | int size) = let
+  val (conv, total_len | size) = _converted_size(length | data, n, source, mark)
+in (TEXTOF_single_convert(detect, scan, length, conv), total_len | size) end
+
+fn _utf16 {l:agz}{n:pos}{cells:$A.cells}{source:int | source == 1 || source == 2}{mark:nat | mark <= n}
+  (length: $A.CLEN(cells, n), detect: DETECT(cells, source, mark) | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), mark: int mark)
   : [plan:int][out:textout] (TEXTOF(cells, plan, out) | text_plan_ix(plan)) =
   if n - mark <= 0 then (TEXTOF_utf16_empty(detect, length) | ProvedRefused())
-  else (TEXTOF_utf16_convert(detect, length) | ProvedConvert())
+  else let
+    val (plan, _ | _) = _convert_utf16(length, detect | data, n, source, mark)
+  in (plan | ProvedConvert()) end
 
-fn _single_byte {l:agz}{n:pos}{cells:$A.cells}{source:int | 4 <= source; source <= 17}{mark:nat}
-  (length: $A.CLEN(cells, n), detect: DETECT(cells, source, mark) | data: !$A.cborrow(l, n, cells), n: int n)
+fn _single_byte {l:agz}{n:pos}{cells:$A.cells}{source:int | 4 <= source; source <= 17}{mark:nat | mark <= n}
+  (length: $A.CLEN(cells, n), detect: DETECT(cells, source, mark) | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), mark: int mark)
   : [plan:int][out:textout] (TEXTOF(cells, plan, out) | text_plan_ix(plan)) = let
   val (scan | verdict) = text_utf8_scan(length | data, n, 0)
 in
   case+ verdict of
-  | Utf8Refused() => (TEXTOF_single_convert(detect, scan) | ProvedConvert())
-  | Utf8AsciiOnly() => (TEXTOF_single_as_is(detect, scan) | ProvedAsIs())
-  | Utf8Wide() => (TEXTOF_single_as_is(detect, scan) | ProvedAsIs())
+  | Utf8Refused() => let
+      val (plan, _ | _) = _convert_single(length, detect, scan | data, n, source, mark)
+    in (plan | ProvedConvert()) end
+  | Utf8AsciiOnly() => let
+      prval held = holds_exists{cells}{0, n, n}(length)
+    in (TEXTOF_single_as_is(detect, scan, length, held) | ProvedAsIs()) end
+  | Utf8Wide() => let
+      prval held = holds_exists{cells}{0, n, n}(length)
+    in (TEXTOF_single_as_is(detect, scan, length, held) | ProvedAsIs()) end
 end
 
 (* What the document in the cells needs, with the proof of its relation to them (TEXTOF) *)
@@ -1944,30 +2679,144 @@ in
       | Utf8AsciiOnly() => _after_utf8(length, detect, scan | n, mark)
       | Utf8Wide() => _after_utf8(length, detect, scan | n, mark)
     end
-  | LabelUtf16Le() => _utf16(length, detect | n, mark)
-  | LabelUtf16Be() => _utf16(length, detect | n, mark)
+  | LabelUtf16Le() => _utf16(length, detect | data, n, source, mark)
+  | LabelUtf16Be() => _utf16(length, detect | data, n, source, mark)
   | LabelUnsupported() => let
       val (scan | verdict) = text_utf8_scan(length | data, n, 0)
     in
       case+ verdict of
-      | Utf8AsciiOnly() => (TEXTOF_unsupported_as_is(detect, scan) | ProvedAsIs())
+      | Utf8AsciiOnly() => let
+          prval held = holds_exists{cells}{0, n, n}(length)
+        in (TEXTOF_unsupported_as_is(detect, scan, length, held) | ProvedAsIs()) end
       | Utf8Refused() => (TEXTOF_unsupported_refused(detect, scan) | ProvedRefused())
       | Utf8Wide() => (TEXTOF_unsupported_refused(detect, scan) | ProvedRefused())
     end
-  | LabelCp1250() => _single_byte(length, detect | data, n)
-  | LabelCp1251() => _single_byte(length, detect | data, n)
-  | LabelCp1252() => _single_byte(length, detect | data, n)
-  | LabelCp1253() => _single_byte(length, detect | data, n)
-  | LabelCp1254() => _single_byte(length, detect | data, n)
-  | LabelCp1255() => _single_byte(length, detect | data, n)
-  | LabelCp1256() => _single_byte(length, detect | data, n)
-  | LabelCp1257() => _single_byte(length, detect | data, n)
-  | LabelIso88592() => _single_byte(length, detect | data, n)
-  | LabelIso88595() => _single_byte(length, detect | data, n)
-  | LabelIso88597() => _single_byte(length, detect | data, n)
-  | LabelIso88598() => _single_byte(length, detect | data, n)
-  | LabelIso885915() => _single_byte(length, detect | data, n)
-  | LabelKoi8r() => _single_byte(length, detect | data, n)
+  | LabelCp1250() => _single_byte(length, detect | data, n, source, mark)
+  | LabelCp1251() => _single_byte(length, detect | data, n, source, mark)
+  | LabelCp1252() => _single_byte(length, detect | data, n, source, mark)
+  | LabelCp1253() => _single_byte(length, detect | data, n, source, mark)
+  | LabelCp1254() => _single_byte(length, detect | data, n, source, mark)
+  | LabelCp1255() => _single_byte(length, detect | data, n, source, mark)
+  | LabelCp1256() => _single_byte(length, detect | data, n, source, mark)
+  | LabelCp1257() => _single_byte(length, detect | data, n, source, mark)
+  | LabelIso88592() => _single_byte(length, detect | data, n, source, mark)
+  | LabelIso88595() => _single_byte(length, detect | data, n, source, mark)
+  | LabelIso88597() => _single_byte(length, detect | data, n, source, mark)
+  | LabelIso88598() => _single_byte(length, detect | data, n, source, mark)
+  | LabelIso885915() => _single_byte(length, detect | data, n, source, mark)
+  | LabelKoi8r() => _single_byte(length, detect | data, n, source, mark)
 end
+
+(* The size of the output of a document that needs a conversion, with the proof of its relation to the document *)
+#pub datavtype text_sized($A.cells) =
+  | {cells:$A.cells} TextNoConversion(cells)
+  | {cells:$A.cells}{total:bytes}{m:nat} TextSized(cells) of (TEXTOF(cells, 1, TOUT_bytes(total)), LEN(total, m) | int m)
+
+fn _sized_after_utf8 {n:pos}{cells:$A.cells}{mark:nat | mark <= n}{verdict:int | 0 < verdict}
+  (length: $A.CLEN(cells, n), detect: DETECT(cells, 0, mark), scan: UTF8SCAN(cells, mark, verdict) | n: int n, mark: int mark): text_sized(cells) =
+  if mark = 0 then TextNoConversion()
+  else if n - mark <= 0 then TextNoConversion()
+  else let
+    prval () = detect_utf8_mark(detect)
+    prval held = holds_exists{cells}{3, n - 3, n}(length)
+  in TextSized(TEXTOF_bom_dropped(detect, scan, length, held), holds_len(held) | n - 3) end
+
+fn _sized_single {l:agz}{n:pos}{cells:$A.cells}{source:int | 4 <= source; source <= 17}{mark:nat | mark <= n}
+  (length: $A.CLEN(cells, n), detect: DETECT(cells, source, mark) | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), mark: int mark): text_sized(cells) = let
+  val (scan | verdict) = text_utf8_scan(length | data, n, 0)
+in
+  case+ verdict of
+  | Utf8Refused() => let
+      val (plan, total_len | size) = _convert_single(length, detect, scan | data, n, source, mark)
+    in TextSized(plan, total_len | size) end
+  | Utf8AsciiOnly() => TextNoConversion()
+  | Utf8Wide() => TextNoConversion()
+end
+
+fn _sized_utf16 {l:agz}{n:pos}{cells:$A.cells}{source:int | source == 1 || source == 2}{mark:nat | mark <= n}
+  (length: $A.CLEN(cells, n), detect: DETECT(cells, source, mark) | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), mark: int mark): text_sized(cells) =
+  if n - mark <= 0 then TextNoConversion()
+  else let
+    val (plan, total_len | size) = _convert_utf16(length, detect | data, n, source, mark)
+  in TextSized(plan, total_len | size) end
+
+(* How many bytes the document makes when it is converted to UTF-8, when it needs that, with the proof of the output (TEXTOF) *)
+#pub fn text_convert_size {l:agz}{n:pos}{cells:$A.cells} (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n): text_sized(cells)
+
+implement text_convert_size {l}{n}{cells} (length | data, n) = let
+  val (detect | source, mark) = text_detect(length | data, n)
+  prval () = detect_mark_in_len(detect, length)
+in
+  case+ source of
+  | LabelUtf8() => let
+      val (scan | verdict) = text_utf8_scan(length | data, n, mark)
+    in
+      case+ verdict of
+      | Utf8Refused() => TextNoConversion()
+      | Utf8AsciiOnly() => _sized_after_utf8(length, detect, scan | n, mark)
+      | Utf8Wide() => _sized_after_utf8(length, detect, scan | n, mark)
+    end
+  | LabelUtf16Le() => _sized_utf16(length, detect | data, n, source, mark)
+  | LabelUtf16Be() => _sized_utf16(length, detect | data, n, source, mark)
+  | LabelUnsupported() => TextNoConversion()
+  | LabelCp1250() => _sized_single(length, detect | data, n, source, mark)
+  | LabelCp1251() => _sized_single(length, detect | data, n, source, mark)
+  | LabelCp1252() => _sized_single(length, detect | data, n, source, mark)
+  | LabelCp1253() => _sized_single(length, detect | data, n, source, mark)
+  | LabelCp1254() => _sized_single(length, detect | data, n, source, mark)
+  | LabelCp1255() => _sized_single(length, detect | data, n, source, mark)
+  | LabelCp1256() => _sized_single(length, detect | data, n, source, mark)
+  | LabelCp1257() => _sized_single(length, detect | data, n, source, mark)
+  | LabelIso88592() => _sized_single(length, detect | data, n, source, mark)
+  | LabelIso88595() => _sized_single(length, detect | data, n, source, mark)
+  | LabelIso88597() => _sized_single(length, detect | data, n, source, mark)
+  | LabelIso88598() => _sized_single(length, detect | data, n, source, mark)
+  | LabelIso885915() => _sized_single(length, detect | data, n, source, mark)
+  | LabelKoi8r() => _sized_single(length, detect | data, n, source, mark)
+end
+
+fn _fill_converted {l:agz}{n:pos}{cells:$A.cells}{source:int | source == 1 || source == 2 || (4 <= source && source <= 17)}{mark:nat | mark <= n}
+  {total:bytes}{m:nat}{lo:agz}{oc:$A.cells}
+  (length: $A.CLEN(cells, n), conv: CONV(cells, source, mark, n, total), total_len: LEN(total, m), out_len: $A.CLEN(oc, m + 1)
+   | data: !$A.cborrow(l, n, cells), n: int n, source: label_source(source), mark: int mark, out: $A.barr(lo, m + 1, oc))
+  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, m + 1) | $A.barr(lo, m + 1, oc2)) =
+  _fill_loop(length, conv, APPEND_nil(), total_len, HOLDS_nil(out_len), LEN_nil(), out_len | data, n, source, mark, out, 0)
+
+(* Writes the output of the document that needs a conversion, as text_convert_size says it is, in an array of one cell more than
+   its bytes: the cells of the array come to hold them *)
+#pub fn text_convert_fill {l:agz}{n:pos}{cells:$A.cells}{total:bytes}{m:nat}{lo:agz}{oc:$A.cells}
+  (length: $A.CLEN(cells, n), plan: TEXTOF(cells, 1, TOUT_bytes(total)), total_len: LEN(total, m), out_len: $A.CLEN(oc, m + 1)
+   | data: !$A.cborrow(l, n, cells), n: int n, out: $A.barr(lo, m + 1, oc), m: int m)
+  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, m + 1) | $A.barr(lo, m + 1, oc2))
+
+implement text_convert_fill {l}{n}{cells}{total}{m}{lo}{oc} (length, plan, total_len, out_len | data, n, out, m) = let
+  val (detect | source, mark) = text_detect(length | data, n)
+  prval () = detect_mark_in_len(detect, length)
+in
+  case+ source of
+  | LabelUtf8() => let
+      prval held = textof_bom_holds(plan, detect, length)
+      prval EQI_refl() = len_functional(holds_len(held), total_len)
+    in _copy_loop(held, APPEND_nil(), total_len, HOLDS_nil(out_len), LEN_nil(), out_len | data, n, 3, n - 3, out, 0) end
+  | LabelUtf16Le() => _fill_converted(length, textof_utf16_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelUtf16Be() => _fill_converted(length, textof_utf16_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelUnsupported() => (falsep_holds(textof_not_unsupported(plan, detect)), out_len | out)
+  | LabelCp1250() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelCp1251() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelCp1252() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelCp1253() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelCp1254() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelCp1255() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelCp1256() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelCp1257() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelIso88592() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelIso88595() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelIso88597() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelIso88598() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelIso885915() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+  | LabelKoi8r() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, source, mark, out)
+end
+
+(* The end of text_relation: the static fixtures of tests/static/reject named text are put before this line *)
 
 end
