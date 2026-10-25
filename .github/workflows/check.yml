@@ -597,14 +597,15 @@ jobs:
   # its release notes. Production stays a promotion made in the Play
   # Console (ANDROID.md). The release is pwa's reusable workflow (pwa#90,
   # moved there by quire#623), called by commit like android.yml:
-  # pwa-ref is android.yml's pin above, which the relock moves with that pin
-  # (#821); play-release.yml itself stays at the commit named below. It signs in by Workload Identity
+  # pwa-ref is this call's own pin below (area: pwa-ref): the relock moves the
+  # play-release.yml pin and this pwa-ref to the same commit (#851), as it does
+  # android.yml's pin and its pwa-ref above (#821). It signs in by Workload Identity
   # Federation, so no key is stored; the names below are public, and
   # Google admits only a push to main of this repository (ANDROID.md)
   play-internal:
     needs: [check, android]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: bats-lang/pwa/.github/workflows/play-release.yml@de812f3cb8710c6d2ed1e488948635926faf0b27 # pwa main after #124 (no release tag)
+    uses: bats-lang/pwa/.github/workflows/play-release.yml@34119fbcf644c7a2a2745b70f8263e37db501bd6 # pwa main 34119fb
     permissions:
       contents: read
       id-token: write
