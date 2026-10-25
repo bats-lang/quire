@@ -70,7 +70,7 @@ export function hold({ dir, holder }) { if (dir) attempt('hold', () => writeFile
 export const LOCK_NAME = 'ring-lock';
 export const LOCK_STALE_MS = 2000;
 export const LOCK_MOST_MS = 5000;
-export const LOCK_UNREADABLE_MS = 250;
+export const LOCK_UNREADABLE_MS = 500;
 export const LOCK_FAILED_PREFIX = 'ring-lock-failed-';
 const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
