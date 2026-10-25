@@ -9,6 +9,7 @@
 #use array as A
 
 staload "bytes.sats"
+staload "text_labels.sats"
 
 (* BYTEAT(cells, i, value): the byte at i of the cells is value, or -1 when i is outside them *)
 #pub dataprop BYTEAT($A.cells, int, int) =
@@ -392,3 +393,370 @@ fun _utf8_scan_loop {l:agz}{n:pos}{cells:$A.cells}{from,i:nat | from <= i; i <= 
 
 implement text_utf8_scan {l}{n}{cells}{from} (length | data, n, from) =
   _utf8_scan_loop(length, UTF8RUN_empty() | data, n, from, 1)
+
+(* BLANKS(cells, from, to): the bytes [from, to) of the cells are blanks (space, tab, line feed, carriage return) *)
+#pub dataprop BLANKS($A.cells, int, int) =
+  | {cells:$A.cells}{i:nat} BLANKS_none(cells, i, i)
+  | {cells:$A.cells}{i,m:nat | i < m}{value:int | value == 32 || value == 9 || value == 10 || value == 13}
+    BLANKS_more(cells, i, m) of ($A.NTH(cells, i, value), BLANKS(cells, i + 1, m))
+
+(* One more blank after blanks *)
+#pub prfun blanks_snoc {cells:$A.cells}{from,to:nat | from <= to}{value:int | value == 32 || value == 9 || value == 10 || value == 13}
+  (BLANKS(cells, from, to), $A.NTH(cells, to, value)): BLANKS(cells, from, to + 1)
+
+prfun _blanks_snoc {cells:$A.cells}{from,to:nat | from <= to}{value:int | value == 32 || value == 9 || value == 10 || value == 13} .<to - from>.
+  (blanks: BLANKS(cells, from, to), cell: $A.NTH(cells, to, value)): BLANKS(cells, from, to + 1) =
+  case+ blanks of
+  | BLANKS_none() => BLANKS_more(cell, BLANKS_none())
+  | BLANKS_more(head, rest) => BLANKS_more(head, _blanks_snoc(rest, cell))
+
+primplement blanks_snoc {cells}{from,to}{value} (blanks, cell) = _blanks_snoc(blanks, cell)
+
+(* SKIP(cells, from, to): to is the first index from `from` on that is not a blank, or the end of the cells *)
+#pub dataprop SKIP($A.cells, int, int) =
+  | {cells:$A.cells}{from,to:nat}{value:int | value != 32; value != 9; value != 10; value != 13}
+    SKIP_stop(cells, from, to) of (BLANKS(cells, from, to), BYTEAT(cells, to, value))
+
+(* Skipping blanks ends in one place *)
+#pub prfun skip_functional {cells:$A.cells}{from,first_to,second_to:nat | from <= first_to; from <= second_to}
+  (SKIP(cells, from, first_to), SKIP(cells, from, second_to)): [first_to == second_to] void
+
+prfun _skip_functional {cells:$A.cells}{from,first_to,second_to:nat | from <= first_to; from <= second_to}
+  {first_value,second_value:int | first_value != 32; first_value != 9; first_value != 10; first_value != 13;
+   second_value != 32; second_value != 9; second_value != 10; second_value != 13} .<first_to - from>.
+  (one: BLANKS(cells, from, first_to), one_end: BYTEAT(cells, first_to, first_value),
+   other: BLANKS(cells, from, second_to), other_end: BYTEAT(cells, second_to, second_value)): [first_to == second_to] void =
+  case+ one of
+  | BLANKS_none() =>
+    (case+ other of
+     | BLANKS_none() => ()
+     | BLANKS_more(cell, _) => byteat_functional(one_end, BYTEAT_in(cell)))
+  | BLANKS_more(cell_one, rest_one) =>
+    (case+ other of
+     | BLANKS_none() => byteat_functional(other_end, BYTEAT_in(cell_one))
+     | BLANKS_more(cell_other, rest_other) => let
+         prval () = $A.nth_functional(cell_one, cell_other)
+       in _skip_functional(rest_one, one_end, rest_other, other_end) end)
+
+primplement skip_functional {cells}{from,first_to,second_to} (one, other) =
+  case+ one of
+  | SKIP_stop(blanks_one, end_one) =>
+    (case+ other of
+     | SKIP_stop(blanks_other, end_other) => _skip_functional(blanks_one, end_one, blanks_other, end_other))
+
+(* NOQUOTE(cells, quote, from, to): none of the bytes [from, to) of the cells is the byte quote *)
+#pub dataprop NOQUOTE($A.cells, int, int, int) =
+  | {cells:$A.cells}{quote:int}{i:nat} NOQUOTE_none(cells, quote, i, i)
+  | {cells:$A.cells}{quote:int}{i,m:nat | i < m}{value:int | value != quote}
+    NOQUOTE_more(cells, quote, i, m) of ($A.NTH(cells, i, value), NOQUOTE(cells, quote, i + 1, m))
+
+(* One more byte that is not the quote after those that are not *)
+#pub prfun noquote_snoc {cells:$A.cells}{quote:int}{from,to:nat | from <= to}{value:int | value != quote}
+  (NOQUOTE(cells, quote, from, to), $A.NTH(cells, to, value)): NOQUOTE(cells, quote, from, to + 1)
+
+prfun _noquote_snoc {cells:$A.cells}{quote:int}{from,to:nat | from <= to}{value:int | value != quote} .<to - from>.
+  (noquote: NOQUOTE(cells, quote, from, to), cell: $A.NTH(cells, to, value)): NOQUOTE(cells, quote, from, to + 1) =
+  case+ noquote of
+  | NOQUOTE_none() => NOQUOTE_more(cell, NOQUOTE_none())
+  | NOQUOTE_more(head, rest) => NOQUOTE_more(head, _noquote_snoc(rest, cell))
+
+primplement noquote_snoc {cells}{quote}{from,to}{value} (noquote, cell) = _noquote_snoc(noquote, cell)
+
+(* QUOTESTOP(cells, quote, at): the byte at `at` is the quote, or `at` is the end of the cells *)
+#pub dataprop QUOTESTOP($A.cells, int, int) =
+  | {cells:$A.cells}{quote:int}{at:nat} QUOTESTOP_hit(cells, quote, at) of $A.NTH(cells, at, quote)
+  | {cells:$A.cells}{quote:int}{at:nat} QUOTESTOP_end(cells, quote, at) of $A.CLEN(cells, at)
+
+(* FINDQUOTE(cells, quote, from, to): to is the first index from `from` on that holds the byte quote, or the end of the cells *)
+#pub dataprop FINDQUOTE($A.cells, int, int, int) =
+  | {cells:$A.cells}{quote:int}{from,to:nat}
+    FINDQUOTE_found(cells, quote, from, to) of (NOQUOTE(cells, quote, from, to), QUOTESTOP(cells, quote, to))
+
+(* Looking for a quote ends in one place *)
+#pub prfun findquote_functional {cells:$A.cells}{quote:int}{from,first_to,second_to:nat | from <= first_to; from <= second_to}
+  (FINDQUOTE(cells, quote, from, first_to), FINDQUOTE(cells, quote, from, second_to)): [first_to == second_to] void
+
+prfun _findquote_functional {cells:$A.cells}{quote:int}{from,first_to,second_to:nat | from <= first_to; from <= second_to} .<first_to - from>.
+  (one: NOQUOTE(cells, quote, from, first_to), one_stop: QUOTESTOP(cells, quote, first_to),
+   other: NOQUOTE(cells, quote, from, second_to), other_stop: QUOTESTOP(cells, quote, second_to)): [first_to == second_to] void =
+  case+ one of
+  | NOQUOTE_none() =>
+    (case+ other of
+     | NOQUOTE_none() => ()
+     | NOQUOTE_more(cell, _) =>
+       (case+ one_stop of
+        | QUOTESTOP_hit(hit) => $A.nth_functional(hit, cell)
+        | QUOTESTOP_end(length) => $A.nth_in_len(cell, length)))
+  | NOQUOTE_more(cell_one, rest_one) =>
+    (case+ other of
+     | NOQUOTE_none() =>
+       (case+ other_stop of
+        | QUOTESTOP_hit(hit) => $A.nth_functional(hit, cell_one)
+        | QUOTESTOP_end(length) => $A.nth_in_len(cell_one, length))
+     | NOQUOTE_more(_, rest_other) => _findquote_functional(rest_one, one_stop, rest_other, other_stop))
+
+primplement findquote_functional {cells}{quote}{from,first_to,second_to} (one, other) =
+  case+ one of
+  | FINDQUOTE_found(noquote_one, stop_one) =>
+    (case+ other of
+     | FINDQUOTE_found(noquote_other, stop_other) => _findquote_functional(noquote_one, stop_one, noquote_other, stop_other))
+
+(* Whether a byte is a blank *)
+fn _is_blank {value:int} (value: int value): bool(value == 32 || value == 9 || value == 10 || value == 13) =
+  if value = 32 then true else if value = 9 then true else if value = 10 then true else if value = 13 then true else false
+
+fun _skip_blank_loop {l:agz}{n:pos}{cells:$A.cells}{from,i:nat | from <= i; i <= n} .<n - i>.
+  (length: $A.CLEN(cells, n), blanks: BLANKS(cells, from, i) | data: !$A.cborrow(l, n, cells), n: int n, i: int i)
+  : [to:nat | from <= to; to <= n] (SKIP(cells, from, to) | int to) =
+  if i >= n then (SKIP_stop(blanks, BYTEAT_after(length)) | i)
+  else let
+    val (cell | value) = $A.cborrow_get(data, i)
+  in
+    if _is_blank(value) then _skip_blank_loop(length, blanks_snoc(blanks, cell) | data, n, i + 1)
+    else (SKIP_stop(blanks, BYTEAT_in(cell)) | i)
+  end
+
+(* Just past the blanks at or after i, with the proof of it *)
+#pub fn text_skip_blank {l:agz}{n:pos}{cells:$A.cells}{from:nat | from <= n}
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n, from: int from)
+  : [to:nat | from <= to; to <= n] (SKIP(cells, from, to) | int to)
+
+implement text_skip_blank {l}{n}{cells}{from} (length | data, n, from) =
+  _skip_blank_loop(length, BLANKS_none() | data, n, from)
+
+fun _find_quote_loop {l:agz}{n:pos}{cells:$A.cells}{quote:int}{from,i:nat | from <= i; i <= n} .<n - i>.
+  (length: $A.CLEN(cells, n), noquote: NOQUOTE(cells, quote, from, i) | data: !$A.cborrow(l, n, cells), n: int n, i: int i, quote: int quote)
+  : [to:nat | from <= to; to <= n] (FINDQUOTE(cells, quote, from, to) | int to) =
+  if i >= n then (FINDQUOTE_found(noquote, QUOTESTOP_end(length)) | i)
+  else let
+    val (cell | value) = $A.cborrow_get(data, i)
+  in
+    if value = quote then (FINDQUOTE_found(noquote, QUOTESTOP_hit(cell)) | i)
+    else _find_quote_loop(length, noquote_snoc(noquote, cell) | data, n, i + 1, quote)
+  end
+
+(* The first index at or after `from` that holds the byte quote, or n, with the proof of it *)
+#pub fn text_find_quote {l:agz}{n:pos}{cells:$A.cells}{quote:int}{from:nat | from <= n}
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n, from: int from, quote: int quote)
+  : [to:nat | from <= to; to <= n] (FINDQUOTE(cells, quote, from, to) | int to)
+
+implement text_find_quote {l}{n}{cells}{quote}{from} (length | data, n, from, quote) =
+  _find_quote_loop(length, NOQUOTE_none() | data, n, from, quote)
+
+
+(* LOWER(raw, lowered): lowered is the byte raw in lower case (A to Z become a to z) *)
+#pub dataprop LOWER(int, int) =
+  | {raw:int | raw < 65 || 90 < raw} LOWER_same(raw, raw)
+  | {raw:int | 65 <= raw; raw <= 90} LOWER_shift(raw, raw + 32)
+
+(* A byte has one lower case *)
+#pub prfun lower_functional {raw,first,second:int} (LOWER(raw, first), LOWER(raw, second)): [first == second] void
+
+primplement lower_functional {raw,first,second} (one, other) =
+  case+ one of
+  | LOWER_same() => (case+ other of LOWER_same() => () | LOWER_shift() => ())
+  | LOWER_shift() => (case+ other of LOWER_same() => () | LOWER_shift() => ())
+
+(* LOWERED(cells, from, label): the bytes of the cells from `from` on, in lower case, begin with the bytes label *)
+#pub dataprop LOWERED($A.cells, int, bytes) =
+  | {cells:$A.cells}{from:nat} LOWERED_nil(cells, from, bnil())
+  | {cells:$A.cells}{from:nat}{raw,low:int}{rest:bytes}
+    LOWERED_cons(cells, from, bcons(low, rest)) of ($A.NTH(cells, from, raw), LOWER(raw, low), LOWERED(cells, from + 1, rest))
+
+(* LABELIS(cells, from, count, label): the count bytes of the cells from `from`, in lower case, are the bytes label *)
+#pub dataprop LABELIS($A.cells, int, int, bytes) =
+  | {cells:$A.cells}{from,count:nat}{label:bytes}
+    LABELIS_mk(cells, from, count, label) of (LOWERED(cells, from, label), LEN(label, count))
+
+(* The lower case of the same bytes is one byte string, when it is of one length *)
+#pub prfun lowered_functional {cells:$A.cells}{from,count:nat}{first,second:bytes}
+  (LOWERED(cells, from, first), LOWERED(cells, from, second), LEN(first, count), LEN(second, count)): EQB(first, second)
+
+prfun _lowered_functional {cells:$A.cells}{from,count:nat}{first,second:bytes} .<count>.
+  (lowered_first: LOWERED(cells, from, first), lowered_second: LOWERED(cells, from, second), len_first: LEN(first, count), len_second: LEN(second, count)): EQB(first, second) =
+  case+ len_first of
+  | LEN_nil() => (case+ len_second of LEN_nil() => EQB_refl())
+  | LEN_cons(rest_len_first) =>
+    (case+ len_second of
+     | LEN_cons(rest_len_second) =>
+       (case+ lowered_first of
+        | LOWERED_cons(cell_first, lower_first, rest_first) =>
+          (case+ lowered_second of
+           | LOWERED_cons(cell_second, lower_second, rest_second) => let
+               prval () = $A.nth_functional(cell_first, cell_second)
+               prval () = lower_functional(lower_first, lower_second)
+               prval EQB_refl() = _lowered_functional(rest_first, rest_second, rest_len_first, rest_len_second)
+             in EQB_refl() end)))
+
+primplement lowered_functional {cells}{from,count}{first,second} (lowered_first, lowered_second, len_first, len_second) =
+  _lowered_functional(lowered_first, lowered_second, len_first, len_second)
+
+(* DIFFFROM(cells, from, label): the bytes of the cells from `from` on, in lower case, differ from label at some byte *)
+#pub dataprop DIFFFROM($A.cells, int, bytes) =
+  | {cells:$A.cells}{from:nat}{raw,low,expected:int | low != expected}{rest:bytes}
+    DIFFFROM_head(cells, from, bcons(expected, rest)) of ($A.NTH(cells, from, raw), LOWER(raw, low))
+  | {cells:$A.cells}{from:nat}{raw,expected:int}{rest:bytes}
+    DIFFFROM_tail(cells, from, bcons(expected, rest)) of ($A.NTH(cells, from, raw), LOWER(raw, expected), DIFFFROM(cells, from + 1, rest))
+
+(* LABELDIFF(cells, from, count, label): the count bytes of the cells from `from`, in lower case, are not the bytes
+   label: label is of another length, or a byte differs *)
+#pub dataprop LABELDIFF($A.cells, int, int, bytes) =
+  | {cells:$A.cells}{from,count:nat}{label:bytes}{label_count:nat | label_count != count}
+    LABELDIFF_length(cells, from, count, label) of LEN(label, label_count)
+  | {cells:$A.cells}{from,count:nat}{label:bytes}
+    LABELDIFF_byte(cells, from, count, label) of DIFFFROM(cells, from, label)
+
+prfun _lowered_not_diff {cells:$A.cells}{from,count:nat}{label:bytes} .<count>.
+  (lowered: LOWERED(cells, from, label), diff: DIFFFROM(cells, from, label), label_len: LEN(label, count)): FALSEP() =
+  case+ label_len of
+  | LEN_nil() => (case+ lowered of LOWERED_nil() => (case+ diff of DIFFFROM_head(_, _) =/=> () | DIFFFROM_tail(_, _, _) =/=> ()))
+  | LEN_cons(rest_len) =>
+    (case+ lowered of
+     | LOWERED_cons(cell, lower, rest_lowered) =>
+       (case+ diff of
+        | DIFFFROM_head(cell_diff, lower_diff) => let
+            prval () = $A.nth_functional(cell, cell_diff)
+            prval () = lower_functional(lower, lower_diff)
+          in contradiction{0}() end
+        | DIFFFROM_tail(cell_diff, lower_diff, rest_diff) => _lowered_not_diff(rest_lowered, rest_diff, rest_len)))
+
+(* Bytes are not both the label and not the label *)
+#pub prfun labelis_not_diff {cells:$A.cells}{from,count:nat}{label:bytes}
+  (LABELIS(cells, from, count, label), LABELDIFF(cells, from, count, label)): FALSEP()
+
+primplement labelis_not_diff {cells}{from,count}{label} (is, diff) =
+  case+ is of
+  | LABELIS_mk(lowered, label_len) =>
+    (case+ diff of
+     | LABELDIFF_length(other_len) => let prval EQI_refl() = len_functional(label_len, other_len) in contradiction{0}() end
+     | LABELDIFF_byte(different) => _lowered_not_diff(lowered, different, label_len))
+
+(* ALLDIFF(cells, from, count, tried): the bytes are none of the first `tried` labels of the table *)
+#pub dataprop ALLDIFF($A.cells, int, int, int) =
+  | {cells:$A.cells}{from,count:nat} ALLDIFF_none(cells, from, count, 0)
+  | {cells:$A.cells}{from,count:nat}{tried:nat | tried < LABEL_COUNT}{label:bytes}{source:int}
+    ALLDIFF_more(cells, from, count, tried + 1) of (ALLDIFF(cells, from, count, tried), ENTRY(tried, label, source), LABELDIFF(cells, from, count, label))
+
+(* Bytes that are none of the labels tried are not any one of them *)
+#pub prfun alldiff_get {cells:$A.cells}{from,count:nat}{tried,index:nat | index < tried}{label:bytes}{source:int}
+  (ALLDIFF(cells, from, count, tried), ENTRY(index, label, source)): LABELDIFF(cells, from, count, label)
+
+prfun _alldiff_get {cells:$A.cells}{from,count:nat}{tried,index:nat | index < tried}{label:bytes}{source:int} .<tried>.
+  (all: ALLDIFF(cells, from, count, tried), entry: ENTRY(index, label, source)): LABELDIFF(cells, from, count, label) =
+  case+ all of
+  | ALLDIFF_none() =/=> ()
+  | ALLDIFF_more(rest, last_entry, last_diff) =>
+    sif index == tried - 1 then let
+        prval (EQB_refl(), _) = entry_functional(last_entry, entry)
+      in last_diff end
+    else _alldiff_get(rest, entry)
+
+primplement alldiff_get {cells}{from,count}{tried,index}{label}{source} (all, entry) = _alldiff_get(all, entry)
+
+(* LABELSRC(cells, from, count, source): the count bytes of the cells from `from` name the source with that number:
+   a label of the table, or none of them (3, the encodings Quire has no table for) *)
+#pub dataprop LABELSRC($A.cells, int, int, int) =
+  | {cells:$A.cells}{from,count:nat}{index:nat | index < LABEL_COUNT}{label:bytes}{source:int}
+    LABELSRC_listed(cells, from, count, source) of (ENTRY(index, label, source), LABELIS(cells, from, count, label))
+  | {cells:$A.cells}{from,count:nat}
+    LABELSRC_unsupported(cells, from, count, 3) of ALLDIFF(cells, from, count, LABEL_COUNT)
+
+(* The bytes of a label name one source *)
+#pub prfun labelsrc_functional {cells:$A.cells}{from,count:nat}{first,second:int}
+  (LABELSRC(cells, from, count, first), LABELSRC(cells, from, count, second)): [first == second] void
+
+primplement labelsrc_functional {cells}{from,count}{first,second} (one, other) =
+  case+ one of
+  | LABELSRC_listed(entry_one, is_one) =>
+    (case+ other of
+     | LABELSRC_listed(entry_other, is_other) =>
+       (case+ is_one of
+        | LABELIS_mk(lowered_one, len_one) =>
+          (case+ is_other of
+           | LABELIS_mk(lowered_other, len_other) => let
+               prval EQB_refl() = lowered_functional(lowered_one, lowered_other, len_one, len_other)
+               prval EQI_refl() = entry_label_injective(entry_one, entry_other)
+               prval (_, EQI_refl()) = entry_functional(entry_one, entry_other)
+             in () end))
+     | LABELSRC_unsupported(all) => let
+         prval () = entry_below_count(entry_one)
+         prval different = alldiff_get(all, entry_one)
+       in case+ labelis_not_diff(is_one, different) of FALSEP_mk() =/=> () end)
+  | LABELSRC_unsupported(all) =>
+    (case+ other of
+     | LABELSRC_listed(entry_other, is_other) => let
+         prval () = entry_below_count(entry_other)
+         prval different = alldiff_get(all, entry_other)
+       in case+ labelis_not_diff(is_other, different) of FALSEP_mk() =/=> () end
+     | LABELSRC_unsupported(_) => ())
+
+(* The lower case of a byte, with the proof of it *)
+fn _lower {raw:int} (raw: int raw): [low:int] (LOWER(raw, low) | int low) =
+  if raw >= 65 then (if raw <= 90 then (LOWER_shift() | raw + 32) else (LOWER_same() | raw))
+  else (LOWER_same() | raw)
+
+(* LOWEREDCMP(cells, from, label, same): the bytes from `from`, in lower case, begin with label (same) or differ from it *)
+#pub dataprop LOWEREDCMP($A.cells, int, bytes, bool) =
+  | {cells:$A.cells}{from:nat}{label:bytes} LOWEREDCMP_same(cells, from, label, true) of LOWERED(cells, from, label)
+  | {cells:$A.cells}{from:nat}{label:bytes} LOWEREDCMP_diff(cells, from, label, false) of DIFFFROM(cells, from, label)
+
+fun _lowered_compare {l:agz}{n:pos}{cells:$A.cells}{from:nat}{label:bytes}{count:nat | from + count <= n} .<count>.
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n, from: int from, text: !blist(label, count))
+  : [same:bool] (LOWEREDCMP(cells, from, label, same) | bool same) =
+  case+ text of
+  | blist_nil() => (LOWEREDCMP_same(LOWERED_nil()) | true)
+  | blist_cons(expected, rest) => let
+      val (cell | raw) = $A.cborrow_get(data, from)
+      val (lower | low) = _lower(raw)
+    in
+      if low = expected then let
+          val (rest_compare | same) = _lowered_compare(length | data, n, from + 1, rest)
+        in
+          if same then let prval LOWEREDCMP_same(rest_lowered) = rest_compare
+            in (LOWEREDCMP_same(LOWERED_cons(cell, lower, rest_lowered)) | true) end
+          else let prval LOWEREDCMP_diff(rest_different) = rest_compare
+            in (LOWEREDCMP_diff(DIFFFROM_tail(cell, lower, rest_different)) | false) end
+        end
+      else (LOWEREDCMP_diff(DIFFFROM_head(cell, lower)) | false)
+    end
+
+(* LABELCMP(cells, from, count, label, same): the count bytes from `from` are the label (same) or are not *)
+#pub dataprop LABELCMP($A.cells, int, int, bytes, bool) =
+  | {cells:$A.cells}{from,count:nat}{label:bytes} LABELCMP_is(cells, from, count, label, true) of LABELIS(cells, from, count, label)
+  | {cells:$A.cells}{from,count:nat}{label:bytes} LABELCMP_diff(cells, from, count, label, false) of LABELDIFF(cells, from, count, label)
+
+fn _label_compare {l:agz}{n:pos}{cells:$A.cells}{from,count:nat | from + count <= n}{label:bytes}{label_count:nat}
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n, from: int from, count: int count, text: !blist(label, label_count))
+  : [same:bool] (LABELCMP(cells, from, count, label, same) | bool same) = let
+  val (text_len | text_count) = blist_len(text)
+in
+  if text_count <> count then (LABELCMP_diff(LABELDIFF_length(text_len)) | false)
+  else let
+      val (compare | same) = _lowered_compare(length | data, n, from, text)
+    in
+      if same then let prval LOWEREDCMP_same(lowered) = compare in (LABELCMP_is(LABELIS_mk(lowered, text_len)) | true) end
+      else let prval LOWEREDCMP_diff(different) = compare in (LABELCMP_diff(LABELDIFF_byte(different)) | false) end
+    end
+end
+
+fun _label_loop {l:agz}{n:pos}{cells:$A.cells}{from,count:nat | from + count <= n}{tried:nat | tried <= LABEL_COUNT} .<LABEL_COUNT - tried>.
+  (length: $A.CLEN(cells, n), all: ALLDIFF(cells, from, count, tried) | data: !$A.cborrow(l, n, cells), n: int n, from: int from, count: int count, tried: int tried)
+  : [source:int] (LABELSRC(cells, from, count, source) | label_source(source)) =
+  if tried >= text_label_total() then (LABELSRC_unsupported(all) | LabelUnsupported())
+  else let
+    val (entry | text, source) = text_entry_label(tried)
+    val (compare | same) = _label_compare(length | data, n, from, count, text)
+    val () = blist_free(text)
+  in
+    if same then let prval LABELCMP_is(is) = compare in (LABELSRC_listed(entry, is) | source) end
+    else let prval LABELCMP_diff(different) = compare
+      in _label_loop(length, ALLDIFF_more(all, entry, different) | data, n, from, count, tried + 1) end
+  end
+
+(* The encoding the count bytes at `from` name, with the proof of it *)
+#pub fn text_label_source {l:agz}{n:pos}{cells:$A.cells}{from,count:nat | from + count <= n}
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n, from: int from, count: int count)
+  : [source:int] (LABELSRC(cells, from, count, source) | label_source(source))
+
+implement text_label_source {l}{n}{cells}{from,count} (length | data, n, from, count) =
+  _label_loop(length, ALLDIFF_none() | data, n, from, count, 0)
