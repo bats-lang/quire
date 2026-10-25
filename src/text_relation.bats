@@ -104,10 +104,10 @@ primplement utf8step_functional {cells}{i}{first_to,second_to}{first_spread,seco
    after another; they are all ASCII or one of them is not *)
 #pub dataprop UTF8RUN($A.cells, int, int, spread) =
   | {cells:$A.cells}{i:nat} UTF8RUN_empty(cells, i, i, SpreadAscii())
-  | {cells:$A.cells}{i,k,m:nat | i < k; k <= m}{spread:spread}
-    UTF8RUN_ascii(cells, i, m, spread) of (UTF8STEP(cells, i, k, SpreadAscii()), UTF8RUN(cells, k, m, spread))
-  | {cells:$A.cells}{i,k,m:nat | i < k; k <= m}{rest_spread:spread}
-    UTF8RUN_wide(cells, i, m, SpreadWide()) of (UTF8STEP(cells, i, k, SpreadWide()), UTF8RUN(cells, k, m, rest_spread))
+  | {cells:$A.cells}{i,next,to:nat | i < next; next <= to}{spread:spread}
+    UTF8RUN_ascii(cells, i, to, spread) of (UTF8STEP(cells, i, next, SpreadAscii()), UTF8RUN(cells, next, to, spread))
+  | {cells:$A.cells}{i,next,to:nat | i < next; next <= to}{rest_spread:spread}
+    UTF8RUN_wide(cells, i, to, SpreadWide()) of (UTF8STEP(cells, i, next, SpreadWide()), UTF8RUN(cells, next, to, rest_spread))
 
 (* A run is one run *)
 #pub prfun utf8run_functional {cells:$A.cells}{from,to:nat | from <= to}{first_spread,second_spread:spread}
@@ -435,8 +435,8 @@ implement text_utf8_scan {l}{n}{cells}{from} (length | data, n, from) =
 (* BLANKS(cells, from, to): the bytes [from, to) of the cells are blanks (space, tab, line feed, carriage return) *)
 #pub dataprop BLANKS($A.cells, int, int) =
   | {cells:$A.cells}{i:nat} BLANKS_none(cells, i, i)
-  | {cells:$A.cells}{i,m:nat | i < m}{value:int | value == 32 || value == 9 || value == 10 || value == 13}
-    BLANKS_more(cells, i, m) of ($A.NTH(cells, i, value), BLANKS(cells, i + 1, m))
+  | {cells:$A.cells}{i,to:nat | i < to}{value:int | value == 32 || value == 9 || value == 10 || value == 13}
+    BLANKS_more(cells, i, to) of ($A.NTH(cells, i, value), BLANKS(cells, i + 1, to))
 
 (* One more blank after blanks *)
 #pub prfun blanks_snoc {cells:$A.cells}{from,to:nat | from <= to}{value:int | value == 32 || value == 9 || value == 10 || value == 13}
@@ -485,8 +485,8 @@ primplement skip_functional {cells}{from,first_to,second_to} (one, other) =
 (* NOQUOTE(cells, quote, from, to): none of the bytes [from, to) of the cells is the byte quote *)
 #pub dataprop NOQUOTE($A.cells, int, int, int) =
   | {cells:$A.cells}{quote:int}{i:nat} NOQUOTE_none(cells, quote, i, i)
-  | {cells:$A.cells}{quote:int}{i,m:nat | i < m}{value:int | value != quote}
-    NOQUOTE_more(cells, quote, i, m) of ($A.NTH(cells, i, value), NOQUOTE(cells, quote, i + 1, m))
+  | {cells:$A.cells}{quote:int}{i,to:nat | i < to}{value:int | value != quote}
+    NOQUOTE_more(cells, quote, i, to) of ($A.NTH(cells, i, value), NOQUOTE(cells, quote, i + 1, to))
 
 (* One more byte that is not the quote after those that are not *)
 #pub prfun noquote_snoc {cells:$A.cells}{quote:int}{from,to:nat | from <= to}{value:int | value != quote}
@@ -1955,10 +1955,10 @@ primplement stepof_bounds {cells}{source}{i,n}{to,point} (step, length) =
   | {point:int | 0 <= point; point < 128} ENC_one(point, bcons(point, bnil()))
   | {point,high,low:int | 2 <= high; high < 32; 0 <= low; low < 64; point == 64 * high + low}
     ENC_two(point, bcons(192 + high, bcons(128 + low, bnil())))
-  | {point,a,b,c:int | 0 <= a; a < 16; 0 <= b; b < 64; 0 <= c; c < 64; 2048 <= point; point == 4096 * a + 64 * b + c}
-    ENC_three(point, bcons(224 + a, bcons(128 + b, bcons(128 + c, bnil()))))
-  | {point,a,b,c,d:int | 0 <= a; a < 5; 0 <= b; b < 64; 0 <= c; c < 64; 0 <= d; d < 64; 65536 <= point; point == 262144 * a + 4096 * b + 64 * c + d}
-    ENC_four(point, bcons(240 + a, bcons(128 + b, bcons(128 + c, bcons(128 + d, bnil())))))
+  | {point,high,middle,low:int | 0 <= high; high < 16; 0 <= middle; middle < 64; 0 <= low; low < 64; 2048 <= point; point == 4096 * high + 64 * middle + low}
+    ENC_three(point, bcons(224 + high, bcons(128 + middle, bcons(128 + low, bnil()))))
+  | {point,top,high,middle,low:int | 0 <= top; top < 5; 0 <= high; high < 64; 0 <= middle; middle < 64; 0 <= low; low < 64; 65536 <= point; point == 262144 * top + 4096 * high + 64 * middle + low}
+    ENC_four(point, bcons(240 + top, bcons(128 + high, bcons(128 + middle, bcons(128 + low, bnil())))))
 
 (* Digits of 64 are unique *)
 prfn digit64_unique {high_one,low_one,high_two,low_two:int | 0 <= low_one; low_one < 64; 0 <= low_two; low_two < 64; 64 * high_one + low_one == 64 * high_two + low_two}
@@ -1983,24 +1983,24 @@ primplement enc_functional {point}{first,second} (one, other) =
        in EQB_refl() end
      | ENC_three() => falsep_eqb(contradiction{0}())
      | ENC_four() => falsep_eqb(contradiction{0}()))
-  | ENC_three{point_one, a_one, b_one, c_one}() =>
+  | ENC_three{point_one, high_one, middle_one, low_one}() =>
     (case+ other of
      | ENC_one() => falsep_eqb(contradiction{0}())
      | ENC_two() => falsep_eqb(contradiction{0}())
-     | ENC_three{point_two, a_two, b_two, c_two}() => let
-         prval () = digit64_unique{64 * a_one + b_one, c_one, 64 * a_two + b_two, c_two}()
-         prval () = digit64_unique{a_one, b_one, a_two, b_two}()
+     | ENC_three{point_two, high_two, middle_two, low_two}() => let
+         prval () = digit64_unique{64 * high_one + middle_one, low_one, 64 * high_two + middle_two, low_two}()
+         prval () = digit64_unique{high_one, middle_one, high_two, middle_two}()
        in EQB_refl() end
      | ENC_four() => falsep_eqb(contradiction{0}()))
-  | ENC_four{point_one, a_one, b_one, c_one, d_one}() =>
+  | ENC_four{point_one, top_one, high_one, middle_one, low_one}() =>
     (case+ other of
      | ENC_one() => falsep_eqb(contradiction{0}())
      | ENC_two() => falsep_eqb(contradiction{0}())
      | ENC_three() => falsep_eqb(contradiction{0}())
-     | ENC_four{point_two, a_two, b_two, c_two, d_two}() => let
-         prval () = digit64_unique{64 * (64 * a_one + b_one) + c_one, d_one, 64 * (64 * a_two + b_two) + c_two, d_two}()
-         prval () = digit64_unique{64 * a_one + b_one, c_one, 64 * a_two + b_two, c_two}()
-         prval () = digit64_unique{a_one, b_one, a_two, b_two}()
+     | ENC_four{point_two, top_two, high_two, middle_two, low_two}() => let
+         prval () = digit64_unique{64 * (64 * top_one + high_one) + middle_one, low_one, 64 * (64 * top_two + high_two) + middle_two, low_two}()
+         prval () = digit64_unique{64 * top_one + high_one, middle_one, 64 * top_two + high_two, middle_two}()
+         prval () = digit64_unique{top_one, high_one, top_two, high_two}()
        in EQB_refl() end)
 
 (* A code point is some bytes long *)
@@ -2017,8 +2017,8 @@ primplement enc_len {point}{octets} (enc) =
    (STEPOF), becomes the UTF-8 bytes octets (the bytes of each character's code point, ENC, one after another) *)
 #pub dataprop CONV($A.cells, tsrc, int, int, bytes) =
   | {cells:$A.cells}{source:tsrc}{i:nat} CONV_none(cells, source, i, i, bnil())
-  | {cells:$A.cells}{source:tsrc}{i,j,m:nat | i < j; j <= m}{point:int}{enc,rest,octets:bytes}
-    CONV_more(cells, source, i, m, octets) of (STEPOF(cells, source, i, j, point), ENC(point, enc), CONV(cells, source, j, m, rest), APPEND(enc, rest, octets))
+  | {cells:$A.cells}{source:tsrc}{i,j,to:nat | i < j; j <= to}{point:int}{enc,rest,octets:bytes}
+    CONV_more(cells, source, i, to, octets) of (STEPOF(cells, source, i, j, point), ENC(point, enc), CONV(cells, source, j, to, rest), APPEND(enc, rest, octets))
 
 (* A conversion gives one byte string *)
 #pub prfun conv_functional {cells:$A.cells}{source:tsrc}{from,to:nat | from <= to}{first,second:bytes}
@@ -2099,11 +2099,11 @@ prfun _holds_snoc {cells:$A.cells}{i,count:nat}{value:int}{octets,joined:bytes} 
 
 primplement holds_snoc {cells}{i,count}{value}{octets,joined} (holds, cell, joined) = _holds_snoc(holds, cell, joined)
 
-(* The cells held from 0 for p bytes, with the cell p set to a byte, hold the bytes and that byte *)
-#pub prfun holds_push {cells,cells_after:$A.cells}{p:nat}{value:int}{octets,joined:bytes}
-  (HOLDS(cells, 0, octets, p), $A.SETC(cells, p, value, cells_after), APPEND(octets, bcons(value, bnil()), joined)): HOLDS(cells_after, 0, joined, p + 1)
+(* The cells held from 0 for written_count bytes, with the cell written_count set to a byte, hold the bytes and that byte *)
+#pub prfun holds_push {cells,cells_after:$A.cells}{written_count:nat}{value:int}{octets,joined:bytes}
+  (HOLDS(cells, 0, octets, written_count), $A.SETC(cells, written_count, value, cells_after), APPEND(octets, bcons(value, bnil()), joined)): HOLDS(cells_after, 0, joined, written_count + 1)
 
-primplement holds_push {cells,cells_after}{p}{value}{octets,joined} (holds, cells_set, joined) =
+primplement holds_push {cells,cells_after}{written_count}{value}{octets,joined} (holds, cells_set, joined) =
   holds_snoc(holds_after_set_later(cells_set, holds), $A.setc_nth_same(cells_set), joined)
 
 (* Whether a unit is the first half of a pair, or the second *)
@@ -2187,10 +2187,10 @@ fn _step_proved {l:agz}{n:pos}{cells:$A.cells}{source:tsrc}{i:nat | i < n}
   | ConvIso885915() => _step_single(length | data, n, LabelIso885915(), i)
   | ConvKoi8r() => _step_single(length | data, n, LabelKoi8r(), i)
 
-(* x as 64 times a number and a digit *)
-fn _split64 {x:nat} (x: int x): [high,low:nat | x == 64 * high + low; low < 64] (int high, int low) = let
-  val high = x / 64
-in (high, x - 64 * high) end
+(* number as 64 times a number and a digit *)
+fn _split64 {number:nat} (number: int number): [high,low:nat | number == 64 * high + low; low < 64] (int high, int low) = let
+  val high = number / 64
+in (high, number - 64 * high) end
 
 (* The UTF-8 bytes of a code point, with the proof of them and how many they are *)
 fn _enc_count {point:int | 0 <= point; point < 1114112} (point: int point)
@@ -2200,76 +2200,76 @@ fn _enc_count {point:int | 0 <= point; point < 1114112} (point: int point)
       val [high:int, low:int] (high_digit, low_digit) = _split64(point)
     in (ENC_two{point, high, low}(), LEN_cons(LEN_cons(LEN_nil())) | 2) end
   else if point < 65536 then let
-      val [rest:int, c:int] (rest_digit, c_digit) = _split64(point)
-      val [a:int, b:int] (a_digit, b_digit) = _split64(rest_digit)
-    in (ENC_three{point, a, b, c}(), LEN_cons(LEN_cons(LEN_cons(LEN_nil()))) | 3) end
+      val [rest:int, low:int] (rest_digit, low_digit) = _split64(point)
+      val [high:int, middle:int] (high_digit, middle_digit) = _split64(rest_digit)
+    in (ENC_three{point, high, middle, low}(), LEN_cons(LEN_cons(LEN_cons(LEN_nil()))) | 3) end
   else let
-      val [rest:int, d:int] (rest_digit, d_digit) = _split64(point)
-      val [rest_two:int, c:int] (rest_two_digit, c_digit) = _split64(rest_digit)
-      val [a:int, b:int] (a_digit, b_digit) = _split64(rest_two_digit)
-    in (ENC_four{point, a, b, c, d}(), LEN_cons(LEN_cons(LEN_cons(LEN_cons(LEN_nil())))) | 4) end
+      val [rest:int, low:int] (rest_digit, low_digit) = _split64(point)
+      val [rest_two:int, middle:int] (rest_two_digit, middle_digit) = _split64(rest_digit)
+      val [top:int, high:int] (top_digit, high_digit) = _split64(rest_two_digit)
+    in (ENC_four{point, top, high, middle, low}(), LEN_cons(LEN_cons(LEN_cons(LEN_cons(LEN_nil())))) | 4) end
 
-(* Writes a byte at p of an array whose cells hold the bytes written from 0, and holds them with it *)
-fn _put_byte {lo:agz}{size:pos}{oc:$A.cells}{p:nat | p < size}{written:bytes}{value:int | 0 <= value; value < 256}
-  (holds: HOLDS(oc, 0, written, p), written_len: LEN(written, p), out_len: $A.CLEN(oc, size) | out: $A.barr(lo, size, oc), p: int p, value: int value)
-  : [oc2:$A.cells][joined:bytes] (HOLDS(oc2, 0, joined, p + 1), $A.CLEN(oc2, size), LEN(joined, p + 1), APPEND(written, bcons(value, bnil()), joined) | $A.barr(lo, size, oc2)) = let
-  val (cells_set | out_after) = $A.barr_set(out, p, value)
+(* Writes a byte at written_count of an array whose cells hold the bytes written from 0, and holds them with it *)
+fn _put_byte {out_location:agz}{size:pos}{out_cells:$A.cells}{written_count:nat | written_count < size}{written:bytes}{value:int | 0 <= value; value < 256}
+  (holds: HOLDS(out_cells, 0, written, written_count), written_len: LEN(written, written_count), out_len: $A.CLEN(out_cells, size) | out: $A.barr(out_location, size, out_cells), written_count: int written_count, value: int value)
+  : [out_cells_after:$A.cells][joined:bytes] (HOLDS(out_cells_after, 0, joined, written_count + 1), $A.CLEN(out_cells_after, size), LEN(joined, written_count + 1), APPEND(written, bcons(value, bnil()), joined) | $A.barr(out_location, size, out_cells_after)) = let
+  val (cells_set | out_after) = $A.barr_set(out, written_count, value)
   prval appended = append_exists{written, bcons(value, bnil())}(written_len)
   prval holds_after = holds_push(holds, cells_set, appended)
   prval joined_len = append_len(appended, written_len, LEN_cons(LEN_nil()))
 in (holds_after, $A.setc_len(cells_set, out_len), joined_len, appended | out_after) end
 
-(* Writes the UTF-8 bytes of a code point, whose bytes are given and are k, after the p bytes written *)
-fn _write_point {lo:agz}{size:pos}{oc:$A.cells}{p,k:nat | p + k <= size}{written:bytes}{point:int | 0 <= point; point < 1114112}{given:bytes}
-  (holds: HOLDS(oc, 0, written, p), written_len: LEN(written, p), out_len: $A.CLEN(oc, size), given_enc: ENC(point, given), given_len: LEN(given, k)
-   | out: $A.barr(lo, size, oc), p: int p, point: int point)
-  : [oc2:$A.cells][joined:bytes] (HOLDS(oc2, 0, joined, p + k), $A.CLEN(oc2, size), LEN(joined, p + k), APPEND(written, given, joined) | $A.barr(lo, size, oc2), int(p + k)) =
+(* Writes the UTF-8 bytes of a code point, whose bytes are given and are given_count, after the written_count bytes written *)
+fn _write_point {out_location:agz}{size:pos}{out_cells:$A.cells}{written_count,given_count:nat | written_count + given_count <= size}{written:bytes}{point:int | 0 <= point; point < 1114112}{given:bytes}
+  (holds: HOLDS(out_cells, 0, written, written_count), written_len: LEN(written, written_count), out_len: $A.CLEN(out_cells, size), given_enc: ENC(point, given), given_len: LEN(given, given_count)
+   | out: $A.barr(out_location, size, out_cells), written_count: int written_count, point: int point)
+  : [out_cells_after:$A.cells][joined:bytes] (HOLDS(out_cells_after, 0, joined, written_count + given_count), $A.CLEN(out_cells_after, size), LEN(joined, written_count + given_count), APPEND(written, given, joined) | $A.barr(out_location, size, out_cells_after), int(written_count + given_count)) =
   if point < 128 then let
       prval EQB_refl() = enc_functional(ENC_one(), given_enc)
       prval EQI_refl() = len_functional(given_len, LEN_cons(LEN_nil()))
-      val (holds_one, len_one, joined_len_one, appended_one | out_one) = _put_byte(holds, written_len, out_len | out, p, point)
-    in (holds_one, len_one, joined_len_one, appended_one | out_one, p + 1) end
+      val (holds_one, len_one, joined_len_one, appended_one | out_one) = _put_byte(holds, written_len, out_len | out, written_count, point)
+    in (holds_one, len_one, joined_len_one, appended_one | out_one, written_count + 1) end
   else if point < 2048 then let
       val [high:int, low:int] (high_digit, low_digit) = _split64(point)
       prval EQB_refl() = enc_functional(ENC_two{point, high, low}(), given_enc)
       prval EQI_refl() = len_functional(given_len, LEN_cons(LEN_cons(LEN_nil())))
-      val (holds_one, len_one, joined_len_one, appended_one | out_one) = _put_byte(holds, written_len, out_len | out, p, 192 + high_digit)
-      val (holds_two, len_two, joined_len_two, appended_two | out_two) = _put_byte(holds_one, joined_len_one, len_one | out_one, p + 1, 128 + low_digit)
+      val (holds_one, len_one, joined_len_one, appended_one | out_one) = _put_byte(holds, written_len, out_len | out, written_count, 192 + high_digit)
+      val (holds_two, len_two, joined_len_two, appended_two | out_two) = _put_byte(holds_one, joined_len_one, len_one | out_one, written_count + 1, 128 + low_digit)
       prval (APPEND_cons(APPEND_nil()), appended) = append_assoc(appended_one, appended_two)
-    in (holds_two, len_two, joined_len_two, appended | out_two, p + 2) end
+    in (holds_two, len_two, joined_len_two, appended | out_two, written_count + 2) end
   else if point < 65536 then let
-      val [rest:int, c:int] (rest_digit, c_digit) = _split64(point)
-      val [a:int, b:int] (a_digit, b_digit) = _split64(rest_digit)
-      prval EQB_refl() = enc_functional(ENC_three{point, a, b, c}(), given_enc)
+      val [rest:int, low:int] (rest_digit, low_digit) = _split64(point)
+      val [high:int, middle:int] (high_digit, middle_digit) = _split64(rest_digit)
+      prval EQB_refl() = enc_functional(ENC_three{point, high, middle, low}(), given_enc)
       prval EQI_refl() = len_functional(given_len, LEN_cons(LEN_cons(LEN_cons(LEN_nil()))))
-      val (holds_one, len_one, joined_len_one, appended_one | out_one) = _put_byte(holds, written_len, out_len | out, p, 224 + a_digit)
-      val (holds_two, len_two, joined_len_two, appended_two | out_two) = _put_byte(holds_one, joined_len_one, len_one | out_one, p + 1, 128 + b_digit)
-      val (holds_three, len_three, joined_len_three, appended_three | out_three) = _put_byte(holds_two, joined_len_two, len_two | out_two, p + 2, 128 + c_digit)
+      val (holds_one, len_one, joined_len_one, appended_one | out_one) = _put_byte(holds, written_len, out_len | out, written_count, 224 + high_digit)
+      val (holds_two, len_two, joined_len_two, appended_two | out_two) = _put_byte(holds_one, joined_len_one, len_one | out_one, written_count + 1, 128 + middle_digit)
+      val (holds_three, len_three, joined_len_three, appended_three | out_three) = _put_byte(holds_two, joined_len_two, len_two | out_two, written_count + 2, 128 + low_digit)
       prval (APPEND_cons(APPEND_nil()), appended_pair) = append_assoc(appended_one, appended_two)
       prval (APPEND_cons(APPEND_cons(APPEND_nil())), appended) = append_assoc(appended_pair, appended_three)
-    in (holds_three, len_three, joined_len_three, appended | out_three, p + 3) end
+    in (holds_three, len_three, joined_len_three, appended | out_three, written_count + 3) end
   else let
-      val [rest:int, d:int] (rest_digit, d_digit) = _split64(point)
-      val [rest_two:int, c:int] (rest_two_digit, c_digit) = _split64(rest_digit)
-      val [a:int, b:int] (a_digit, b_digit) = _split64(rest_two_digit)
-      prval EQB_refl() = enc_functional(ENC_four{point, a, b, c, d}(), given_enc)
+      val [rest:int, low:int] (rest_digit, low_digit) = _split64(point)
+      val [rest_two:int, middle:int] (rest_two_digit, middle_digit) = _split64(rest_digit)
+      val [top:int, high:int] (top_digit, high_digit) = _split64(rest_two_digit)
+      prval EQB_refl() = enc_functional(ENC_four{point, top, high, middle, low}(), given_enc)
       prval EQI_refl() = len_functional(given_len, LEN_cons(LEN_cons(LEN_cons(LEN_cons(LEN_nil())))))
-      val (holds_one, len_one, joined_len_one, appended_one | out_one) = _put_byte(holds, written_len, out_len | out, p, 240 + a_digit)
-      val (holds_two, len_two, joined_len_two, appended_two | out_two) = _put_byte(holds_one, joined_len_one, len_one | out_one, p + 1, 128 + b_digit)
-      val (holds_three, len_three, joined_len_three, appended_three | out_three) = _put_byte(holds_two, joined_len_two, len_two | out_two, p + 2, 128 + c_digit)
-      val (holds_four, len_four, joined_len_four, appended_four | out_four) = _put_byte(holds_three, joined_len_three, len_three | out_three, p + 3, 128 + d_digit)
+      val (holds_one, len_one, joined_len_one, appended_one | out_one) = _put_byte(holds, written_len, out_len | out, written_count, 240 + top_digit)
+      val (holds_two, len_two, joined_len_two, appended_two | out_two) = _put_byte(holds_one, joined_len_one, len_one | out_one, written_count + 1, 128 + high_digit)
+      val (holds_three, len_three, joined_len_three, appended_three | out_three) = _put_byte(holds_two, joined_len_two, len_two | out_two, written_count + 2, 128 + middle_digit)
+      val (holds_four, len_four, joined_len_four, appended_four | out_four) = _put_byte(holds_three, joined_len_three, len_three | out_three, written_count + 3, 128 + low_digit)
       prval (APPEND_cons(APPEND_nil()), appended_pair) = append_assoc(appended_one, appended_two)
       prval (APPEND_cons(APPEND_cons(APPEND_nil())), appended_triple) = append_assoc(appended_pair, appended_three)
       prval (APPEND_cons(APPEND_cons(APPEND_cons(APPEND_nil()))), appended) = append_assoc(appended_triple, appended_four)
-    in (holds_four, len_four, joined_len_four, appended | out_four, p + 4) end
+    in (holds_four, len_four, joined_len_four, appended | out_four, written_count + 4) end
 
 (* Writes the converted document from i on, one character at a time, as the conversion of it that is to be written says *)
 fun _fill_loop {l:agz}{n:pos}{cells:$A.cells}{source:tsrc}{i:nat | i <= n}
-  {lo:agz}{oc:$A.cells}{p:nat}{written,rest,total:bytes}{m:pos} .<n - i>.
-  (length: $A.CLEN(cells, n), remaining: CONV(cells, source, i, n, rest), appended: APPEND(written, rest, total), total_len: LEN(total, m),
-   holds: HOLDS(oc, 0, written, p), written_len: LEN(written, p), out_len: $A.CLEN(oc, m)
-   | data: !$A.cborrow(l, n, cells), n: int n, source: conv_source(source), i: int i, out: $A.barr(lo, m, oc), p: int p)
-  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, m) | $A.barr(lo, m, oc2)) =
+  {out_location:agz}{out_cells:$A.cells}{written_count:nat}{written,rest,total:bytes}{total_count:pos} .<n - i>.
+  (length: $A.CLEN(cells, n), remaining: CONV(cells, source, i, n, rest), appended: APPEND(written, rest, total), total_len: LEN(total, total_count),
+   holds: HOLDS(out_cells, 0, written, written_count), written_len: LEN(written, written_count), out_len: $A.CLEN(out_cells, total_count)
+   | data: !$A.cborrow(l, n, cells), n: int n, source: conv_source(source), i: int i, out: $A.barr(out_location, total_count, out_cells), written_count: int written_count)
+  : [out_cells_after:$A.cells] (HOLDS(out_cells_after, 0, total, total_count), $A.CLEN(out_cells_after, total_count) | $A.barr(out_location, total_count, out_cells_after)) =
   if i >= n then let
       prval CONV_none() = remaining
       prval EQB_refl() = append_nil_eq(written_len, appended)
@@ -2282,11 +2282,11 @@ fun _fill_loop {l:agz}{n:pos}{cells:$A.cells}{source:tsrc}{i:nat | i <= n}
       prval rest_len = append_len_rest(appended, written_len, total_len)
       prval enc_length = enc_len(enc_proof)
       prval after_len = append_len_rest(appended_char, enc_length, rest_len)
-      val (holds_after, len_after, joined_len, appended_written | out_after, p_after) =
-        _write_point(holds, written_len, out_len, enc_proof, enc_length | out, p, point)
+      val (holds_after, len_after, joined_len, appended_written | out_after, written_after) =
+        _write_point(holds, written_len, out_len, enc_proof, enc_length | out, written_count, point)
       prval (appended_enc, appended_rest) = append_assoc_rev(appended_char, appended)
       prval EQB_refl() = append_functional(appended_enc, appended_written)
-    in _fill_loop(length, rest_proof, appended_rest, total_len, holds_after, joined_len, len_after | data, n, source, to, out_after, p_after) end
+    in _fill_loop(length, rest_proof, appended_rest, total_len, holds_after, joined_len, len_after | data, n, source, to, out_after, written_after) end
 
 (* The conversion of the document from i on, with the proof of it and of the number of bytes it makes *)
 fun _size_loop {l:agz}{n:pos}{cells:$A.cells}{source:tsrc}{mark,i:nat | mark <= i; i <= n}
@@ -2605,12 +2605,12 @@ primplement falsep_holds {cells}{i}{octets}{count} (falsity) = case+ falsity of 
 primplement falsep_conv {cells}{source}{from,to}{octets} (falsity) = case+ falsity of FALSEP_mk() =/=> ()
 
 (* Copies the bytes held from i in the cells to the array, one at a time *)
-fun _copy_loop {l:agz}{n:pos}{cells:$A.cells}{i,c:nat | i + c <= n}{lo:agz}{oc:$A.cells}{p:nat}{written,rest,total:bytes}{m:pos} .<c>.
-  (remaining: HOLDS(cells, i, rest, c), appended: APPEND(written, rest, total), total_len: LEN(total, m),
-   holds: HOLDS(oc, 0, written, p), written_len: LEN(written, p), out_len: $A.CLEN(oc, m)
-   | data: !$A.cborrow(l, n, cells), n: int n, i: int i, c: int c, out: $A.barr(lo, m, oc), p: int p)
-  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, m) | $A.barr(lo, m, oc2)) =
-  if c <= 0 then let
+fun _copy_loop {l:agz}{n:pos}{cells:$A.cells}{i,held_count:nat | i + held_count <= n}{out_location:agz}{out_cells:$A.cells}{written_count:nat}{written,rest,total:bytes}{total_count:pos} .<held_count>.
+  (remaining: HOLDS(cells, i, rest, held_count), appended: APPEND(written, rest, total), total_len: LEN(total, total_count),
+   holds: HOLDS(out_cells, 0, written, written_count), written_len: LEN(written, written_count), out_len: $A.CLEN(out_cells, total_count)
+   | data: !$A.cborrow(l, n, cells), n: int n, i: int i, held_count: int held_count, out: $A.barr(out_location, total_count, out_cells), written_count: int written_count)
+  : [out_cells_after:$A.cells] (HOLDS(out_cells_after, 0, total, total_count), $A.CLEN(out_cells_after, total_count) | $A.barr(out_location, total_count, out_cells_after)) =
+  if held_count <= 0 then let
       prval HOLDS_nil(_) = remaining
       prval EQB_refl() = append_nil_eq(written_len, appended)
       prval EQI_refl() = len_functional(written_len, total_len)
@@ -2622,10 +2622,10 @@ fun _copy_loop {l:agz}{n:pos}{cells:$A.cells}{i,c:nat | i + c <= n}{lo:agz}{oc:$
       prval rest_len = append_len_rest(appended, written_len, total_len)
       prval held_len = holds_len(remaining)
       prval EQI_refl() = len_functional(rest_len, held_len)
-      val (holds_after, len_after, joined_len, appended_one | out_after) = _put_byte(holds, written_len, out_len | out, p, value)
+      val (holds_after, len_after, joined_len, appended_one | out_after) = _put_byte(holds, written_len, out_len | out, written_count, value)
       prval (appended_front, appended_rest) = append_assoc_rev(APPEND_cons(APPEND_nil()), appended)
       prval EQB_refl() = append_functional(appended_front, appended_one)
-    in _copy_loop(rest_held, appended_rest, total_len, holds_after, joined_len, len_after | data, n, i + 1, c - 1, out_after, p + 1) end
+    in _copy_loop(rest_held, appended_rest, total_len, holds_after, joined_len, len_after | data, n, i + 1, held_count - 1, out_after, written_count + 1) end
 
 (* The conversion of a document that needs one, and is detected as UTF-16 *)
 #pub prfun textof_utf16_conv {cells:$A.cells}{order:byteorder}{mark:int}{n:nat}{total:bytes}
@@ -2823,7 +2823,7 @@ end
 (* The size of the output of a document that needs a conversion, with the proof of its relation to the document *)
 #pub datavtype text_sized($A.cells) =
   | {cells:$A.cells} TextNoConversion(cells)
-  | {cells:$A.cells}{total:bytes}{m:pos} TextSized(cells) of (TEXTOF(cells, PlanConvert(), TOUT_bytes(total)), LEN(total, m) | int m)
+  | {cells:$A.cells}{total:bytes}{total_count:pos} TextSized(cells) of (TEXTOF(cells, PlanConvert(), TOUT_bytes(total)), LEN(total, total_count) | int total_count)
 
 fn _sized_after_utf8 {n:pos}{cells:$A.cells}{mark:nat | mark <= n}{spread:spread}
   (length: $A.CLEN(cells, n), detect: DETECT(cells, SrcUtf8(), mark), run: UTF8RUN(cells, mark, n, spread) | n: int n, mark: int mark): text_sized(cells) =
@@ -2892,20 +2892,20 @@ in
 end
 
 fn _fill_converted {l:agz}{n:pos}{cells:$A.cells}{source:tsrc}{mark:nat | mark <= n}
-  {total:bytes}{m:pos}{lo:agz}{oc:$A.cells}
-  (length: $A.CLEN(cells, n), conv: CONV(cells, source, mark, n, total), total_len: LEN(total, m), out_len: $A.CLEN(oc, m)
-   | data: !$A.cborrow(l, n, cells), n: int n, source: conv_source(source), mark: int mark, out: $A.barr(lo, m, oc))
-  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, m) | $A.barr(lo, m, oc2)) =
+  {total:bytes}{total_count:pos}{out_location:agz}{out_cells:$A.cells}
+  (length: $A.CLEN(cells, n), conv: CONV(cells, source, mark, n, total), total_len: LEN(total, total_count), out_len: $A.CLEN(out_cells, total_count)
+   | data: !$A.cborrow(l, n, cells), n: int n, source: conv_source(source), mark: int mark, out: $A.barr(out_location, total_count, out_cells))
+  : [out_cells_after:$A.cells] (HOLDS(out_cells_after, 0, total, total_count), $A.CLEN(out_cells_after, total_count) | $A.barr(out_location, total_count, out_cells_after)) =
   _fill_loop(length, conv, APPEND_nil(), total_len, HOLDS_nil(out_len), LEN_nil(), out_len | data, n, source, mark, out, 0)
 
 (* Writes the output of the document that needs a conversion, as text_convert_size says it is, in an array of as many cells as there
    are bytes: the cells of the array come to hold them *)
-#pub fn text_convert_fill {l:agz}{n:pos}{cells:$A.cells}{total:bytes}{m:pos}{lo:agz}{oc:$A.cells}
-  (length: $A.CLEN(cells, n), plan: TEXTOF(cells, PlanConvert(), TOUT_bytes(total)), total_len: LEN(total, m), out_len: $A.CLEN(oc, m)
-   | data: !$A.cborrow(l, n, cells), n: int n, out: $A.barr(lo, m, oc), m: int m)
-  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, m) | $A.barr(lo, m, oc2))
+#pub fn text_convert_fill {l:agz}{n:pos}{cells:$A.cells}{total:bytes}{total_count:pos}{out_location:agz}{out_cells:$A.cells}
+  (length: $A.CLEN(cells, n), plan: TEXTOF(cells, PlanConvert(), TOUT_bytes(total)), total_len: LEN(total, total_count), out_len: $A.CLEN(out_cells, total_count)
+   | data: !$A.cborrow(l, n, cells), n: int n, out: $A.barr(out_location, total_count, out_cells), total_count: int total_count)
+  : [out_cells_after:$A.cells] (HOLDS(out_cells_after, 0, total, total_count), $A.CLEN(out_cells_after, total_count) | $A.barr(out_location, total_count, out_cells_after))
 
-implement text_convert_fill {l}{n}{cells}{total}{m}{lo}{oc} (length, plan, total_len, out_len | data, n, out, m) = let
+implement text_convert_fill {l}{n}{cells}{total}{total_count}{out_location}{out_cells} (length, plan, total_len, out_len | data, n, out, total_count) = let
   val (detect | source, mark) = text_detect(length | data, n)
   prval () = detect_mark_in_len(detect, length)
 in
