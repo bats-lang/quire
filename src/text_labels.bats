@@ -112,7 +112,8 @@ implement text_label_total () = 77
 #pub prfun entry_functional {index:nat}{first_label,second_label:bytes}{first_source,second_source:tsrc}
   (LABELENTRY(index, first_label, first_source), LABELENTRY(index, second_label, second_source)): (EQB(first_label, second_label), EQSRC(first_source, second_source))
 
-primplement entry_functional {index}{first_label,second_label}{first_source,second_source} (one, other) =
+prfn _entry_functional_0 {index:nat | index < 20}{first_label,second_label:bytes}{first_source,second_source:tsrc}
+  (one: LABELENTRY(index, first_label, first_source), other: LABELENTRY(index, second_label, second_source)): (EQB(first_label, second_label), EQSRC(first_source, second_source)) =
   case+ one of
   | LABELENTRY_0() => (case+ other of LABELENTRY_0() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_1() => (case+ other of LABELENTRY_1() => (EQB_refl(), EQSRC_refl()))
@@ -134,6 +135,10 @@ primplement entry_functional {index}{first_label,second_label}{first_source,seco
   | LABELENTRY_17() => (case+ other of LABELENTRY_17() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_18() => (case+ other of LABELENTRY_18() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_19() => (case+ other of LABELENTRY_19() => (EQB_refl(), EQSRC_refl()))
+
+prfn _entry_functional_1 {index:nat | 20 <= index; index < 40}{first_label,second_label:bytes}{first_source,second_source:tsrc}
+  (one: LABELENTRY(index, first_label, first_source), other: LABELENTRY(index, second_label, second_source)): (EQB(first_label, second_label), EQSRC(first_source, second_source)) =
+  case+ one of
   | LABELENTRY_20() => (case+ other of LABELENTRY_20() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_21() => (case+ other of LABELENTRY_21() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_22() => (case+ other of LABELENTRY_22() => (EQB_refl(), EQSRC_refl()))
@@ -154,6 +159,10 @@ primplement entry_functional {index}{first_label,second_label}{first_source,seco
   | LABELENTRY_37() => (case+ other of LABELENTRY_37() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_38() => (case+ other of LABELENTRY_38() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_39() => (case+ other of LABELENTRY_39() => (EQB_refl(), EQSRC_refl()))
+
+prfn _entry_functional_2 {index:nat | 40 <= index; index < 60}{first_label,second_label:bytes}{first_source,second_source:tsrc}
+  (one: LABELENTRY(index, first_label, first_source), other: LABELENTRY(index, second_label, second_source)): (EQB(first_label, second_label), EQSRC(first_source, second_source)) =
+  case+ one of
   | LABELENTRY_40() => (case+ other of LABELENTRY_40() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_41() => (case+ other of LABELENTRY_41() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_42() => (case+ other of LABELENTRY_42() => (EQB_refl(), EQSRC_refl()))
@@ -174,6 +183,10 @@ primplement entry_functional {index}{first_label,second_label}{first_source,seco
   | LABELENTRY_57() => (case+ other of LABELENTRY_57() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_58() => (case+ other of LABELENTRY_58() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_59() => (case+ other of LABELENTRY_59() => (EQB_refl(), EQSRC_refl()))
+
+prfn _entry_functional_3 {index:nat | 60 <= index}{first_label,second_label:bytes}{first_source,second_source:tsrc}
+  (one: LABELENTRY(index, first_label, first_source), other: LABELENTRY(index, second_label, second_source)): (EQB(first_label, second_label), EQSRC(first_source, second_source)) =
+  case+ one of
   | LABELENTRY_60() => (case+ other of LABELENTRY_60() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_61() => (case+ other of LABELENTRY_61() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_62() => (case+ other of LABELENTRY_62() => (EQB_refl(), EQSRC_refl()))
@@ -191,6 +204,12 @@ primplement entry_functional {index}{first_label,second_label}{first_source,seco
   | LABELENTRY_74() => (case+ other of LABELENTRY_74() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_75() => (case+ other of LABELENTRY_75() => (EQB_refl(), EQSRC_refl()))
   | LABELENTRY_76() => (case+ other of LABELENTRY_76() => (EQB_refl(), EQSRC_refl()))
+
+primplement entry_functional {index}{first_label,second_label}{first_source,second_source} (one, other) =
+  sif index < 20 then _entry_functional_0(one, other) else
+  sif index < 40 then _entry_functional_1(one, other) else
+  sif index < 60 then _entry_functional_2(one, other) else
+  _entry_functional_3(one, other)
 
 (* A label is one entry *)
 #pub prfun entry_label_injective {first_index,second_index:nat}{label:bytes}{first_source,second_source:tsrc}

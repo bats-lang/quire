@@ -124,9 +124,24 @@ for index, (label, c) in enumerate(cond):
 v("")
 v("(* An entry is one label and one source *)")
 v("#pub prfun entry_functional {index:nat}{first_label,second_label:bytes}{first_source,second_source:tsrc}\n  (LABELENTRY(index, first_label, first_source), LABELENTRY(index, second_label, second_source)): (EQB(first_label, second_label), EQSRC(first_source, second_source))\n")
-v("primplement entry_functional {index}{first_label,second_label}{first_source,second_source} (one, other) =\n  case+ one of")
-for index in range(len(cond)):
-    v(f"  | LABELENTRY_{index}() => (case+ other of LABELENTRY_{index}() => (EQB_refl(), EQSRC_refl()))")
+# the entries in pieces of FUNCTIONAL_PIECE, each piece a lemma of its own, and the lemma picks the piece by the index: a false
+# variant of the statement then fails in a few places, not once for each of the entries (patsopt's message for each holds
+# the entry's whole label, 641 KB for the 77 entries, which bats mistakes for the memory cap, keyword: text-encoding relation)
+FUNCTIONAL_PIECE = 20
+pieces = [(lo, min(lo + FUNCTIONAL_PIECE, len(cond))) for lo in range(0, len(cond), FUNCTIONAL_PIECE)]
+functional_result = "(EQB(first_label, second_label), EQSRC(first_source, second_source))"
+for number, (lo, hi) in enumerate(pieces):
+    bound = f"index < {hi}" if number == 0 else (f"{lo} <= index" if number == len(pieces) - 1 else f"{lo} <= index; index < {hi}")
+    v(f"prfn _entry_functional_{number} {{index:nat | {bound}}}{{first_label,second_label:bytes}}{{first_source,second_source:tsrc}}\n  (one: LABELENTRY(index, first_label, first_source), other: LABELENTRY(index, second_label, second_source)): {functional_result} =\n  case+ one of")
+    for index in range(lo, hi):
+        v(f"  | LABELENTRY_{index}() => (case+ other of LABELENTRY_{index}() => (EQB_refl(), EQSRC_refl()))")
+    v("")
+v("primplement entry_functional {index}{first_label,second_label}{first_source,second_source} (one, other) =")
+for number, (lo, hi) in enumerate(pieces):
+    if number == len(pieces) - 1:
+        v(f"  _entry_functional_{number}(one, other)")
+    else:
+        v(f"  sif index < {hi} then _entry_functional_{number}(one, other) else")
 v("")
 v("(* A label is one entry *)")
 v("#pub prfun entry_label_injective {first_index,second_index:nat}{label:bytes}{first_source,second_source:tsrc}\n  (LABELENTRY(first_index, label, first_source), LABELENTRY(second_index, label, second_source)): EQI(first_index, second_index)\n")

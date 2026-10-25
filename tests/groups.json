@@ -443,8 +443,22 @@
     "mutation-text-relation-4": [
       "mutation/text_relation-part4of4"
     ],
-    "mutation-text-tables": [
-      "mutation/text_labels",
+    "mutation-text-labels-1": [
+      "mutation/text_labels-part1of5"
+    ],
+    "mutation-text-labels-2": [
+      "mutation/text_labels-part2of5"
+    ],
+    "mutation-text-labels-3": [
+      "mutation/text_labels-part3of5"
+    ],
+    "mutation-text-labels-4": [
+      "mutation/text_labels-part4of5"
+    ],
+    "mutation-text-labels-5": [
+      "mutation/text_labels-part5of5"
+    ],
+    "mutation-text-codes": [
       "mutation/text_codes"
     ]
   }
