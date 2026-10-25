@@ -282,9 +282,9 @@ primplement utf8run_snoc {cells}{from,to,after}{wide,step_wide} (run, step) = _u
    (verdict 1 when ASCII only, 2 when not), or they are whole characters and then one that is not whole (verdict 0).
    The second is the claim that no reading of them as UTF-8 exists (utf8run_bad_not_complete) *)
 #pub dataprop UTF8SCAN($A.cells, int, int) =
-  | {cells:$A.cells}{from,n:nat}{wide:int | 1 <= wide; wide <= 2}
+  | {cells:$A.cells}{from,n:nat | from <= n}{wide:int | 1 <= wide; wide <= 2}
     UTF8SCAN_whole(cells, from, wide) of ($A.CLEN(cells, n), UTF8RUN(cells, from, n, wide))
-  | {cells:$A.cells}{from,bad_at:nat}{leading_wide:int}
+  | {cells:$A.cells}{from,bad_at:nat | from <= bad_at}{leading_wide:int}
     UTF8SCAN_bad(cells, from, 0) of (UTF8RUN(cells, from, bad_at, leading_wide), UTF8BAD(cells, bad_at))
 
 (* The verdict of a scan, as a value *)
@@ -1440,4 +1440,534 @@ in
       else (DETECT_declared(n0, n1, n2, n3, n4, scan) | declared, 0)
     end
   else (DETECT_plain(p0, p1, p2, p3, p4) | LabelUtf8(), 0)
+end
+
+(* A scan of the bytes from one place has one verdict *)
+#pub prfun utf8scan_functional {cells:$A.cells}{from:nat}{first,second:int}
+  (UTF8SCAN(cells, from, first), UTF8SCAN(cells, from, second)): [first == second] void
+
+primplement utf8scan_functional {cells}{from}{first,second} (one, other) =
+  case+ one of
+  | UTF8SCAN_whole(length_one, run_one) =>
+    (case+ other of
+     | UTF8SCAN_whole(length_other, run_other) => let
+         prval () = clen_functional(length_one, length_other)
+       in utf8run_functional(run_one, run_other) end
+     | UTF8SCAN_bad(leading, bad) => let
+         prval falsity = utf8run_bad_not_complete(leading, bad, run_one, length_one)
+       in case+ falsity of FALSEP_mk() =/=> () end)
+  | UTF8SCAN_bad(leading, bad) =>
+    (case+ other of
+     | UTF8SCAN_whole(length_other, run_other) => let
+         prval falsity = utf8run_bad_not_complete(leading, bad, run_other, length_other)
+       in case+ falsity of FALSEP_mk() =/=> () end
+     | UTF8SCAN_bad(_, _) => ())
+
+(* What a document becomes: nothing (it is refused), cells, or something a later piece of quire#608 defines *)
+#pub datasort textout =
+  | TOUT_none of ()
+  | TOUT_later of ()
+  | TOUT_some of ($A.cells)
+
+(* EQCELLS(first, second): two cells are one *)
+#pub dataprop EQCELLS($A.cells, $A.cells) =
+  | {same:$A.cells} EQCELLS_refl(same, same)
+
+(* EQOUT(first, second): two outcomes are one *)
+#pub dataprop EQOUT(textout, textout) =
+  | {same:textout} EQOUT_refl(same, same)
+
+(* DROPPED(cells, count, rest): rest is the cells without the first count *)
+#pub dataprop DROPPED($A.cells, int, $A.cells) =
+  | {cells:$A.cells} DROPPED_none(cells, 0, cells)
+  | {cell:int}{cells,rest:$A.cells}{count:nat} DROPPED_more($A.ccons(cell, cells), count + 1, rest) of DROPPED(cells, count, rest)
+
+(* Dropping some cells leaves one rest *)
+#pub prfun dropped_functional {cells:$A.cells}{count:nat}{first,second:$A.cells}
+  (DROPPED(cells, count, first), DROPPED(cells, count, second)): EQCELLS(first, second)
+
+prfun _dropped_functional {cells:$A.cells}{count:nat}{first,second:$A.cells} .<count>.
+  (one: DROPPED(cells, count, first), other: DROPPED(cells, count, second)): EQCELLS(first, second) =
+  case+ one of
+  | DROPPED_none() => (case+ other of DROPPED_none() => EQCELLS_refl())
+  | DROPPED_more(rest_one) =>
+    (case+ other of
+     | DROPPED_more(rest_other) => let
+         prval EQCELLS_refl() = _dropped_functional(rest_one, rest_other)
+       in EQCELLS_refl() end)
+
+primplement dropped_functional {cells}{count}{first,second} (one, other) = _dropped_functional(one, other)
+
+(* Cells that are long enough have their first cells dropped, and what is left is as long as the rest *)
+#pub prfun dropped_exists {cells:$A.cells}{count,n:nat | count <= n} ($A.CLEN(cells, n))
+  : [rest:$A.cells] (DROPPED(cells, count, rest), $A.CLEN(rest, n - count))
+
+prfun _dropped_exists {cells:$A.cells}{count,n:nat | count <= n} .<count>.
+  (length: $A.CLEN(cells, n)): [rest:$A.cells] (DROPPED(cells, count, rest), $A.CLEN(rest, n - count)) =
+  sif count == 0 then (DROPPED_none(), length)
+  else
+    (case+ length of
+     | $A.CLEN_nil() =/=> ()
+     | $A.CLEN_cons(rest_length) => let
+         prval (dropped, rest_dropped) = _dropped_exists{..}{count - 1, n - 1}(rest_length)
+       in (DROPPED_more(dropped), rest_dropped) end)
+
+primplement dropped_exists {cells}{count,n} (length) = _dropped_exists(length)
+
+(* TEXTOF(cells, plan, output): the document in the cells needs the plan with that number (0 none: it is as it is, 1 made into
+   UTF-8, 2 refused) and becomes the output: the cells themselves, the cells without a byte order mark, nothing (refused), or
+   something the conversion of UTF-16 and of the single-byte encodings defines (TOUT_later, quire#846 and quire#847).
+   Refused is the claim that no reading of the document exists: the bytes are not UTF-8 (UTF8SCAN's bad case, which
+   utf8run_bad_not_complete makes exclusive of a reading), or are nothing after their byte order mark, or say an encoding
+   Quire has no table for and are not ASCII only *)
+#pub dataprop TEXTOF($A.cells, int, textout) =
+  | {cells:$A.cells}{verdict:int | 0 < verdict}
+    TEXTOF_utf8_as_is(cells, 0, TOUT_some(cells)) of (DETECT(cells, 0, 0), UTF8SCAN(cells, 0, verdict))
+  | {cells:$A.cells}{mark:nat}
+    TEXTOF_unsupported_as_is(cells, 0, TOUT_some(cells)) of (DETECT(cells, 3, mark), UTF8SCAN(cells, 0, 1))
+  | {cells:$A.cells}{source:int | 4 <= source; source <= 17}{mark:nat}{verdict:int | 0 < verdict}
+    TEXTOF_single_as_is(cells, 0, TOUT_some(cells)) of (DETECT(cells, source, mark), UTF8SCAN(cells, 0, verdict))
+  | {cells:$A.cells}{n:nat | 3 < n}{verdict:int | 0 < verdict}{rest:$A.cells}
+    TEXTOF_bom_dropped(cells, 1, TOUT_some(rest)) of (DETECT(cells, 0, 3), UTF8SCAN(cells, 3, verdict), $A.CLEN(cells, n), DROPPED(cells, 3, rest), $A.CLEN(rest, n - 3))
+  | {cells:$A.cells}{source:int | source == 1 || source == 2}{mark,n:nat | mark < n}
+    TEXTOF_utf16_convert(cells, 1, TOUT_later) of (DETECT(cells, source, mark), $A.CLEN(cells, n))
+  | {cells:$A.cells}{source:int | 4 <= source; source <= 17}{mark:nat}
+    TEXTOF_single_convert(cells, 1, TOUT_later) of (DETECT(cells, source, mark), UTF8SCAN(cells, 0, 0))
+  | {cells:$A.cells}{mark:nat}
+    TEXTOF_utf8_invalid(cells, 2, TOUT_none) of (DETECT(cells, 0, mark), UTF8SCAN(cells, mark, 0))
+  | {cells:$A.cells}{mark,n:nat | 0 < mark; n <= mark}{verdict:int | 0 < verdict}
+    TEXTOF_bom_only(cells, 2, TOUT_none) of (DETECT(cells, 0, mark), UTF8SCAN(cells, mark, verdict), $A.CLEN(cells, n))
+  | {cells:$A.cells}{source:int | source == 1 || source == 2}{mark,n:nat | n <= mark}
+    TEXTOF_utf16_empty(cells, 2, TOUT_none) of (DETECT(cells, source, mark), $A.CLEN(cells, n))
+  | {cells:$A.cells}{mark:nat}{verdict:int | verdict != 1}
+    TEXTOF_unsupported_refused(cells, 2, TOUT_none) of (DETECT(cells, 3, mark), UTF8SCAN(cells, 0, verdict))
+
+(* From a contradiction, one plan and one output *)
+#pub prfun falsep_textof {first_plan,second_plan:int}{first_out,second_out:textout}
+  (FALSEP()): (EQI(first_plan, second_plan), EQOUT(first_out, second_out))
+
+primplement falsep_textof {first_plan,second_plan}{first_out,second_out} (falsity) = case+ falsity of FALSEP_mk() =/=> ()
+
+(* A document needs one plan and becomes one output *)
+#pub prfun textof_functional {cells:$A.cells}{first_plan,second_plan:int}{first_out,second_out:textout}
+  (TEXTOF(cells, first_plan, first_out), TEXTOF(cells, second_plan, second_out)): (EQI(first_plan, second_plan), EQOUT(first_out, second_out))
+
+primplement textof_functional {cells}{first_plan,second_plan}{first_out,second_out} (one, other) =
+  case+ one of
+  | TEXTOF_utf8_as_is(one_detect, one_scan) =>
+    (case+ other of
+     | TEXTOF_utf8_as_is(other_detect, other_scan) => (EQI_refl(), EQOUT_refl())
+     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_convert(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_convert(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = utf8scan_functional(one_scan, other_scan)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_empty(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end)
+  | TEXTOF_unsupported_as_is(one_detect, one_scan) =>
+    (case+ other of
+     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_as_is(other_detect, other_scan) => (EQI_refl(), EQOUT_refl())
+     | TEXTOF_single_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_convert(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_convert(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_empty(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = utf8scan_functional(one_scan, other_scan)
+       in falsep_textof(contradiction{0}()) end)
+  | TEXTOF_single_as_is(one_detect, one_scan) =>
+    (case+ other of
+     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_as_is(other_detect, other_scan) => (EQI_refl(), EQOUT_refl())
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_convert(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_convert(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = utf8scan_functional(one_scan, other_scan)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_empty(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end)
+  | TEXTOF_bom_dropped(one_detect, one_scan, one_len, one_dropped, one_rest_len) =>
+    (case+ other of
+     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+         prval EQCELLS_refl() = dropped_functional(one_dropped, other_dropped)
+       in (EQI_refl(), EQOUT_refl()) end
+     | TEXTOF_utf16_convert(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_convert(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = utf8scan_functional(one_scan, other_scan)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = clen_functional(one_len, other_len)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_empty(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end)
+  | TEXTOF_utf16_convert(one_detect, one_len) =>
+    (case+ other of
+     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_convert(other_detect, other_len) => (EQI_refl(), EQOUT_refl())
+     | TEXTOF_single_convert(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_empty(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = clen_functional(one_len, other_len)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end)
+  | TEXTOF_single_convert(one_detect, one_scan) =>
+    (case+ other of
+     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = utf8scan_functional(one_scan, other_scan)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_convert(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_convert(other_detect, other_scan) => (EQI_refl(), EQOUT_refl())
+     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_empty(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end)
+  | TEXTOF_utf8_invalid(one_detect, one_scan) =>
+    (case+ other of
+     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = utf8scan_functional(one_scan, other_scan)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = utf8scan_functional(one_scan, other_scan)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_convert(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_convert(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf8_invalid(other_detect, other_scan) => (EQI_refl(), EQOUT_refl())
+     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = utf8scan_functional(one_scan, other_scan)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_empty(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end)
+  | TEXTOF_bom_only(one_detect, one_scan, one_len) =>
+    (case+ other of
+     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = clen_functional(one_len, other_len)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_convert(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_convert(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = utf8scan_functional(one_scan, other_scan)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_only(other_detect, other_scan, other_len) => (EQI_refl(), EQOUT_refl())
+     | TEXTOF_utf16_empty(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end)
+  | TEXTOF_utf16_empty(one_detect, one_len) =>
+    (case+ other of
+     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_convert(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = clen_functional(one_len, other_len)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_convert(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_empty(other_detect, other_len) => (EQI_refl(), EQOUT_refl())
+     | TEXTOF_unsupported_refused(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end)
+  | TEXTOF_unsupported_refused(one_detect, one_scan) =>
+    (case+ other of
+     | TEXTOF_utf8_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+         prval () = utf8scan_functional(one_scan, other_scan)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_as_is(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_dropped(other_detect, other_scan, other_len, other_dropped, other_rest_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_convert(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_single_convert(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf8_invalid(other_detect, other_scan) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_bom_only(other_detect, other_scan, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_utf16_empty(other_detect, other_len) => let
+         prval () = detect_functional(one_detect, other_detect)
+       in falsep_textof(contradiction{0}()) end
+     | TEXTOF_unsupported_refused(other_detect, other_scan) => (EQI_refl(), EQOUT_refl()))
+
+(* The byte order mark of a document is within it *)
+#pub prfun detect_mark_in_len {cells:$A.cells}{source,mark:int}{n:nat}
+  (DETECT(cells, source, mark), $A.CLEN(cells, n)): [0 <= mark; mark <= n] void
+
+primplement detect_mark_in_len {cells}{source,mark}{n} (detect, length) =
+  case+ detect of
+  | DETECT_bom8(_, _, third) => $A.nth_in_len(third, length)
+  | DETECT_utf16le_mark(_, second) => $A.nth_in_len(second, length)
+  | DETECT_utf16be_mark(_, second) => $A.nth_in_len(second, length)
+  | DETECT_utf16le_bare(_, _) => ()
+  | DETECT_utf16be_bare(_, _) => ()
+  | DETECT_declared_text(_, _, _, _, _, _) => ()
+  | DETECT_declared(_, _, _, _, _, _) => ()
+  | DETECT_plain(_, _, _, _, _) => ()
+
+(* A document detected as UTF-8 has a byte order mark of three bytes, or none *)
+#pub prfun detect_utf8_mark {cells:$A.cells}{mark:int} (DETECT(cells, 0, mark)): [mark == 0 || mark == 3] void
+
+primplement detect_utf8_mark {cells}{mark} (detect) =
+  case+ detect of
+  | DETECT_bom8(_, _, _) => ()
+  | DETECT_declared_text(_, _, _, _, _, _) => ()
+  | DETECT_declared(_, _, _, _, _, _) => ()
+  | DETECT_plain(_, _, _, _, _) => ()
+
+(* The plan of a document, as a value *)
+#pub datatype text_plan_ix(int) = ProvedAsIs(0) | ProvedConvert(1) | ProvedRefused(2)
+
+fn _after_utf8 {n:pos}{cells:$A.cells}{mark:nat | mark <= n}{verdict:int | 0 < verdict}
+  (length: $A.CLEN(cells, n), detect: DETECT(cells, 0, mark), scan: UTF8SCAN(cells, mark, verdict) | n: int n, mark: int mark)
+  : [plan:int][out:textout] (TEXTOF(cells, plan, out) | text_plan_ix(plan)) =
+  if mark = 0 then (TEXTOF_utf8_as_is(detect, scan) | ProvedAsIs())
+  else if n - mark <= 0 then (TEXTOF_bom_only(detect, scan, length) | ProvedRefused())
+  else let
+    prval () = detect_utf8_mark(detect)
+    prval (dropped, rest_len) = dropped_exists{..}{3, n}(length)
+  in (TEXTOF_bom_dropped(detect, scan, length, dropped, rest_len) | ProvedConvert()) end
+
+fn _utf16 {n:pos}{cells:$A.cells}{source:int | source == 1 || source == 2}{mark:nat | mark <= n}
+  (length: $A.CLEN(cells, n), detect: DETECT(cells, source, mark) | n: int n, mark: int mark)
+  : [plan:int][out:textout] (TEXTOF(cells, plan, out) | text_plan_ix(plan)) =
+  if n - mark <= 0 then (TEXTOF_utf16_empty(detect, length) | ProvedRefused())
+  else (TEXTOF_utf16_convert(detect, length) | ProvedConvert())
+
+fn _single_byte {l:agz}{n:pos}{cells:$A.cells}{source:int | 4 <= source; source <= 17}{mark:nat}
+  (length: $A.CLEN(cells, n), detect: DETECT(cells, source, mark) | data: !$A.cborrow(l, n, cells), n: int n)
+  : [plan:int][out:textout] (TEXTOF(cells, plan, out) | text_plan_ix(plan)) = let
+  val (scan | verdict) = text_utf8_scan(length | data, n, 0)
+in
+  case+ verdict of
+  | Utf8Refused() => (TEXTOF_single_convert(detect, scan) | ProvedConvert())
+  | Utf8AsciiOnly() => (TEXTOF_single_as_is(detect, scan) | ProvedAsIs())
+  | Utf8Wide() => (TEXTOF_single_as_is(detect, scan) | ProvedAsIs())
+end
+
+(* What the document in the cells needs, with the proof of its relation to them (TEXTOF) *)
+#pub fn text_plan_proved {l:agz}{n:pos}{cells:$A.cells}
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n)
+  : [plan:int][out:textout] (TEXTOF(cells, plan, out) | text_plan_ix(plan))
+
+implement text_plan_proved {l}{n}{cells} (length | data, n) = let
+  val (detect | source, mark) = text_detect(length | data, n)
+  prval () = detect_mark_in_len(detect, length)
+in
+  case+ source of
+  | LabelUtf8() => let
+      val (scan | verdict) = text_utf8_scan(length | data, n, mark)
+    in
+      case+ verdict of
+      | Utf8Refused() => (TEXTOF_utf8_invalid(detect, scan) | ProvedRefused())
+      | Utf8AsciiOnly() => _after_utf8(length, detect, scan | n, mark)
+      | Utf8Wide() => _after_utf8(length, detect, scan | n, mark)
+    end
+  | LabelUtf16Le() => _utf16(length, detect | n, mark)
+  | LabelUtf16Be() => _utf16(length, detect | n, mark)
+  | LabelUnsupported() => let
+      val (scan | verdict) = text_utf8_scan(length | data, n, 0)
+    in
+      case+ verdict of
+      | Utf8AsciiOnly() => (TEXTOF_unsupported_as_is(detect, scan) | ProvedAsIs())
+      | Utf8Refused() => (TEXTOF_unsupported_refused(detect, scan) | ProvedRefused())
+      | Utf8Wide() => (TEXTOF_unsupported_refused(detect, scan) | ProvedRefused())
+    end
+  | LabelCp1250() => _single_byte(length, detect | data, n)
+  | LabelCp1251() => _single_byte(length, detect | data, n)
+  | LabelCp1252() => _single_byte(length, detect | data, n)
+  | LabelCp1253() => _single_byte(length, detect | data, n)
+  | LabelCp1254() => _single_byte(length, detect | data, n)
+  | LabelCp1255() => _single_byte(length, detect | data, n)
+  | LabelCp1256() => _single_byte(length, detect | data, n)
+  | LabelCp1257() => _single_byte(length, detect | data, n)
+  | LabelIso88592() => _single_byte(length, detect | data, n)
+  | LabelIso88595() => _single_byte(length, detect | data, n)
+  | LabelIso88597() => _single_byte(length, detect | data, n)
+  | LabelIso88598() => _single_byte(length, detect | data, n)
+  | LabelIso885915() => _single_byte(length, detect | data, n)
+  | LabelKoi8r() => _single_byte(length, detect | data, n)
+end
+
 end
