@@ -1,3 +1,0 @@
-function _static_dropped_two_counts
-line 2
-unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Eapp(S2Ecst(add_int_int); S2Evar(count(_)), S2Eintinf(1)); S2Evar(count(_))))

@@ -1,3 +1,0 @@
-function _static_as_is_of_invalid
-line 1
-unsolved constraint: C3NSTRprop(C3TKmain(); S2Eapp(S2Ecst(<); S2Eintinf(0), S2EVar(_->S2Eintinf(0))))

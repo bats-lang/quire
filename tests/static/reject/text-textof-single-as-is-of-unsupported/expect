@@ -1,3 +1,0 @@
-function _static_single_as_is_of_unsupported
-line 2
-unsolved constraint: C3NSTRprop(C3TKmain(); S2Eapp(S2Ecst(<=); S2Eintinf(4), S2EVar(_->S2Eintinf(3))))

@@ -4,6 +4,7 @@ paths:
   - src/text_tables.bats
   - src/text_relation.bats
   - src/text_labels.bats
+  - src/text_codes.bats
   - src/language.bats
   - src/css_size.bats
   - src/css_cascade.bats
@@ -57,22 +58,32 @@ that says another language, inside a block, is a block of its own (`_runs_node`,
 
 ## What a text document needs, as a relation over its cells (#845, a piece of #608)
 
-`src/text_relation.bats` states `text_plan_of`'s decision as `TEXTOF(cells, plan, output)` over the
-cells of array's `barr` (`NTH`, `CLEN`) and proves a second implementation of it,
-`text_plan_proved`, which takes a `cborrow` and returns `(TEXTOF(cells, plan, out) | text_plan_ix(plan))`.
-`text_plan_of` (plain `borrow`, no cells in its type) stays beside it until `take_text` moves to the
-proved one (#848); the removal of the old form is its own p2 ticket. The two are separate code with the
-same structure; that they agree is neither proved nor yet tested: `e2e/encodings.spec.js` reads documents
-through the old one, and runs through the proved one when `take_text` moves (#848). What is proved is each relation's functionality and that the proved
-functions return the relation of the bytes they read.
+`src/text_relation.bats` states `text_plan_of`'s decision and the conversion `text_convert_into` makes as
+`TEXTOF(cells, plan, output)` over the cells of array's `barr` (`NTH`, `CLEN`), and proves a second
+implementation of them that takes a `cborrow`: `text_plan_proved` (the plan and its relation),
+`text_convert_size` (how many bytes the conversion makes, with the relation) and `text_convert_fill`
+(writes them into an array whose cells then hold them: `HOLDS`). `text_plan_of`, `text_converted_size`
+and `text_convert_into` (plain `borrow`, no cells in their types) stay beside them, marked deprecated, until
+`take_text` moves to the proved ones (#848); the removal of the old forms is quire#865 (p2). The two are
+separate code with the same structure; that they decide alike is neither proved nor yet tested:
+`e2e/encodings.spec.js` reads documents through the old ones, and runs through the proved ones when
+`take_text` moves. What is proved is each relation's functionality and that the proved functions return
+the relation of the bytes they read and write the bytes the relation says. The output array is the
+caller's, as a `barr` (its cells model reaches 1048576 bytes with `barr_alloc`; `barr_of_arr` and
+`barr_of_arrx` take any array, whose cells then are not known until they are written).
 
-* **Cases** (the numbers are the plan's: 0 as it is, 1 made into UTF-8, 2 refused): as it is (UTF-8
-  with no byte order mark; ASCII only in an unsupported encoding; valid UTF-8 that says a single-byte
-  encoding, output = source); UTF-8 with a byte order mark (`DROPPED(cells, 3, rest)`, output = the
-  source without its three bytes, `CLEN(rest, n - 3)`); refused (no output: not UTF-8, only a byte order
-  mark, UTF-16 with nothing after its mark, an unsupported encoding that is not ASCII only). UTF-16 and
-  the single-byte encodings that need a conversion are `TOUT_later`: the relation says the plan is 1 and
-  names no output (#846, #847).
+* **Cases** (the numbers are the plan's: 0 as it is, 1 made into UTF-8, 2 refused). As it is: UTF-8
+  with no byte order mark, ASCII only in an unsupported encoding, valid UTF-8 that says a single-byte
+  encoding; the output is the bytes of the cells (`HOLDS(cells, 0, octets, n)`). UTF-8 with a byte order
+  mark: the bytes from the fourth (`HOLDS(cells, 3, octets, n - 3)`). UTF-16 either way, and a single-byte
+  encoding on bytes that are not UTF-8: the output is `CONV`, the UTF-8 bytes of each character one after
+  another. Refused (no output): not UTF-8, only a byte order mark, UTF-16 with nothing after its mark, an
+  unsupported encoding that is not ASCII only.
+* **A character** (`STEPOF`) is a UTF-16 unit that is no half of a pair, a high half and a low half (one
+  character beyond U+FFFF), a half alone or a lone byte at the end (U+FFFD), a single-byte encoding's byte
+  under 128 (itself) or the table's code point for the others (`TABLEAT`, `src/text_codes.bats`, made from the
+  same tables as `text_tables.bats` by `scripts/gen-encodings.py`). `ENC` is the UTF-8 bytes of a code point,
+  stated by the digits of 64 so that no division is stated.
 * **Refusal is the claim that no reading exists.** `UTF8SCAN(cells, from, 0)` carries a run of whole
   characters and then `UTF8BAD` (a lead byte that is none, or a byte it needs that is missing or not a
   continuation, by the Unicode table of well-formed sequences: no overlong form, surrogate or code point
@@ -89,13 +100,21 @@ functions return the relation of the bytes they read.
   (unsupported, source 3); `alldiff_get` and `labelis_not_diff` make the two exclusive. The proved
   `text_label_source` builds each entry as a `blist` and compares it, so it allocates a few small lists for
   a document that declares an encoding. The generator is Python because it already was (quire#436) and holds
-  the label list: a second copy in bats would drift from it.
+  the label list and the tables: a second copy in bats would drift from it.
 * **The loops that run over a document are tail recursive** (`_utf8_scan_loop`, `_skip_blank_loop`,
-  `_find_quote_loop`): the proof is built at the end of the run it has read (`utf8run_snoc`, `blanks_snoc`,
-  `noquote_snoc`) and is erased, so a document of any size is read in constant stack. The loops that are
-  not (`_declscan_proved`, 257 deep at most; `_label_loop`, 77) are bounded by their metric.
-* **Not proved:** that `text_label_source` and `text_source_of_label` have one list of labels (both are
-  made from `scripts/gen-encodings.py`'s list), and that the proved functions decide as the old ones do (above).
+  `_find_quote_loop`, `_size_loop`, `_fill_loop`, `_copy_loop`): the proof is built at the end of the run it
+  has read (`utf8run_snoc`, `blanks_snoc`, `noquote_snoc`, `conv_snoc`, `holds_push`) and is erased, so a
+  document of any size is read in constant stack. The loops that are not (`_declscan_proved`, 257 deep at
+  most; `_label_loop`, 77) are bounded by their metric. The conversion is two passes, as before: the size
+  pass proves the whole conversion (`CONV`, built a character at a time by `conv_snoc`), and the fill pass
+  carries what is left of it, takes each character from it (`stepof_functional` says the character it reads
+  is the one the proof has) and so knows from the proof that every byte it writes is within the array.
+  `text_plan_proved` runs the size pass for a document that needs a conversion, because the relation names
+  the output bytes and the cells model does not say that a cell is a byte (it says it only for what is read).
+* **Not proved:** that `text_label_source` and `text_source_of_label`, and `TABLEAT` and `text_table_code`,
+  have one list of labels and one table (both are made from `scripts/gen-encodings.py`'s lists, and the tables
+  are Python's codecs' (quire#436): that they are the WHATWG index's is not proved, and `e2e/encodings.spec.js` reads books in a few of the encodings),
+  and that the proved functions decide as the old ones do (above).
 * The lemmas are mutation-checked (`tests/static/mutation_modules.txt`) and the relations have reject
   fixtures (`tests/static/reject/text-*`).
 

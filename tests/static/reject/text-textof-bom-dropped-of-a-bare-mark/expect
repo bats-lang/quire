@@ -1,3 +1,0 @@
-function _static_bom_dropped_of_bare_mark
-line 2
-unsolved constraint: C3NSTRprop(C3TKmain(); S2Eapp(S2Ecst(<); S2Eintinf(3), S2EVar(_->S2Eintinf(3))))

@@ -1,5 +1,0 @@
-function _static_refused_has_output
-line 1
-the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(TEXTOF); S2Evar(cells(_)), S2Eintinf(2), S2Eapp(S2Ecst(TOUT_some); S2Evar(cells(_))))].
-mismatch of static terms (equal):
-mismatch of static terms (tyleq):
