@@ -64,9 +64,12 @@ export function hold({ dir, holder }) { if (dir) attempt('hold', () => writeFile
 // so a lock older than LOCK_STALE_MS is a dead holder's and is taken over. A lock that cannot be had in LOCK_MOST_MS is not waited for any
 // longer: the action runs without it (a capture is worth more than none) and the failure is a record, `ring-lock-failed-*` in the output
 // directory and a line on stderr, which the run's monitor and the job's check turn into `EVIDENCE MISSING: ring lock`. Keyword: ring lock.
+// A lock whose content is not a time (empty after a write that hit ENOSPC, or text) is a dead holder's too: it is taken over once it has
+// been seen unreadable for LOCK_UNREADABLE_MS, which is longer than the write of a live holder (ring lock, unreadable lock; #844).
 export const LOCK_NAME = 'ring-lock';
 export const LOCK_STALE_MS = 2000;
 export const LOCK_MOST_MS = 5000;
+export const LOCK_UNREADABLE_MS = 50;
 export const LOCK_FAILED_PREFIX = 'ring-lock-failed-';
 const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
@@ -92,12 +95,15 @@ export function withRingLock(dir, action, { most = LOCK_MOST_MS, stale = LOCK_ST
   const begun = Date.now();
   let locked = false;
   let holder = '';
+  let unreadableSince = 0;
   while (!locked && Date.now() - begun < most) {
     try { writeFileSync(path, `${new Date().toISOString()} ${process.pid}\n`, { flag: 'wx' }); locked = true; } catch (error) {
       if (!error || error.code !== 'EEXIST') break; // the directory is gone: nothing to take turns over
       let at = Number.NaN;
       try { holder = readFileSync(path, 'utf8').trim(); at = Date.parse(holder.split(/\s/)[0]); } catch (gone) { /* it was given back meanwhile */ }
-      if (Date.now() - at > stale) attempt('unlock', () => unlinkSync(path));
+      if (Number.isNaN(at)) { if (!unreadableSince) unreadableSince = Date.now(); } else unreadableSince = 0; // ring lock: unreadable lock
+      const dead = Number.isNaN(at) ? unreadableSince > 0 && Date.now() - unreadableSince >= LOCK_UNREADABLE_MS : Date.now() - at > stale;
+      if (dead) attempt('unlock', () => unlinkSync(path));
       else nap(2);
     }
   }

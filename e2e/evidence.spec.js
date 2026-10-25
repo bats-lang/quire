@@ -628,6 +628,37 @@ test('a ring lock that cannot be had in its limit leaves a record, runs the acti
   expect(existsSync(join(free, LOCK_NAME)), 'and given back').toBe(false);
 });
 
+test('a ring lock that is empty, is not a time, or is older than the stale limit is taken; a live one is refused (ring lock, unreadable lock)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const limits = { most: 1500, stale: 60000 };
+  const taken = (name, content) => {
+    const dir = testInfo.outputPath(name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, LOCK_NAME), content);
+    const result = { ran: withRingLock(dir, () => 'ran', limits), records: lockFailuresIn(dir) };
+    return { ...result, left: existsSync(join(dir, LOCK_NAME)) };
+  };
+  // a run that hit ENOSPC while writing the lock leaves it empty
+  expect.soft(taken('empty', ''), 'an empty lock is taken, with no record').toEqual({ ran: 'ran', records: [], left: false });
+  expect.soft(taken('text', 'not-a-time 99\n'), 'a lock with text that is not a number is taken').toEqual({ ran: 'ran', records: [], left: false });
+  const old = new Date(Date.now() - 120000).toISOString();
+  expect.soft(taken('old', `${old} 4242\n`), 'a lock older than the stale limit is taken').toEqual({ ran: 'ran', records: [], left: false });
+  // a live lock (younger than the limit) is still refused: the limit passes, a record is left, and the lock stays
+  const write = console.error;
+  console.error = () => {};
+  let refused;
+  try {
+    const dir = testInfo.outputPath('live-again');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, LOCK_NAME), `${new Date().toISOString()} 4242\n`);
+    refused = { ran: withRingLock(dir, () => 'ran', { most: 300, stale: 60000 }), records: lockFailuresIn(dir), left: existsSync(join(dir, LOCK_NAME)) };
+  } finally { console.error = write; }
+  expect(refused.ran, 'the action still runs').toBe('ran');
+  expect(refused.records, 'a live lock is not taken: a record says it was not had').toHaveLength(1);
+  expect(refused.records[0].text).toMatch(/did not get the ring lock .*4242\)/);
+  expect(refused.left, 'and the live holder\'s lock stays').toBe(true);
+});
+
 test('a capture leaves the ring recording on every outcome, the last of two readers resumes it, and a ring left paused is not a record of the next red', async ({}, testInfo) => {
   desktopOnly(testInfo);
   await recorderOn();
