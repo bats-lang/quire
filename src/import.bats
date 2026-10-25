@@ -159,22 +159,23 @@ fn _stage_name (): void =
    The file's identity: its SHA-256
    ============================================================ *)
 
+(* book id: the proved SHA-256 (#834) *)
 fun _hash_loop {l:agz}{file_size:nat}{offset:nat | offset <= file_size} .<file_size - offset>.
-  (book_file: !$BF.infile(file_size), file_size: int file_size, offset: int offset, hasher: !$SHA.ctx, chunk: !$A.arr(byte, l, 1048576)): void =
+  (book_file: !$BF.infile(file_size), file_size: int file_size, offset: int offset, hasher: !$SHA.proved_ctx, chunk: !$A.arr(byte, l, 1048576)): void =
   if offset >= file_size then ()
   else let
     val chunk_len = (if file_size - offset < 1048576 then file_size - offset else 1048576): [chunk_len:pos | chunk_len <= 1048576; offset + chunk_len <= file_size] int chunk_len
     val () = $BF.file_read(book_file, offset, chunk, chunk_len)
-    val () = $SHA.update(hasher, chunk, chunk_len)
+    val () = $SHA.proved_update(hasher, chunk, chunk_len)
   in _hash_loop(book_file, file_size, offset + chunk_len, hasher, chunk) end
 
 fn _file_id {file_size:nat} (book_file: !$BF.infile(file_size), file_size: int file_size): @(Int, Int) = let
-  val hasher = $SHA.init()
+  val hasher = $SHA.proved_init()
   val chunk = $A.alloc<byte>(1048576)
   val () = _hash_loop(book_file, file_size, 0, hasher, chunk)
   val () = $A.free<byte>(chunk)
   val hex_digest = $A.alloc<byte>(64)
-  val () = $SHA.finish(hasher, hex_digest)
+  val () = $SHA.proved_finish(hasher, hex_digest)
   val id = lib_id_of_hex(hex_digest)
   val () = $A.free<byte>(hex_digest)
 in id end

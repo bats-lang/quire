@@ -613,7 +613,7 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
     { name: 'mimetype', data: mimetype, store: true },
     { name: 'META-INF/container.xml', data: containerXml, store: true },
     { name: posix.join(opfDir, opfName), data: contentOpf, store: true, damaged: !!opts.damagedPackage },
-    useNcx ? { name: inBook('toc.ncx'), data: tocNcx } : { name: inBook(navHref), data: navXhtml },
+    useNcx ? { name: inBook('toc.ncx'), data: tocNcx, store: !!opts.storeNav } : { name: inBook(navHref), data: navXhtml, store: !!opts.storeNav },
   ];
   for (const f of metaInf) zipEntries.push({ name: 'META-INF/' + f.name, data: f.data, store: true });
   if (opts.alsoNav) zipEntries.push({ name: inBook(navHref), data: navXhtml });
@@ -642,6 +642,7 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
   // the EPUB bigger than a whole-file read could hold
   for (const e of (opts.extraEntries || [])) zipEntries.push(e);
 
+  // storeNav: true stores the nav document (or the NCX) too, so no byte of the file is zlib's (book id, #834)
   // storeChapters: true → store chapters uncompressed (diagnostic: test sync path)
   if (opts.storeChapters) {
     chapters.forEach(ch => { ch.store = true; });
