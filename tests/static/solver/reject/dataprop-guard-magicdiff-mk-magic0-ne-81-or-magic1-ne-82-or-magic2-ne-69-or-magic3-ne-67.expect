@@ -1,0 +1,3 @@
+line 13
+function probe_magic0_ne_81_or_magic1_ne_82_or_magic2_ne_69_or_magic3_ne_67
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eapp(S2Ecst(||); S2Eapp(S2Ecst(||); S2Eapp(S2Ecst(||); S2Eapp(S2Ecst(!=); S2Evar(magic0(_)), S2Eintinf(81)), S2Eapp(S2Ecst(!=); S2Evar(magic1(_)), S2Eintinf(82))), S2Eapp(S2Ecst(!=); S2Evar(magic2(_)), S2Eintinf(69))), S2Eapp(S2Ecst(!=); S2Evar(magic3(_)), S2Eintinf(67))))

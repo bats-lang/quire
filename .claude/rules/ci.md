@@ -133,6 +133,47 @@ that is the one error, in that module, at that line, inside that function; an ac
 A fixture whose memo entry is unchanged costs nothing, else about what its snippet changes (a
 changed `#pub` declaration re-checks what depends on it).
 
+### The solver fixtures written from the sources (keyword: solver fixtures, #837 to #841, pieces of #594)
+
+`tests/static/solver.py` runs the files of `tests/static/solver/{accept,reject}/` with the machine's
+patsopt (CI's is the infinite-precision build). A reject fixture has a `.expect` beside it, one block for
+each error patsopt prints (`line`, `function`, the error with its variable numbers as `_`), and passes
+only when the errors are exactly those; one without it fails. `solver.py --record` writes the files to
+read and commit. patsopt reports the first unsolved constraint of a file only, so a fixture holds one
+false claim.
+
+* **Written from the text, not retyped.** `tests/static/proof_sources.py` reads the declarations of
+  `src/*.bats` and of the locked packages' archives (array, arith, css: `PROVIDERS`) and writes a
+  declaration with what it uses as a `.dats` needing the prelude only. Four generators use it, each
+  with `--check` (run by `run.sh`'s `solver` member): it writes the fixtures again and fails when a
+  committed one differs, is missing, or belongs to nothing, so a changed lemma, dataprop or constant
+  changes its fixture or fails the check. Each writes the unchanged text to `accept/` as the control, so a
+  rejection is the change's and not a typo of the copy.
+  * `gen_luminance.py`: the `prval L_<rrggbb>` constants of `src/palette_proofs.bats` (60), the low
+    and the high bound of each plus one.
+  * `gen_lemmas.py`: the lemmas that conclude `FALSEP()`, an `EQFD`, a tuple or a bare existential, which
+    `mutation_check.py` makes no mutant of: the lemma under a statement that is false (a guard shifted
+    so that the premises can both hold, or the conclusion changed).
+  * `gen_guards.py`: each atom of the guard of each dataprop constructor of `src/`, shifted by one
+    in a probe that states the constructor under the weaker guard (`--list` prints them), a probe that the
+    guards hold of some values (also css's HUE, SATNEAR and CONTRAST), and an accept control for each
+    dataprop. FALSEP's constructor, whose two atoms exclude each other, is `falsep-made-at-*`.
+  * `gen_vacuity.py`: the contexts `proofs_audit.py` flags (below).
+* **The audit's verdicts** (`tests/static/proofs_audit_verdicts.txt`). Each HIGH row of
+  `proofs_audit.py` over `src/` and over the locked packages (`--lock bats.lock --repository`) is
+  keyed by scope, file, the declaration it is in and its kind, and names the reject fixtures that put a
+  false claim in its context. `--fail-on high` fails for a HIGH row with no verdict, a fixture that is
+  not there, or a malformed line, and `run.sh` runs it (`checkers`); `proofs_audit_test.py` injects
+  the row. A relock that adds a HIGH row to a package fails there until its verdict is written: the
+  verdict is the decision that the new context was looked at. A proof construct is a line that begins a proof
+  and the lines it holds (a `prval` in a function body no longer makes the rest of the function
+  proof). The reasons a fixture shows a context is not contradictory: a probe `[t == t + 1] void` in the
+  branch (the division terms and the hypotheses are in the context), the proof's result one more
+  (rejected at the cast, which has every division of the body in it), or, for a function with no copy
+  (`implement`, `fun`), the same claims written by hand (`vacuity-by-hand-*`).
+* Python, as every `tests/static` checker: they extend and import `proofs_audit.py`, `mutation_check.py`
+  and `solver.py`, which read text and run patsopt, before any bats program is built.
+
 ### The merge queue (#586)
 
 A PR in the queue is tested as a group (a commit of main plus the PR and the
