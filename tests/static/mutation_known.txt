@@ -25,3 +25,17 @@ src/record.bats | _not_quire_proof | arg1:fresh | DECODES_magic holds for any sp
 # so any false conclusion is proved from them; `[1 == 0]` and `[1 == 2]` are the same statement.
 src/cut.bats | white_not_white | * | the premises are contradictory by the disjoint ranges of the byte: the lemma's purpose
 src/cut.bats | starts_not_continues | * | the premises are contradictory by the disjoint ranges of the byte: the lemma's purpose
+#
+# The ex falso lemmas of text_relation (the premise is FALSEP(), which has no constructor, so the conclusion
+# is true of anything and every mutant of it is the same statement) and the existence of an append:
+# `append_exists` holds for any back, so `bcons(0, back)` is as true as `back`.
+src/text_relation.bats | falsep_eqsrc | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+src/text_relation.bats | falsep_textof | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+src/text_relation.bats | falsep_eqscanned | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+src/text_relation.bats | falsep_holds | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+src/text_relation.bats | falsep_conv | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+src/text_relation.bats | falsep_detect | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+src/text_relation.bats | falsep_stepeq | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+src/text_relation.bats | falsep_eqspread | * | ex falso: the conclusion is true of anything, the mutants are equivalent
+src/text_relation.bats | append_exists | arg2:bcons | an append of any back exists: bcons(0, back) is as true as back
+src/text_relation.bats | _append_exists | arg2:bcons | an append of any back exists: bcons(0, back) is as true as back
