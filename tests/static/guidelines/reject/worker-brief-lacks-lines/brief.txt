@@ -1,0 +1,3 @@
+Follow the worker.md rules; finish inside the turn; do not merge; do not write the review.
+
+The tests pass.

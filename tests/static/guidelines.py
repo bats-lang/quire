@@ -237,6 +237,24 @@ def lint_overlap(text, name, line_form, line_name):
     return findings
 
 
+# A worker brief (it names worker.md) carries each of these lines (quire#866), as a signature change carries Overlap.
+WORKER_BRIEF = re.compile(r'worker\.md')
+WORKER_LINES = (
+    (re.compile(r'^\s*Design check:', re.MULTILINE), 'Design check: ...', 'the ticket\'s declarations are pushed and read before the worker builds on them'),
+    (re.compile(r'^\s*Push:', re.MULTILINE), 'Push: ...', 'the branch is pushed after every commit'),
+    (re.compile(r'^\s*Expects:', re.MULTILINE), 'Expects: ...', 'reject expects are blessed, not written by hand'),
+    (re.compile(r'^\s*Sample:', re.MULTILINE), 'Sample: ...', 'a local population run is a seeded sample'),
+)
+
+
+def lint_worker_lines(text, name):
+    """Worker brief lines (quire#866, orchestration.md, "Briefs and the machine"): a brief that names worker.md carries each."""
+    if not WORKER_BRIEF.search(text):
+        return []
+    return [f'{name}: it names worker.md and has no line "{line_name}" ({reason}; orchestration.md, "Briefs and the machine")'
+            for line_form, line_name, reason in WORKER_LINES if not line_form.search(text)]
+
+
 def lint_review(text, phrases, gate_form=False):
     findings = review_text(text, phrases) + lint_overlap(text, 'review', OVERLAP_REVIEW, 'Overlap check: ...')
     lines = [line for line in text.split('\n') if line.strip()]
@@ -261,7 +279,7 @@ def done_when(ticket):
 
 
 def lint_brief(brief, ticket, phrases):
-    findings = lint_text(brief, 'brief', phrases) + lint_overlap(brief, 'brief', OVERLAP_BRIEF, 'Overlap: ...')
+    findings = lint_text(brief, 'brief', phrases) + lint_overlap(brief, 'brief', OVERLAP_BRIEF, 'Overlap: ...') + lint_worker_lines(brief, 'brief')
     lines = done_when(ticket)
     if lines is None:
         findings.append('ticket: it has no "Done when" section: add it before the brief (the Done-when is what the work is measured by)')
