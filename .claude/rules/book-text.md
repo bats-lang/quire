@@ -82,7 +82,12 @@ caller's, as a `barr` (its cells model reaches 1048576 bytes with `barr_alloc`; 
 * **A character** (`STEPOF`) is a UTF-16 unit that is no half of a pair, a high half and a low half (one
   character beyond U+FFFF), a half alone or a lone byte at the end (U+FFFD), a single-byte encoding's byte
   under 128 (itself) or the table's code point for the others (`TABLEAT`, `src/text_codes.bats`, made from the
-  same tables as `text_tables.bats` by `scripts/gen-encodings.py`). `ENC` is the UTF-8 bytes of a code point,
+  same tables as `text_tables.bats` by `scripts/gen-encodings.py`). `TABLEAT` has one constructor for each
+  encoding, carrying that encoding's own `PAGEAT_<page>` (128 constructors): a case over all 1792 byte and
+  encoding pairs in one dataprop took patsopt 7.4 GB and 62 seconds for `tableat_functional` (the cost of a
+  case grows with the square of the constructors it is checked against), and over 128 at a time 0.7 GB and
+  2 seconds, inside the 4096 MB cap of CI (quire#845). A table past a few hundred constructors in one
+  dataprop is split by the key of the lemma that reads it. `ENC` is the UTF-8 bytes of a code point,
   stated by the digits of 64 so that no division is stated.
 * **Refusal is the claim that no reading exists.** `UTF8SCAN(cells, from, 0)` carries a run of whole
   characters and then `UTF8BAD` (a lead byte that is none, or a byte it needs that is missing or not a
@@ -95,7 +100,7 @@ caller's, as a `barr` (its cells model reaches 1048576 bytes with `barr_alloc`; 
   text is UTF-8) is built of `BLANKS`/`SKIP`, `NOQUOTE`/`FINDQUOTE`, `ISENCODING`, `DECLARED` and
   `DECLSCAN`, each with its functional lemma, and `LABELSRC` for the label in the quotes.
 * **The labels** are a table made with the single-byte tables by `scripts/gen-encodings.py`
-  (`src/text_labels.bats`: `ENTRY(index, label, source)`, the entries 0 to `LABEL_COUNT - 1` in the order
+  (`src/text_labels.bats`: `LABELENTRY(index, label, source)`, the entries 0 to `LABEL_COUNT - 1` in the order
   `text_source_of_label` tries them). A label is `LABELIS` one entry, or `ALLDIFF` all of them
   (unsupported, source 3); `alldiff_get` and `labelis_not_diff` make the two exclusive. The proved
   `text_label_source` builds each entry as a `blist` and compares it, so it allocates a few small lists for

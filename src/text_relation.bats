@@ -673,14 +673,14 @@ primplement labelis_not_diff {cells}{from,count}{label} (is, diff) =
 #pub dataprop ALLDIFF($A.cells, int, int, int) =
   | {cells:$A.cells}{from,count:nat} ALLDIFF_none(cells, from, count, 0)
   | {cells:$A.cells}{from,count:nat}{tried:nat | tried < LABEL_COUNT}{label:bytes}{source:tsrc}
-    ALLDIFF_more(cells, from, count, tried + 1) of (ALLDIFF(cells, from, count, tried), ENTRY(tried, label, source), LABELDIFF(cells, from, count, label))
+    ALLDIFF_more(cells, from, count, tried + 1) of (ALLDIFF(cells, from, count, tried), LABELENTRY(tried, label, source), LABELDIFF(cells, from, count, label))
 
 (* Bytes that are none of the labels tried are not any one of them *)
 #pub prfun alldiff_get {cells:$A.cells}{from,count:nat}{tried,index:nat | index < tried}{label:bytes}{source:tsrc}
-  (ALLDIFF(cells, from, count, tried), ENTRY(index, label, source)): LABELDIFF(cells, from, count, label)
+  (ALLDIFF(cells, from, count, tried), LABELENTRY(index, label, source)): LABELDIFF(cells, from, count, label)
 
 prfun _alldiff_get {cells:$A.cells}{from,count:nat}{tried,index:nat | index < tried}{label:bytes}{source:tsrc} .<tried>.
-  (all: ALLDIFF(cells, from, count, tried), entry: ENTRY(index, label, source)): LABELDIFF(cells, from, count, label) =
+  (all: ALLDIFF(cells, from, count, tried), entry: LABELENTRY(index, label, source)): LABELDIFF(cells, from, count, label) =
   case+ all of
   | ALLDIFF_none() =/=> ()
   | ALLDIFF_more(rest, last_entry, last_diff) =>
@@ -695,7 +695,7 @@ primplement alldiff_get {cells}{from,count}{tried,index}{label}{source} (all, en
    or none of them (an encoding Quire has no table for) *)
 #pub dataprop LABELSRC($A.cells, int, int, tsrc) =
   | {cells:$A.cells}{from,count:nat}{index:nat | index < LABEL_COUNT}{label:bytes}{source:tsrc}
-    LABELSRC_listed(cells, from, count, source) of (ENTRY(index, label, source), LABELIS(cells, from, count, label))
+    LABELSRC_listed(cells, from, count, source) of (LABELENTRY(index, label, source), LABELIS(cells, from, count, label))
   | {cells:$A.cells}{from,count:nat}
     LABELSRC_unsupported(cells, from, count, SrcUnsupported()) of ALLDIFF(cells, from, count, LABEL_COUNT)
 

@@ -109,8 +109,8 @@ v(f"#pub stadef LABEL_COUNT = {len(cond)}\n")
 v("(* LABEL_COUNT, as a value *)")
 v("#pub fn text_label_total (): int(LABEL_COUNT)\n")
 v(f"implement text_label_total () = {len(cond)}\n")
-v("(* ENTRY(index, label, source): the index-th label tried is the byte string label (lower case), and it names the source *)")
-v("#pub dataprop ENTRY(int, bytes, tsrc) =")
+v("(* LABELENTRY(index, label, source): the index-th label tried is the byte string label (lower case), and it names the source *)")
+v("#pub dataprop LABELENTRY(int, bytes, tsrc) =")
 def octets(text):
     out_text = "bnil()"
     for ch in reversed(text):
@@ -120,37 +120,37 @@ entry_source = []
 for index, (label, c) in enumerate(cond):
     term = source_term(c)
     entry_source.append(term)
-    v(f"  | ENTRY_{index}({index}, {octets(label)}, {term})")
+    v(f"  | LABELENTRY_{index}({index}, {octets(label)}, {term})")
 v("")
 v("(* An entry is one label and one source *)")
-v("#pub prfun entry_functional {index:nat}{first_label,second_label:bytes}{first_source,second_source:tsrc}\n  (ENTRY(index, first_label, first_source), ENTRY(index, second_label, second_source)): (EQB(first_label, second_label), EQSRC(first_source, second_source))\n")
+v("#pub prfun entry_functional {index:nat}{first_label,second_label:bytes}{first_source,second_source:tsrc}\n  (LABELENTRY(index, first_label, first_source), LABELENTRY(index, second_label, second_source)): (EQB(first_label, second_label), EQSRC(first_source, second_source))\n")
 v("primplement entry_functional {index}{first_label,second_label}{first_source,second_source} (one, other) =\n  case+ one of")
 for index in range(len(cond)):
-    v(f"  | ENTRY_{index}() => (case+ other of ENTRY_{index}() => (EQB_refl(), EQSRC_refl()))")
+    v(f"  | LABELENTRY_{index}() => (case+ other of LABELENTRY_{index}() => (EQB_refl(), EQSRC_refl()))")
 v("")
 v("(* A label is one entry *)")
-v("#pub prfun entry_label_injective {first_index,second_index:nat}{label:bytes}{first_source,second_source:tsrc}\n  (ENTRY(first_index, label, first_source), ENTRY(second_index, label, second_source)): EQI(first_index, second_index)\n")
+v("#pub prfun entry_label_injective {first_index,second_index:nat}{label:bytes}{first_source,second_source:tsrc}\n  (LABELENTRY(first_index, label, first_source), LABELENTRY(second_index, label, second_source)): EQI(first_index, second_index)\n")
 v("primplement entry_label_injective {first_index,second_index}{label}{first_source,second_source} (one, other) =\n  case+ one of")
 for index in range(len(cond)):
-    v(f"  | ENTRY_{index}() => (case+ other of ENTRY_{index}() => EQI_refl())")
+    v(f"  | LABELENTRY_{index}() => (case+ other of LABELENTRY_{index}() => EQI_refl())")
 v("")
 v("(* Every entry is below LABEL_COUNT *)")
-v("#pub prfun entry_below_count {index:nat}{label:bytes}{source:tsrc} (ENTRY(index, label, source)): [index < LABEL_COUNT] void\n")
+v("#pub prfun entry_below_count {index:nat}{label:bytes}{source:tsrc} (LABELENTRY(index, label, source)): [index < LABEL_COUNT] void\n")
 v("primplement entry_below_count {index}{label}{source} (entry) =\n  case+ entry of")
 for index in range(len(cond)):
-    v(f"  | ENTRY_{index}() => ()")
+    v(f"  | LABELENTRY_{index}() => ()")
 v("")
 v("(* The source of a label, as a value *)")
 v("#pub datatype label_source(tsrc) = " + " | ".join(f"Label{name}({term})" for name, term in zip(label_names, label_source_terms)) + "\n")
 v("(* The index-th label, as a list of its bytes, with the source it names *)")
-v("#pub fn text_entry_label {index:nat | index < LABEL_COUNT} (index: int index)\n  : [label:bytes][source:tsrc][count:nat] (ENTRY(index, label, source) | blist(label, count), label_source(source))\n")
+v("#pub fn text_entry_label {index:nat | index < LABEL_COUNT} (index: int index)\n  : [label:bytes][source:tsrc][count:nat] (LABELENTRY(index, label, source) | blist(label, count), label_source(source))\n")
 v("implement text_entry_label {index} (index) =")
 def leaf(i):
     label, c = cond[i]
     body = "blist_nil()"
     for ch in reversed(label):
         body = f"blist_cons({ord(ch)}, {body})"
-    return f"(ENTRY_{i}() | {body}, Label{c[3:]}())"
+    return f"(LABELENTRY_{i}() | {body}, Label{c[3:]}())"
 def tree(lo, hi, depth):
     pad = "  " * depth
     if hi - lo == 1:
@@ -169,26 +169,35 @@ c("(* text_codes -- the code points of the single-byte encodings, as the relatio
 c("#target wasm begin\n")
 c('#include "share/atspre_staload.hats"\n')
 c('staload "text_labels.sats"\n')
-c("(* TABLEAT(page, byte, code point): in the single-byte encoding page, the byte of 128 to 255 stands for the code point\n   (65533 where the encoding has none) *)")
-c("#pub dataprop TABLEAT(codepage, int, int) =")
+c("(* One encoding's table: PAGEAT_<page>(byte, code point) says the byte of 128 to 255 stands for the code point (65533 where the\n   encoding has none). A table of its own for each encoding, so that the proof that a byte has one code point reads 128\n   constructors for each encoding and not 1792 for every clause (patsopt's memory grows with the square of the constructors a\n   case is checked against, quire#845, keyword: text-encoding relation) *)")
 codes = {}
 for number, (name, codec, labels) in enumerate(ENCODINGS):
     text = bytes(range(128, 256)).decode(codec, errors="replace")
     codes[name] = [ord(ch) for ch in text]
+    c(f"#pub dataprop PAGEAT_{name}(int, int) =")
     for index, point in enumerate(codes[name]):
-        c(f"  | TABLEAT_{name}_{128 + index}({name}(), {128 + index}, {point})")
+        c(f"  | PAGEAT_{name}_{128 + index}(%d, %d)" % (128 + index, point))
+    c("")
+c("(* TABLEAT(page, byte, code point): in the single-byte encoding page, the byte of 128 to 255 stands for the code point\n   (65533 where the encoding has none) *)")
+c("#pub dataprop TABLEAT(codepage, int, int) =")
+for name, codec, labels in ENCODINGS:
+    c(f"  | {{byte,point:int}} TABLEAT_{name}(%s(), byte, point) of PAGEAT_{name}(byte, point)" % name)
 c("")
+for name, codec, labels in ENCODINGS:
+    c(f"prfn _pageat_{name.lower()}_functional {{byte,first,second:int}}\n  (one: PAGEAT_{name}(byte, first), other: PAGEAT_{name}(byte, second)): [first == second] void =\n  case+ one of")
+    for index in range(128):
+        c(f"  | PAGEAT_{name}_{128 + index}() => (case+ other of PAGEAT_{name}_{128 + index}() => ())")
+    c("")
 c("(* A byte stands for one code point in an encoding *)")
 c("#pub prfun tableat_functional {page:codepage}{byte:int}{first,second:int}\n  (TABLEAT(page, byte, first), TABLEAT(page, byte, second)): [first == second] void\n")
 c("primplement tableat_functional {page}{byte}{first,second} (one, other) =\n  case+ one of")
-for number, (name, codec, labels) in enumerate(ENCODINGS):
-    for index in range(128):
-        c(f"  | TABLEAT_{name}_{128 + index}() => (case+ other of TABLEAT_{name}_{128 + index}() => ())")
+for name, codec, labels in ENCODINGS:
+    c(f"  | TABLEAT_{name}(one_page) => (case+ other of TABLEAT_{name}(other_page) => _pageat_{name.lower()}_functional(one_page, other_page))")
 c("")
 def table_tree(name, lo, hi, depth):
     pad = "  " * depth
     if hi - lo == 1:
-        return f"{pad}(TABLEAT_{name}_{lo}() | {codes[name][lo - 128]})"
+        return f"{pad}(TABLEAT_{name}(PAGEAT_{name}_{lo}()) | {codes[name][lo - 128]})"
     mid = (lo + hi) // 2
     return f"{pad}if byte < {mid} then\n" + table_tree(name, lo, mid, depth + 1) + f"\n{pad}else\n" + table_tree(name, mid, hi, depth + 1)
 for number, (name, codec, labels) in enumerate(ENCODINGS):
