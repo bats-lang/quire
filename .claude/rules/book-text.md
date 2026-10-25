@@ -72,7 +72,7 @@ the relation of the bytes they read and write the bytes the relation says. The o
 caller's, as a `barr` (its cells model reaches 1048576 bytes with `barr_alloc`; `barr_of_arr` and
 `barr_of_arrx` take any array, whose cells then are not known until they are written).
 
-* **Cases** (the numbers are the plan's: 0 as it is, 1 made into UTF-8, 2 refused). As it is: UTF-8
+* **Cases** (the static sort `plan`: `PlanAsIs`, `PlanConvert`, `PlanRefused`, named after `text_plan`'s constructors; the detected source is a `tsrc`, `SrcUtf8`, `SrcUtf16(order)`, `SrcUnsupported` or `SrcTable(page)`, and the verdict of a UTF-8 scan a `scanned`, `ScannedRefused`, `ScannedAscii` or `ScannedOther`). As it is: UTF-8
   with no byte order mark, ASCII only in an unsupported encoding, valid UTF-8 that says a single-byte
   encoding; the output is the bytes of the cells (`HOLDS(cells, 0, octets, n)`). UTF-8 with a byte order
   mark: the bytes from the fourth (`HOLDS(cells, 3, octets, n - 3)`). UTF-16 either way, and a single-byte
@@ -88,8 +88,8 @@ caller's, as a `barr` (its cells model reaches 1048576 bytes with `barr_alloc`; 
   characters and then `UTF8BAD` (a lead byte that is none, or a byte it needs that is missing or not a
   continuation, by the Unicode table of well-formed sequences: no overlong form, surrogate or code point
   past U+10FFFF), and `utf8run_bad_not_complete` proves that no run of whole characters reaches the end
-  of the cells from there. `utf8scan_functional` makes the three verdicts (0 not UTF-8, 1 ASCII only, 2
-  other characters) exclusive.
+  of the cells from there. `utf8scan_functional` makes the three verdicts (refused, ASCII only, other
+  characters) exclusive.
 * **Detection** (`DETECT(cells, source, mark)`: the byte order mark, `<` and a null byte, the XML
   declaration's `encoding` within 256 bytes, else UTF-8; a declaration that says UTF-16 of bytes that are
   text is UTF-8) is built of `BLANKS`/`SKIP`, `NOQUOTE`/`FINDQUOTE`, `ISENCODING`, `DECLARED` and

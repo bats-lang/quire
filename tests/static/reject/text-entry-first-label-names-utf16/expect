@@ -2,4 +2,8 @@ function _static_first_label_utf16
 line 1
 the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(ENTRY); S2Eintinf(0), S2Eapp(S2Ecst(bcons); S2Eintinf(117), S2Eapp(S2Ecst(bcons); S2Eintinf(116), S2Eapp(S2Ecst(bcons); S2Eintinf(102), S2Eapp(S2Ecst(bcons); S2Eintinf(45), S2Eapp(S2Ecst(bcons); S2Eintinf(56), S2Eapp(S2Ecst(bnil); )))))), S2Eapp(S2Ecst(SrcUtf16); S2Eapp(S2Ecst(LittleEndian); )))].
 mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(SrcUtf8); )
+The needed term is: S2Eapp(S2Ecst(SrcUtf16); S2Eapp(S2Ecst(LittleEndian); ))
 mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(ENTRY); S2Eintinf(0), S2Eapp(S2Ecst(bcons); S2Eintinf(117), S2Eapp(S2Ecst(bcons); S2Eintinf(116), S2Eapp(S2Ecst(bcons); S2Eintinf(102), S2Eapp(S2Ecst(bcons); S2Eintinf(45), S2Eapp(S2Ecst(bcons); S2Eintinf(56), S2Eapp(S2Ecst(bnil); )))))), S2Eapp(S2Ecst(SrcUtf8); ))
+The needed term is: S2Eapp(S2Ecst(ENTRY); S2Eintinf(0), S2Eapp(S2Ecst(bcons); S2Eintinf(117), S2Eapp(S2Ecst(bcons); S2Eintinf(116), S2Eapp(S2Ecst(bcons); S2Eintinf(102), S2Eapp(S2Ecst(bcons); S2Eintinf(45), S2Eapp(S2Ecst(bcons); S2Eintinf(56), S2Eapp(S2Ecst(bnil); )))))), S2Eapp(S2Ecst(SrcUtf16); S2Eapp(S2Ecst(LittleEndian); )))
