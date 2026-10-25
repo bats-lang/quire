@@ -1,0 +1,3 @@
+function _static_capital_not_lowered
+line 2
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Eintinf(97); S2Eintinf(65)))

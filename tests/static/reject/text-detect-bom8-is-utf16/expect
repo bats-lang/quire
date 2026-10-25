@@ -1,0 +1,9 @@
+function _static_bom8_is_utf16
+line 2
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(DETECT); S2Evar(cells(_)), S2Eapp(S2Ecst(SrcUtf16); S2Eapp(S2Ecst(LittleEndian); )), S2Eintinf(3))].
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(SrcUtf8); )
+The needed term is: S2Eapp(S2Ecst(SrcUtf16); S2Eapp(S2Ecst(LittleEndian); ))
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(DETECT); S2Evar(cells(_)), S2Eapp(S2Ecst(SrcUtf8); ), S2Eintinf(3))
+The needed term is: S2Eapp(S2Ecst(DETECT); S2Evar(cells(_)), S2Eapp(S2Ecst(SrcUtf16); S2Eapp(S2Ecst(LittleEndian); )), S2Eintinf(3))

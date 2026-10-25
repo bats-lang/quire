@@ -1,0 +1,3 @@
+function _static_another_label
+line 2
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Evar(other(_)); S2Evar(label(_))))

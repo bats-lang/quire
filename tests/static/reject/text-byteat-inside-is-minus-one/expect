@@ -1,0 +1,3 @@
+function _static_inside_is_minus_one
+line 1
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Evar(value(_)); S2Eapp(S2Ecst(neg_int); S2Eintinf(1))))

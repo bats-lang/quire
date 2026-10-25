@@ -128,7 +128,34 @@
       "reject/page-turn-copy-marked",
       "reject/picture-box-zoom-zero",
       "reject/shelf-unmatched",
-      "reject/undo-offer-brief"
+      "reject/undo-offer-brief",
+      "reject/text-alldiff-get-past-the-tried",
+      "reject/text-byteat-minus-one-is-a-cell",
+      "reject/text-declared-quote-is-no-quote",
+      "reject/text-declscan-next-at-the-close",
+      "reject/text-detect-of-two-documents",
+      "reject/text-isencoding-no-with-the-letters",
+      "reject/text-labelsrc-listed-past-the-table",
+      "reject/text-lowered-cons-of-the-capital",
+      "reject/text-quotestop-hit-of-another-byte",
+      "reject/text-textof-utf16-convert-without-content",
+      "reject/text-utf8-bad-three-first-valid",
+      "reject/text-utf8-run-two-ends",
+      "reject/text-utf8-step-continuation-alone",
+      "reject/text-append-exists-swapped",
+      "reject/text-conv-snoc-joined-the-other-way",
+      "reject/text-declared-unclosed-says-a-table",
+      "reject/text-detect-of-other-cells",
+      "reject/text-enc-two-of-127",
+      "reject/text-holds-push-another-place",
+      "reject/text-plan-proved-of-other-cells",
+      "reject/text-stepof-high-alone-before-a-low",
+      "reject/text-stepof-table-of-another-page",
+      "reject/text-tableat-two-bytes",
+      "reject/text-textof-bom-holds-from-zero",
+      "reject/text-textof-single-convert-of-valid-utf8",
+      "reject/text-textof-utf8-invalid-of-a-valid-scan",
+      "reject/text-unit16-two-places"
     ],
     "accepts": [
       "accept/crc-complemented",
@@ -149,7 +176,34 @@
       "reject/notice-without-details",
       "reject/page-turn-held-lifted",
       "reject/pieces-two-counts-of-the-same-cells",
-      "reject/theme-unmatched"
+      "reject/theme-unmatched",
+      "reject/text-alldiff-more-past-the-table",
+      "reject/text-byteat-two-places",
+      "reject/text-declared-unclosed-with-a-letter-quote",
+      "reject/text-detect-plain-with-a-byte-order-mark",
+      "reject/text-entry-below-one",
+      "reject/text-isencoding-of-two-places",
+      "reject/text-labelsrc-of-two-places",
+      "reject/text-lowered-of-two-lengths",
+      "reject/text-textof-bom-only-without-a-mark",
+      "reject/text-textof-utf16-empty-with-content",
+      "reject/text-utf8-bad-two-with-a-continuation",
+      "reject/text-utf8-run-wide-flagged-ascii",
+      "reject/text-utf8-step-overlong-two-byte",
+      "reject/text-conv-more-from-another-place",
+      "reject/text-conv-snoc-step-elsewhere",
+      "reject/text-declscan-mark-says-unsupported",
+      "reject/text-difffrom-the-same-byte",
+      "reject/text-entry-sources-of-two-labels",
+      "reject/text-holds-snoc-cell-elsewhere",
+      "reject/text-plan-proved-refused-branch-is-as-is",
+      "reject/text-stepof-high-at-end-with-room",
+      "reject/text-stepof-truncated-with-room",
+      "reject/text-textof-as-is-held-from-one",
+      "reject/text-textof-not-unsupported-of-a-refusal",
+      "reject/text-textof-unsupported-as-is-of-a-wide-run",
+      "reject/text-unit16-big-is-little-order",
+      "reject/text-utf8-run-snoc-wide-keeps-ascii"
     ],
     "accepts-reader": [
       "accept/aloud-placement-matched",
@@ -170,7 +224,35 @@
       "reject/page-height-fraction",
       "reject/page-width-fraction",
       "reject/role-unmatched",
-      "reject/turn-unmatched"
+      "reject/turn-unmatched",
+      "reject/text-blanks-a-letter",
+      "reject/text-clen-one-more",
+      "reject/text-declscan-end-inside-the-cells",
+      "reject/text-detect-bom8-of-two-bytes",
+      "reject/text-detect-utf8-mark-is-three",
+      "reject/text-entry-first-label-names-utf16",
+      "reject/text-findquote-closed-at-the-end",
+      "reject/text-labelsrc-unsupported-is-a-table",
+      "reject/text-noquote-snoc-the-quote",
+      "reject/text-skip-from-two-places",
+      "reject/text-textof-of-two-documents",
+      "reject/text-utf8-bad-and-step-at-two-places",
+      "reject/text-utf8-run-ascii-flagged-wide",
+      "reject/text-utf8-step-past-the-last-code-point",
+      "reject/text-conv-more-in-the-wrong-order",
+      "reject/text-convert-fill-array-longer-than-the-output",
+      "reject/text-detect-bom8-is-utf16",
+      "reject/text-enc-four-past-the-last",
+      "reject/text-find-quote-of-other-quote",
+      "reject/text-label-source-of-other-cells",
+      "reject/text-skip-blank-of-other-cells",
+      "reject/text-stepof-low-alone-of-a-high",
+      "reject/text-stepof-unit-of-a-high-half",
+      "reject/text-textof-as-is-of-a-bom",
+      "reject/text-textof-refused-has-bytes",
+      "reject/text-textof-unsupported-invalid-of-utf8",
+      "reject/text-unit16-byte-of-256",
+      "reject/text-utf8-scan-ascii-of-a-wide-run"
     ],
     "rejects": [
       "solver",
@@ -192,7 +274,33 @@
       "reject/page-turn-forged-copy",
       "reject/pieces-counted-over-other-cells",
       "reject/snapshot-not-handed-on",
-      "reject/unreadable-unhandled"
+      "reject/unreadable-unhandled",
+      "reject/text-blanks-snoc-a-letter",
+      "reject/text-declared-equals-sign-is-no-equals",
+      "reject/text-declscan-functional-past-257",
+      "reject/text-entry-label-names-another-index",
+      "reject/text-findquote-found-stop-elsewhere",
+      "reject/text-labeldiff-of-the-same-length",
+      "reject/text-lower-of-two-bytes",
+      "reject/text-noquote-the-quote",
+      "reject/text-skip-stops-at-a-blank",
+      "reject/text-utf8-bad-in-len-after-the-end",
+      "reject/text-utf8-run-skips-a-byte",
+      "reject/text-utf8-step-surrogate",
+      "reject/text-conv-more-of-another-code-point",
+      "reject/text-convert-fill-holds-other-bytes",
+      "reject/text-detect-declared-table-is-the-declaration-of-another",
+      "reject/text-enc-of-two-code-points",
+      "reject/text-holds-after-set-before-the-end",
+      "reject/text-nth-exists-past-the-end",
+      "reject/text-stepof-ascii-of-128",
+      "reject/text-stepof-pair-of-two-low-halves",
+      "reject/text-stepof-unit-of-a-single-byte-source",
+      "reject/text-textof-bom-dropped-held-from-zero",
+      "reject/text-textof-refused-run-and-scan-of-two-places",
+      "reject/text-textof-unsupported-wide-of-an-ascii-run",
+      "reject/text-unit16-in-len-two-bytes-on",
+      "reject/text-utf8-scan-bad-is-ascii"
     ],
     "accepts-data": [
       "accept/codec-roundtrip",
@@ -212,7 +320,33 @@
       "reject/page-turn-left-unfinished",
       "reject/restored-bare-count",
       "reject/sheet-scrolls-over-share",
-      "reject/try-again-without-hope"
+      "reject/try-again-without-hope",
+      "reject/text-byteat-after-within-the-cells",
+      "reject/text-declared-from-two-places",
+      "reject/text-declscan-limit-at-256",
+      "reject/text-entry-two-indexes",
+      "reject/text-findquote-open-before-the-end",
+      "reject/text-labelis-is-not-of-another-label",
+      "reject/text-lower-same-for-a-capital",
+      "reject/text-textof-single-as-is-of-unsupported",
+      "reject/text-utf8-bad-lead-of-ascii",
+      "reject/text-utf8-run-snoc-step-not-at-the-end",
+      "reject/text-utf8-scan-from-two-places",
+      "reject/text-utf8-step-two-byte-is-ascii",
+      "reject/text-conv-none-over-a-range",
+      "reject/text-convert-fill-of-another-document",
+      "reject/text-detect-declared-text-of-a-utf8-declaration",
+      "reject/text-enc-one-of-128",
+      "reject/text-holds-exists-past-the-end",
+      "reject/text-plan-proved-as-is-branch-is-convert",
+      "reject/text-stepof-bounds-past-the-end",
+      "reject/text-stepof-pair-point-plus-one",
+      "reject/text-tableat-euro-sign-is-128",
+      "reject/text-textof-bom-dropped-is-as-is",
+      "reject/text-textof-single-conv-of-another-length",
+      "reject/text-textof-utf16-conv-of-a-table-source",
+      "reject/text-unit16-little-as-big",
+      "reject/text-utf8-scan-of-other-cells"
     ],
     "rest": [
       "accept/codec-absent-added-group",
@@ -232,7 +366,29 @@
       "reject/nav-row-without-summary",
       "reject/page-turn-forged-sheet",
       "reject/pieces-forged-cut",
-      "reject/sync-result-unmatched"
+      "reject/sync-result-unmatched",
+      "reject/text-byteat-inside-is-minus-one",
+      "reject/text-declared-label-of-another-start",
+      "reject/text-declscan-mark-past-256",
+      "reject/text-detect-mark-before-the-end",
+      "reject/text-findquote-two-quotes",
+      "reject/text-labelis-of-another-length",
+      "reject/text-lower-shift-of-a-lower-case-letter",
+      "reject/text-utf8-bad-run-ends-after-the-bad",
+      "reject/text-utf8-step-two-places",
+      "reject/text-conv-of-two-ends",
+      "reject/text-convert-size-of-other-cells",
+      "reject/text-detect-declared-utf8-of-a-utf16-declaration",
+      "reject/text-enc-three-of-65536",
+      "reject/text-holds-len-one-more",
+      "reject/text-plan-proved-convert-branch-is-refused",
+      "reject/text-stepof-from-two-places",
+      "reject/text-stepof-table-of-a-letter",
+      "reject/text-tableat-of-another-page",
+      "reject/text-textof-bom-dropped-of-three-bytes",
+      "reject/text-textof-single-convert-of-utf16",
+      "reject/text-textof-utf16-convert-of-a-table-conversion",
+      "reject/text-unit16-range-below-65535"
     ],
     "mutation-crc-1": [
       "mutation/crc-part1of5"
@@ -274,6 +430,36 @@
     "mutation-bytesarr-cut": [
       "mutation/bytesarr",
       "mutation/cut"
+    ],
+    "mutation-text-relation-1": [
+      "mutation/text_relation-part1of4"
+    ],
+    "mutation-text-relation-2": [
+      "mutation/text_relation-part2of4"
+    ],
+    "mutation-text-relation-3": [
+      "mutation/text_relation-part3of4"
+    ],
+    "mutation-text-relation-4": [
+      "mutation/text_relation-part4of4"
+    ],
+    "mutation-text-labels-1": [
+      "mutation/text_labels-part1of5"
+    ],
+    "mutation-text-labels-2": [
+      "mutation/text_labels-part2of5"
+    ],
+    "mutation-text-labels-3": [
+      "mutation/text_labels-part3of5"
+    ],
+    "mutation-text-labels-4": [
+      "mutation/text_labels-part4of5"
+    ],
+    "mutation-text-labels-5": [
+      "mutation/text_labels-part5of5"
+    ],
+    "mutation-text-codes": [
+      "mutation/text_codes"
     ]
   }
 }

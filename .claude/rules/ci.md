@@ -241,7 +241,7 @@ shown by the first Dependabot run, not by the docs. The hand-pinned Chromium of 
 
 ### The mutation check in CI (#594)
 
-The eleven proof modules in `tests/static/mutation_modules.txt` are hours of
+The fourteen proof modules in `tests/static/mutation_modules.txt` are hours of
 mutants, too long for the required `check` and for a merge queue window. So:
 
 * **No mutation job over about 25 minutes on an idle pool.** A module is split

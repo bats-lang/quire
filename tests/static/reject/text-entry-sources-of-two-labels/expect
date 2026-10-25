@@ -1,0 +1,3 @@
+function _static_entry_sources
+line 3
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Evar(second_source(_)); S2Eapp(S2Ecst(SrcUtf8); )))

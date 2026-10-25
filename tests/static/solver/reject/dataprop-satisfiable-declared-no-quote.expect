@@ -1,0 +1,3 @@
+line 179
+function satisfiable_declared_no_quote
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eapp(S2Ecst(==); S2Eintinf(1), S2Eintinf(2)))

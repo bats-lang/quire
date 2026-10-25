@@ -1,0 +1,1 @@
+prfn _static_table_of_another_page {cells:$A.cells}{i:nat}{point:int} (one: $A.NTH(cells, i, 200), table: TABLEAT(Cp1251(), 200, point)): STEPOF(cells, SrcTable(Cp1252()), i, i + 1, point) = STEPOF_table(one, table)
