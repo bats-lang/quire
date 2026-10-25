@@ -2004,7 +2004,7 @@ primplement enc_functional {point}{first,second} (one, other) =
        in EQB_refl() end)
 
 (* A code point is some bytes long *)
-#pub prfun enc_len {point:int}{octets:bytes} (ENC(point, octets)): [count:nat] LEN(octets, count)
+#pub prfun enc_len {point:int}{octets:bytes} (ENC(point, octets)): [count:nat | 1 <= count] LEN(octets, count)
 
 primplement enc_len {point}{octets} (enc) =
   case+ enc of
@@ -2057,6 +2057,18 @@ prfun _conv_snoc {cells:$A.cells}{source:tsrc}{from,mid,after:nat | from <= mid;
     in CONV_more(step_head, enc_head, _conv_snoc(rest, step, enc, append_rest), append_joined) end
 
 primplement conv_snoc {cells}{source}{from,mid,after}{point}{octets,enc,joined} (conv, step, enc, joined) = _conv_snoc(conv, step, enc, joined)
+
+(* A conversion of some characters makes some bytes *)
+#pub prfun conv_nonempty {cells:$A.cells}{source:tsrc}{from,to:nat | from < to}{octets:bytes}{size:nat}
+  (CONV(cells, source, from, to, octets), LEN(octets, size)): [1 <= size] void
+
+primplement conv_nonempty {cells}{source}{from,to}{octets}{size} (conv, octets_len) =
+  case+ conv of
+  | CONV_none() =/=> ()
+  | CONV_more(_, enc, _, joined) => let
+      prval enc_length = enc_len(enc)
+      prval rest_len = append_len_rest(joined, enc_length, octets_len)
+    in () end
 
 prfun _holds_after_set_later {cells,cells_after:$A.cells}{i,count,at:nat | i + count <= at}{value:int}{octets:bytes} .<count>.
   (cells_set: $A.SETC(cells, at, value, cells_after), holds: HOLDS(cells, i, octets, count)): HOLDS(cells_after, i, octets, count) =
@@ -2208,7 +2220,7 @@ fn _put_byte {lo:agz}{size:pos}{oc:$A.cells}{p:nat | p < size}{written:bytes}{va
 in (holds_after, $A.setc_len(cells_set, out_len), joined_len, appended | out_after) end
 
 (* Writes the UTF-8 bytes of a code point, whose bytes are given and are k, after the p bytes written *)
-fn _write_point {lo:agz}{size:pos}{oc:$A.cells}{p,k:nat | p + k < size}{written:bytes}{point:int | 0 <= point; point < 1114112}{given:bytes}
+fn _write_point {lo:agz}{size:pos}{oc:$A.cells}{p,k:nat | p + k <= size}{written:bytes}{point:int | 0 <= point; point < 1114112}{given:bytes}
   (holds: HOLDS(oc, 0, written, p), written_len: LEN(written, p), out_len: $A.CLEN(oc, size), given_enc: ENC(point, given), given_len: LEN(given, k)
    | out: $A.barr(lo, size, oc), p: int p, point: int point)
   : [oc2:$A.cells][joined:bytes] (HOLDS(oc2, 0, joined, p + k), $A.CLEN(oc2, size), LEN(joined, p + k), APPEND(written, given, joined) | $A.barr(lo, size, oc2), int(p + k)) =
@@ -2253,11 +2265,11 @@ fn _write_point {lo:agz}{size:pos}{oc:$A.cells}{p,k:nat | p + k < size}{written:
 
 (* Writes the converted document from i on, one character at a time, as the conversion of it that is to be written says *)
 fun _fill_loop {l:agz}{n:pos}{cells:$A.cells}{source:tsrc}{i:nat | i <= n}
-  {lo:agz}{size:pos}{oc:$A.cells}{p:nat}{written,rest,total:bytes}{m:nat | m + 1 == size} .<n - i>.
+  {lo:agz}{oc:$A.cells}{p:nat}{written,rest,total:bytes}{m:pos} .<n - i>.
   (length: $A.CLEN(cells, n), remaining: CONV(cells, source, i, n, rest), appended: APPEND(written, rest, total), total_len: LEN(total, m),
-   holds: HOLDS(oc, 0, written, p), written_len: LEN(written, p), out_len: $A.CLEN(oc, size)
-   | data: !$A.cborrow(l, n, cells), n: int n, source: conv_source(source), i: int i, out: $A.barr(lo, size, oc), p: int p)
-  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, size) | $A.barr(lo, size, oc2)) =
+   holds: HOLDS(oc, 0, written, p), written_len: LEN(written, p), out_len: $A.CLEN(oc, m)
+   | data: !$A.cborrow(l, n, cells), n: int n, source: conv_source(source), i: int i, out: $A.barr(lo, m, oc), p: int p)
+  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, m) | $A.barr(lo, m, oc2)) =
   if i >= n then let
       prval CONV_none() = remaining
       prval EQB_refl() = append_nil_eq(written_len, appended)
@@ -2330,7 +2342,7 @@ fn _converted_size {l:agz}{n:pos}{cells:$A.cells}{source:tsrc}{mark:nat | mark <
     TEXTOF_bom_dropped(cells, PlanConvert(), TOUT_bytes(octets)) of (DETECT(cells, SrcUtf8(), 3), $A.CLEN(cells, n), UTF8RUN(cells, 3, n, spread), HOLDS(cells, 3, octets, n - 3))
   | {cells:$A.cells}{order:byteorder}{mark,n:nat | mark < n}{octets:bytes}
     TEXTOF_utf16_convert(cells, PlanConvert(), TOUT_bytes(octets)) of (DETECT(cells, SrcUtf16(order), mark), $A.CLEN(cells, n), CONV(cells, SrcUtf16(order), mark, n, octets))
-  | {cells:$A.cells}{page:codepage}{mark,n:nat | mark <= n}{octets:bytes}
+  | {cells:$A.cells}{page:codepage}{mark,n:nat | mark < n}{octets:bytes}
     TEXTOF_single_convert(cells, PlanConvert(), TOUT_bytes(octets)) of (DETECT(cells, SrcTable(page), mark), UTF8SCAN(cells, 0, ScannedRefused()), $A.CLEN(cells, n), CONV(cells, SrcTable(page), mark, n, octets))
   | {cells:$A.cells}{mark:nat}
     TEXTOF_utf8_invalid(cells, PlanRefused(), TOUT_none()) of (DETECT(cells, SrcUtf8(), mark), UTF8SCAN(cells, mark, ScannedRefused()))
@@ -2593,11 +2605,11 @@ primplement falsep_holds {cells}{i}{octets}{count} (falsity) = case+ falsity of 
 primplement falsep_conv {cells}{source}{from,to}{octets} (falsity) = case+ falsity of FALSEP_mk() =/=> ()
 
 (* Copies the bytes held from i in the cells to the array, one at a time *)
-fun _copy_loop {l:agz}{n:pos}{cells:$A.cells}{i,c:nat | i + c <= n}{lo:agz}{size:pos}{oc:$A.cells}{p:nat}{written,rest,total:bytes}{m:nat | m + 1 == size} .<c>.
+fun _copy_loop {l:agz}{n:pos}{cells:$A.cells}{i,c:nat | i + c <= n}{lo:agz}{oc:$A.cells}{p:nat}{written,rest,total:bytes}{m:pos} .<c>.
   (remaining: HOLDS(cells, i, rest, c), appended: APPEND(written, rest, total), total_len: LEN(total, m),
-   holds: HOLDS(oc, 0, written, p), written_len: LEN(written, p), out_len: $A.CLEN(oc, size)
-   | data: !$A.cborrow(l, n, cells), n: int n, i: int i, c: int c, out: $A.barr(lo, size, oc), p: int p)
-  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, size) | $A.barr(lo, size, oc2)) =
+   holds: HOLDS(oc, 0, written, p), written_len: LEN(written, p), out_len: $A.CLEN(oc, m)
+   | data: !$A.cborrow(l, n, cells), n: int n, i: int i, c: int c, out: $A.barr(lo, m, oc), p: int p)
+  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, m) | $A.barr(lo, m, oc2)) =
   if c <= 0 then let
       prval HOLDS_nil(_) = remaining
       prval EQB_refl() = append_nil_eq(written_len, appended)
@@ -2680,6 +2692,13 @@ primplement detect_mark_in_len {cells}{source}{mark}{n} (detect, length) =
   | DETECT_declared_table(_, _, _, _, _, _) => ()
   | DETECT_plain(_, _, _, _, _) => ()
 
+(* A document detected as a single-byte encoding by its declaration has no byte order mark *)
+#pub prfun detect_table_mark {cells:$A.cells}{page:codepage}{mark:int} (DETECT(cells, SrcTable(page), mark)): [mark == 0] void
+
+primplement detect_table_mark {cells}{page}{mark} (detect) =
+  case+ detect of
+  | DETECT_declared_table(_, _, _, _, _, _) => ()
+
 (* A document detected as UTF-8 has a byte order mark of three bytes, or none *)
 #pub prfun detect_utf8_mark {cells:$A.cells}{mark:int} (DETECT(cells, SrcUtf8(), mark)): [mark == 0 || mark == 3] void
 
@@ -2710,16 +2729,18 @@ fn _after_utf8 {n:pos}{cells:$A.cells}{mark:nat | mark <= n}{spread:spread}
 fn _convert_utf16 {l:agz}{n:pos}{cells:$A.cells}{order:byteorder}{mark:nat | mark < n}
   (length: $A.CLEN(cells, n), detect: DETECT(cells, SrcUtf16(order), mark)
    | data: !$A.cborrow(l, n, cells), n: int n, source: conv_source(SrcUtf16(order)), mark: int mark)
-  : [total:bytes][size:nat] (TEXTOF(cells, PlanConvert(), TOUT_bytes(total)), LEN(total, size) | int size) = let
+  : [total:bytes][size:pos] (TEXTOF(cells, PlanConvert(), TOUT_bytes(total)), LEN(total, size) | int size) = let
   val (conv, total_len | size) = _converted_size(length | data, n, source, mark)
+  prval () = conv_nonempty(conv, total_len)
 in (TEXTOF_utf16_convert(detect, length, conv), total_len | size) end
 
 (* The output of a document in a single-byte encoding that is not UTF-8, with the proof of it and the number of bytes it makes *)
-fn _convert_single {l:agz}{n:pos}{cells:$A.cells}{page:codepage}{mark:nat | mark <= n}
+fn _convert_single {l:agz}{n:pos}{cells:$A.cells}{page:codepage}{mark:nat | mark < n}
   (length: $A.CLEN(cells, n), detect: DETECT(cells, SrcTable(page), mark), scan: UTF8SCAN(cells, 0, ScannedRefused())
    | data: !$A.cborrow(l, n, cells), n: int n, source: conv_source(SrcTable(page)), mark: int mark)
-  : [total:bytes][size:nat] (TEXTOF(cells, PlanConvert(), TOUT_bytes(total)), LEN(total, size) | int size) = let
+  : [total:bytes][size:pos] (TEXTOF(cells, PlanConvert(), TOUT_bytes(total)), LEN(total, size) | int size) = let
   val (conv, total_len | size) = _converted_size(length | data, n, source, mark)
+  prval () = conv_nonempty(conv, total_len)
 in (TEXTOF_single_convert(detect, scan, length, conv), total_len | size) end
 
 fn _utf16 {l:agz}{n:pos}{cells:$A.cells}{order:byteorder}{mark:nat | mark <= n}
@@ -2739,6 +2760,7 @@ fn _single_byte {l:agz}{n:pos}{cells:$A.cells}{page:codepage}{mark:nat | mark <=
 in
   case+ verdict of
   | Utf8Refused() => let
+      prval () = detect_table_mark(detect)
       val (plan, _ | _) = _convert_single(length, detect, scan | data, n, source, mark)
     in (plan | ProvedConvert()) end
   | Utf8AsciiOnly() => let
@@ -2801,7 +2823,7 @@ end
 (* The size of the output of a document that needs a conversion, with the proof of its relation to the document *)
 #pub datavtype text_sized($A.cells) =
   | {cells:$A.cells} TextNoConversion(cells)
-  | {cells:$A.cells}{total:bytes}{m:nat} TextSized(cells) of (TEXTOF(cells, PlanConvert(), TOUT_bytes(total)), LEN(total, m) | int m)
+  | {cells:$A.cells}{total:bytes}{m:pos} TextSized(cells) of (TEXTOF(cells, PlanConvert(), TOUT_bytes(total)), LEN(total, m) | int m)
 
 fn _sized_after_utf8 {n:pos}{cells:$A.cells}{mark:nat | mark <= n}{spread:spread}
   (length: $A.CLEN(cells, n), detect: DETECT(cells, SrcUtf8(), mark), run: UTF8RUN(cells, mark, n, spread) | n: int n, mark: int mark): text_sized(cells) =
@@ -2819,6 +2841,7 @@ fn _sized_single {l:agz}{n:pos}{cells:$A.cells}{page:codepage}{mark:nat | mark <
 in
   case+ verdict of
   | Utf8Refused() => let
+      prval () = detect_table_mark(detect)
       val (plan, total_len | size) = _convert_single(length, detect, scan | data, n, source, mark)
     in TextSized(plan, total_len | size) end
   | Utf8AsciiOnly() => TextNoConversion()
@@ -2869,18 +2892,18 @@ in
 end
 
 fn _fill_converted {l:agz}{n:pos}{cells:$A.cells}{source:tsrc}{mark:nat | mark <= n}
-  {total:bytes}{m:nat}{lo:agz}{oc:$A.cells}
-  (length: $A.CLEN(cells, n), conv: CONV(cells, source, mark, n, total), total_len: LEN(total, m), out_len: $A.CLEN(oc, m + 1)
-   | data: !$A.cborrow(l, n, cells), n: int n, source: conv_source(source), mark: int mark, out: $A.barr(lo, m + 1, oc))
-  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, m + 1) | $A.barr(lo, m + 1, oc2)) =
+  {total:bytes}{m:pos}{lo:agz}{oc:$A.cells}
+  (length: $A.CLEN(cells, n), conv: CONV(cells, source, mark, n, total), total_len: LEN(total, m), out_len: $A.CLEN(oc, m)
+   | data: !$A.cborrow(l, n, cells), n: int n, source: conv_source(source), mark: int mark, out: $A.barr(lo, m, oc))
+  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, m) | $A.barr(lo, m, oc2)) =
   _fill_loop(length, conv, APPEND_nil(), total_len, HOLDS_nil(out_len), LEN_nil(), out_len | data, n, source, mark, out, 0)
 
-(* Writes the output of the document that needs a conversion, as text_convert_size says it is, in an array of one cell more than
-   its bytes: the cells of the array come to hold them *)
-#pub fn text_convert_fill {l:agz}{n:pos}{cells:$A.cells}{total:bytes}{m:nat}{lo:agz}{oc:$A.cells}
-  (length: $A.CLEN(cells, n), plan: TEXTOF(cells, PlanConvert(), TOUT_bytes(total)), total_len: LEN(total, m), out_len: $A.CLEN(oc, m + 1)
-   | data: !$A.cborrow(l, n, cells), n: int n, out: $A.barr(lo, m + 1, oc), m: int m)
-  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, m + 1) | $A.barr(lo, m + 1, oc2))
+(* Writes the output of the document that needs a conversion, as text_convert_size says it is, in an array of as many cells as there
+   are bytes: the cells of the array come to hold them *)
+#pub fn text_convert_fill {l:agz}{n:pos}{cells:$A.cells}{total:bytes}{m:pos}{lo:agz}{oc:$A.cells}
+  (length: $A.CLEN(cells, n), plan: TEXTOF(cells, PlanConvert(), TOUT_bytes(total)), total_len: LEN(total, m), out_len: $A.CLEN(oc, m)
+   | data: !$A.cborrow(l, n, cells), n: int n, out: $A.barr(lo, m, oc), m: int m)
+  : [oc2:$A.cells] (HOLDS(oc2, 0, total, m), $A.CLEN(oc2, m) | $A.barr(lo, m, oc2))
 
 implement text_convert_fill {l}{n}{cells}{total}{m}{lo}{oc} (length, plan, total_len, out_len | data, n, out, m) = let
   val (detect | source, mark) = text_detect(length | data, n)
