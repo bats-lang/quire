@@ -696,7 +696,7 @@ fn _lower {raw:int} (raw: int raw): [low:int] (LOWER(raw, low) | int low) =
   else (LOWER_same() | raw)
 
 (* LOWEREDCMP(cells, from, label, same): the bytes from `from`, in lower case, begin with label (same) or differ from it *)
-#pub dataprop LOWEREDCMP($A.cells, int, bytes, bool) =
+dataprop LOWEREDCMP($A.cells, int, bytes, bool) =
   | {cells:$A.cells}{from:nat}{label:bytes} LOWEREDCMP_same(cells, from, label, true) of LOWERED(cells, from, label)
   | {cells:$A.cells}{from:nat}{label:bytes} LOWEREDCMP_diff(cells, from, label, false) of DIFFFROM(cells, from, label)
 
@@ -721,7 +721,7 @@ fun _lowered_compare {l:agz}{n:pos}{cells:$A.cells}{from:nat}{label:bytes}{count
     end
 
 (* LABELCMP(cells, from, count, label, same): the count bytes from `from` are the label (same) or are not *)
-#pub dataprop LABELCMP($A.cells, int, int, bytes, bool) =
+dataprop LABELCMP($A.cells, int, int, bytes, bool) =
   | {cells:$A.cells}{from,count:nat}{label:bytes} LABELCMP_is(cells, from, count, label, true) of LABELIS(cells, from, count, label)
   | {cells:$A.cells}{from,count:nat}{label:bytes} LABELCMP_diff(cells, from, count, label, false) of LABELDIFF(cells, from, count, label)
 

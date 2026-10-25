@@ -1,0 +1,3 @@
+function _static_one_too_few
+line 1
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Eapp(S2Ecst(add_int_int); S2Eintinf(1), S2Eintinf(1)); S2Eintinf(1)))

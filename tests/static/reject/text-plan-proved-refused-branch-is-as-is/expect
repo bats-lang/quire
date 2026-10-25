@@ -1,0 +1,3 @@
+function _static_refused_branch_is_as_is
+line 9
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Eintinf(2); S2Eintinf(0)))

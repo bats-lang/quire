@@ -1,0 +1,3 @@
+function _static_output_is_source
+line 2
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Evar(rest(_)); S2Evar(cells(_))))

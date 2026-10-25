@@ -2,6 +2,8 @@
 paths:
   - src/text_encoding.bats
   - src/text_tables.bats
+  - src/text_relation.bats
+  - src/text_labels.bats
   - src/language.bats
   - src/css_size.bats
   - src/css_cascade.bats
@@ -52,6 +54,50 @@ is the language in force there (`_lang_take`). In the text read aloud an element
 that says another language, inside a block, is a block of its own (`_runs_node`,
 `_block_lang_add`), said in its language (`script_lang`).
 `e2e/encodings.spec.js`, `e2e/languages.spec.js`.
+
+## What a text document needs, as a relation over its cells (#845, a piece of #608)
+
+`src/text_relation.bats` states `text_plan_of`'s decision as `TEXTOF(cells, plan, output)` over the
+cells of array's `barr` (`NTH`, `CLEN`) and proves a second implementation of it,
+`text_plan_proved`, which takes a `cborrow` and returns `(TEXTOF(cells, plan, out) | text_plan_ix(plan))`.
+`text_plan_of` (plain `borrow`, no cells in its type) stays beside it until `take_text` moves to the
+proved one (#848); the removal of the old form is its own p2 ticket. The two are separate code with the
+same structure; that they agree is neither proved nor yet tested: `e2e/encodings.spec.js` reads documents
+through the old one, and runs through the proved one when `take_text` moves (#848). What is proved is each relation's functionality and that the proved
+functions return the relation of the bytes they read.
+
+* **Cases** (the numbers are the plan's: 0 as it is, 1 made into UTF-8, 2 refused): as it is (UTF-8
+  with no byte order mark; ASCII only in an unsupported encoding; valid UTF-8 that says a single-byte
+  encoding, output = source); UTF-8 with a byte order mark (`DROPPED(cells, 3, rest)`, output = the
+  source without its three bytes, `CLEN(rest, n - 3)`); refused (no output: not UTF-8, only a byte order
+  mark, UTF-16 with nothing after its mark, an unsupported encoding that is not ASCII only). UTF-16 and
+  the single-byte encodings that need a conversion are `TOUT_later`: the relation says the plan is 1 and
+  names no output (#846, #847).
+* **Refusal is the claim that no reading exists.** `UTF8SCAN(cells, from, 0)` carries a run of whole
+  characters and then `UTF8BAD` (a lead byte that is none, or a byte it needs that is missing or not a
+  continuation, by the Unicode table of well-formed sequences: no overlong form, surrogate or code point
+  past U+10FFFF), and `utf8run_bad_not_complete` proves that no run of whole characters reaches the end
+  of the cells from there. `utf8scan_functional` makes the three verdicts (0 not UTF-8, 1 ASCII only, 2
+  other characters) exclusive.
+* **Detection** (`DETECT(cells, source, mark)`: the byte order mark, `<` and a null byte, the XML
+  declaration's `encoding` within 256 bytes, else UTF-8; a declaration that says UTF-16 of bytes that are
+  text is UTF-8) is built of `BLANKS`/`SKIP`, `NOQUOTE`/`FINDQUOTE`, `ISENCODING`, `DECLARED` and
+  `DECLSCAN`, each with its functional lemma, and `LABELSRC` for the label in the quotes.
+* **The labels** are a table made with the single-byte tables by `scripts/gen-encodings.py`
+  (`src/text_labels.bats`: `ENTRY(index, label, source)`, the entries 0 to `LABEL_COUNT - 1` in the order
+  `text_source_of_label` tries them). A label is `LABELIS` one entry, or `ALLDIFF` all of them
+  (unsupported, source 3); `alldiff_get` and `labelis_not_diff` make the two exclusive. The proved
+  `text_label_source` builds each entry as a `blist` and compares it, so it allocates a few small lists for
+  a document that declares an encoding. The generator is Python because it already was (quire#436) and holds
+  the label list: a second copy in bats would drift from it.
+* **The loops that run over a document are tail recursive** (`_utf8_scan_loop`, `_skip_blank_loop`,
+  `_find_quote_loop`): the proof is built at the end of the run it has read (`utf8run_snoc`, `blanks_snoc`,
+  `noquote_snoc`) and is erased, so a document of any size is read in constant stack. The loops that are
+  not (`_declscan_proved`, 257 deep at most; `_label_loop`, 77) are bounded by their metric.
+* **Not proved:** that `text_label_source` and `text_source_of_label` have one list of labels (both are
+  made from `scripts/gen-encodings.py`'s list), and that the proved functions decide as the old ones do (above).
+* The lemmas are mutation-checked (`tests/static/mutation_modules.txt`) and the relations have reject
+  fixtures (`tests/static/reject/text-*`).
 
 ## A book's place in its series is a position in hundredths (#434)
 
