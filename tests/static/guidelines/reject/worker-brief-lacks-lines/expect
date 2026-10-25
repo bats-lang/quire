@@ -1,0 +1,4 @@
+brief: it names worker.md and has no line "Design check: ..." (the ticket's declarations are pushed and read before the worker builds on them; orchestration.md, "Briefs and the machine")
+brief: it names worker.md and has no line "Push: ..." (the branch is pushed after every commit; orchestration.md, "Briefs and the machine")
+brief: it names worker.md and has no line "Expects: ..." (reject expects are blessed, not written by hand; orchestration.md, "Briefs and the machine")
+brief: it names worker.md and has no line "Sample: ..." (a local population run is a seeded sample; orchestration.md, "Briefs and the machine")

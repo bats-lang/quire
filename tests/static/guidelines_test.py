@@ -285,6 +285,38 @@ class Overlap(unittest.TestCase):
             self.assertIn(needle, read_root(*parts), parts)
 
 
+class WorkerLines(unittest.TestCase):
+    """The reject fixture tests/static/guidelines/reject/worker-brief-lacks-lines: its expect is the exact output."""
+    DIR = os.path.join(HERE, 'guidelines', 'reject', 'worker-brief-lacks-lines')
+
+    def fixture(self):
+        return [open(os.path.join(self.DIR, name)).read() for name in ('brief.txt', 'ticket.txt', 'expect')]
+
+    def test_the_fixture_is_refused_exactly_as_its_expect_says(self):
+        brief, ticket, expect = self.fixture()
+        self.assertEqual('\n'.join(gl.lint_brief(brief, ticket, PHRASES)) + '\n', expect)
+
+    def test_a_mutation_of_the_checker_that_drops_a_line_fails_the_fixture(self):
+        brief, ticket, expect = self.fixture()
+        for dropped in range(len(gl.WORKER_LINES)):
+            kept = gl.WORKER_LINES[:dropped] + gl.WORKER_LINES[dropped + 1:]
+            original, gl.WORKER_LINES = gl.WORKER_LINES, kept
+            try:
+                found = '\n'.join(gl.lint_brief(brief, ticket, PHRASES)) + '\n'
+            finally:
+                gl.WORKER_LINES = original
+            self.assertNotEqual(found, expect, f'dropping line {dropped} did not change the output')
+
+    def test_a_brief_with_every_line_passes(self):
+        brief, ticket, _ = self.fixture()
+        brief += 'Design check: first.\nPush: after every commit.\nExpects: blessed.\nSample: seeded.\n'
+        self.assertEqual(gl.lint_brief(brief, ticket, PHRASES), [])
+
+    def test_orchestration_md_carries_the_lines(self):
+        for line_form, line_name, _ in gl.WORKER_LINES:
+            self.assertIn('`' + line_name.split(' ')[0], read_root('.claude', 'orchestration.md'), line_name)
+
+
 class FakeApi:
     def __init__(self, comments=()):
         self.comments, self.calls = list(comments), []
