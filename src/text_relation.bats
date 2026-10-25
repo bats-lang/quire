@@ -760,3 +760,684 @@ fun _label_loop {l:agz}{n:pos}{cells:$A.cells}{from,count:nat | from + count <= 
 
 implement text_label_source {l}{n}{cells}{from,count} (length | data, n, from, count) =
   _label_loop(length, ALLDIFF_none() | data, n, from, count, 0)
+
+(* ISENCODING(cells, i, same): the bytes at i are "encoding" (same), or one of them is another byte *)
+#pub dataprop ISENCODING($A.cells, int, bool) =
+  | {cells:$A.cells}{i:nat}
+    ISENCODING_yes(cells, i, true) of ($A.NTH(cells, i, 101), $A.NTH(cells, i + 1, 110), $A.NTH(cells, i + 2, 99), $A.NTH(cells, i + 3, 111),
+      $A.NTH(cells, i + 4, 100), $A.NTH(cells, i + 5, 105), $A.NTH(cells, i + 6, 110), $A.NTH(cells, i + 7, 103))
+  | {cells:$A.cells}{i:nat}{b0,b1,b2,b3,b4,b5,b6,b7:int | b0 != 101 || b1 != 110 || b2 != 99 || b3 != 111 || b4 != 100 || b5 != 105 || b6 != 110 || b7 != 103}
+    ISENCODING_no(cells, i, false) of (BYTEAT(cells, i, b0), BYTEAT(cells, i + 1, b1), BYTEAT(cells, i + 2, b2), BYTEAT(cells, i + 3, b3),
+      BYTEAT(cells, i + 4, b4), BYTEAT(cells, i + 5, b5), BYTEAT(cells, i + 6, b6), BYTEAT(cells, i + 7, b7))
+
+(* Bytes are "encoding" or are not *)
+#pub prfun isencoding_functional {cells:$A.cells}{i:nat}{first,second:bool}
+  (ISENCODING(cells, i, first), ISENCODING(cells, i, second)): [first == second] void
+
+primplement isencoding_functional {cells}{i}{first,second} (one, other) =
+  case+ one of
+  | ISENCODING_yes(a0, a1, a2, a3, a4, a5, a6, a7) =>
+    (case+ other of
+     | ISENCODING_yes(_, _, _, _, _, _, _, _) => ()
+     | ISENCODING_no(c0, c1, c2, c3, c4, c5, c6, c7) => let
+         prval () = byteat_functional(BYTEAT_in(a0), c0)
+         prval () = byteat_functional(BYTEAT_in(a1), c1)
+         prval () = byteat_functional(BYTEAT_in(a2), c2)
+         prval () = byteat_functional(BYTEAT_in(a3), c3)
+         prval () = byteat_functional(BYTEAT_in(a4), c4)
+         prval () = byteat_functional(BYTEAT_in(a5), c5)
+         prval () = byteat_functional(BYTEAT_in(a6), c6)
+         prval () = byteat_functional(BYTEAT_in(a7), c7)
+       in () end)
+  | ISENCODING_no(c0, c1, c2, c3, c4, c5, c6, c7) =>
+    (case+ other of
+     | ISENCODING_yes(a0, a1, a2, a3, a4, a5, a6, a7) => let
+         prval () = byteat_functional(BYTEAT_in(a0), c0)
+         prval () = byteat_functional(BYTEAT_in(a1), c1)
+         prval () = byteat_functional(BYTEAT_in(a2), c2)
+         prval () = byteat_functional(BYTEAT_in(a3), c3)
+         prval () = byteat_functional(BYTEAT_in(a4), c4)
+         prval () = byteat_functional(BYTEAT_in(a5), c5)
+         prval () = byteat_functional(BYTEAT_in(a6), c6)
+         prval () = byteat_functional(BYTEAT_in(a7), c7)
+       in () end
+     | ISENCODING_no(_, _, _, _, _, _, _, _) => ())
+
+(* DECLARED(cells, i, source): the XML declaration's text from i, just past "encoding", says the source with that number: UTF-8
+   (0) when it says none (no "=", no quote, no closing quote), else what the label in the quotes names *)
+#pub dataprop DECLARED($A.cells, int, int) =
+  | {cells:$A.cells}{i,equals_at:nat | i <= equals_at}{value:int | value != 61}
+    DECLARED_no_equals(cells, i, 0) of (SKIP(cells, i, equals_at), BYTEAT(cells, equals_at, value))
+  | {cells:$A.cells}{i,equals_at,quote_at:nat | i <= equals_at; equals_at + 1 <= quote_at}{quote:int | quote != 34; quote != 39}
+    DECLARED_no_quote(cells, i, 0) of (SKIP(cells, i, equals_at), $A.NTH(cells, equals_at, 61), SKIP(cells, equals_at + 1, quote_at), BYTEAT(cells, quote_at, quote))
+  | {cells:$A.cells}{i,equals_at,quote_at,label_end:nat | i <= equals_at; equals_at + 1 <= quote_at; quote_at + 1 <= label_end}{quote:int | quote == 34 || quote == 39}
+    DECLARED_unclosed(cells, i, 0) of (SKIP(cells, i, equals_at), $A.NTH(cells, equals_at, 61), SKIP(cells, equals_at + 1, quote_at),
+      $A.NTH(cells, quote_at, quote), NOQUOTE(cells, quote, quote_at + 1, label_end), $A.CLEN(cells, label_end))
+  | {cells:$A.cells}{i,equals_at,quote_at,label_end:nat | i <= equals_at; equals_at + 1 <= quote_at; quote_at + 1 <= label_end}{quote:int | quote == 34 || quote == 39}{source:int}
+    DECLARED_label(cells, i, source) of (SKIP(cells, i, equals_at), $A.NTH(cells, equals_at, 61), SKIP(cells, equals_at + 1, quote_at),
+      $A.NTH(cells, quote_at, quote), NOQUOTE(cells, quote, quote_at + 1, label_end), $A.NTH(cells, label_end, quote),
+      LABELSRC(cells, quote_at + 1, label_end - (quote_at + 1), source))
+
+(* The cells have one length *)
+#pub prfun clen_functional {cells:$A.cells}{first,second:nat} ($A.CLEN(cells, first), $A.CLEN(cells, second)): [first == second] void
+
+prfun _clen_functional {cells:$A.cells}{first,second:nat} .<first>.
+  (one: $A.CLEN(cells, first), other: $A.CLEN(cells, second)): [first == second] void =
+  case+ one of
+  | $A.CLEN_nil() => (case+ other of $A.CLEN_nil() => ())
+  | $A.CLEN_cons(rest_one) => (case+ other of $A.CLEN_cons(rest_other) => _clen_functional(rest_one, rest_other))
+
+primplement clen_functional {cells}{first,second} (one, other) = _clen_functional(one, other)
+
+(* A search for a quote that ends at or past the end of the cells ended because the cells did *)
+#pub prfun findquote_open {cells:$A.cells}{quote:int}{from,to,n:nat | n <= to}
+  (FINDQUOTE(cells, quote, from, to), $A.CLEN(cells, n)): (NOQUOTE(cells, quote, from, to), $A.CLEN(cells, to))
+
+primplement findquote_open {cells}{quote}{from,to,n} (found, length) =
+  case+ found of
+  | FINDQUOTE_found(noquote, stop) =>
+    (case+ stop of
+     | QUOTESTOP_hit(hit) => let
+         prval () = $A.nth_in_len(hit, length)
+       in case+ contradiction{0}() of FALSEP_mk() =/=> () end
+     | QUOTESTOP_end(ended) => (noquote, ended))
+
+(* A search for a quote that ends before the end of the cells ended at the quote *)
+#pub prfun findquote_closed {cells:$A.cells}{quote:int}{from,to,n:nat | to < n}
+  (FINDQUOTE(cells, quote, from, to), $A.CLEN(cells, n)): (NOQUOTE(cells, quote, from, to), $A.NTH(cells, to, quote))
+
+primplement findquote_closed {cells}{quote}{from,to,n} (found, length) =
+  case+ found of
+  | FINDQUOTE_found(noquote, stop) =>
+    (case+ stop of
+     | QUOTESTOP_hit(hit) => (noquote, hit)
+     | QUOTESTOP_end(ended) => let
+         prval () = clen_functional(ended, length)
+       in case+ contradiction{0}() of FALSEP_mk() =/=> () end)
+
+(* Whether a byte is a quote *)
+fn _is_quote {value:int} (value: int value): bool(value == 34 || value == 39) =
+  if value = 34 then true else if value = 39 then true else false
+
+(* The encoding the XML declaration's text from i, just past "encoding", names (UTF-8 when it names none) *)
+fn _declared_proved {l:agz}{n:pos}{cells:$A.cells}{i:nat | i <= n}
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n, i: int i)
+  : [source:int] (DECLARED(cells, i, source) | label_source(source)) = let
+  val (skip_equals | equals_at) = text_skip_blank(length | data, n, i)
+  val (equals_byte | equals_value) = _byte_at(length | data, n, equals_at)
+in
+  if equals_value <> 61 then (DECLARED_no_equals(skip_equals, equals_byte) | LabelUtf8())
+  else let
+      prval equals_cell = byteat_nth(equals_byte)
+      prval () = $A.nth_in_len(equals_cell, length)
+      val (skip_quote | quote_at) = text_skip_blank(length | data, n, equals_at + 1)
+      val (quote_byte | quote) = _byte_at(length | data, n, quote_at)
+    in
+      if _is_quote(quote) then let
+          prval quote_cell = byteat_nth(quote_byte)
+          prval () = $A.nth_in_len(quote_cell, length)
+          val (found | label_end) = text_find_quote(length | data, n, quote_at + 1, quote)
+        in
+          if label_end >= n then let
+              prval (noquote, ended) = findquote_open(found, length)
+            in (DECLARED_unclosed(skip_equals, equals_cell, skip_quote, quote_cell, noquote, ended) | LabelUtf8()) end
+          else let
+              prval (noquote, closing) = findquote_closed(found, length)
+              val (label_source | source) = text_label_source(length | data, n, quote_at + 1, label_end - (quote_at + 1))
+            in (DECLARED_label(skip_equals, equals_cell, skip_quote, quote_cell, noquote, closing, label_source) | source) end
+        end
+      else (DECLARED_no_quote(skip_equals, equals_cell, skip_quote, quote_byte) | LabelUtf8())
+    end
+end
+
+(* A declaration's text names one source *)
+#pub prfun declared_functional {cells:$A.cells}{i:nat}{first,second:int}
+  (DECLARED(cells, i, first), DECLARED(cells, i, second)): [first == second] void
+
+primplement declared_functional {cells}{i}{first,second} (one, other) =
+  case+ one of
+  | DECLARED_no_equals(skip_one, byte_one) =>
+    (case+ other of
+     | DECLARED_no_equals(_, _) => ()
+     | DECLARED_no_quote(skip_other, equals_other, _, _) => let
+         prval () = skip_functional(skip_one, skip_other)
+       in byteat_functional(byte_one, BYTEAT_in(equals_other)) end
+     | DECLARED_unclosed(skip_other, equals_other, _, _, _, _) => let
+         prval () = skip_functional(skip_one, skip_other)
+       in byteat_functional(byte_one, BYTEAT_in(equals_other)) end
+     | DECLARED_label(skip_other, equals_other, _, _, _, _, _) => let
+         prval () = skip_functional(skip_one, skip_other)
+       in byteat_functional(byte_one, BYTEAT_in(equals_other)) end)
+  | DECLARED_no_quote(skip_one, equals_one, quote_skip_one, quote_byte_one) =>
+    (case+ other of
+     | DECLARED_no_equals(skip_other, byte_other) => let
+         prval () = skip_functional(skip_one, skip_other)
+       in byteat_functional(byte_other, BYTEAT_in(equals_one)) end
+     | DECLARED_no_quote(_, _, _, _) => ()
+     | DECLARED_unclosed(skip_other, _, quote_skip_other, quote_other, _, _) => let
+         prval () = skip_functional(skip_one, skip_other)
+         prval () = skip_functional(quote_skip_one, quote_skip_other)
+       in byteat_functional(quote_byte_one, BYTEAT_in(quote_other)) end
+     | DECLARED_label(skip_other, _, quote_skip_other, quote_other, _, _, _) => let
+         prval () = skip_functional(skip_one, skip_other)
+         prval () = skip_functional(quote_skip_one, quote_skip_other)
+       in byteat_functional(quote_byte_one, BYTEAT_in(quote_other)) end)
+  | DECLARED_unclosed(skip_one, equals_one, quote_skip_one, quote_one, noquote_one, ended_one) =>
+    (case+ other of
+     | DECLARED_no_equals(skip_other, byte_other) => let
+         prval () = skip_functional(skip_one, skip_other)
+       in byteat_functional(byte_other, BYTEAT_in(equals_one)) end
+     | DECLARED_no_quote(skip_other, _, quote_skip_other, quote_byte_other) => let
+         prval () = skip_functional(skip_one, skip_other)
+         prval () = skip_functional(quote_skip_one, quote_skip_other)
+       in byteat_functional(quote_byte_other, BYTEAT_in(quote_one)) end
+     | DECLARED_unclosed(_, _, _, _, _, _) => ()
+     | DECLARED_label(skip_other, _, quote_skip_other, quote_other, noquote_other, closing_other, _) => let
+         prval () = skip_functional(skip_one, skip_other)
+         prval () = skip_functional(quote_skip_one, quote_skip_other)
+         prval () = $A.nth_functional(quote_one, quote_other)
+         prval () = findquote_functional(FINDQUOTE_found(noquote_one, QUOTESTOP_end(ended_one)), FINDQUOTE_found(noquote_other, QUOTESTOP_hit(closing_other)))
+         prval () = $A.nth_in_len(closing_other, ended_one)
+       in () end)
+  | DECLARED_label(skip_one, equals_one, quote_skip_one, quote_one, noquote_one, closing_one, label_one) =>
+    (case+ other of
+     | DECLARED_no_equals(skip_other, byte_other) => let
+         prval () = skip_functional(skip_one, skip_other)
+       in byteat_functional(byte_other, BYTEAT_in(equals_one)) end
+     | DECLARED_no_quote(skip_other, _, quote_skip_other, quote_byte_other) => let
+         prval () = skip_functional(skip_one, skip_other)
+         prval () = skip_functional(quote_skip_one, quote_skip_other)
+       in byteat_functional(quote_byte_other, BYTEAT_in(quote_one)) end
+     | DECLARED_unclosed(skip_other, _, quote_skip_other, quote_other, noquote_other, ended_other) => let
+         prval () = skip_functional(skip_one, skip_other)
+         prval () = skip_functional(quote_skip_one, quote_skip_other)
+         prval () = $A.nth_functional(quote_one, quote_other)
+         prval () = findquote_functional(FINDQUOTE_found(noquote_one, QUOTESTOP_hit(closing_one)), FINDQUOTE_found(noquote_other, QUOTESTOP_end(ended_other)))
+         prval () = $A.nth_in_len(closing_one, ended_other)
+       in () end
+     | DECLARED_label(skip_other, _, quote_skip_other, quote_other, noquote_other, closing_other, label_other) => let
+         prval () = skip_functional(skip_one, skip_other)
+         prval () = skip_functional(quote_skip_one, quote_skip_other)
+         prval () = $A.nth_functional(quote_one, quote_other)
+         prval () = findquote_functional(FINDQUOTE_found(noquote_one, QUOTESTOP_hit(closing_one)), FINDQUOTE_found(noquote_other, QUOTESTOP_hit(closing_other)))
+       in labelsrc_functional(label_one, label_other) end)
+
+(* DECLSCAN(cells, i, source): looking from i for the XML declaration's encoding, up to its end ("?>"), the end of the cells
+   or 256 bytes: the source with that number (UTF-8, number 0, when it says none) *)
+#pub dataprop DECLSCAN($A.cells, int, int) =
+  | {cells:$A.cells}{i,n:nat | n <= i} DECLSCAN_end(cells, i, 0) of $A.CLEN(cells, n)
+  | {cells:$A.cells}{i:nat | 256 < i} DECLSCAN_limit(cells, i, 0)
+  | {cells:$A.cells}{i,n:nat | i < n; i <= 256}
+    DECLSCAN_mark(cells, i, 0) of ($A.CLEN(cells, n), $A.NTH(cells, i, 63), BYTEAT(cells, i + 1, 62))
+  | {cells:$A.cells}{i,n:nat | i < n; i <= 256}{source:int}
+    DECLSCAN_encoding(cells, i, source) of ($A.CLEN(cells, n), ISENCODING(cells, i, true), DECLARED(cells, i + 8, source))
+  | {cells:$A.cells}{i,n:nat | i < n; i <= 256}{first,second:int | first != 63 || second != 62}{source:int}
+    DECLSCAN_next(cells, i, source) of ($A.CLEN(cells, n), BYTEAT(cells, i, first), BYTEAT(cells, i + 1, second), ISENCODING(cells, i, false), DECLSCAN(cells, i + 1, source))
+
+prfun _declscan_functional {cells:$A.cells}{i:nat | i <= 257}{first,second:int} .<257 - i>.
+  (one: DECLSCAN(cells, i, first), other: DECLSCAN(cells, i, second)): [first == second] void =
+  case+ one of
+  | DECLSCAN_end(length_one) =>
+    (case+ other of
+     | DECLSCAN_end(_) => ()
+     | DECLSCAN_limit() => ()
+     | DECLSCAN_mark(length_other, _, _) => clen_functional(length_one, length_other)
+     | DECLSCAN_encoding(length_other, _, _) => clen_functional(length_one, length_other)
+     | DECLSCAN_next(length_other, _, _, _, _) => clen_functional(length_one, length_other))
+  | DECLSCAN_limit() =>
+    (case+ other of
+     | DECLSCAN_end(_) => ()
+     | DECLSCAN_limit() => ()
+     | DECLSCAN_mark(_, _, _) => ()
+     | DECLSCAN_encoding(_, _, _) => ()
+     | DECLSCAN_next(_, _, _, _, _) => ())
+  | DECLSCAN_mark(length_one, mark_one, close_one) =>
+    (case+ other of
+     | DECLSCAN_end(length_other) => clen_functional(length_one, length_other)
+     | DECLSCAN_limit() => ()
+     | DECLSCAN_mark(_, _, _) => ()
+     | DECLSCAN_encoding(_, encoding_other, _) =>
+       (case+ encoding_other of ISENCODING_yes(first_byte, _, _, _, _, _, _, _) => $A.nth_functional(mark_one, first_byte))
+     | DECLSCAN_next(_, first_other, second_other, _, _) => let
+         prval () = byteat_functional(first_other, BYTEAT_in(mark_one))
+         prval () = byteat_functional(second_other, close_one)
+       in () end)
+  | DECLSCAN_encoding(length_one, encoding_one, declared_one) =>
+    (case+ other of
+     | DECLSCAN_end(length_other) => clen_functional(length_one, length_other)
+     | DECLSCAN_limit() => ()
+     | DECLSCAN_mark(_, mark_other, _) =>
+       (case+ encoding_one of ISENCODING_yes(first_byte, _, _, _, _, _, _, _) => $A.nth_functional(mark_other, first_byte))
+     | DECLSCAN_encoding(_, _, declared_other) => declared_functional(declared_one, declared_other)
+     | DECLSCAN_next(_, _, _, plain_other, _) => isencoding_functional(encoding_one, plain_other))
+  | DECLSCAN_next(length_one, first_one, second_one, plain_one, rest_one) =>
+    (case+ other of
+     | DECLSCAN_end(length_other) => clen_functional(length_one, length_other)
+     | DECLSCAN_limit() => ()
+     | DECLSCAN_mark(_, mark_other, close_other) => let
+         prval () = byteat_functional(first_one, BYTEAT_in(mark_other))
+         prval () = byteat_functional(second_one, close_other)
+       in () end
+     | DECLSCAN_encoding(_, encoding_other, _) => isencoding_functional(plain_one, encoding_other)
+     | DECLSCAN_next(_, _, _, _, rest_other) => _declscan_functional(rest_one, rest_other))
+
+(* A scan of a declaration names one source *)
+#pub prfun declscan_functional {cells:$A.cells}{i:nat | i <= 257}{first,second:int}
+  (DECLSCAN(cells, i, first), DECLSCAN(cells, i, second)): [first == second] void
+
+primplement declscan_functional {cells}{i}{first,second} (one, other) = _declscan_functional(one, other)
+
+(* Whether the bytes at i are "encoding", with the proof of the answer *)
+fn _is_encoding_at {l:agz}{n:pos}{cells:$A.cells}{i:nat}
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n, i: int i)
+  : [same:bool] (ISENCODING(cells, i, same) | bool same) = let
+  val (p0 | a0) = _byte_at(length | data, n, i)
+  val (p1 | a1) = _byte_at(length | data, n, i + 1)
+  val (p2 | a2) = _byte_at(length | data, n, i + 2)
+  val (p3 | a3) = _byte_at(length | data, n, i + 3)
+  val (p4 | a4) = _byte_at(length | data, n, i + 4)
+  val (p5 | a5) = _byte_at(length | data, n, i + 5)
+  val (p6 | a6) = _byte_at(length | data, n, i + 6)
+  val (p7 | a7) = _byte_at(length | data, n, i + 7)
+in
+  if a0 = 101 then
+    (if a1 = 110 then
+       (if a2 = 99 then
+          (if a3 = 111 then
+             (if a4 = 100 then
+                (if a5 = 105 then
+                   (if a6 = 110 then
+                      (if a7 = 103 then
+                         (ISENCODING_yes(byteat_nth(p0), byteat_nth(p1), byteat_nth(p2), byteat_nth(p3), byteat_nth(p4), byteat_nth(p5), byteat_nth(p6), byteat_nth(p7)) | true)
+                       else (ISENCODING_no(p0, p1, p2, p3, p4, p5, p6, p7) | false))
+                    else (ISENCODING_no(p0, p1, p2, p3, p4, p5, p6, p7) | false))
+                 else (ISENCODING_no(p0, p1, p2, p3, p4, p5, p6, p7) | false))
+              else (ISENCODING_no(p0, p1, p2, p3, p4, p5, p6, p7) | false))
+           else (ISENCODING_no(p0, p1, p2, p3, p4, p5, p6, p7) | false))
+        else (ISENCODING_no(p0, p1, p2, p3, p4, p5, p6, p7) | false))
+     else (ISENCODING_no(p0, p1, p2, p3, p4, p5, p6, p7) | false))
+  else (ISENCODING_no(p0, p1, p2, p3, p4, p5, p6, p7) | false)
+end
+
+(* Whether two bytes are "?>" *)
+fn _is_close {first,second:int} (first: int first, second: int second): bool(first == 63 && second == 62) =
+  if first = 63 then (if second = 62 then true else false) else false
+
+fun _declscan_proved {l:agz}{n:pos}{cells:$A.cells}{i:nat | i <= 257} .<257 - i>.
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n, i: int i)
+  : [source:int] (DECLSCAN(cells, i, source) | label_source(source)) =
+  if i >= n then (DECLSCAN_end(length) | LabelUtf8())
+  else if i > 256 then (DECLSCAN_limit() | LabelUtf8())
+  else let
+    val (first_byte | first) = _byte_at(length | data, n, i)
+    val (second_byte | second) = _byte_at(length | data, n, i + 1)
+  in
+    if _is_close(first, second) then (DECLSCAN_mark(length, byteat_nth(first_byte), second_byte) | LabelUtf8())
+    else let
+        val (encoding | same) = _is_encoding_at(length | data, n, i)
+      in
+        if same then let
+            prval ISENCODING_yes(_, _, _, _, _, _, _, last_byte) = encoding
+            prval () = $A.nth_in_len(last_byte, length)
+            val (declared | source) = _declared_proved(length | data, n, i + 8)
+          in (DECLSCAN_encoding(length, encoding, declared) | source) end
+        else let
+            val (rest | source) = _declscan_proved(length | data, n, i + 1)
+          in (DECLSCAN_next(length, first_byte, second_byte, encoding, rest) | source) end
+      end
+  end
+
+(* DETECT(cells, source, mark): the document is in the source with that number (0 UTF-8, 1 UTF-16 little endian, 2 UTF-16 big
+   endian, 3 unsupported, 4 on a table), and begins with a byte order mark of `mark` bytes (0 when it has none): by its byte
+   order mark, by "<" and a null byte, by the encoding its XML declaration names, else UTF-8. A declaration that says UTF-16
+   of bytes that are text is wrong about itself and is read as UTF-8 *)
+#pub dataprop DETECT($A.cells, int, int) =
+  | {cells:$A.cells} DETECT_bom8(cells, 0, 3) of ($A.NTH(cells, 0, 239), $A.NTH(cells, 1, 187), $A.NTH(cells, 2, 191))
+  | {cells:$A.cells} DETECT_utf16le_mark(cells, 1, 2) of ($A.NTH(cells, 0, 255), $A.NTH(cells, 1, 254))
+  | {cells:$A.cells} DETECT_utf16be_mark(cells, 2, 2) of ($A.NTH(cells, 0, 254), $A.NTH(cells, 1, 255))
+  | {cells:$A.cells} DETECT_utf16le_bare(cells, 1, 0) of ($A.NTH(cells, 0, 60), $A.NTH(cells, 1, 0))
+  | {cells:$A.cells} DETECT_utf16be_bare(cells, 2, 0) of ($A.NTH(cells, 0, 0), $A.NTH(cells, 1, 60))
+  | {cells:$A.cells}{declared:int | declared == 1 || declared == 2}
+    DETECT_declared_text(cells, 0, 0) of ($A.NTH(cells, 0, 60), $A.NTH(cells, 1, 63), $A.NTH(cells, 2, 120), $A.NTH(cells, 3, 109), $A.NTH(cells, 4, 108), DECLSCAN(cells, 5, declared))
+  | {cells:$A.cells}{declared:int | declared != 1; declared != 2}
+    DETECT_declared(cells, declared, 0) of ($A.NTH(cells, 0, 60), $A.NTH(cells, 1, 63), $A.NTH(cells, 2, 120), $A.NTH(cells, 3, 109), $A.NTH(cells, 4, 108), DECLSCAN(cells, 5, declared))
+  | {cells:$A.cells}{b0,b1,b2,b3,b4:int | b0 != 239 || b1 != 187 || b2 != 191; b0 != 255 || b1 != 254; b0 != 254 || b1 != 255;
+        b0 != 60 || b1 != 0; b0 != 0 || b1 != 60; b0 != 60 || b1 != 63 || b2 != 120 || b3 != 109 || b4 != 108}
+    DETECT_plain(cells, 0, 0) of (BYTEAT(cells, 0, b0), BYTEAT(cells, 1, b1), BYTEAT(cells, 2, b2), BYTEAT(cells, 3, b3), BYTEAT(cells, 4, b4))
+
+
+(* A document is in one encoding *)
+#pub prfun detect_functional {cells:$A.cells}{first_source,second_source,first_mark,second_mark:int}
+  (DETECT(cells, first_source, first_mark), DETECT(cells, second_source, second_mark))
+  : [first_source == second_source && first_mark == second_mark] void
+
+primplement detect_functional {cells}{first_source,second_source,first_mark,second_mark} (one, other) =
+  case+ one of
+  | DETECT_bom8(one_0, one_1, one_2) =>
+    (case+ other of
+     | DETECT_bom8(other_0, other_1, other_2) => ()
+     | DETECT_utf16le_mark(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16be_mark(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16le_bare(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16be_bare(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_declared_text(other_0, other_1, other_2, other_3, other_4, other_scan) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_declared(other_0, other_1, other_2, other_3, other_4, other_scan) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_plain(other_0, other_1, other_2, other_3, other_4) => let
+         prval () = byteat_functional(other_0, BYTEAT_in(one_0))
+         prval () = byteat_functional(other_1, BYTEAT_in(one_1))
+         prval () = byteat_functional(other_2, BYTEAT_in(one_2))
+       in () end)
+  | DETECT_utf16le_mark(one_0, one_1) =>
+    (case+ other of
+     | DETECT_bom8(other_0, other_1, other_2) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16le_mark(other_0, other_1) => ()
+     | DETECT_utf16be_mark(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16le_bare(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16be_bare(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_declared_text(other_0, other_1, other_2, other_3, other_4, other_scan) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_declared(other_0, other_1, other_2, other_3, other_4, other_scan) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_plain(other_0, other_1, other_2, other_3, other_4) => let
+         prval () = byteat_functional(other_0, BYTEAT_in(one_0))
+         prval () = byteat_functional(other_1, BYTEAT_in(one_1))
+       in () end)
+  | DETECT_utf16be_mark(one_0, one_1) =>
+    (case+ other of
+     | DETECT_bom8(other_0, other_1, other_2) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16le_mark(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16be_mark(other_0, other_1) => ()
+     | DETECT_utf16le_bare(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16be_bare(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_declared_text(other_0, other_1, other_2, other_3, other_4, other_scan) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_declared(other_0, other_1, other_2, other_3, other_4, other_scan) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_plain(other_0, other_1, other_2, other_3, other_4) => let
+         prval () = byteat_functional(other_0, BYTEAT_in(one_0))
+         prval () = byteat_functional(other_1, BYTEAT_in(one_1))
+       in () end)
+  | DETECT_utf16le_bare(one_0, one_1) =>
+    (case+ other of
+     | DETECT_bom8(other_0, other_1, other_2) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16le_mark(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16be_mark(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16le_bare(other_0, other_1) => ()
+     | DETECT_utf16be_bare(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_declared_text(other_0, other_1, other_2, other_3, other_4, other_scan) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_declared(other_0, other_1, other_2, other_3, other_4, other_scan) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_plain(other_0, other_1, other_2, other_3, other_4) => let
+         prval () = byteat_functional(other_0, BYTEAT_in(one_0))
+         prval () = byteat_functional(other_1, BYTEAT_in(one_1))
+       in () end)
+  | DETECT_utf16be_bare(one_0, one_1) =>
+    (case+ other of
+     | DETECT_bom8(other_0, other_1, other_2) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16le_mark(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16be_mark(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16le_bare(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16be_bare(other_0, other_1) => ()
+     | DETECT_declared_text(other_0, other_1, other_2, other_3, other_4, other_scan) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_declared(other_0, other_1, other_2, other_3, other_4, other_scan) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_plain(other_0, other_1, other_2, other_3, other_4) => let
+         prval () = byteat_functional(other_0, BYTEAT_in(one_0))
+         prval () = byteat_functional(other_1, BYTEAT_in(one_1))
+       in () end)
+  | DETECT_declared_text(one_0, one_1, one_2, one_3, one_4, one_scan) =>
+    (case+ other of
+     | DETECT_bom8(other_0, other_1, other_2) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16le_mark(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16be_mark(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16le_bare(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16be_bare(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_declared_text(other_0, other_1, other_2, other_3, other_4, other_scan) => ()
+     | DETECT_declared(other_0, other_1, other_2, other_3, other_4, other_scan) => declscan_functional(one_scan, other_scan)
+     | DETECT_plain(other_0, other_1, other_2, other_3, other_4) => let
+         prval () = byteat_functional(other_0, BYTEAT_in(one_0))
+         prval () = byteat_functional(other_1, BYTEAT_in(one_1))
+         prval () = byteat_functional(other_2, BYTEAT_in(one_2))
+         prval () = byteat_functional(other_3, BYTEAT_in(one_3))
+         prval () = byteat_functional(other_4, BYTEAT_in(one_4))
+       in () end)
+  | DETECT_declared(one_0, one_1, one_2, one_3, one_4, one_scan) =>
+    (case+ other of
+     | DETECT_bom8(other_0, other_1, other_2) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16le_mark(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16be_mark(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16le_bare(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_utf16be_bare(other_0, other_1) => let
+         prval () = $A.nth_functional(one_0, other_0)
+         prval () = $A.nth_functional(one_1, other_1)
+       in () end
+     | DETECT_declared_text(other_0, other_1, other_2, other_3, other_4, other_scan) => declscan_functional(one_scan, other_scan)
+     | DETECT_declared(other_0, other_1, other_2, other_3, other_4, other_scan) => declscan_functional(one_scan, other_scan)
+     | DETECT_plain(other_0, other_1, other_2, other_3, other_4) => let
+         prval () = byteat_functional(other_0, BYTEAT_in(one_0))
+         prval () = byteat_functional(other_1, BYTEAT_in(one_1))
+         prval () = byteat_functional(other_2, BYTEAT_in(one_2))
+         prval () = byteat_functional(other_3, BYTEAT_in(one_3))
+         prval () = byteat_functional(other_4, BYTEAT_in(one_4))
+       in () end)
+  | DETECT_plain(one_0, one_1, one_2, one_3, one_4) =>
+    (case+ other of
+     | DETECT_bom8(other_0, other_1, other_2) => let
+         prval () = byteat_functional(one_0, BYTEAT_in(other_0))
+         prval () = byteat_functional(one_1, BYTEAT_in(other_1))
+         prval () = byteat_functional(one_2, BYTEAT_in(other_2))
+       in () end
+     | DETECT_utf16le_mark(other_0, other_1) => let
+         prval () = byteat_functional(one_0, BYTEAT_in(other_0))
+         prval () = byteat_functional(one_1, BYTEAT_in(other_1))
+       in () end
+     | DETECT_utf16be_mark(other_0, other_1) => let
+         prval () = byteat_functional(one_0, BYTEAT_in(other_0))
+         prval () = byteat_functional(one_1, BYTEAT_in(other_1))
+       in () end
+     | DETECT_utf16le_bare(other_0, other_1) => let
+         prval () = byteat_functional(one_0, BYTEAT_in(other_0))
+         prval () = byteat_functional(one_1, BYTEAT_in(other_1))
+       in () end
+     | DETECT_utf16be_bare(other_0, other_1) => let
+         prval () = byteat_functional(one_0, BYTEAT_in(other_0))
+         prval () = byteat_functional(one_1, BYTEAT_in(other_1))
+       in () end
+     | DETECT_declared_text(other_0, other_1, other_2, other_3, other_4, other_scan) => let
+         prval () = byteat_functional(one_0, BYTEAT_in(other_0))
+         prval () = byteat_functional(one_1, BYTEAT_in(other_1))
+         prval () = byteat_functional(one_2, BYTEAT_in(other_2))
+         prval () = byteat_functional(one_3, BYTEAT_in(other_3))
+         prval () = byteat_functional(one_4, BYTEAT_in(other_4))
+       in () end
+     | DETECT_declared(other_0, other_1, other_2, other_3, other_4, other_scan) => let
+         prval () = byteat_functional(one_0, BYTEAT_in(other_0))
+         prval () = byteat_functional(one_1, BYTEAT_in(other_1))
+         prval () = byteat_functional(one_2, BYTEAT_in(other_2))
+         prval () = byteat_functional(one_3, BYTEAT_in(other_3))
+         prval () = byteat_functional(one_4, BYTEAT_in(other_4))
+       in () end
+     | DETECT_plain(other_0, other_1, other_2, other_3, other_4) => ())
+
+(* Whether two bytes are the two given *)
+fn _is_pair {first,second,expected_first,expected_second:int}
+  (first: int first, second: int second, expected_first: int expected_first, expected_second: int expected_second)
+  : bool(first == expected_first && second == expected_second) =
+  if first = expected_first then (if second = expected_second then true else false) else false
+
+(* Whether three bytes are 239, 187, 191 *)
+fn _is_utf8_mark {b0,b1,b2:int} (b0: int b0, b1: int b1, b2: int b2): bool(b0 == 239 && b1 == 187 && b2 == 191) =
+  if b0 = 239 then (if b1 = 187 then (if b2 = 191 then true else false) else false) else false
+
+(* Whether five bytes are "<?xml" *)
+fn _is_xml_start {b0,b1,b2,b3,b4:int} (b0: int b0, b1: int b1, b2: int b2, b3: int b3, b4: int b4)
+  : bool(b0 == 60 && b1 == 63 && b2 == 120 && b3 == 109 && b4 == 108) =
+  if b0 = 60 then
+    (if b1 = 63 then (if b2 = 120 then (if b3 = 109 then (if b4 = 108 then true else false) else false) else false) else false)
+  else false
+
+(* Whether a source is UTF-16, in either order *)
+fn _is_utf16 {source:int} (source: label_source(source)): bool(source == 1 || source == 2) =
+  case+ source of
+  | LabelUtf16Le() => true
+  | LabelUtf16Be() => true
+  | LabelUtf8() => false
+  | LabelUnsupported() => false
+  | LabelCp1250() => false
+  | LabelCp1251() => false
+  | LabelCp1252() => false
+  | LabelCp1253() => false
+  | LabelCp1254() => false
+  | LabelCp1255() => false
+  | LabelCp1256() => false
+  | LabelCp1257() => false
+  | LabelIso88592() => false
+  | LabelIso88595() => false
+  | LabelIso88597() => false
+  | LabelIso88598() => false
+  | LabelIso885915() => false
+  | LabelKoi8r() => false
+
+(* How the document is encoded, and how many bytes at its start are a byte order mark, with the proof of it *)
+#pub fn text_detect {l:agz}{n:pos}{cells:$A.cells}
+  (length: $A.CLEN(cells, n) | data: !$A.cborrow(l, n, cells), n: int n)
+  : [source,mark:int] (DETECT(cells, source, mark) | label_source(source), int mark)
+
+implement text_detect {l}{n}{cells} (length | data, n) = let
+  val (p0 | b0) = _byte_at(length | data, n, 0)
+  val (p1 | b1) = _byte_at(length | data, n, 1)
+  val (p2 | b2) = _byte_at(length | data, n, 2)
+  val (p3 | b3) = _byte_at(length | data, n, 3)
+  val (p4 | b4) = _byte_at(length | data, n, 4)
+in
+  if _is_utf8_mark(b0, b1, b2) then (DETECT_bom8(byteat_nth(p0), byteat_nth(p1), byteat_nth(p2)) | LabelUtf8(), 3)
+  else if _is_pair(b0, b1, 255, 254) then (DETECT_utf16le_mark(byteat_nth(p0), byteat_nth(p1)) | LabelUtf16Le(), 2)
+  else if _is_pair(b0, b1, 254, 255) then (DETECT_utf16be_mark(byteat_nth(p0), byteat_nth(p1)) | LabelUtf16Be(), 2)
+  else if _is_pair(b0, b1, 60, 0) then (DETECT_utf16le_bare(byteat_nth(p0), byteat_nth(p1)) | LabelUtf16Le(), 0)
+  else if _is_pair(b0, b1, 0, 60) then (DETECT_utf16be_bare(byteat_nth(p0), byteat_nth(p1)) | LabelUtf16Be(), 0)
+  else if _is_xml_start(b0, b1, b2, b3, b4) then let
+      prval n0 = byteat_nth(p0)
+      prval n1 = byteat_nth(p1)
+      prval n2 = byteat_nth(p2)
+      prval n3 = byteat_nth(p3)
+      prval n4 = byteat_nth(p4)
+      prval () = $A.nth_in_len(n4, length)
+      val (scan | declared) = _declscan_proved(length | data, n, 5)
+    in
+      (* bytes that are text say UTF-16: they are UTF-8 (or ASCII) that is wrong about itself *)
+      if _is_utf16(declared) then (DETECT_declared_text(n0, n1, n2, n3, n4, scan) | LabelUtf8(), 0)
+      else (DETECT_declared(n0, n1, n2, n3, n4, scan) | declared, 0)
+    end
+  else (DETECT_plain(p0, p1, p2, p3, p4) | LabelUtf8(), 0)
+end
