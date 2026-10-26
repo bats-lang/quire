@@ -42,7 +42,7 @@ export const tableAlignmentBook = { valid: true, opts: {
       body: `<h1>Equations</h1>\n<p>aligned-label ${filler}</p>\n${aligned}\n<p>cases-label ${filler}</p>\n${cases}\n<p>equations-after ${filler}</p>` },
     { head: sheetLink,
       body: '<h1>Ledger</h1>\n<table class="ledger"><tbody>' +
-        '<tr><td class="amount">1</td><td class="name">Apples</td><td style="text-align:right">left over</td></tr>' +
+        '<tr><td class="amount">1</td><td class="name">Apples</td><td style="text-align:right">ok</td></tr>' +
         '<tr><td class="amount">1000000</td><td class="name">Pears and plums together</td><td style="text-align:right">in stock now</td></tr>' +
         `</tbody></table>\n<p class="right" id="right">sheet-paragraph ${filler}</p>` },
   ] } };
