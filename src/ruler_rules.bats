@@ -1,7 +1,4 @@
-(* ruler_rules -- the reading ruler's rules (keyword: reading ruler, #566): the band over or under
-   the line, and the veils over what Shade and Lightbox dim, each colour written only under its proof:
-   the underline in the text's own colour (EDGEP), the grey bar a ground the book's text stays legible
-   on (RULED), a veil of the page's ground only at the strength proven for the theme (DIMMED) *)
+(* ruler_rules -- the reading ruler's rules, each colour under its proof: EDGEP, RULED, DIMMED (keyword: reading ruler, #566) *)
 
 #target wasm begin
 
@@ -23,8 +20,7 @@ fn dim_selector {number:palette} (which: palette_theme(number)): [length:pos | l
   | Night() => ".th-night .ruler-veil"
   | Grey() => ".th-grey .ruler-veil"
 
-(* The veil in a theme: the page's ground at strength percent, with no text, written only at a strength
-   proven to leave the dimmed lines legible there (DIMMED) *)
+(* The veil in a theme: the page's ground at strength percent, with no text, written only at a strength proven to leave the dimmed lines legible there (DIMMED) *)
 fn dim_rule {number:palette}{strength:nat | strength <= 100}{left:nat | left >= 120}
   (dimmed: DIMMED(number, strength) | sheet: sheet(left, false, false), which: palette_theme(number), strength: int strength)
   : [after:nat | after >= left - 120] sheet(after, false, false) = let
@@ -34,9 +30,7 @@ fn dim_rule {number:palette}{strength:nat | strength <= 100}{left:nat | left >= 
   val () = raw(sheet, "%,transparent);")
 in close(sheet) end
 
-(* The band and the veils are laid over the text area (inside the paddings the page keeps clear, so the
-   footer is never dimmed), by the placement the reader writes (reading_ruler.bats, style-ruler); the
-   style chosen is the class of ruler. Neither takes a tap *)
+(* The band and the veils are laid over the text area (inside the paddings the page keeps clear, so the footer is never dimmed), by the placement the reader writes (reading_ruler.bats, style-ruler); the style chosen is the class of ruler. Neither takes a tap *)
 fn ruler_rules {left:nat | left >= 1403} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1403] sheet(after, false, false) = let
   val sheet = rule(sheet, ".ruler")
   val sheet = lay(sheet, Display(), "none")
@@ -83,8 +77,7 @@ fn ruler_rules {left:nat | left >= 1403} (sheet: sheet(left, false, false)): [af
   val sheet = dim_rule(D_grey_30 | sheet, Grey(), 30)
 in sheet end
 
-(* The ruler's rules are a style element of their own (style-ruler-rules), as the sizes' are, so the
-   main sheet keeps its room *)
+(* The ruler's rules are a style element of their own (style-ruler-rules), as the sizes' are, so the main sheet keeps its room *)
 #pub fn ruler_style (): [l:agz][k:nat | k < 65536] @($A.arr(byte, l, $B.BUILDER_CAP), int k)
 
 implement ruler_style () = let

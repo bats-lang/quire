@@ -1,10 +1,4 @@
-(* reading_ruler -- the reading ruler's line (keyword: reading ruler, #566)
-
-   Where the ruler is: a line of the page, found from the point it is asked for (the first line of the
-   page, the line a tap or a finger is on, the line a sentence being said starts on) by the caret the
-   browser gives there and the place of that character, and the band written as CSS in style-ruler
-   over the text area (ruler_rules.bats gives the style its look). The rules of the area are in
-   .claude/rules/reader-layout.md *)
+(* reading_ruler -- where the reading ruler's line is and its band, found by the caret at a point (keyword: reading ruler, #566) *)
 
 #target wasm begin
 
@@ -22,9 +16,7 @@ staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 
-(* The reader's page as the ruler sees it, told by the reader at each page it shows: paged across (as
-   the book reads), scrolled down, a book set vertically (its lines are columns, read from the right
-   or from the left), or a page of lines the ruler does not hold (a fixed layout) *)
+(* The reader's page as the ruler sees it, told by the reader at each page it shows: paged across (as the book reads), scrolled down, a book set vertically (its lines are columns, read from the right or from the left), or a page of lines the ruler does not hold (a fixed layout) *)
 #pub datatype ruler_view = RulerPaged | RulerPagedBack | RulerScrolled | RulerDownRight | RulerDownLeft | RulerNone
 
 (* A page is shown: the ruler goes to its first line (a scrolled page keeps the ruler at its height) *)
@@ -42,8 +34,7 @@ staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 (* A tap at x, y (viewport px): whether it moved the ruler to the line it is on, off the band *)
 #pub fn ruler_tap (x: int, y: int): bool
 
-(* A raw pointer record of the reader (kind, pointer id, place in sixteenths of px, pointer type):
-   whether the ruler took it, a finger dragging the band *)
+(* A raw pointer record of the reader (kind, pointer id, place in sixteenths of px, pointer type): whether the ruler took it, a finger dragging the band *)
 #pub fn ruler_pointer (kind: int, id: int, x: int, y: int, pointer_type: int): bool
 
 val _view = ref<ruler_view>(RulerNone())
@@ -101,12 +92,9 @@ fn _class_apply (view: ruler_view): void =
      | RulerLightbox() => ui_attr("ruler", AClass, "ruler ruler-lightbox")
      | RulerOff() => ui_attr("ruler", AClass, "ruler"))
 
-(* ============================================================
-   Where the line is
-   ============================================================ *)
+(* ============================================================ Where the line is ============================================================ *)
 
-(* The text area as last measured (viewport px): the ruler's element, which the reader's paddings
-   inset from the page *)
+(* The text area as last measured (viewport px): the ruler's element, which the reader's paddings inset from the page *)
 val _area_x = ref<int>(0)
 val _area_y = ref<int>(0)
 val _area_width = ref<int>(0)
@@ -159,24 +147,20 @@ fn _character_place {node:int} (node: int node, offset: int): bool =
     | $DR.NoElement() => false
   end
 
-(* The line the ruler is on: where its band starts along the lines' stacking (down the page; across it
-   for columns), in viewport px, and how far it reaches; the lines' places kept for the next time *)
+(* The line the ruler is on: where its band starts along the lines' stacking (down the page; across it for columns), in viewport px, and how far it reaches; the lines' places kept for the next time *)
 val _placed = ref<bool>(false)
 val _band_start = ref<int>(0)
 val _band_size = ref<int>(0)
 
-(* The middle of the line last found, and a point on it, for the page to be asked again at: a scrolled
-   page keeps the ruler at its height *)
+(* The middle of the line last found, and a point on it, for the page to be asked again at: a scrolled page keeps the ruler at its height *)
 val _centre = ref<int>(0)
 val _probe_x = ref<int>(0)
 val _probe_y = ref<int>(0)
 
-(* The middle of a line whose first character's box starts at start: a box as high as the text is
-   wide in em, and the line's height around it *)
+(* The middle of a line whose first character's box starts at start: a box as high as the text is wide in em, and the line's height around it *)
 fn _centre_of (start: int): int = start + (set_size_get() * 5) / 8
 
-(* Writes the CSS of the band and of the veils for the line whose middle is centre, at cross (its
-   place across the lines) *)
+(* Writes the CSS of the band and of the veils for the line whose middle is centre, at cross (its place across the lines) *)
 fun _put_from {l:agz}{n:pos}{text_len:nat}{at:nat | at + text_len <= n}{i:nat | i <= text_len} .<text_len - i>.
   (buf: !$A.arr(byte, l, n), at: int at, text: string text_len, text_len: int text_len, i: int i): int(at + text_len) =
   if i >= text_len then at + text_len
@@ -234,8 +218,7 @@ fn _down_pieces {l:agz}{at:nat | at + 200 <= 640}
     val next = _put_text(buf, next, "px}#ruler-after{top:0;bottom:0;right:0;left:")
   in _put_int(buf, next, left + size) end
 
-(* The band of size px starting at start (viewport) in a vertical page: its columns are read from the
-   right (the band's before is at its right) or from the left *)
+(* The band of size px starting at start (viewport) in a vertical page: its columns are read from the right (the band's before is at its right) or from the left *)
 fn _style_down (start: int, size: int, from_right: bool): void = let
   val left = start - !_area_x
   val behind = (if left > 0 then left else 0): int
@@ -248,8 +231,7 @@ fn _style_down (start: int, size: int, from_right: bool): void = let
   val next = _put_text(buf, next, "px}")
 in ui_text_buf("style-ruler", buf, next) end
 
-(* The ruler on the line whose middle is centre (viewport), at cross across the lines: the band of
-   the style's lines, from this line on in the way the book is read *)
+(* The ruler on the line whose middle is centre (viewport), at cross across the lines: the band of the style's lines, from this line on in the way the book is read *)
 fn _line_put (view: ruler_view, centre: int, cross: int): void = let
   val line = _line_px()
   val size = line * _band_lines()
@@ -286,9 +268,7 @@ in
     in _style_across(start, size, cross) end
 end
 
-(* Whether a line was found at x, y: its middle and its place across the lines are then in the refs
-   below. The caret the browser puts at the point is on the line the point is on, and the character's
-   box starts at the line's glyphs *)
+(* Whether a line was found at x, y: its middle and its place across the lines are then in the refs below. The caret the browser puts at the point is on the line the point is on, and the character's box starts at the line's glyphs *)
 val _found_centre = ref<int>(0)
 val _found_cross = ref<int>(0)
 
@@ -327,9 +307,7 @@ fn _place_at (view: ruler_view, x: int, y: int): bool =
   in true end
   else false
 
-(* The first line of the page: down from the area's top (across from the side the lines begin at, for
-   columns), a few half-lines at a time, until a line is there. Where there is none (a page of a picture
-   alone) the ruler is not shown *)
+(* The first line of the page: down from the area's top (across from the side the lines begin at, for columns), a few half-lines at a time, until a line is there. Where there is none (a page of a picture alone) the ruler is not shown *)
 fun _first_from {tries:nat} .<tries>. (view: ruler_view, x: int, y: int, step_x: int, step_y: int, tries: int tries): bool =
   if _place_at(view, x, y) then true
   else if tries <= 0 then false
@@ -363,8 +341,7 @@ in
   in _style_clear() end
 end
 
-(* The line kept, asked for again: a scrolled page moved under it, so the line now at the same height.
-   A line the page's margin cuts is not one to hold the eye: the ruler goes to the whole line beside it *)
+(* The line kept, asked for again: a scrolled page moved under it, so the line now at the same height. A line the page's margin cuts is not one to hold the eye: the ruler goes to the whole line beside it *)
 fn _line_again (view: ruler_view): void =
   if ~(_area_measure()) then ()
   else if _place_at(view, !_probe_x, !_probe_y) then let
@@ -377,9 +354,7 @@ fn _line_again (view: ruler_view): void =
     end
   else _first_line(view)
 
-(* ============================================================
-   What the reader and the settings ask
-   ============================================================ *)
+(* ============================================================ What the reader and the settings ask ============================================================ *)
 
 implement ruler_page_shown (view) = let
   val () = ruler_view_set(view)
@@ -469,8 +444,7 @@ implement ruler_pointer (kind, id, x, y, pointer_type) = let
   val py = y / 16
 in
   if kind = 0 then
-    (* a finger or a pen goes down on the band of a page turned in pages: it drags the band, which a
-       mouse does not (its drag selects text) and a scrolled page does not (its drag scrolls) *)
+    (* a finger or a pen goes down on the band of a page turned in pages: it drags the band, which a mouse does not (its drag selects text) and a scrolled page does not (its drag scrolls) *)
     (if pointer_type = 1 then false
      else if !_drag_id <> NO_DRAG then false
      else if ~(_drawn(view)) then false

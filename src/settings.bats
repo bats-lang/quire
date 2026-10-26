@@ -357,12 +357,10 @@ implement sizes_code (choice) = _sizes_code(choice)
 #pub fn sizes_of_code (code: int): publisher_sizes
 implement sizes_of_code (code) = _sizes_of_code(code)
 
-(* The reading ruler (quire#566), a band that holds the eye to one line, in the styles of Niklaus et al.'s
-   Digital Reading Rulers (CHI 2023): an underline, a grey bar, a shade over what was read, a lightbox
-   dimming all but the line. Off to begin with; the device's own *)
+(* The reading ruler's style, a band that holds the eye to one line: off to begin with, the device's own (keyword: reading ruler, #566) *)
 #pub datatype reading_ruler = RulerOff | RulerUnderline | RulerGreyBar | RulerShade | RulerLightbox
 
-(* The lines the grey bar and the lightbox hold bright: one, three or five, as Immersive Reader's line focus *)
+(* The lines the grey bar and the lightbox hold bright (keyword: reading ruler) *)
 #pub datatype ruler_lines = RulerOneLine | RulerThreeLines | RulerFiveLines
 
 fn _ruler_code (choice: reading_ruler): [code:nat | code <= 4] int code =

@@ -648,8 +648,7 @@ fn _reader (): void = let
   (* a bookmarked page's mark in the page's top-right corner, which
      shows while the bars are hidden (annot_star, #388): drawn, not read
      out (the star in the top bar says it) *)
-  (* the reading ruler (reading_ruler.bats): a band and the veils over the text area, drawn, never read
-     out, taking no tap *)
+  (* the reading ruler (keyword: reading ruler): drawn, never read out, taking no tap *)
   val () = ui_el("reader", "ruler", TDiv, "ruler")
   val () = ui_attr("ruler", AHidden, "true")
   val () = ui_el("ruler", "ruler-before", TDiv, "ruler-veil ruler-before")
@@ -936,9 +935,7 @@ fn _settings (): void = let
   val () = _switch_row("typography-look", "publisher-sizes-row", "publisher-sizes-switch", "publisher-sizes-track",
     "publisher-sizes-knob", "publisher-sizes-about", "Respect the publisher's sizes",
     "Off, your text size is the book's text size and its other sizes follow in proportion. On, the book keeps the sizes its publisher chose")
-  (* the reading ruler (quire#566): a band over the text that holds the eye to one line, in the styles
-     of Digital Reading Rulers; how tall it is, only where a height is the style's (the grey bar and
-     the lightbox) *)
+  (* the reading ruler's style, and its height where the style has one (keyword: reading ruler, #566) *)
   val () = ui_el("typography-look", "ruler-row", TDiv, "srow")
   val () = ui_el("ruler-row", "ruler-label", TSpan, "slabel")
   val () = ui_text("ruler-label", "Reading ruler")

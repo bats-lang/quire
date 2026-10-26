@@ -256,8 +256,7 @@ implement role_name (role) =
       SHADED(t, FG, HL, strength, 45), SHADED(t, FG, HL2, strength, 45),
       SHADED(t, MARKFG, MARK, strength, 45))
 
-(* RULED(ground): a ground under the book's text, the grey bar of the reading ruler, leaves the body's text
-   at 7:1 (HARMONY's at rest) and a link at 4.5:1 (SURF's), not vibrating, in every theme (keyword: reading ruler) *)
+(* RULED(ground): a ground under the book's text, the grey bar of the reading ruler, leaves the body's text at 7:1 (HARMONY's at rest) and a link at 4.5:1 (SURF's), not vibrating, in every theme (keyword: reading ruler) *)
 #pub dataprop RULED(colour_role) =
   | {ground:colour_role}
     {text_light,link_light,ground_light,
@@ -277,9 +276,7 @@ implement role_name (role) =
        PAL(PaletteGrey, FG, text_grey), PAL(PaletteGrey, ACCENT, link_grey), PAL(PaletteGrey, ground, ground_grey),
        $CT.CONTRAST(text_grey, ground_grey, 70), $H.NOVIB(text_grey, ground_grey), $CT.CONTRAST(link_grey, ground_grey, 45))
 
-(* BLEND(c, v, strength, s): colour c under a veil of colour v at strength percent is s, each channel
-   rounded (the page turn's SHADE is the veil black); DIMS(t, text, ground, strength, k): in theme t, text
-   and ground both under a veil of the page's ground at that strength still reach k / 10 *)
+(* BLEND(c, v, strength, s): colour c under a veil of colour v at strength percent is s, each channel rounded (the page turn's SHADE is the veil black); DIMS(t, text, ground, strength, k): in theme t, text and ground both under a veil of the page's ground at that strength still reach k / 10 *)
 #pub dataprop BLEND(int, int, int, int) =
   | {r,g,b,vr,vg,vb,blended_r,blended_g,blended_b:nat | r < 256; g < 256; b < 256; vr < 256; vg < 256; vb < 256}{strength:nat | strength <= 100}
     {rl,rh,gl,gh,bl,bh,vrl,vrh,vgl,vgh,vbl,vbh,srl,srh,sgl,sgh,sbl,sbh:int |
@@ -298,9 +295,7 @@ implement role_name (role) =
       BLEND(text_colour, page_colour, strength, text_dimmed), BLEND(ground_colour, page_colour, strength, ground_dimmed),
       $CT.CONTRAST(text_dimmed, ground_dimmed, k))
 
-(* DIMMED(t, strength): the lines the reading ruler's Shade and Lightbox dim, under a veil of the page's
-   ground at strength percent, stay legible in theme t: the text at 4.5:1 on the page, a link at 3:1 and
-   the text on a highlight at 3:1; a veil is written only at a strength so proven (keyword: reading ruler) *)
+(* DIMMED(t, strength): the lines the reading ruler's Shade and Lightbox dim, under a veil of the page's ground at strength percent, stay legible in theme t: the text at 4.5:1 on the page, a link at 3:1 and the text on a highlight at 3:1; a veil is written only at a strength so proven (keyword: reading ruler) *)
 #pub dataprop DIMMED(palette, int) =
   | {t:palette}{strength:int}
     DIMMEDc(t, strength) of (
