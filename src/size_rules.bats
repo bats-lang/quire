@@ -17,7 +17,7 @@
    The same style element holds the alignments (keyword: publisher
    alignment, #868): a part of a table the publisher aligned has a
    data-align of left, right or center (reader.bats's _align_mark), and the
-   rule for it sets the text-align (the plain keyword, then the -webkit- form); an element has one data-align,
+   rule for it sets the text-align (text-align, then justify-items); an element has one data-align,
    so no two of the rules reach the same element *)
 
 #target wasm begin
@@ -151,20 +151,21 @@ fun _rules_from {left:nat}{step:int | 10 <= step; step <= 61 ; 69 * (61 - step) 
   in _rules_from(sheet, step + 1) end
 
 (* The rules of the alignments: left, right and center, each a selector and
-   the plain keyword, then Blink's -webkit- form (a MathML cell takes only
-   that one, and an engine that does not know it keeps the plain one) *)
-fn _align_rules {left:nat | 256 <= left} (sheet: sheet(left, false, false)): [after:nat | after >= left - 256] sheet(after, false, false) = let
+   the text-align a table cell takes, then the justify-items a MathML cell
+   takes (Chromium leaves the content of an mtd where it was for a plain
+   text-align; the book's own sheet writes both) *)
+fn _align_rules {left:nat | 336 <= left} (sheet: sheet(left, false, false)): [after:nat | after >= left - 336] sheet(after, false, false) = let
   val sheet = rule(sheet, ".caf [data-align=\"left\"]")
   val sheet = lay(sheet, TextAlign(), "left")
-  val sheet = lay(sheet, TextAlign(), "-webkit-left")
+  val sheet = lay(sheet, JustifyItems(), "start")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf [data-align=\"right\"]")
   val sheet = lay(sheet, TextAlign(), "right")
-  val sheet = lay(sheet, TextAlign(), "-webkit-right")
+  val sheet = lay(sheet, JustifyItems(), "end")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf [data-align=\"center\"]")
   val sheet = lay(sheet, TextAlign(), "center")
-  val sheet = lay(sheet, TextAlign(), "-webkit-center")
+  val sheet = lay(sheet, JustifyItems(), "center")
   val sheet = close(sheet)
 in sheet end
 

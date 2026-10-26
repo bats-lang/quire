@@ -344,7 +344,7 @@ fn check_aligns (): void = let
   (* columns by their place in the row, the more specific rule winning, whitespace between the cells not counted *)
   val map = align_run(
     "<table>\n<tr>\n<td>a</td>\n<td>b</td>\n</tr>\n<tr><td>c</td><td>d</td></tr></table><p>x</p>",
-    "td:nth-child(odd){text-align:right} td:nth-child(even){text-align:left} table td:last-child{text-align:-webkit-center} p{text-align:right}")
+    "td:nth-child(odd){text-align:right} td:nth-child(even){text-align:left} table td:last-child{text-align:center} p{text-align:right}")
   val () = expect_int(align_map_count(map), 4, "aligns: four cells, no paragraph")
   val () = expect_text(align_nth(map, 0), "right", "aligns: first column")
   val () = expect_text(align_nth(map, 1), "center", "aligns: last child beats even")

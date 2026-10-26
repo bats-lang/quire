@@ -1,46 +1,23 @@
-// A book whose style sheet aligns the cells of tables (#868): the columns of
-// an aligned equation, the columns of a cases equation, and the cells of a
-// plain table, each by a rule of the book's own sheet or a style attribute.
-// Quire keeps the alignment of table parts only (keyword: publisher
-// alignment); every other rule of the sheet stays unapplied (#411).
+// A book whose style sheet aligns the cells of a plain table (#868), for the
+// case that is not mathematics: a table of a ledger, its columns aligned by
+// the book's sheet and by a style attribute. The mathematics is the real
+// book, e2e/calculus101-mathml-test.epub (keyword: publisher alignment).
 
-const MATHML = 'xmlns="http://www.w3.org/1998/Math/MathML"';
-
-/** The sheet, as a Sphinx book's math sheet writes it: columns by their place in the row */
+/** The sheet: the alignment of cells, and a rule for a paragraph, which stays unapplied (#411) */
 export const alignmentSheet = [
-  'mtable.aligned mtd:nth-child(odd){text-align:right}',
-  'mtable.aligned mtd:nth-child(even){text-align:left}',
-  'mtable.cases mtd{text-align:left}',
   'table.ledger td.amount{text-align:right}',
   'table.ledger td.name{text-align:center}',
   'p.right{text-align:right}',
 ].join('\n');
 
-const sheetLink = '<link rel="stylesheet" type="text/css" href="_static/sphinx-typst-math.css"/>';
-
-const letters = (letter, count) => `<mi>${letter}</mi>`.repeat(count);
-
-/** Two rows whose cells differ in width, so a cell's alignment shows in where its content sits */
-const aligned = `<math ${MATHML} display="block"><mtable class="aligned">` +
-  `<mtr><mtd>${letters('x', 1)}</mtd><mtd><mo>=</mo><mn>1</mn></mtd></mtr>` +
-  `<mtr><mtd>${letters('y', 6)}</mtd><mtd><mo>=</mo><mn>222222</mn></mtd></mtr>` +
-  '</mtable></math>';
-
-const cases = `<math ${MATHML} display="block"><mrow><mo>{</mo><mtable class="cases">` +
-  '<mtr><mtd><mn>1</mn></mtd><mtd><mtext>if x</mtext></mtd></mtr>' +
-  '<mtr><mtd><mn>123456</mn></mtd><mtd><mtext>otherwise stated</mtext></mtd></mtr>' +
-  '</mtable></mrow></math>';
-
 const filler = 'lorem ipsum dolor sit amet '.repeat(6);
 
 export const tableAlignmentBook = { valid: true, opts: {
-  title: 'Table alignment', author: 'Alignment Tests',
-  toc: [{ label: 'Equations', href: 'chapter1.xhtml' }, { label: 'Ledger', href: 'chapter2.xhtml' }],
-  extraFiles: [{ name: '_static/sphinx-typst-math.css', data: alignmentSheet, mediaType: 'text/css' }],
+  title: 'Ledger', author: 'Alignment Tests',
+  toc: [{ label: 'Ledger', href: 'chapter1.xhtml' }],
+  extraFiles: [{ name: 'ledger.css', data: alignmentSheet, mediaType: 'text/css' }],
   rawChapters: [
-    { head: sheetLink, properties: 'mathml',
-      body: `<h1>Equations</h1>\n<p>aligned-label ${filler}</p>\n${aligned}\n<p>cases-label ${filler}</p>\n${cases}\n<p>equations-after ${filler}</p>` },
-    { head: sheetLink,
+    { head: '<link rel="stylesheet" type="text/css" href="ledger.css"/>',
       body: '<h1>Ledger</h1>\n<table class="ledger"><tbody>' +
         '<tr><td class="amount">1</td><td class="name">Apples</td><td style="text-align:right">ok</td></tr>' +
         '<tr><td class="amount">1000000</td><td class="name">Pears and plums together</td><td style="text-align:right">in stock now</td></tr>' +

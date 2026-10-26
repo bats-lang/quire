@@ -451,37 +451,39 @@ implement proportion_of (size, dominant) = 10 + _bounded((20 * size + dominant /
    Alignment of table parts (keyword: publisher alignment, #868)
    ============================================================ *)
 
-(* The text-align a publisher gave a part of a table: the keywords that
-   do not depend on the direction of the text, and Blink's -webkit- forms of
-   them, which are the ones a MathML cell takes (its plain left and right
-   leave the content where it was) *)
+(* The alignment a publisher gave a part of a table, by text-align or by
+   justify-items (keyword: publisher alignment): the keywords that do not
+   depend on the direction of the text, and for justify-items start and end,
+   which a math cell sets left to right whatever the book's direction *)
 #pub datatype align_value = AlignNone | AlignLeft | AlignRight | AlignCenter
 
 (* The alignment one value gives: a keyword alone (marked !important it is
-   not read, as a size is not) *)
+   not read, as a size is not); start and end only where logical is true *)
 fn _align_of_value {l:agz}{n:pos}{start,stop:nat | start <= stop; stop <= n}
-  (data: !$A.borrow(byte, l, n), start: int start, stop: int stop): align_value = let
+  (data: !$A.borrow(byte, l, n), start: int start, stop: int stop, logical: bool): align_value = let
   val value_start = _blank_end(data, start, stop, false)
   val value_stop = _trimmed_end(data, value_start, stop)
+  val left = (if _span_is(data, value_start, value_stop, "left", 4) then true
+    else if logical then _span_is(data, value_start, value_stop, "start", 5) else false)
+  val right = (if _span_is(data, value_start, value_stop, "right", 5) then true
+    else if logical then _span_is(data, value_start, value_stop, "end", 3) else false)
 in
-  if _span_is(data, value_start, value_stop, "left", 4) then AlignLeft()
-  else if _span_is(data, value_start, value_stop, "-webkit-left", 12) then AlignLeft()
-  else if _span_is(data, value_start, value_stop, "right", 5) then AlignRight()
-  else if _span_is(data, value_start, value_stop, "-webkit-right", 13) then AlignRight()
+  if left then AlignLeft()
+  else if right then AlignRight()
   else if _span_is(data, value_start, value_stop, "center", 6) then AlignCenter()
-  else if _span_is(data, value_start, value_stop, "-webkit-center", 14) then AlignCenter()
   else AlignNone()
 end
 
 (* The alignment of one declaration, data[start, stop) being "name: value"
-   with no semicolon: the value when the name is text-align *)
+   with no semicolon: the value when the name is text-align or justify-items *)
 fn _declaration_align {l:agz}{n:pos}{start,stop:nat | start <= stop; stop <= n}
   (data: !$A.borrow(byte, l, n), start: int start, stop: int stop): align_value = let
   val colon_at = _colon(data, start, stop)
   val name_stop = _trimmed_end(data, start, colon_at)
 in
   if colon_at >= stop then AlignNone()
-  else if _span_is(data, start, name_stop, "text-align", 10) then _align_of_value(data, colon_at + 1, stop)
+  else if _span_is(data, start, name_stop, "text-align", 10) then _align_of_value(data, colon_at + 1, stop, false)
+  else if _span_is(data, start, name_stop, "justify-items", 13) then _align_of_value(data, colon_at + 1, stop, true)
   else AlignNone()
 end
 
@@ -506,7 +508,7 @@ in
   in _align_declarations(data, declaration_stop, stop, _align_merge(so_far, next)) end
 end
 
-(* The text-align of a declaration block, data[start, stop) being what is
+(* The alignment of a declaration block, data[start, stop) being what is
    between the braces (or an inline style attribute's value) *)
 #pub fun declarations_align_read {l:agz}{n:pos}{start,stop:nat | start <= stop; stop <= n}
   (data: !$A.borrow(byte, l, n), start: int start, stop: int stop): align_value

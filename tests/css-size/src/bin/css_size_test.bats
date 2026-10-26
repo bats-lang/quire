@@ -276,10 +276,16 @@ in $A.free<byte>($A.thaw<byte>(frozen)) end
 
 fn check_aligns (): void = let
   val () = align_of("text-align:right", "right")
-  val () = align_of("text-align: -webkit-center", "center")
+  val () = align_of("text-align: -webkit-center", "none")
+  val () = align_of("justify-items:end", "right")
+  val () = align_of("justify-items: START", "left")
+  val () = align_of("justify-items:center", "center")
+  val () = align_of("justify-items:stretch", "none")
+  val () = align_of("text-align:right;justify-items:start", "left")
+  val () = align_of("justify-items:end;text-align:center", "center")
   val () = align_of(" TEXT-ALIGN : LEFT ; ", "left")
   val () = align_of("color:red;text-align:left;text-align:bogus", "left")
-  val () = align_of("text-align:left;text-align:-webkit-right", "right")
+  val () = align_of("text-align:left;text-align:-webkit-right", "left")
   val () = align_of("text-align:right !important", "none")
   val () = align_of("text-align:start", "none")
   val () = align_of("text-align:justify", "none")
