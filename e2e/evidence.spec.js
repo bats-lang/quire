@@ -9,7 +9,7 @@ import { createServer } from 'node:http';
 import { Worker } from 'node:worker_threads';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { createWriteStream } from 'node:fs';
@@ -24,6 +24,7 @@ import { missingFields } from './evidence-check.js';
 import { futexAnalysis, ringContent } from './flight-recorder.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { Watchdog } from './flight-watchdog.js';
+import { memoryReclaim, runnerLoad } from './runner-load.js';
 import { LOCK_NAME, LOCK_UNREADABLE_MS, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
 
 function desktopOnly(testInfo) {
@@ -457,6 +458,69 @@ test('a stall of the machine, seen from inside: a tick that comes late is kept w
   await new Promise((resolve) => setTimeout(resolve, 400));
   clearInterval(timer);
   expect(real.stalls.some((each) => each.gapMs >= 900)).toBe(true);
+});
+
+// quire#909: a stall of the machine names what the machine was doing (run 40232296271: 7965 ms, steal 0, nothing said why)
+function lay909(proc, { memory, io = 0, cpu = 0, swapin = 0, swapout = 0, major = 0, reclaim = 0, steal = 0 }) {
+  mkdirSync(join(proc, 'pressure'), { recursive: true });
+  const psi = (some, full) => `some avg10=0.00 avg60=0.00 avg300=0.00 total=${some}\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=${full}\n`;
+  writeFileSync(join(proc, 'pressure', 'memory'), psi(memory, Math.floor(memory / 2)));
+  writeFileSync(join(proc, 'pressure', 'io'), psi(io, io));
+  writeFileSync(join(proc, 'pressure', 'cpu'), `some avg10=0.00 avg60=0.00 avg300=0.00 total=${cpu}\n`);
+  writeFileSync(join(proc, 'vmstat'), `nr_free_pages 100\npswpin ${swapin}\npswpout ${swapout}\nallocstall_normal ${reclaim}\nallocstall_movable 0\npgmajfault ${major}\npgfault 99999\n`);
+  writeFileSync(join(proc, 'stat'), `cpu  1 2 3 4 5 6 7 ${steal / 10} 0 0\n`);
+}
+
+test('a stall of the machine names the memory, io and cpu pressure and the swap, faults and reclaim that passed over it (quire#909)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const proc = testInfo.outputPath('proc909');
+  const out = testInfo.outputPath('stalls909');
+  const dog = new Watchdog({ root: process.pid, out, gapMs: 300, proc });
+  lay909(proc, { memory: 1000000, io: 50000, cpu: 20000, swapin: 10, swapout: 20, major: 30, reclaim: 5, steal: 100 });
+  dog.tick(1000);
+  dog.tick(1100);
+  // the machine stood still for 7.9 s while memory was reclaimed: 7.5 s of stalled tasks, 40 swap-outs, 8 direct reclaims
+  lay909(proc, { memory: 8500000, io: 150000, cpu: 21000, swapin: 12, swapout: 60, major: 130, reclaim: 13, steal: 100 });
+  dog.tick(1100 + 100 + 7900);
+  expect(dog.stalls.length).toBe(1);
+  const [stall] = dog.stalls;
+  expect(stall.gapMs).toBe(7900);
+  expect(stall.pressureDuringUs.memory, 'microseconds of memory pressure over the stall').toEqual({ some: 7500000, full: 3750000 });
+  expect(stall.pressureDuringUs.io).toEqual({ some: 100000, full: 100000 });
+  expect(stall.pressureDuringUs.cpu, 'cpu has no full line on this kernel').toEqual({ some: 1000, full: null });
+  expect(stall.vmstatDuring).toEqual({ pswpin: 2, pswpout: 40, pgmajfault: 100, allocstall_normal: 8, allocstall_movable: 0 });
+  expect(stall.stealMsDuring).toBe(0);
+  expect(stall.reading).toMatch(/^memory reclaim: /);
+  expect(JSON.parse(readFileSync(join(out, `host-stalls-${process.pid}-${process.pid}.json`), 'utf8'))[0].pressureDuringUs.memory.some).toBe(7500000);
+  // a stall with no memory pressure names zero, and is not memory reclaim
+  dog.tick(9100 + 100 + 2000);
+  expect(dog.stalls.length).toBe(2);
+  expect(dog.stalls[1].pressureDuringUs.memory, 'the counters did not move over this stall').toEqual({ some: 0, full: 0 });
+  expect(dog.stalls[1].vmstatDuring.pswpout).toBe(0);
+  expect(dog.stalls[1].reading).not.toMatch(/^memory reclaim/);
+  // the counters are compared with the tick before the stall, not with the start of the run: the 7.5 s of the first stall are not in the second
+  // and a kernel without pressure files says so, with the stall kept
+  rmSync(join(proc, 'pressure'), { recursive: true });
+  rmSync(join(proc, 'vmstat'));
+  dog.tick(11200 + 100 + 2000);
+  expect(dog.stalls.length).toBe(3);
+  expect(dog.stalls[2].pressureDuringUs.memory).toMatch(/^not available: ENOENT/);
+  expect(dog.stalls[2].vmstatDuring).toMatch(/^not available: ENOENT/);
+});
+
+test('the reading of the runner load says memory reclaim when the memory pressure covers most of a stall (quire#909)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  expect(memoryReclaim(7965, 7500000), 'most of the gap').toBe(true);
+  expect(memoryReclaim(7965, 3000000), 'less than half of the gap').toBe(false);
+  expect(memoryReclaim(7965, 0), 'none').toBe(false);
+  expect(memoryReclaim(7965, null), 'unreadable').toBe(false);
+  const sample = (lateMs, stalledMs) => ({ at: new Date().toISOString(), lateMs, pressure: { memory: { some: { stalledMs } } } });
+  const reclaim = runnerLoad(60000, [sample(0, 10), sample(7965, 7500)]);
+  expect(reclaim.summary.reading).toMatch(/memory reclaim: memory pressure stalled tasks for 7500 ms of the sample .* 7965 ms late/);
+  expect(reclaim.summary.stalls).toHaveLength(1);
+  const none = runnerLoad(60000, [sample(0, 10), sample(7965, 100)]);
+  expect(none.summary.reading, 'a stall with no memory pressure').not.toMatch(/memory reclaim/);
+  expect(runnerLoad(60000, [sample(0, 1900)]).summary.reading, 'pressure with no stall').not.toMatch(/memory reclaim/);
 });
 
 test('the watchdog counts the CPU of the main thread, not of the process: a frozen renderer whose other threads tick now and then is still reported', async ({}, testInfo) => {
