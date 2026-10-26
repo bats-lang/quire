@@ -173,6 +173,13 @@ export function fatal(part, why, out) {
   process.exit(1);
 }
 
+/**
+ * Whether a watchdog's last heartbeat is too old to be a live one (host stall): its age less the time this monitor was itself late.
+ * When the whole machine stops, the monitor's timer runs before the watchdog's on its return and finds the old beat; that is the machine's
+ * stop, recorded by the watchdog as a host stall, not a watchdog gone quiet. A watchdog stopped alone leaves the monitor on time.
+ */
+export function heartbeatQuiet({ beatAgeMs, monitorLateMs, staleMs }) { return beatAgeMs - Math.max(0, monitorLateMs) > staleMs; }
+
 /** Watches the parts while the run goes on. Returns a function that ends the watching. Logs a line at its start and a summary at its end (or at its fatal). */
 export function startMonitor(started, env = process.env) {
   if (!started || env.QUIRE_FLIGHT_MONITOR === 'off') return () => {};
@@ -184,12 +191,16 @@ export function startMonitor(started, env = process.env) {
   let lastMoved = Date.now();
   let stoppedSeenAt = null;
   let unreadable = 0;
-  const seen = { checks: 0, beats: new Set(), holdsMost: 0, lastRing: null, lastScans: null };
-  const summary = () => `${seen.checks} checks in ${Math.round((Date.now() - began) / 1000)} s; ${seen.beats.size} distinct heartbeats of the watchdog read (last: ${seen.lastScans === null ? 'none' : `${seen.lastScans} scans`}); ${seen.lastRing === null ? 'no reading of the ring was made' : `the ring had written ${seen.lastRing} events at the last reading`}; ring holds seen at once: ${seen.holdsMost}`;
+  let lastTick = began;
+  const seen = { stalls: 0, checks: 0, beats: new Set(), holdsMost: 0, lastRing: null, lastScans: null };
+  const summary = () => `${seen.checks} checks in ${Math.round((Date.now() - began) / 1000)} s; ${seen.beats.size} distinct heartbeats of the watchdog read (last: ${seen.lastScans === null ? 'none' : `${seen.lastScans} scans`}); ${seen.lastRing === null ? 'no reading of the ring was made' : `the ring had written ${seen.lastRing} events at the last reading`}; ring holds seen at once: ${seen.holdsMost}${seen.stalls ? `; the monitor itself was late ${seen.stalls} time(s) (host stall)` : ''}`;
   const die = (part, why) => { console.error(`[monitor] ended the run: ${summary()}`); return fatal(part, why, out); };
   console.error(`[monitor] started (${serialRun() ? 'the @serial run' : 'the run'}): every ${MONITOR_EVERY_MS} ms the watchdog ${started.watchdog.child ? started.watchdog.child.pid : '?'} (child and heartbeat), the ring ${started.kernel.instance} (on, taking events, held paused only by a capture that ends within ${HOLD_MOST_MS / 1000} s)`);
   const timer = setInterval(() => {
     seen.checks += 1;
+    const monitorLateMs = Date.now() - lastTick - MONITOR_EVERY_MS;
+    lastTick = Date.now();
+    if (monitorLateMs >= staleMs) seen.stalls += 1;
     if (watchdog.exited && !watchdog.stopping) return die('watchdog', `exited during the run (code ${watchdog.exited.code}, signal ${watchdog.exited.signal})`);
     // a capture that went without the ring lock (flight-tracefs.js, ring lock) may have crossed another's pause and resume: the ring is then not to be trusted
     const unlocked = lockFailuresIn(out);
@@ -199,7 +210,7 @@ export function startMonitor(started, env = process.env) {
     unreadable = 0;
     seen.beats.add(beat.at);
     seen.lastScans = beat.scans;
-    if (Date.now() - beat.at > staleMs) return die('watchdog', `no heartbeat for ${Date.now() - beat.at} ms`);
+    if (heartbeatQuiet({ beatAgeMs: Date.now() - beat.at, monitorLateMs, staleMs })) return die('watchdog', `no heartbeat for ${Date.now() - beat.at} ms`);
     const ring = beat.ring || {};
     if (ring.error) return die('kernel ring', `unreadable by the watchdog: ${ring.error}`);
     if (ring.written !== undefined) seen.lastRing = ring.written;

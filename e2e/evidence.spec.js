@@ -24,6 +24,7 @@ import { missingFields } from './evidence-check.js';
 import { futexAnalysis, ringContent } from './flight-recorder.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { Watchdog } from './flight-watchdog.js';
+import { heartbeatQuiet } from './preflight.js';
 import { LOCK_NAME, LOCK_UNREADABLE_MS, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
 
 function desktopOnly(testInfo) {
@@ -1155,4 +1156,10 @@ test('what the runner can do that bears on the classes the record cannot see is 
   expect(reading.counters).toHaveProperty('available');
   expect(reading.rr, 'the preflight asked rr itself').toHaveProperty('installed');
   expect(reading.rr.record, 'and said what its recording did').toHaveProperty('works');
+});
+
+test('the monitor does not take a stop of the whole machine for a watchdog gone quiet (quire#908, run 40232296271: a beat 7846 ms old, the machine stopped 7965 ms)', async () => {
+  expect(heartbeatQuiet({ beatAgeMs: 7846, monitorLateMs: 7900, staleMs: 6000 }), 'the monitor was as late as the beat is old').toBe(false);
+  expect(heartbeatQuiet({ beatAgeMs: 7846, monitorLateMs: 0, staleMs: 6000 }), 'a watchdog quiet while the monitor was on time').toBe(true);
+  expect(heartbeatQuiet({ beatAgeMs: 14000, monitorLateMs: 7900, staleMs: 6000 }), 'quiet for longer than the monitor was late').toBe(true);
 });

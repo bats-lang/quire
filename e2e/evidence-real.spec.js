@@ -292,6 +292,29 @@ test('heartbeat: a watchdog that is alive and stops beating fails the job at tha
   } finally { run.child.kill('SIGKILL'); for (const pid of [watchdog, parent]) if (pid) { try { kill(pid, 'SIGKILL'); } catch (gone) { /* it ended with the run */ } } }
 });
 
+// The machine stopping as a whole (quire#908: a host stall of 7965 ms with no steal, run 40232296271): the runner and the watchdog stop together, and the
+// monitor, on their return, must not read the beat that was written before the stop as a watchdog gone quiet.
+test('heartbeat: the runner and the watchdog stopped together, for longer than the limit, are not a watchdog gone quiet (quire#908)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000', QUIRE_FLIGHT_BEAT_STALE_MS: '3000' });
+  let watchdog = null;
+  let parent = null;
+  const pids = () => [...new Set([run.child.pid, parent, watchdog].filter(Boolean))];
+  try {
+    watchdog = Number((await run.until(/watchdog (\d+) beating/))[1]);
+    parent = Number((await run.until(/the watchdog (\d+) \(child and heartbeat\)/))[1]);
+    for (const pid of pids()) kill(pid, 'SIGSTOP');
+    await new Promise((resolve) => setTimeout(resolve, 7000));
+    for (const pid of pids()) kill(pid, 'SIGCONT');
+    // long enough for several monitor ticks after the return
+    await new Promise((resolve) => setTimeout(resolve, 9000));
+    expect(run.output(), 'a stop of the whole machine is not a quiet watchdog').not.toMatch(/EVIDENCE MISSING/);
+    expect(run.output()).toMatch(/\[monitor\] started/);
+    expect(run.child.exitCode, 'the run goes on').toBeNull();
+  } finally { for (const pid of pids()) { try { kill(pid, 'SIGCONT'); kill(pid, 'SIGKILL'); } catch (gone) { /* it ended with the run */ } } run.child.kill('SIGKILL'); }
+});
+
 test('heartbeat: a ring that is on and takes no events fails the job at that moment, by name', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();
