@@ -75,7 +75,8 @@
       "publisher-sizes.spec.js",
       "search.spec.js",
       "titles-redraw.spec.js",
-      "vertical.spec.js"
+      "vertical.spec.js",
+      "vocabulary.spec.js"
     ],
     "relaunch": [
       "drm.spec.js",
@@ -412,7 +413,8 @@
     "mutation-bytes-records": [
       "mutation/bytes-part2of2",
       "mutation/bookrec",
-      "mutation/indexrec"
+      "mutation/indexrec",
+      "mutation/wordrec"
     ],
     "mutation-schema-1": [
       "mutation/schema-part1of2"

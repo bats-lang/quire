@@ -77,6 +77,10 @@ fun _copy_into {source_loc,target_loc:agz}{source_size,target_size:pos}{count:na
     val () = $A.set<byte>(target, i, $A.get<byte>(source, i))
   in _copy_into(source, target, count, i + 1) end
 
+(* position, or the nearest of 0 and most *)
+fn _within {most:nat} (position: Int, most: int most): [stop:nat | stop <= most] int stop =
+  if position < 0 then 0 else if position > most then most else position
+
 (* The word of the selection (up to the most the toolbar copies) in the book's language language[0, language_len) *)
 #pub fn words_candidate_set {word_loc,language_loc:agz}{word_len:nat | word_len <= 64}{language_len:nat | language_len <= 3}
   (word: !$A.arr(byte, word_loc, 65), word_len: int word_len, language: !$A.arr(byte, language_loc, 3), language_len: int language_len): void
@@ -530,6 +534,14 @@ fn _digits {k:nat} (k: int k): [l:agz][n:pos | n <= 20] @($A.arr(byte, l, n), in
   val () = $A.free<byte>(buffer)
 in @(digits, ended) end
 
+(* How many times the word was looked up, in words, at the start of out *)
+fn _put_times {l:agz} (out: !$A.arr(byte, l, 80), lookups: Int): [stop:nat | stop <= 79] int stop =
+  if lookups <= 1 then _within(_put_literal(out, 0, "Looked up once"), 79)
+  else let
+    val after = _put_literal(out, 0, "Looked up ")
+    val after = _within($S.int_to_str(out, after, 80, lookups), 40)
+  in _within(_put_literal(out, after, " times"), 79) end
+
 (* A row of the list: the word, the book and the word's state, its sentence with the word marked, and the buttons *)
 fn _row_draw {k:nat}{c:wordx} (k: int k, image: !word_image(c), now: Int): void = let
   val numbers = word_image_numbers(image)
@@ -542,6 +554,9 @@ fn _row_draw {k:nat}{c:wordx} (k: int k, image: !word_image(c), now: Int): void 
   val @(title_text, title_len) = word_image_word(image)
   val @(title_id, title_id_len) = nid_make("word-title", k)
   val () = ui_text_n_buf(title_id, title_id_len, title_text, title_len)
+  val @(group_id, group_id_len) = nid_make("word-row", k)
+  val @(group_label, group_label_len) = nid_make("word-title", k)
+  val () = ui_labelled_nn(group_id, group_id_len, NGroup, group_label, group_label_len)
   val () = _child("word-go", "word-book", k, TSpan, "hstyle")
   val @(book_title, book_title_len) = _book_title(numbers.book_high, numbers.book_low)
   val line = $A.alloc<byte>(400)
@@ -551,6 +566,11 @@ fn _row_draw {k:nat}{c:wordx} (k: int k, image: !word_image(c), now: Int): void 
   val ended = _put_state(line, after_title, numbers.mastered <> 0, numbers.due, now)
   val @(book_id, book_id_len) = nid_make("word-book", k)
   val () = ui_text_n_buf(book_id, book_id_len, line, ended)
+  val () = _child("word-go", "word-times", k, TSpan, "hstyle")
+  val times = $A.alloc<byte>(80)
+  val ended = _put_times(times, numbers.lookups)
+  val @(times_id, times_id_len) = nid_make("word-times", k)
+  val () = ui_text_n_buf(times_id, times_id_len, times, ended)
   val @(marked_word, marked_len) = word_image_word(image)
   val @(sentence, count) = _sentence_of(image)
   val () = _sentence_show(k, sentence, count, marked_word, marked_len)
@@ -607,10 +627,6 @@ fun _book_options {count:nat}{k:nat} .<count>. (list: !books(count), k: int k, b
 val _book_all = ref<bool>(true)
 val _book_high = ref<Int>(0)
 val _book_low = ref<Int>(0)
-
-(* position, or the nearest of 0 and most *)
-fn _within {most:nat} (position: Int, most: int most): [stop:nat | stop <= most] int stop =
-  if position < 0 then 0 else if position > most then most else position
 
 (* The line under the tabs: how many words are due, still being learned and mastered *)
 fn _status_show (): void = let
