@@ -22,9 +22,11 @@
 
 #include "share/atspre_staload.hats"
 #use promise as P
+#use result as R
 
 staload "ui.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload STORE = "wasm.bats-packages.dev/bridge/src/storage.sats"
 
 (* ============================================================
@@ -43,17 +45,31 @@ implement platform_install_show (offer) =
 fn _install_now (): $BAPP.install_offer =
   if $BAPP.install_prompt_available() then $BAPP.InstallOffered() else $BAPP.InstallWithdrawn()
 
+(* The text an install answer carries is not shown: freed (install keeps its outcome words) *)
+fn _install_text_dropped (text: $R.option([n:nat] $BD.dblob(n))): void =
+  case+ text of
+  | ~$R.some(blob) => $BD.blob_free(blob)
+  | ~$R.none() => ()
+
 (* Install Quire clicked: the browser's offer shown. How it ends is the
    browser's to show; the offer is used up either way (bridge's listener
-   withdraws it) *)
+   withdraws it). Each answer is its own case (install keeps its outcome words) *)
 #pub fn platform_install (): void
 
 implement platform_install () =
-  $P.finish<$BAPP.install_outcome>($BAPP.install_prompt(), llam(outcome) =>
-    case+ outcome of
-    | $BAPP.InstallAccepted() => ()
-    | $BAPP.InstallDismissed() => ()
-    | $BAPP.InstallUnavailable() => platform_install_show(_install_now()))
+  $P.finish<$BAPP.install_answer>($BAPP.install_prompt_answer(), llam(answer) =>
+    case+ answer of
+    | ~$BAPP.InstallAnswerAccepted() => ()
+    | ~$BAPP.InstallAnswerDismissed() => ()
+    | ~$BAPP.InstallAnswerNoOffer() => platform_install_show(_install_now())
+    | ~$BAPP.InstallAnswerRejected(text) => let
+        val () = _install_text_dropped(text)
+      in platform_install_show(_install_now()) end
+    | ~$BAPP.InstallAnswerThrown(text) => let
+        val () = _install_text_dropped(text)
+      in platform_install_show(_install_now()) end
+    | ~$BAPP.InstallAnswerOdd(text) => _install_text_dropped(text)
+    | ~$BAPP.InstallAnswerUnexpected(_) => platform_install_show(_install_now()))
 
 (* ============================================================
    Keeping the storage
