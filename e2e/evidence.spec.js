@@ -668,11 +668,11 @@ for (const [ms, action, content] of steps) {
   while (Date.now() - begun < ms) { /* wait */ }
   if (action === 'write') writeFileSync(path, content.replace('NOW', new Date().toISOString() + ' ' + process.pid + '\\n'), content.startsWith('NEW') ? { flag: 'wx' } : {});
   else if (action === 'swap') { writeFileSync(path + '.next', content); renameSync(path + '.next', path); } // another holder's lock in the first one's place, at one instant
-  else if (action === 'recreate') { // the lock removed and made again with the same content and the inode it had if the filesystem gives it (ext4 and tmpfs do at once)
+  else if (action === 'recreate') { // the lock replaced at one instant by a file with the same content and the inode it had if the filesystem gives it (ext4 and tmpfs do on the next file made): no instant has no lock, so a waiter never finds the path free
     const before = statSync(path).ino;
     const text = readFileSync(path, 'utf8'); // the same content, so the content alone does not tell the two locks apart
     let reused = false;
-    for (let tries = 0; tries < 1000 && !reused; tries++) { unlinkSync(path); writeFileSync(path, text, { flag: 'wx' }); reused = statSync(path).ino === before; }
+    for (let tries = 0; tries < 1000 && !reused; tries++) { writeFileSync(path + '.next', text); renameSync(path + '.next', path); reused = statSync(path).ino === before; }
     writeFileSync(path + '.reused', String(reused));
   } else unlinkSync(path);
 }
