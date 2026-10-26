@@ -41,7 +41,15 @@
    `<style>` texts and the hrefs of the `<link>` elements to read are
    found here. A sheet that ends inside a comment or a block takes the
    sheets after it with it (they are joined); a sheet that does that is
-   rare, and what is lost is a size, never a page. *)
+   rare, and what is lost is a size, never a page.
+
+   Alignment (keyword: publisher alignment, #868): the same walk matches the
+   rules that give a text-align against the parts of a table (table, its
+   sections, rows and cells, and MathML's mtable, mtr and mtd), a cell's
+   style attribute first, and maps the parts that got one. The selectors
+   may hold :first-child, :last-child and :nth-child(odd, even or a
+   number), which ask for the place of an element among the elements of its
+   parent. *)
 
 #target wasm begin
 
@@ -169,15 +177,17 @@ fun _attr_find {l:agz}{n:pos}{count:nat}{m:nat} .<count>.
 
 (* What a selector can ask of an element: where its name, its class
    attribute and its id attribute are in the document of n bytes *)
-#pub typedef element_facts(n:int) = [name_at,name_len,class_at,class_len,id_at,id_len:nat |
+#pub typedef element_facts(n:int) = [name_at,name_len,class_at,class_len,id_at,id_len,place:nat |
   name_at + name_len <= n; class_at + class_len <= n; id_at + id_len <= n]
-  @(int name_at, int name_len, int class_at, int class_len, int id_at, int id_len)
+  @(int name_at, int name_len, int class_at, int class_len, int id_at, int id_len, int place, bool)
 
-fn _facts_of {l:agz}{n:pos}{name_at,name_len:nat | name_at + name_len <= n}{count:nat}
-  (data: !$A.borrow(byte, l, n), name_at: int name_at, name_len: int name_len, attrs: !$X.xml_attr_list(n, count)): element_facts(n) = let
+(* Its place among the elements of its parent (from 1) and whether it is the last of them *)
+fn _facts_of {l:agz}{n:pos}{name_at,name_len:nat | name_at + name_len <= n}{count:nat}{place:nat}
+  (data: !$A.borrow(byte, l, n), name_at: int name_at, name_len: int name_len, attrs: !$X.xml_attr_list(n, count),
+   place: int place, last: bool): element_facts(n) = let
   val @(class_at, class_len) = _attr_find(data, attrs, "class", 5)
   val @(id_at, id_len) = _attr_find(data, attrs, "id", 2)
-in @(name_at, name_len, class_at, class_len, id_at, id_len) end
+in @(name_at, name_len, class_at, class_len, id_at, id_len, place, last) end
 
 (* The elements above the one being looked at, the nearest first, depth of them *)
 datavtype ancestors(n:int, depth:int) =
@@ -188,16 +198,31 @@ datavtype ancestors(n:int, depth:int) =
    Matching a selector
    ============================================================ *)
 
-(* Whether the compound sheet[at, stop) (names, .classes and #ids with
-   nothing between them) holds for an element of these facts *)
+(* Whether a structural pseudo-class holds for an element at place, the last
+   of its parent's elements or not *)
+fn _pseudo_holds (kind: pseudo_kind, index: int, place: int, last: bool): bool =
+  case+ kind of
+  | PseudoFirstChild() => place = 1
+  | PseudoLastChild() => last
+  | PseudoOdd() => place % 2 = 1
+  | PseudoEven() => place % 2 = 0
+  | PseudoIndex() => place = index
+
+(* Whether the compound sheet[at, stop) (names, .classes, #ids and structural
+   pseudo-classes with nothing between them) holds for an element of these facts *)
 fun _compound_matches {ls:agz}{ns:pos}{ld:agz}{nd:pos}{at,stop:nat | at <= stop; stop <= ns} .<stop - at>.
   (sheet: !$A.borrow(byte, ls, ns), at: int at, stop: int stop, data: !$A.borrow(byte, ld, nd), facts: element_facts(nd)): bool =
   if at >= stop then true
   else let
     val code = _code(sheet, at)
-    val @(name_at, name_len, class_at, class_len, id_at, id_len) = facts
+    val @(name_at, name_len, class_at, class_len, id_at, id_len, place, last) = facts
   in
-    if code = 46 then let
+    if code = 58 then
+      (case+ pseudo_read(sheet, at, stop) of
+       | ~PseudoUnsupported() => false
+       | ~PseudoSupported(kind, end_at, index) =>
+         if _pseudo_holds(kind, index, place, last) then _compound_matches(sheet, end_at, stop, data, facts) else false)
+    else if code = 46 then let
       val name_stop = _name_end(sheet, at + 1, stop)
     in
       if name_stop <= at + 1 then false
@@ -279,6 +304,25 @@ fun _best_rule {ls:agz}{ns:pos}{ld:agz}{nd:pos}{count:nat}{depth:nat} .<count>.
     in
       if wins then _best_rule(sheet, rest, data, facts, chain, @{found= true, specificity= specificity, order= order, size= size})
       else _best_rule(sheet, rest, data, facts, chain, best)
+    end
+
+typedef best_align = @{found= bool, specificity= int, order= int, align= align_value}
+
+fun _best_align {ls:agz}{ns:pos}{ld:agz}{nd:pos}{count:nat}{depth:nat} .<count>.
+  (sheet: !$A.borrow(byte, ls, ns), rules: !align_rules(ns, count), data: !$A.borrow(byte, ld, nd),
+   facts: element_facts(nd), chain: !ancestors(nd, depth), best: best_align): best_align =
+  case+ rules of
+  | AlignRulesNil() => best
+  | AlignRulesCons(rule, align, rest) => let
+      val @{selector_at= selector_at, selector_len= selector_len, specificity= specificity, order= order} = rule
+      val beats = (if ~(best.found) then true
+        else if specificity > best.specificity then true
+        else if specificity < best.specificity then false
+        else order >= best.order)
+      val wins = (if beats then _selector_matches(sheet, selector_at, selector_len, data, facts, chain) else false)
+    in
+      if wins then _best_align(sheet, rest, data, facts, chain, @{found= true, specificity= specificity, order= order, align= align})
+      else _best_align(sheet, rest, data, facts, chain, best)
     end
 
 (* ============================================================
@@ -442,6 +486,62 @@ implement size_map_take {count} (map, offset) = let
       else @(0, MapCons(each, step, rest))
 in walk(map, offset) end
 
+(* The parts of tables that have a text-align of their own (a rule or a style
+   attribute), each by where its name is in the document and its alignment,
+   in the document's order *)
+#pub datavtype align_map(count:int) =
+  | AlignMapNil(0) of ()
+  | {count:nat} AlignMapCons(count + 1) of (int, align_value, align_map(count))
+
+#pub fun align_map_new (): align_map(0)
+
+implement align_map_new () = AlignMapNil()
+
+#pub fun align_map_free {count:nat} (map: align_map(count)): void
+
+implement align_map_free {count} (map) = let
+  fun walk {count:nat} .<count>. (map: align_map(count)): void =
+    case+ map of
+    | ~AlignMapNil() => ()
+    | ~AlignMapCons(_, _, rest) => walk(rest)
+in walk(map) end
+
+fun _align_map_reversed {a,b:nat} .<a>. (map: align_map(a), onto: align_map(b)): align_map(a + b) =
+  case+ map of
+  | ~AlignMapNil() => onto
+  | ~AlignMapCons(offset, align, rest) => _align_map_reversed(rest, AlignMapCons(offset, align, onto))
+
+fn _align_map_added {m:nat} (map: align_map(m), offset: int, align: align_value): [more:nat] align_map(more) =
+  case+ align of
+  | AlignNone() => map
+  | AlignLeft() => AlignMapCons(offset, AlignLeft(), map)
+  | AlignRight() => AlignMapCons(offset, AlignRight(), map)
+  | AlignCenter() => AlignMapCons(offset, AlignCenter(), map)
+
+#pub fun align_map_count {count:nat} (map: !align_map(count)): int count
+
+implement align_map_count {count} (map) = let
+  fun walk {count:nat} .<count>. (map: !align_map(count)): int count =
+    case+ map of
+    | AlignMapNil() => 0
+    | AlignMapCons(_, _, rest) => 1 + walk(rest)
+in walk(map) end
+
+(* The alignment of the part whose name is at offset, AlignNone when the
+   publisher gave it none; the entries before it are passed over (the
+   elements are asked for in the document's order), and the one found *)
+#pub fun align_map_take {count:nat} (map: align_map(count), offset: int): [rest:nat] @(align_value, align_map(rest))
+
+implement align_map_take {count} (map, offset) = let
+  fun walk {count:nat} .<count>. (map: align_map(count), offset: int): [rest:nat] @(align_value, align_map(rest)) =
+    case+ map of
+    | ~AlignMapNil() => @(AlignNone(), AlignMapNil())
+    | ~AlignMapCons(each, align, rest) =>
+      if each < offset then walk(rest, offset)
+      else if each = offset then @(align, rest)
+      else @(AlignNone(), AlignMapCons(each, align, rest))
+in walk(map, offset) end
+
 (* ============================================================
    Counting a chapter's characters by size
    ============================================================ *)
@@ -468,6 +568,47 @@ fn _is_uncounted {l:agz}{n:pos}{at,len:nat | at + len <= n}
   else if _is_word(data, at, len, "title", 5) then true
   else if _is_word(data, at, len, "rt", 2) then true
   else _is_word(data, at, len, "rp", 2)
+
+(* Whether an element is a part of a table, which a book's text-align reaches:
+   table, its sections, rows and cells, and MathML's table, row and cell *)
+fn _is_table_part {l:agz}{n:pos}{at,len:nat | at + len <= n}
+  (data: !$A.borrow(byte, l, n), at: int at, len: int len): bool =
+  if _is_word(data, at, len, "td", 2) then true
+  else if _is_word(data, at, len, "th", 2) then true
+  else if _is_word(data, at, len, "tr", 2) then true
+  else if _is_word(data, at, len, "mtd", 3) then true
+  else if _is_word(data, at, len, "mtr", 3) then true
+  else if _is_word(data, at, len, "mtable", 6) then true
+  else if _is_word(data, at, len, "table", 5) then true
+  else if _is_word(data, at, len, "thead", 5) then true
+  else if _is_word(data, at, len, "tbody", 5) then true
+  else _is_word(data, at, len, "tfoot", 5)
+
+(* The alignment of a part of a table: its style attribute's, else the best
+   rule's *)
+fn _align_of_part {l:agz}{n:pos}{ns:pos}{count:nat}{depth:nat}{attr_count:nat}{ls:agz}
+  (data: !$A.borrow(byte, l, n), sheet: !$A.borrow(byte, ls, ns), aligns: !align_rules(ns, count),
+   facts: element_facts(n), chain: !ancestors(n, depth), attrs: !$X.xml_attr_list(n, attr_count)): align_value = let
+  val @(style_at, style_len) = _attr_find(data, attrs, "style", 5)
+  val style_align = (if style_len = 0 then AlignNone() else declarations_align_read(data, style_at, style_at + style_len)): align_value
+in
+  case+ style_align of
+  | AlignLeft() => AlignLeft()
+  | AlignRight() => AlignRight()
+  | AlignCenter() => AlignCenter()
+  | AlignNone() => let
+      val best = _best_align(sheet, aligns, data, facts, chain, @{found= false, specificity= 0, order= 0, align= AlignNone()})
+    in if best.found then best.align else AlignNone() end
+end
+
+(* The number of elements in a list of nodes *)
+fun _elements_in {nd:pos}{sz:nat} .<sz>. (nodes: !$X.xml_node_list(nd, sz)): int =
+  case+ nodes of
+  | $X.xml_nodes_nil() => 0
+  | $X.xml_nodes_cons(node, rest) =>
+    (case+ node of
+     | $X.xml_element(_, _, _, _) => 1 + _elements_in(rest)
+     | $X.xml_text(_, _) => _elements_in(rest))
 
 (* What a walk gathers: the characters by size (the measure), or the map of
    the elements' sizes against a base *)
@@ -511,38 +652,49 @@ fn _rule_size (best: best_rule): size_read =
   if best.found then SizeFound(best.size) else SizeNone()
 
 (* What a walk has gathered so far: the elements above the one looked at, the
-   characters by size and the map of sizes *)
+   characters by size, the map of sizes and the map of alignments *)
 datavtype walked(n:int, depth:int) =
-  | {depth:nat}{kinds,mapped:nat} Walked(n, depth) of (ancestors(n, depth), size_tally(kinds), size_map(mapped))
+  | {depth:nat}{kinds,mapped,aligned:nat} Walked(n, depth) of (ancestors(n, depth), size_tally(kinds), size_map(mapped), align_map(aligned))
 
-fun _walk_nodes {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:nat}{count:nat}{depth:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, ld, nd), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count),
+(* The children of an element, or the top nodes: the elements among them are
+   counted once, so each knows its place and whether it is the last *)
+fun _walk_nodes {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:nat}{count,align_count:nat}{depth:nat} .<sz, 2>.
+  (data: !$A.borrow(byte, ld, nd), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count), aligns: !align_rules(ns, align_count),
    nodes: !$X.xml_node_list(nd, sz), state: walked(nd, depth), parent: size_computed, root: size_computed,
    shown: size_computed, goal: walk_goal, base: size_computed): walked(nd, depth) =
+  _walk_list(data, sheet, rules, aligns, nodes, state, parent, root, shown, goal, base, 0, _elements_in(nodes))
+
+and _walk_list {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:nat}{count,align_count:nat}{depth:nat}{seen:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, ld, nd), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count), aligns: !align_rules(ns, align_count),
+   nodes: !$X.xml_node_list(nd, sz), state: walked(nd, depth), parent: size_computed, root: size_computed,
+   shown: size_computed, goal: walk_goal, base: size_computed, seen: int seen, total: int): walked(nd, depth) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val state = _walk_node(data, sheet, rules, node, state, parent, root, shown, goal, base)
-    in _walk_nodes(data, sheet, rules, rest, state, parent, root, shown, goal, base) end
+      val place = (case+ node of
+        | $X.xml_element(_, _, _, _) => seen + 1
+        | $X.xml_text(_, _) => seen): [place:nat] int place
+      val state = _walk_node(data, sheet, rules, aligns, node, state, parent, root, shown, goal, base, place, total)
+    in _walk_list(data, sheet, rules, aligns, rest, state, parent, root, shown, goal, base, place, total) end
   | $X.xml_nodes_nil() => state
 
-and _walk_node {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:pos}{count:nat}{depth:nat} .<sz, 0>.
-  (data: !$A.borrow(byte, ld, nd), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count),
+and _walk_node {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:pos}{count,align_count:nat}{depth:nat}{place:nat} .<sz, 0>.
+  (data: !$A.borrow(byte, ld, nd), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count), aligns: !align_rules(ns, align_count),
    node: !$X.xml_node(nd, sz), state: walked(nd, depth), parent: size_computed, root: size_computed,
-   shown: size_computed, goal: walk_goal, base: size_computed): walked(nd, depth) =
+   shown: size_computed, goal: walk_goal, base: size_computed, place: int place, total: int): walked(nd, depth) =
   case+ node of
   | $X.xml_text(at, len) =>
     (case+ goal of
      | GoalSizes() => state
      | GoalTally() => let
          val chars = _count_chars(data, at, at + len, 0)
-         val ~Walked(chain, tally, map) = state
+         val ~Walked(chain, tally, map, align_map) = state
          val tally = tally_add(tally, parent, chars)
-       in Walked(chain, tally, map) end)
+       in Walked(chain, tally, map, align_map) end)
   | $X.xml_element(name_at, name_len, attrs, children) =>
     if _is_uncounted(data, name_at, name_len) then state
     else let
-      val ~Walked(chain, tally, map) = state
-      val facts = _facts_of(data, name_at, name_len, attrs)
+      val ~Walked(chain, tally, map, align_map) = state
+      val facts = _facts_of(data, name_at, name_len, attrs, place, place = total)
       val best = _best_rule(sheet, rules, data, facts, chain, @{found= false, specificity= 0, order= 0, size= @{basis= BasisPixels(), thousandths= 0}})
       val declared = _first_found(_inline_size(data, attrs), _rule_size(best), _hint_size(data, name_at, name_len, attrs))
       val @(computed, own) = (case+ declared of
@@ -558,20 +710,25 @@ and _walk_node {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:pos}{count:nat}{depth:nat} .<
       val step = proportion_of(computed, base)
       val mapped = (if transparent then false else if own then true else step <> proportion_of(shown, base))
       val map = _map_added(map, (case+ goal of GoalTally() => false | GoalSizes() => mapped), name_at, step)
+      val align = (case+ goal of
+        | GoalTally() => AlignNone()
+        | GoalSizes() => (if _is_table_part(data, name_at, name_len) then _align_of_part(data, sheet, aligns, facts, chain, attrs) else AlignNone()))
+      val align_map = _align_map_added(align_map, name_at, align)
       val below_shown = (if mapped then computed else shown): size_computed
       val chain = AncestorsCons(facts, chain)
-      val ~Walked(chain, tally, map) = _walk_nodes(data, sheet, rules, children, Walked(chain, tally, map), computed, below_root, below_shown, goal, base)
+      val ~Walked(chain, tally, map, align_map) = _walk_nodes(data, sheet, rules, aligns, children, Walked(chain, tally, map, align_map), computed, below_root, below_shown, goal, base)
       val+ ~AncestorsCons(_, chain) = chain
-    in Walked(chain, tally, map) end
+    in Walked(chain, tally, map, align_map) end
 
 (* The walk of a chapter's tree: its chain of ancestors is empty at the
-   end, and the map comes out in the document's order *)
-fn _walked {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:nat}{count:nat}{kinds:nat}
+   end, and the maps come out in the document's order *)
+fn _walked {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:nat}{count,align_count:nat}{kinds:nat}
   (data: !$A.borrow(byte, ld, nd), nodes: !$X.xml_node_list(nd, sz), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count),
-   tally: size_tally(kinds), goal: walk_goal, initial: size_computed, base: size_computed): [more,mapped:nat] @(size_tally(more), size_map(mapped)) = let
-  val ~Walked(chain, tally, map) = _walk_nodes(data, sheet, rules, nodes, Walked(AncestorsNil(), tally, MapNil()), initial, initial, base, goal, base)
+   aligns: !align_rules(ns, align_count),
+   tally: size_tally(kinds), goal: walk_goal, initial: size_computed, base: size_computed): [more,mapped,aligned:nat] @(size_tally(more), size_map(mapped), align_map(aligned)) = let
+  val ~Walked(chain, tally, map, align_map) = _walk_nodes(data, sheet, rules, aligns, nodes, Walked(AncestorsNil(), tally, MapNil(), AlignMapNil()), initial, initial, base, goal, base)
   val+ ~AncestorsNil() = chain
-in @(tally, _map_reversed(map, MapNil())) end
+in @(tally, _map_reversed(map, MapNil()), _align_map_reversed(align_map, AlignMapNil())) end
 
 (* The characters of the chapter data[0, nd), its parsed tree nodes, added to
    tally by the size they are set in, sheet being the joined style sheets of
@@ -580,9 +737,12 @@ in @(tally, _map_reversed(map, MapNil())) end
   (data: !$A.borrow(byte, ld, nd), nodes: !$X.xml_node_list(nd, sz), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count),
    tally: size_tally(kinds)): [more:nat] size_tally(more)
 
-implement chapter_tally (data, nodes, sheet, rules, tally) = let
-  val @(tally, map) = _walked(data, nodes, sheet, rules, tally, GoalTally(), 16000, 16000)
+implement chapter_tally {ld}{nd}{ls}{ns}{sz}{count}{kinds} (data, nodes, sheet, rules, tally) = let
+  val aligns = AlignRulesNil(): align_rules(ns, 0)
+  val @(tally, map, align_map) = _walked(data, nodes, sheet, rules, aligns, tally, GoalTally(), 16000, 16000)
   val () = size_map_free(map)
+  val () = align_map_free(align_map)
+  val () = align_rules_free(aligns)
 in tally end
 
 (* chapter_tally for a chapter with no style sheet *)
@@ -608,9 +768,12 @@ in tally end
   (data: !$A.borrow(byte, ld, nd), nodes: !$X.xml_node_list(nd, sz), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count),
    initial: size_computed, base: size_computed): [mapped:nat] size_map(mapped)
 
-implement chapter_size_map (data, nodes, sheet, rules, initial, base) = let
-  val @(tally, map) = _walked(data, nodes, sheet, rules, tally_new(), GoalSizes(), initial, base)
+implement chapter_size_map {ld}{nd}{ls}{ns}{sz}{count} (data, nodes, sheet, rules, initial, base) = let
+  val aligns = AlignRulesNil(): align_rules(ns, 0)
+  val @(tally, map, align_map) = _walked(data, nodes, sheet, rules, aligns, tally_new(), GoalSizes(), initial, base)
   val () = tally_free(tally)
+  val () = align_map_free(align_map)
+  val () = align_rules_free(aligns)
 in map end
 
 #pub fun chapter_size_map_unstyled {ld:agz}{nd:pos}{sz:nat}
@@ -625,6 +788,34 @@ implement chapter_size_map_unstyled (data, nodes, initial, base) = let
   val () = $A.drop<byte>(blank_frozen, blank_bytes)
   val () = $A.free<byte>($A.thaw<byte>(blank_frozen))
 in map end
+
+(* chapter_size_map with the alignments of the parts of tables that the
+   sheet's rules (and the style attributes) give, in a map of their own *)
+#pub fun chapter_maps {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:nat}{count,align_count:nat}
+  (data: !$A.borrow(byte, ld, nd), nodes: !$X.xml_node_list(nd, sz), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count),
+   aligns: !align_rules(ns, align_count), initial: size_computed, base: size_computed): [mapped,aligned:nat] @(size_map(mapped), align_map(aligned))
+
+implement chapter_maps (data, nodes, sheet, rules, aligns, initial, base) = let
+  val @(tally, map, align_map) = _walked(data, nodes, sheet, rules, aligns, tally_new(), GoalSizes(), initial, base)
+  val () = tally_free(tally)
+in @(map, align_map) end
+
+(* chapter_maps for a chapter with no style sheet: only its style attributes give an alignment *)
+#pub fun chapter_maps_unstyled {ld:agz}{nd:pos}{sz:nat}
+  (data: !$A.borrow(byte, ld, nd), nodes: !$X.xml_node_list(nd, sz), initial: size_computed, base: size_computed)
+  : [mapped,aligned:nat] @(size_map(mapped), align_map(aligned))
+
+implement chapter_maps_unstyled (data, nodes, initial, base) = let
+  val blank = $A.alloc<byte>(1)
+  val @(blank_frozen, blank_bytes) = $A.freeze<byte>(blank)
+  val rules = RulesNil(): css_rules(1, 0)
+  val aligns = AlignRulesNil(): align_rules(1, 0)
+  val maps = chapter_maps(data, nodes, blank_bytes, rules, aligns, initial, base)
+  val () = css_rules_free(rules)
+  val () = align_rules_free(aligns)
+  val () = $A.drop<byte>(blank_frozen, blank_bytes)
+  val () = $A.free<byte>($A.thaw<byte>(blank_frozen))
+in maps end
 
 (* ============================================================
    Finding a chapter's style sheets

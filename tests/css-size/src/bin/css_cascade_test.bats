@@ -118,7 +118,7 @@ fn check_rules (): void = let
   val () = tally_free(names)
 
   (* a selector css_size does not read selects nothing *)
-  val skipped = chapter_run("<div><p>aaa</p></div>", "div > p{font-size:30px} p:first-child{font-size:30px} p[x]{font-size:30px}")
+  val skipped = chapter_run("<div><p>aaa</p></div>", "div > p{font-size:30px} p:hover{font-size:30px} p[x]{font-size:30px}")
   val () = expect_int(tally_chars_in(skipped, 16000), 3, "skipped: unsupported selectors")
   val () = tally_free(skipped)
 
@@ -292,6 +292,93 @@ fn check_map (): void = let
   val () = size_map_free(map)
 in () end
 
+
+(* The alignments of the chapter doc under sheet *)
+fn align_run {n,m:pos | n <= 1048576; m <= 1048576} (doc: string(n), sheet: string(m)): [c:nat] align_map(c) = let
+  val n = g1u2i(string1_length(doc))
+  val m = g1u2i(string1_length(sheet))
+  val doc_array = text_array(doc, n)
+  val @(doc_frozen, doc_view) = $A.freeze<byte>(doc_array)
+  val nodes = $X.parse_document(doc_view, n)
+  val sheet_array = text_array(sheet, m)
+  val @(sheet_frozen, sheet_view) = $A.freeze<byte>(sheet_array)
+  val ~SheetRead(_, _, rules) = sheet_rules_read(sheet_view, m)
+  val aligns = sheet_aligns_read(sheet_view, m)
+  val @(sizes, map) = chapter_maps(doc_view, nodes, sheet_view, rules, aligns, 16000, 16000)
+  val () = size_map_free(sizes)
+  val () = css_rules_free(rules)
+  val () = align_rules_free(aligns)
+  val () = $A.drop<byte>(sheet_frozen, sheet_view)
+  val () = $A.free<byte>($A.thaw<byte>(sheet_frozen))
+  val () = $X.free_nodes(nodes)
+  val () = $A.drop<byte>(doc_frozen, doc_view)
+  val () = $A.free<byte>($A.thaw<byte>(doc_frozen))
+in map end
+
+(* The alignment of the n-th entry of the map as a word, "none" when it has fewer *)
+fun align_nth {c:nat} .<c>. (map: !align_map(c), n: int): string =
+  case+ map of
+  | AlignMapNil() => "none"
+  | AlignMapCons(_, align, rest) =>
+    if n <= 0 then
+      (case+ align of
+       | AlignNone() => "none"
+       | AlignLeft() => "left"
+       | AlignRight() => "right"
+       | AlignCenter() => "center")
+    else align_nth(rest, n - 1)
+
+fn expect_text (got: string, wanted: string, what: string): void =
+  if got = wanted then () else let
+    val () = println! ("  ", what, ": wanted ", wanted, ", got ", got)
+  in fail(what) end
+
+fn align_text (align: align_value): string =
+  case+ align of
+  | AlignNone() => "none"
+  | AlignLeft() => "left"
+  | AlignRight() => "right"
+  | AlignCenter() => "center"
+
+fn check_aligns (): void = let
+  (* columns by their place in the row, the more specific rule winning, whitespace between the cells not counted *)
+  val map = align_run(
+    "<table>\n<tr>\n<td>a</td>\n<td>b</td>\n</tr>\n<tr><td>c</td><td>d</td></tr></table><p>x</p>",
+    "td:nth-child(odd){text-align:right} td:nth-child(even){text-align:left} table td:last-child{text-align:-webkit-center} p{text-align:right}")
+  val () = expect_int(align_map_count(map), 4, "aligns: four cells, no paragraph")
+  val () = expect_text(align_nth(map, 0), "right", "aligns: first column")
+  val () = expect_text(align_nth(map, 1), "center", "aligns: last child beats even")
+  val () = expect_text(align_nth(map, 2), "right", "aligns: first column of the second row")
+  val () = expect_text(align_nth(map, 3), "center", "aligns: second row's last")
+  val () = align_map_free(map)
+
+  (* a style attribute beats every rule; MathML's cells and rows are parts of a table too *)
+  val map = align_run(
+    "<math><mtable><mtr><mtd style=\"text-align:center\">a</mtd><mtd>b</mtd></mtr></mtable></math>",
+    "mtable mtd{text-align:left} mtr{text-align:right}")
+  val () = expect_int(align_map_count(map), 3, "aligns: mtr and two mtd")
+  val () = expect_text(align_nth(map, 0), "right", "aligns: the row")
+  val () = expect_text(align_nth(map, 1), "center", "aligns: the style attribute")
+  val () = expect_text(align_nth(map, 2), "left", "aligns: the rule")
+  val () = align_map_free(map)
+
+  (* the number of the child, and the first child *)
+  val map = align_run("<tr><td>a</td><td>b</td><td>c</td></tr>", "td:nth-child(2){text-align:center} td:first-child{text-align:right}")
+  val () = expect_int(align_map_count(map), 2, "aligns: two of three cells")
+  val () = expect_text(align_nth(map, 0), "right", "aligns: first child")
+  val () = expect_text(align_nth(map, 1), "center", "aligns: second child")
+  val () = expect_text(align_nth(map, 2), "none", "aligns: third child has none")
+  val () = align_map_free(map)
+
+  (* a map is taken in the document's order *)
+  val map = align_run("<tr><td style=\"text-align:left\">a</td><td style=\"text-align:right\">b</td></tr>", " ")
+  val @(none, map) = align_map_take(map, 0)
+  val () = expect_text(align_text(none), "none", "aligns take: before the first")
+  val @(first, map) = align_map_take(map, 5)
+  val () = expect_text(align_text(first), "left", "aligns take: the first cell's name is at 5")
+  val () = align_map_free(map)
+in () end
+
 fn check_sources (): void = let
   val doc = "<html><head><link rel=\"stylesheet\" href=\"a.css\"/><link rel=\"alternate stylesheet\" href=\"b.css\"/><link rel=\"stylesheet\" media=\"print\" href=\"c.css\"/><link rel=\"stylesheet\" media=\"screen\" href=\"d.css\"/><link rel=\"icon\" href=\"e.png\"/><link rel=\"stylesheet\"/><style>p{}</style><style>h1{}</style></head><body><p>x</p></body></html>"
   val n = g1u2i(string1_length(doc))
@@ -389,6 +476,7 @@ implement main0 () = let
   val () = check_most_sizes()
   val () = check_sources()
   val () = check_map()
+  val () = check_aligns()
   val () = fuzz(5000)
 in
   if !_failures = 0 then println! ("all ok")

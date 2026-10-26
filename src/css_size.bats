@@ -448,6 +448,72 @@ implement size_resolve (declared, parent, root) =
 implement proportion_of (size, dominant) = 10 + _bounded((20 * size + dominant / 2) / dominant - 10, 50)
 
 (* ============================================================
+   Alignment of table parts (keyword: publisher alignment, #868)
+   ============================================================ *)
+
+(* The text-align a publisher gave a part of a table: the keywords that
+   do not depend on the direction of the text, and Blink's -webkit- forms of
+   them, which are the ones a MathML cell takes (its plain left and right
+   leave the content where it was) *)
+#pub datatype align_value = AlignNone | AlignLeft | AlignRight | AlignCenter
+
+(* The alignment one value gives: a keyword alone (marked !important it is
+   not read, as a size is not) *)
+fn _align_of_value {l:agz}{n:pos}{start,stop:nat | start <= stop; stop <= n}
+  (data: !$A.borrow(byte, l, n), start: int start, stop: int stop): align_value = let
+  val value_start = _blank_end(data, start, stop, false)
+  val value_stop = _trimmed_end(data, value_start, stop)
+in
+  if _span_is(data, value_start, value_stop, "left", 4) then AlignLeft()
+  else if _span_is(data, value_start, value_stop, "-webkit-left", 12) then AlignLeft()
+  else if _span_is(data, value_start, value_stop, "right", 5) then AlignRight()
+  else if _span_is(data, value_start, value_stop, "-webkit-right", 13) then AlignRight()
+  else if _span_is(data, value_start, value_stop, "center", 6) then AlignCenter()
+  else if _span_is(data, value_start, value_stop, "-webkit-center", 14) then AlignCenter()
+  else AlignNone()
+end
+
+(* The alignment of one declaration, data[start, stop) being "name: value"
+   with no semicolon: the value when the name is text-align *)
+fn _declaration_align {l:agz}{n:pos}{start,stop:nat | start <= stop; stop <= n}
+  (data: !$A.borrow(byte, l, n), start: int start, stop: int stop): align_value = let
+  val colon_at = _colon(data, start, stop)
+  val name_stop = _trimmed_end(data, start, colon_at)
+in
+  if colon_at >= stop then AlignNone()
+  else if _span_is(data, start, name_stop, "text-align", 10) then _align_of_value(data, colon_at + 1, stop)
+  else AlignNone()
+end
+
+(* The alignment so far and the one after it: a valid one replaces the one
+   before it *)
+fn _align_merge (before: align_value, after: align_value): align_value =
+  case+ after of
+  | AlignNone() => before
+  | AlignLeft() => AlignLeft()
+  | AlignRight() => AlignRight()
+  | AlignCenter() => AlignCenter()
+
+fun _align_declarations {l:agz}{n:pos}{at,stop:nat | at <= stop; stop <= n} .<stop - at>.
+  (data: !$A.borrow(byte, l, n), at: int at, stop: int stop, so_far: align_value): align_value = let
+  val [started:int] start = _blank_end(data, at, stop, true)
+in
+  if start >= stop then so_far
+  else let
+    val scanned = _declaration_scan(data, start, stop, 0, 0)
+    val declaration_stop = (if scanned > start then scanned else start + 1): [e:nat | started < e; e <= stop] int e
+    val next = _declaration_align(data, start, declaration_stop)
+  in _align_declarations(data, declaration_stop, stop, _align_merge(so_far, next)) end
+end
+
+(* The text-align of a declaration block, data[start, stop) being what is
+   between the braces (or an inline style attribute's value) *)
+#pub fun declarations_align_read {l:agz}{n:pos}{start,stop:nat | start <= stop; stop <= n}
+  (data: !$A.borrow(byte, l, n), start: int start, stop: int stop): align_value
+
+implement declarations_align_read (data, start, stop) = _align_declarations(data, start, stop, AlignNone())
+
+(* ============================================================
    Selectors
    ============================================================ *)
 
@@ -491,6 +557,47 @@ fun _name_end {l:agz}{n:pos}{at,stop:nat | at <= stop; stop <= n} .<stop - at>.
   else if _is_name(_code(data, at)) then _name_end(data, at + 1, stop)
   else at
 
+(* The structural pseudo-classes a selector may hold (keyword: publisher
+   alignment): the first and last child, and the child by its place *)
+#pub datatype pseudo_kind = PseudoFirstChild | PseudoLastChild | PseudoOdd | PseudoEven | PseudoIndex
+
+(* The pseudo-class that begins with its colon at data[at], with where it
+   ends and, for PseudoIndex, the place (from 1) *)
+#pub datavtype pseudo_read(at:int, stop:int) =
+  | PseudoUnsupported(at, stop) of ()
+  | {end_at:nat | at < end_at; end_at <= stop} PseudoSupported(at, stop) of (pseudo_kind, int end_at, int)
+
+#pub fun pseudo_read {l:agz}{n:pos}{at,stop:nat | at < stop; stop <= n}
+  (data: !$A.borrow(byte, l, n), at: int at, stop: int stop): pseudo_read(at, stop)
+
+implement pseudo_read (data, at, stop) = let
+  val name_stop = _name_end(data, at + 1, stop)
+in
+  if _span_is(data, at + 1, name_stop, "first-child", 11) then PseudoSupported(PseudoFirstChild(), name_stop, 0)
+  else if _span_is(data, at + 1, name_stop, "last-child", 10) then PseudoSupported(PseudoLastChild(), name_stop, 0)
+  else if _span_is(data, at + 1, name_stop, "nth-child", 9) then
+    (if name_stop >= stop then PseudoUnsupported()
+     else if _code(data, name_stop) <> 40 then PseudoUnsupported()
+     else let
+       val argument_start = name_stop + 1
+       val argument_stop = _name_end(data, argument_start, stop)
+     in
+       if argument_stop >= stop then PseudoUnsupported()
+       else if _code(data, argument_stop) <> 41 then PseudoUnsupported()
+       else if _span_is(data, argument_start, argument_stop, "odd", 3) then PseudoSupported(PseudoOdd(), argument_stop + 1, 0)
+       else if _span_is(data, argument_start, argument_stop, "even", 4) then PseudoSupported(PseudoEven(), argument_stop + 1, 0)
+       else let
+         val @(digits_end, place) = _whole(data, argument_start, argument_stop, 0)
+       in
+         if digits_end = argument_stop then
+           (if argument_stop > argument_start then (if place >= 1 then PseudoSupported(PseudoIndex(), argument_stop + 1, place) else PseudoUnsupported())
+            else PseudoUnsupported())
+         else PseudoUnsupported()
+       end
+     end)
+  else PseudoUnsupported()
+end
+
 (* A selector, data[at, stop) being what remains of it: fresh when a
    compound begins here, depth the compounds begun *)
 fun _selector {l:agz}{n:pos}{at,stop:nat | at <= stop; stop <= n} .<stop - at, 1>.
@@ -526,7 +633,10 @@ and _compound_part {l:agz}{n:pos}{at,stop:nat | at < stop; stop <= n} .<stop - a
     if name_stop > at + 1 then _selector(data, name_stop, stop, false, depth, ids, classes + 1, names)
     else SelectorUnsupported(UnsupportedCharacter())
   end
-  else if code = 58 then SelectorUnsupported(UnsupportedPseudo())
+  else if code = 58 then
+    (case+ pseudo_read(data, at, stop) of
+     | ~PseudoUnsupported() => SelectorUnsupported(UnsupportedPseudo())
+     | ~PseudoSupported(_, end_at, _) => _selector(data, end_at, stop, false, depth, ids, classes + 1, names))
   else if code = 91 then SelectorUnsupported(UnsupportedAttribute())
   else if code = 42 then SelectorUnsupported(UnsupportedUniversal())
   else if code = 62 then SelectorUnsupported(UnsupportedCombinator())
@@ -725,5 +835,87 @@ end
 #pub fun sheet_rules_read {l:agz}{n:pos} (data: !$A.borrow(byte, l, n), sheet_len: int n): sheet_read(n)
 
 implement sheet_rules_read (data, sheet_len) = _sheet(data, 0, sheet_len, Gathered(RULES_MAX, 0, RulesNil()))
+
+(* ============================================================
+   The rules of a sheet that give a text-align (keyword: publisher alignment)
+   ============================================================ *)
+
+(* The rules of a sheet that give a text-align, in the order of the sheet,
+   each with its alignment (never AlignNone) *)
+#pub datavtype align_rules(sheet_len:int, count:int) =
+  | AlignRulesNil(sheet_len, 0) of ()
+  | {count:nat} AlignRulesCons(sheet_len, count + 1) of (css_rule(sheet_len), align_value, align_rules(sheet_len, count))
+
+#pub fun align_rules_free {sheet_len:int}{count:nat} (rules: align_rules(sheet_len, count)): void
+
+implement align_rules_free {sheet_len}{count} (rules) = let
+  fun walk {count:nat} .<count>. (rules: align_rules(sheet_len, count)): void =
+    case+ rules of
+    | ~AlignRulesNil() => ()
+    | ~AlignRulesCons(_, _, rest) => walk(rest)
+in walk(rules) end
+
+fun _align_reversed {sheet_len:int}{a,b:nat} .<a>.
+  (source: align_rules(sheet_len, a), onto: align_rules(sheet_len, b)): align_rules(sheet_len, a + b) =
+  case+ source of
+  | ~AlignRulesNil() => onto
+  | ~AlignRulesCons(rule, align, rest) => _align_reversed(rest, AlignRulesCons(rule, align, onto))
+
+(* The alignment rules gathered so far (last first) and how many more the sheet may give *)
+datavtype align_gathered(sheet_len:int) =
+  | {count:nat} AlignGathered(sheet_len) of (int, align_rules(sheet_len, count))
+
+(* The selectors of data[at, stop), a comma-separated list, each with align, added to what is gathered *)
+fun _align_selectors {l:agz}{n:pos}{at,stop:nat | at <= stop; stop <= n} .<stop - at>.
+  (data: !$A.borrow(byte, l, n), at: int at, stop: int stop, align: align_value, so_far: align_gathered(n)): align_gathered(n) = let
+  val selector_stop = _comma(data, at, stop)
+  val selector_start = _space_end(data, at, selector_stop)
+  val selector_end = _trimmed_end(data, selector_start, selector_stop)
+  val read = selector_specificity_read(data, at, selector_stop)
+  val ~AlignGathered(budget, rules) = so_far
+  val gathered = (case+ read of
+    | ~SelectorUnsupported(_) => AlignGathered(budget, rules)
+    | ~SelectorSupported(weight) =>
+      if budget <= 0 then AlignGathered(budget, rules)
+      else let
+        val order = _bounded(RULES_MAX - budget, RULES_MAX - 1)
+        val rule = @{selector_at= selector_start, selector_len= selector_end - selector_start, specificity= weight, order= order}: css_rule(n)
+      in AlignGathered(budget - 1, AlignRulesCons(rule, align, rules)) end): align_gathered(n)
+in
+  if selector_stop < stop then _align_selectors(data, selector_stop + 1, stop, align, gathered)
+  else gathered
+end
+
+fun _align_sheet {l:agz}{n:pos}{at:nat | at <= n} .<n - at>.
+  (data: !$A.borrow(byte, l, n), at: int at, stop: int n, so_far: align_gathered(n)): align_gathered(n) = let
+  val start = _blank_end(data, at, stop, true)
+in
+  if start >= stop then so_far
+  else let
+    val [prelude_end:int] prelude_stop = _prelude_end(data, start, stop, 0)
+  in
+    if prelude_stop >= stop then so_far
+    else if _code(data, prelude_stop) = 59 then _align_sheet(data, prelude_stop + 1, stop, so_far)
+    else let
+      val block_stop = _block_end(data, prelude_stop + 1, stop, 0, 0)
+      val after = (if block_stop < stop then block_stop + 1 else stop): [after:nat | prelude_end < after; after <= n] int after
+    in
+      if _code(data, start) = 64 then _align_sheet(data, after, stop, so_far)
+      else
+        (case+ declarations_align_read(data, prelude_stop + 1, block_stop) of
+         | AlignNone() => _align_sheet(data, after, stop, so_far)
+         | AlignLeft() => _align_sheet(data, after, stop, _align_selectors(data, start, prelude_stop, AlignLeft(), so_far))
+         | AlignRight() => _align_sheet(data, after, stop, _align_selectors(data, start, prelude_stop, AlignRight(), so_far))
+         | AlignCenter() => _align_sheet(data, after, stop, _align_selectors(data, start, prelude_stop, AlignCenter(), so_far)))
+    end
+  end
+end
+
+(* The rules of a style sheet that give a text-align, data[0, sheet_len) being the sheet *)
+#pub fun sheet_aligns_read {l:agz}{n:pos} (data: !$A.borrow(byte, l, n), sheet_len: int n): [count:nat] align_rules(n, count)
+
+implement sheet_aligns_read (data, sheet_len) = let
+  val ~AlignGathered(_, rules) = _align_sheet(data, 0, sheet_len, AlignGathered(RULES_MAX, AlignRulesNil()))
+in _align_reversed(rules, AlignRulesNil()) end
 
 end

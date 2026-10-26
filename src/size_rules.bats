@@ -12,7 +12,13 @@
    outrank a step: the selectors are all of one specificity, and the
    steps different. Each rule is a selector of 19 bytes and a value of
    30, so a step cannot name a rule that is not written, and the sheet's
-   budget is proven to hold all 51 *)
+   budget is proven to hold all 51.
+
+   The same style element holds the alignments (keyword: publisher
+   alignment, #868): a part of a table the publisher aligned has a
+   data-align of left, right or center (reader.bats's _align_mark), and the
+   rule for it sets the text-align (the plain keyword, then the -webkit- form); an element has one data-align,
+   so no two of the rules reach the same element *)
 
 #target wasm begin
 
@@ -144,13 +150,32 @@ fun _rules_from {left:nat}{step:int | 10 <= step; step <= 61 ; 69 * (61 - step) 
     val sheet = close(sheet)
   in _rules_from(sheet, step + 1) end
 
-(* The style sheet of the sizes: one rule for each step *)
+(* The rules of the alignments: left, right and center, each a selector and
+   the plain keyword, then Blink's -webkit- form (a MathML cell takes only
+   that one, and an engine that does not know it keeps the plain one) *)
+fn _align_rules {left:nat | 256 <= left} (sheet: sheet(left, false, false)): [after:nat | after >= left - 256] sheet(after, false, false) = let
+  val sheet = rule(sheet, ".caf [data-align=\"left\"]")
+  val sheet = lay(sheet, TextAlign(), "left")
+  val sheet = lay(sheet, TextAlign(), "-webkit-left")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".caf [data-align=\"right\"]")
+  val sheet = lay(sheet, TextAlign(), "right")
+  val sheet = lay(sheet, TextAlign(), "-webkit-right")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".caf [data-align=\"center\"]")
+  val sheet = lay(sheet, TextAlign(), "center")
+  val sheet = lay(sheet, TextAlign(), "-webkit-center")
+  val sheet = close(sheet)
+in sheet end
+
+(* The style sheet of the sizes: one rule for each step, and the alignments *)
 #pub fn size_style (): [l:agz][k:nat | k < 65536] @($A.arr(byte, l, $B.BUILDER_CAP), int k)
 
 implement size_style () = let
   val builder = $B.create()
   val sheet: sheet(BUDGET, false, false) = Sheet(builder)
   val sheet = _rules_from(sheet, 10)
+  val sheet = _align_rules(sheet)
   val+ ~Sheet(builder) = sheet
   val @(bytes, length) = $B.to_arr(builder)
 in @(bytes, length) end

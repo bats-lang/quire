@@ -138,6 +138,26 @@ errors its entry lists.
   (Thorium), on purpose. What only CSS hid (`display:none`) is shown; the
   `hidden` attribute is kept (`_pass_attrs` gives it the class
   `hidden-by-book`). `e2e/publisher.spec.js`.
+* **The alignment of a table's parts is the one thing kept** (#868, keyword: publisher alignment).
+  The `text-align` of the book's sheets (`<link>` sheets and `<style>`, the same joined sheet as the
+  sizes, #431) and of a cell's `style` attribute is read for `table`, `thead`, `tbody`, `tfoot`, `tr`,
+  `td`, `th` and MathML's `mtable`, `mtr` and `mtd` only: `left`, `right`, `center` and Blink's
+  `-webkit-` forms, never `!important`. The cascade of `src/css_cascade.bats` picks the winning rule of
+  each part and the part carries `data-align` (`_align_mark` in `src/reader.bats`), which the rules of
+  `style-sizes` (`src/size_rules.bats`) turn into `text-align`, the plain keyword and then the
+  `-webkit-` form. Why the `-webkit-` form: a MathML cell is `-webkit-center` in Chromium, and its
+  children are not inline, so the plain `left` and `right` leave them where they were (measured in
+  Chromium 149: with `mtd{text-align:right}` the content stays at the cell's start, with
+  `-webkit-right` it moves to the end); WebKit's own `mathml.css` makes the children of an `mtd`
+  inline-block to the same end. Selectors may hold `:first-child`, `:last-child` and
+  `:nth-child(odd, even or a number)` (`pseudo_read` in `src/css_size.bats`, used by the sizes too);
+  the cascade needs an element's place among its parent's elements, which the walk counts.
+  Why this part and no other: a table's cells are aligned by their content (numbers right, labels
+  left), so a setting of the reader's has nothing to say about them, where Justify, spacing and
+  Font are the reader's for the text; Readium CSS leaves tables out of its text-align setting
+  for the same reason (readium/css#5: headings, tables and `pre` are not overridden). Every other
+  property and element of the sheets stays dropped. `e2e/table-alignment.spec.js` plays
+  `e2e/table-alignment-books.js`; `tests/css-size/run.sh` tests the reading and the cascade.
 * **The print page list** (#415): the Pages tab lists the entries as the book
   gives them (not sorted, duplicates kept); an entry whose chapter the book lacks
   is listed and leads nowhere (the panel stays), one whose fragment is missing
