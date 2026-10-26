@@ -46,3 +46,7 @@ text	2	\bas refs\b	it goes in as Refs	A PR that does not meet its Done-when as w
 text	2	\buse refs\b	use Refs	A PR that does not meet its Done-when as written is not opened as Refs: the verdict is changes needed.
 guide	16	unless the brief says otherwise	new tooling is bats unless the brief says otherwise	A brief does not override CLAUDE.md: non-bats code names the avenue it exhausted.
 guide	14	take a p1 or p2	or take a p1 or p2	CLAUDE.md: a p1 is not started while a p0 is open.
+guide	14	\b(one|two|three|\d+) (sonnet|haiku|opus)s?\b	go down to one sonnet	The rows of the ledger file are the agents that run; no text names a count (quire#897).
+guide	14	\b(sonnet|haiku)\d*\b	most conflicts are haiku-level	No text names a model of an agent; the ledger's rows are the agents (quire#897).
+guide	14	\b(at most|no more than|limit of|limit is|limit) (two|three|\d+) (agents|workers|slots)\b	at most two agents run	The rows of the ledger file are the agents that run; no text names a count (quire#897).
+guide	14	\b(two|three|\d+) (live |worker )?(agents|slots)\b	ListAgents shows two live agents	The rows of the ledger file are the agents that run; no text names a count (quire#897).
