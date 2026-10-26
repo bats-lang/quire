@@ -1,6 +1,9 @@
 ---
 paths:
   - src/reader*.bats
+  - src/reading_ruler.bats
+  - src/ruler_rules.bats
+  - e2e/reading-ruler*
   - src/settings.bats
   - src/image_viewer.bats
   - src/page_size.bats
@@ -230,3 +233,55 @@ switching tabs moves neither the sheet nor its tabs. Their controls are one `typ
   `WithPrevious`). The facing page is rendered into `facing-box` (`_facing_open`),
   its content nodes going on from the page's, and cannot be selected (`.facing`),
   so what is marked or read aloud is the page's. A turn moves a spread at a time.
+
+## The reading ruler (keyword: reading ruler, #566)
+
+A band over the text that holds the eye to one line, for readers who lose their place; offered as a
+preference (Off to begin with), not as a claim: the evidence is for reading speed, and weaker for
+comprehension (Niklaus, Cai, Bylinskii and Wallace, *Digital Reading Rulers*, CHI 2023: 177 readers, 91 with
+dyslexia; Grey Bar, Shade and Underline raised the speed of readers with dyslexia by about 10 to 20 words a
+minute, readers with dyslexia preferred Lightbox, no style was preferred by all, so the paper recommends
+offering several). Comparable software: Kindle's Reading Ruler (colour, opacity, style and size; on Android
+it asks for continuous scrolling), Immersive Reader's Line focus (1, 3 or 5 lines, the rest dimmed, arrow keys
+move it) and Moon+ Reader (6 styles); KOReader, Thorium, Apple Books and Play Books have none (searched).
+
+* **Styles** (`reading_ruler`: `RulerOff | RulerUnderline | RulerGreyBar | RulerShade | RulerLightbox`, a
+  segmented group in the Look tab) and, for the grey bar and the lightbox, the lines held (`ruler_lines`: one,
+  three, five, as Immersive Reader). A device setting like the brightness: byte "R" and two bytes at the end
+  of the "S2" record, `readingRuler` and `readingRulerLines` in the backup, reset with the settings and put
+  back by Undo (`set_reset_undoable`).
+* **Colours are the theme's, proven** (`src/ruler_rules.bats`, a style element of its own,
+  `style-ruler-rules`, since the main sheet's budget is full). The underline is the text's own colour,
+  `underline(E_fg_bg | ...)` (`EDGEP`, the participants' ask). The grey bar is the role `RULER` (a ground under
+  the text, in `PAL` and `HARMONY`), written only by `band(R_ruler | ...)`: `RULED` proves the body's text and a
+  link on it in every theme at the levels `HARMONY` and `SURF` ask. Shade and Lightbox are the page's ground as
+  a veil over the lines, `dim_rule(D_<theme>_<strength> | ...)`: `DIMMED` proves, per theme and strength, that
+  the dimmed text, a link and the text on a highlight stay readable (`BLEND` is the rounding of the blend,
+  `DIMS` the pair). The page turn's black shade (`VEILED`) was not reused: its proven strengths in the dark
+  themes are 8% and none at night, which dims nothing there; a veil of the ground dims text toward the page in
+  every theme and is proven the same way. Dimmed, not hidden: the reader may glance back.
+  `scripts/gen-harmony.py` writes the proofs; `tests/static/solver/gen_blend.py` the fixtures of `BLEND`.
+* **Where it sits** (`src/reading_ruler.bats`): over the text area (`#ruler`, inside the page's paddings, so
+  the footer is never dimmed), on a line found from a point by the caret the browser gives there and the place
+  of that character (`caret_position_from_point`, `measure_text_offset`); the band is the line's height around
+  the glyph box. The reader tells the module its view (`ruler_view`: paged across, paged right to left, scrolled,
+  a column set vertically from the right or from the left, none for a fixed layout) at every page it shows
+  (`_place_shown`, `reader_scrolled`). A page turn puts it on the page's first line; scrolled it keeps its height
+  and snaps to the whole line there (a line the margin cuts is not one); a spread holds the column the line is
+  in; a vertical book's ruler lies along the column (`ruler-down`). The band is as many lines as the setting,
+  from the line it is on in the way the book is read. Taken as a limit: a line with a larger font than the text
+  (a heading) is held at the text's line height.
+* **Moving it.** A tap between the sides' zones on another line moves it there (the single-pointer way, WCAG
+  2.5.7); a tap on its own line brings up the bars as before, so the bars are summoned by a tap on the ruler's
+  line while it is on. A finger or pen that goes down on the band drags it from line to line
+  (`ruler_pointer`, before the gestures see the record, so the page does not turn); a mouse's drag selects text,
+  and a scrolled page's drag scrolls the text under the ruler (Kindle's way). Reading aloud and a narrated book's
+  clips put it on the line of the sentence or clip (`ruler_follow`). No new keys (the arrows are page keys). It is
+  `aria-hidden` and takes no focus: a screen reader has its own.
+* **Under a panel.** A point under the reading settings' sheet hits the sheet, so a ruler that could not be
+  placed there is placed a moment after the panel closes (`ruler_retry`, from `_open_set` in `layer.bats`).
+* **Not** in a fixed-layout page (its lines are the publisher's art) or the image viewer.
+* Tests: `e2e/reading-ruler.spec.js` (each style on the line it should be at 1, 3 and 5 lines, the first line
+  after a turn, tap, drag, read aloud, scrolled and vertical, the contrasts as the browser computes them in the
+  five themes, the setting kept, in the backup, reset and Undone, the paragraph kept with the ruler on);
+  `tests/static/reject/ruler-*` (a colour pair without its proof does not type-check).
