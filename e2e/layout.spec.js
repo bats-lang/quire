@@ -14,7 +14,7 @@ import {
 import { failLibrary, healReads, stubReads } from './storage-stub.js';
 import { legacyLibrary, bookKey, store, put, forgetRecords, syncEnded, reloadSettled } from './legacy-library.js';
 import { checkPageMargins } from './page-margins.js';
-import { coveredByBanner, textContrastShort, cardMoreBoxes } from './controls-shown.js';
+import { coveredByBanner, textContrastShort, cardMoreBoxes, switchNotesShown, switchNotesMissing } from './controls-shown.js';
 import { fits } from './fits.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
@@ -390,11 +390,11 @@ test('the reading settings sheet scrolls within the window, Close always in reac
   await start(page);
   await readBook(page, { title: 'Sheet', author: 'L', rawChapters: chapters(1) });
   await openReadingSettings(page, 'Page');
-  await readingSettings(page).getByRole('button', { name: 'Full screen', exact: true }).click();
+  await readingSettings(page).getByRole('button', { name: 'Full screen while reading', exact: true }).click();
   // (in the Android app, full screen is a setting the system bars follow only
   // while a book is read with its own bars away: the sheet is open with them
   // up, so the switch is on and nothing is hidden yet; quire#348)
-  if (onAndroid(testInfo)) await expect(readingSettings(page).getByRole('button', { name: 'Full screen', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  if (onAndroid(testInfo)) await expect(readingSettings(page).getByRole('button', { name: 'Full screen while reading', exact: true })).toHaveAttribute('aria-pressed', 'true');
   else await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
   await openReadingSettings(page, 'Look');
   const panel = dialog(page, 'Reading settings');
@@ -473,7 +473,7 @@ test('in the app, scrolled and in full screen with the bars still shown, no text
   await readBook(page, { title: 'Scrolled Under', author: 'L', rawChapters: chapters(2, 80) });
   await openReadingSettings(page, 'Page');
   await readingSettings(page).getByRole('button', { name: 'Scroll', exact: true }).click();
-  const full = readingSettings(page).getByRole('button', { name: 'Full screen', exact: true });
+  const full = readingSettings(page).getByRole('button', { name: 'Full screen while reading', exact: true });
   await full.click();
   await expect(full).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('Escape');
@@ -543,7 +543,7 @@ for (const insets of [
     // (a browser's Fullscreen API, or in the Android app the status bar
     // hidden: either way the button is pressed)
     await openReadingSettings(page, 'Page');
-    const full = readingSettings(page).getByRole('button', { name: 'Full screen', exact: true });
+    const full = readingSettings(page).getByRole('button', { name: 'Full screen while reading', exact: true });
     await full.click();
     await expect(full).toHaveAttribute('aria-pressed', 'true');
     await readingSettings(page).getByRole('button', { name: 'Close', exact: true }).click();
@@ -765,6 +765,70 @@ test('the reading settings sheet keeps its box and its tabs in place on every ta
     await expect(tab(name)).toBeFocused();
     await only(name, key);
   }
+});
+
+// quire#592: a switch is its label alone, and its description is read out
+// and not seen, so the Page tab takes the room of its rows and not of
+// their lines. The height is measured as it is and with every
+// description drawn (the class the rows had), on a 320 x 568 phone, a
+// 412 x 915 Pixel and a 768 x 1024 tablet, each panel of the sheet
+test('a switch in the reading settings is its label alone, its description kept for assistive technology, and the tabs are shorter for it', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Label Alone', author: 'L', rawChapters: chapters(1) });
+  await openReadingSettings(page, 'Page');
+  const panels = ['look', 'page', 'turning', 'aloud'];
+  const heights = () => page.evaluate(panels => panels.map(name => Math.round(document.getElementById(`typography-${name}`).getBoundingClientRect().height)), panels);
+  const described = () => page.evaluate(() => [...document.querySelectorAll('button.switch')].map(b => document.getElementById(b.getAttribute('aria-describedby')).textContent.trim()));
+  const drawn = on => page.evaluate(on => {
+    for (const b of document.querySelectorAll('button.switch')) document.getElementById(b.getAttribute('aria-describedby')).classList.toggle('readout', !on);
+  }, on);
+  const lines = await described();
+  expect(lines.length, 'the switches of the sheet').toBeGreaterThanOrEqual(8);
+  expect(lines.filter(text => !text), 'switches with no description').toEqual([]);
+  await fits(page, 'Reading settings, Page, the label alone');
+  const sizes = [[320, 568], [412, 915], [768, 1024]];
+  for (const [width, height] of sizes) {
+    await page.setViewportSize({ width, height });
+    const label = await heights();
+    await drawn(true);
+    const before = await heights();
+    await drawn(false);
+    const rows = await page.evaluate(() => [...document.querySelectorAll('#typography-page button.switch')].filter(b => b.getClientRects().length > 0).length);
+    console.log(`SHEET HEIGHTS ${width} x ${height} (look, page, turning, aloud) with a line under every switch ${JSON.stringify(before)}, label alone ${JSON.stringify(label)}`);
+    // the Page tab is shorter by at least a 13 px line for each of its switches that was shown
+    expect(before[1] - label[1], `the Page tab's room at ${width} x ${height}`).toBeGreaterThanOrEqual(rows * 13);
+    for (const [i, name] of panels.entries()) expect(label[i], `${name} panel at ${width} x ${height}`).toBeLessThanOrEqual(before[i]);
+  }
+  // the description of each is still the button's
+  const named = await page.evaluate(() => [...document.querySelectorAll('button.switch')].map(b => `${b.textContent.trim()} / ${document.getElementById(b.getAttribute('aria-describedby')).textContent.trim()}`));
+  expect(named).toContain('Lock rotation / Keeps the page in its current orientation when the device turns');
+  expect(named).toContain('Justify text / Lines end evenly at both edges');
+});
+
+// quire#592: the two checks fail when the class they cover occurs
+test('a switch with its description drawn, or with none, is found by the checks', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Found Out', author: 'L', rawChapters: chapters(1) });
+  await openReadingSettings(page, 'Page');
+  expect(await switchNotesShown(page)).toEqual([]);
+  expect(await switchNotesMissing(page)).toEqual([]);
+  // a description drawn under a row
+  await page.evaluate(() => document.getElementById('justify-about').classList.remove('readout'));
+  const shown = await switchNotesShown(page);
+  expect(shown.length).toBe(1);
+  expect(shown[0]).toContain('justify-switch: "Lines end evenly at both edges" is drawn');
+  await expect(fits(page, 'Reading settings, Page, a description drawn')).rejects.toThrow(/with a description line drawn under them/);
+  // named with its reason, it is allowed
+  expect(await switchNotesShown(page, { 'justify-switch': 'a consequence the label cannot carry' })).toEqual([]);
+  await page.evaluate(() => document.getElementById('justify-about').classList.add('readout'));
+  expect(await switchNotesShown(page)).toEqual([]);
+  // a description emptied, and one that is not in the page
+  await page.evaluate(() => { document.getElementById('hyphenation-about').textContent = ''; });
+  expect(await switchNotesMissing(page)).toEqual(['hyphenation-switch: its description "hyphenation-about" has no text']);
+  await page.evaluate(() => document.getElementById('hyphenation-about').remove());
+  expect(await switchNotesMissing(page)).toEqual(['hyphenation-switch: aria-describedby "hyphenation-about" is not in the page']);
+  // and fits says so on the screen
+  await expect(fits(page, 'Reading settings, Page, a description gone')).rejects.toThrow(/description is missing/);
 });
 
 // #374: the error banner never covers the library's header

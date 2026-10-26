@@ -62,6 +62,16 @@ implement switch_rules (sheet) = let
   val sheet = lay(sheet, FontSize(), "13px")
   val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = close(sheet)
+  (* a switch's description, read out and not seen (quire#592, keyword
+     switch-note): a clip, never display:none, so the button's
+     aria-describedby still resolves to text *)
+  val sheet = rule(sheet, ".sabout.readout")
+  val sheet = lay(sheet, Position(), "absolute")
+  val sheet = lay(sheet, Width(), "1px")
+  val sheet = lay(sheet, Height(), "1px")
+  val sheet = spaced(sheet, Padding(), SpaceNone())
+  val sheet = read_out_only(sheet)
+  val sheet = close(sheet)
   val sheet = rule(sheet, ".sbtn.switch")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
