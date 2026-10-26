@@ -580,19 +580,15 @@ in lib_render() end
 
 fn _show_library (): void = _library_shown(true)
 
-(* The reader's bars come up on the reader's tap and go on a reader's act and at no other time
-   (reader_act, keyword: reader acts, #560); no timer hides them. A reader panel open leaves
-   them under its scrim, so the button that opened it is there to have the focus back when it
-   closes *)
+(* reader acts: the bars come up on a tap and go on a reader's act, never on a timer *)
 fn _chrome_show (): void = let
-  (* bringing the bars up leaves the place a jump landed on: the back
-     button goes *)
+  (* reader acts: showing the bars puts the jump's back button away *)
   val () = (if ~(!_chrome) then reader_back_rest() else ())
   val () = !_chrome := true
   val () = ui_attr("reader", AClass, "rv")
   val () = (if _in_reader() then banner_place_set(BannerUnderBars()) else ())
 in
-  (* the system bars come with them *)
+  (* reader acts: the system bars come with them *)
   screen_immersive_set(false)
 end
 
@@ -601,20 +597,18 @@ fn _chrome_hide (act: reader_act): void = let
   val () = ui_attr("reader", AClass, "rv chrome-off")
   val () = (if _in_reader() then banner_place_set(BannerAtTop()) else ())
 in
-  (* away with the reader's own bars: the immersive reading screen, quire#348 *)
+  (* reader acts: the immersive reading screen goes with the bars *)
   screen_immersive_set(_in_reader())
 end
 
-(* A jump from a panel lands: the bars go and the page has the focus the panel's close gave back to
-   the button that opened it *)
-(* reader-bars: a jump of any kind takes the bars down *)
+(* reader acts: a jump of any kind takes the bars down *)
 fn _bars_down_for_jump (): void = if !_chrome then _chrome_hide(ActJump()) else ()
 
 fn _jumped (): void = let
   val () = _bars_down_for_jump()
 in ui_focus("page") end
 
-(* The tap in the middle, or the t key *)
+(* reader acts: the tap in the middle, or the t key *)
 fn _chrome_toggle (): void = if !_chrome then _chrome_hide(ActMiddleTap()) else _chrome_show()
 
 (* The hint on turning pages, shown once, on the first book opened
@@ -642,8 +636,7 @@ in
   in () end)
 end
 
-(* Shows the hint, the first time a book is opened, with the bars down so that nothing
-   covers it: it stays until the first page turn or a tap on it (reader_act) *)
+(* reader acts: the first book's hint opens with the bars down and stays until a turn or a tap *)
 fn _hint_offer (): void =
   if !_hint_seen then ()
   else let
@@ -2168,7 +2161,7 @@ fn _search_selection (): void =
 (* Closes the reader's panels; whether one was open *)
 fn _panels_close (): bool = layer_close_all()
 
-(* A page turn: the bars hide (the hint's going is the turn's own, reader.bats) *)
+(* reader acts: a page turn hides the bars *)
 fn _next (): void = let
   val () = (if !_chrome then _chrome_hide(ActPageTurn()) else ())
 in page_next() end
@@ -2815,7 +2808,7 @@ fn _highlight_tapped (node: Int, x: Int, y: Int): bool =
 fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 22) = let
   val listeners = RCons(listeners, OnEl("back-to-library"), "click", llam(_) => let val () = _show_library() in 0 end)
   val listeners = RCons(listeners, OnEl("previous-page"), "click", llam(_) => let val () = page_prev() in 0 end)
-  (* a tap on the hint itself takes it away (reader_act) *)
+  (* reader acts: a tap on the hint takes it away *)
   val listeners = RCons(listeners, OnEl("turn-hint"), "click", llam(_) => let val () = hint_hide(ActHintTap()) in 0 end)
   val listeners = RCons(listeners, OnEl("next-page"), "click", llam(_) => let val () = page_next() in 0 end)
   (* a chapter at a time: no further than the first or the last *)

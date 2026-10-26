@@ -285,7 +285,7 @@ async function open(page, name, opts = {}) {
   await page.keyboard.press('Escape');
   await expect(readingSettings(page)).toBeHidden();
   if (opts.oneColumn) await oneColumn(page);
-  // the bars and the hint stay until the reader acts (#560)
+  // reader acts: the bars and the hint stay until taken away
   await bareReader(page);
   await settled(page);
 }

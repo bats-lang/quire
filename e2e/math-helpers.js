@@ -80,8 +80,7 @@ async function pixelsOf(page, rect) {
     (its most common colour) by more than 48 in some channel, in viewport CSS px, and the pixel
     that differs most. null for a region with no ink */
 export async function inkIn(page, rect, threshold = 48) {
-  // the bars of the reader lie over the page's head and foot, and the hint on turning pages in its head,
-  // until the reader acts (#560): the t key and a tap on the hint
+  // reader acts: the bars and the hint lie over the page until taken away
   await bareReader(page);
   const { clip, base64 } = await pixelsOf(page, rect);
   const found = await page.evaluate(async ({ base64, clip, threshold }) => {

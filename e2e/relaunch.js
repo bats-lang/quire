@@ -16,8 +16,7 @@
  *     none by itself;
  *   - the pointer's hover: the mouse is moved off every control first;
  *   - a moment's things (the reader's back button), which goes by itself: run
- *     out on the fake clock (`settled`, #657); the reader's bars and the hint
- *     on turning pages stay until the reader acts (#560), so `settled` acts;
+ *     out on the fake clock (`settled`, #657); reader acts: `settled` takes the bars and hint away;
  *   - the renderer's own noise: a pixel drawn up to 16 levels a channel
  *     apart (an edge's anti-aliasing) is not counted as changed.
  */
@@ -156,7 +155,7 @@ export async function settled(page) {
     await page.clock.runFor(MOMENT_MS);
     await writesDone(page);
   }
-  // the reader's bars and the hint on turning pages stay until the reader acts (#560)
+  // reader acts: the bars and the hint are taken away
   await bareReader(page);
   // whichever way it passed, the assertions are the same
   await expect(page.getByRole('button', { name: '↩ Back' })).toBeHidden({ timeout: 15000 });

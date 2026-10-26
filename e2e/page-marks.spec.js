@@ -10,7 +10,7 @@ const star = page => page.getByRole('button', { name: 'Bookmark this page' });
 const mark = page => page.locator('#bookmark-mark');
 const book = { title: 'Page Marks', author: 'Marks Tests', rawChapters: chapters(3) };
 
-// the bars stay until the reader acts (#560): a page turn took them down, the t key takes them down when up
+// reader acts: the bars go on a page turn or the t key
 async function hideBars(page) {
   await bareReader(page);
 }

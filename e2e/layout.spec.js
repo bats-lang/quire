@@ -497,7 +497,7 @@ test('in the app, scrolled and in full screen with the bars still shown, no text
 /** The bars put down, so the running footer shows (a tap on the page's
     middle brings them up and puts them down) */
 async function barsDown(page) {
-  // by the reader's acts (#560): a tap in the middle can land on the hint, which only takes the hint away
+  // reader acts: by acts, as a tap can land on the hint
   await bareReader(page);
   await expect(page.locator('#footer')).toBeVisible();
 }
@@ -845,10 +845,7 @@ test('the library menu is reachable under the banner of records that cannot be u
   await reachable();
 });
 
-// #560: on a first open the hint is not covered by a bar, in every project (320 px wide in narrow,
-// 412 px in the phones). The bars, once up, do cover it: the top bar is as tall as the band the text
-// keeps clear of, so the hint cannot lie below the bar without lying over the text; this is why the
-// first book opens with the bars down
+// reader acts: on a first open the hint is not covered by a bar, in every project
 test('on a first open no bar covers the hint, and the bars would', async ({ page }) => {
   await start(page);
   await readBook(page, { title: 'Uncovered', author: 'Layout Tests', rawChapters: chapters(2, 20) }, { asOpened: true });

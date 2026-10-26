@@ -894,7 +894,7 @@ test('the t key shows and hides the bars', async ({ page }) => {
   await start(page);
   await readBook(page, book('Toggle', 1, 10), { asOpened: true });
   const prev = control(page, 'Previous page');
-  // the first book opens with the bars down (#560: the hint is then not covered)
+  // reader acts: the first book opens with the bars down
   await expect(prev).toBeHidden();
   await page.keyboard.press('t');
   await expect(prev).toBeVisible();
@@ -1227,19 +1227,17 @@ const HINT_WORDS = 'Tap the sides to turn pages. Tap the middle for the menu.';
 const hintOf = page => page.getByRole('status').filter({ hasText: HINT_WORDS });
 const barsOf = page => page.getByRole('toolbar', { name: 'Page controls' });
 
-// #560: the hint stays until the first turn, with nothing to time out, and shows once
+// reader acts: the hint stays until the first turn and shows once
 test('the first book opened says once how to turn the page, and the hint waits for the first turn', async ({ page }) => {
   await page.clock.install();
   await start(page);
   await readBook(page, book('First Book', 2), { asOpened: true });
   const hint = hintOf(page);
   await expect(hint).toBeVisible();
-  // the bars are down, so nothing covers it
   await expect(barsOf(page)).toBeHidden();
-  // 30 s on, it is still there
   await page.clock.runFor(30000);
   await expect(hint).toBeVisible();
-  // a tap in the middle is not a turn: the bars come up and the hint stays
+  // reader acts: a tap in the middle is not a turn
   await showChrome(page);
   await expect(hint).toBeVisible();
   await page.keyboard.press('ArrowRight');
@@ -1255,7 +1253,7 @@ test('the first book opened says once how to turn the page, and the hint waits f
   await expect(hint).toBeHidden();
 });
 
-// #560: the hint goes at the first turn by each route, and on a tap on it
+// reader acts: the hint goes at the first turn by each route, and on a tap on it
 for (const route of ['a tap on the side', 'a swipe', 'the Next page button', 'Page Down', 'Space', 'a tap on the hint']) {
   test(`the hint goes at the first turn: ${route}`, async ({ page }) => {
     await start(page);
@@ -1285,7 +1283,7 @@ for (const route of ['a tap on the side', 'a swipe', 'the Next page button', 'Pa
     else {
       await hint.click();
       await expect(hint).toBeHidden();
-      // a tap on the hint is no turn
+      // reader acts: a tap on the hint is no turn
       expect((await place(page)).p).toBe(1);
       return;
     }
@@ -1294,7 +1292,7 @@ for (const route of ['a tap on the side', 'a swipe', 'the Next page button', 'Pa
   });
 }
 
-// #560: the bars stay up until the reader acts, and go on a tap in the middle
+// reader acts: the bars stay up until the reader acts
 test('the reader\'s bars stay up 30 s and go on a tap in the middle', async ({ page }) => {
   await page.clock.install();
   await start(page);
@@ -1333,7 +1331,6 @@ test('the hint on turning pages lies clear of the text, and says both gestures',
   await readBook(page, book('Hint Book', 2), { asOpened: true });
   const hint = page.getByRole('status').filter({ hasText: 'Tap the sides to turn pages. Tap the middle for the menu.' });
   await expect(hint).toBeVisible();
-  // the first book opens with the bars down, so nothing is over it
   await expect(page.getByRole('toolbar', { name: 'Page controls' })).toBeHidden();
   const box = await hint.boundingBox();
   const geometry = await bookPage(page).evaluate((element, hintBox) => {

@@ -108,7 +108,7 @@ test('bringing up the bars puts the back button away', async ({ page }) => {
   await control(page, 'Contents').click();
   await entries(page).filter({ hasText: 'The End' }).click();
   await expect.poll(async () => (await place(page)).ch).toBe('The End');
-  // the jump took the bars down (#560); the button stays
+  // reader acts: a jump takes the bars down
   await expect(control(page, 'Previous page')).toBeHidden();
   await expect(jumpBack(page)).toBeVisible();
   await showChrome(page);
@@ -182,7 +182,7 @@ for (const ncx of [false, true]) {
     await rows.filter({ hasText: '5' }).click();
     await expect(contents(page)).toBeHidden();
     await expect.poll(async () => (await place(page)).ch).toBe(2);
-    // the jump took the bars down (#560), which shows the footer
+    // reader acts: a jump takes the bars down
     await expect(footerPage).toHaveText(' · page 5 in print');
     await expect(jumpBack(page)).toBeVisible();
   });

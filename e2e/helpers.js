@@ -285,14 +285,11 @@ export const control = (page, name) =>
 /** The button that goes back after a jump */
 export const jumpBack = page => page.getByRole('button', { name: '↩ Back' });
 
-/** Opens the book whose card has text, and waits for its first page. The reader's bars then
-    stay up until the reader acts (#560), and the first book of a profile opens with them down so
-    that nothing covers its hint: a test that does not look at that taps the middle to have
-    them as every other book opens them (`asOpened: true` leaves them as the app opened them) */
+/** Opens the book whose card has text, and waits for its first page; reader acts: the bars are brought up unless asOpened */
 export async function openBook(page, text, { asOpened = false } = {}) {
   await card(page, text).click();
   await pageShown(page);
-  // the t key, not a tap: a tap in the middle can land on a link or a player of the book
+  // reader acts: the key, not a tap, which can land on the book's content
   if (!asOpened && !(await control(page, 'Previous page').isVisible())) {
     await page.keyboard.press('t');
     await expect(control(page, 'Previous page')).toBeVisible();
@@ -679,8 +676,7 @@ export async function runUntil(page, done, { stepMs = 1000, timeout = 30000 } = 
   }, { timeout, intervals: [50] }).toBe(true);
 }
 
-/** Takes the reader's bars down and the first-book hint away, by the reader's acts (#560: the t
-    key, a tap on the hint): neither goes by itself, so a test that wants the page bare acts */
+/** reader acts: takes the bars down and the hint away by acts, as neither goes by itself */
 export async function bareReader(page) {
   const bars = page.getByRole('toolbar', { name: 'Page controls' });
   if (await bars.isVisible()) await page.keyboard.press('t');
@@ -690,18 +686,12 @@ export async function bareReader(page) {
   await expect(hint).toBeHidden();
 }
 
-/** Waits for the chapter named by the page indicator, which is read with the bars down. A page
-    turn or a jump takes the bars down (#560), and bringing them up to read the title in them
-    would put away the back button a jump leaves, so the bars are left as they are */
+/** reader acts: waits for the chapter the page indicator names, leaving the bars as they are */
 export async function expectChapter(page, title, { timeout = 10000 } = {}) {
   await expect.poll(async () => ((await indicator(page).textContent()) ?? '').replace(/\s·\s+pages?\s.*$/s, '').trim(), { timeout }).toBe(title);
 }
 
-/** Clicks the bottom bar's control name, bringing the bars up first.
-    The bars go when the reader acts (a turn, a jump, a tap in the
-    middle, #560), so a step before the click that did one can see them
-    gone: bringing them up and clicking are tried again together until
-    the click lands */
+/** Clicks the bottom bar's control name, bringing the bars up first (reader acts, layout: tried again together) */
 export async function clickControl(page, name, { layoutMs = 0 } = {}) {
   // a click waits as long as the layout the page is in (#600, as toLibrary's
   // does): a click made behind a columns layout is answered when the layout
