@@ -362,12 +362,15 @@ test('a book moved to the Trash can be undone, and restored from it', async ({ p
 });
 
 test('emptying the Trash asks, and deletes only what is in it', async ({ page }) => {
+  // each book is imported in a minute of its own on the page's fake clock (#657, #899): the
+  // library lists the later import first, and the wall clock decides nothing
+  await page.clock.install({ time: new Date('2026-06-01T12:00:00Z') });
   await start(page);
-  await importFiles(page, [
-    epubFile({ title: 'Trash One', author: 'A' }),
-    epubFile({ title: 'Trash Two', author: 'B' }),
-    epubFile({ title: 'Stays', author: 'C' }),
-  ], 3);
+  await importFiles(page, [epubFile({ title: 'Trash One', author: 'A' })], 1);
+  await page.clock.fastForward(60000);
+  await importFiles(page, [epubFile({ title: 'Trash Two', author: 'B' })], 2);
+  await page.clock.fastForward(60000);
+  await importFiles(page, [epubFile({ title: 'Stays', author: 'C' })], 3);
   for (const t of ['Trash One', 'Trash Two']) {
     await bookMenu(page, t);
     await menuItem(page, 'Move to Trash').click();
@@ -391,8 +394,8 @@ test('emptying the Trash asks, and deletes only what is in it', async ({ page })
   const ask = emptyTrashDialog(page);
   // the question counts what goes and names it
   await expect(ask).toHaveAccessibleName('Delete 2 books forever?');
-  // named in library order, which puts the later minute of import first (library order keyword)
-  await expect(ask).toContainText(/'Trash (One' and 'Trash Two|Two' and 'Trash One)' will be deleted for good/);
+  // the library lists the later import first, and the question names the books in that order
+  await expect(ask).toContainText("'Trash Two' and 'Trash One' will be deleted for good");
   expect(await colour(ask.getByRole('button', { name: 'Delete forever' }))).toBe(red);
   expect(await colour(ask.getByRole('button', { name: 'Cancel' }))).not.toBe(red);
   await ask.getByRole('button', { name: 'Cancel' }).click();
