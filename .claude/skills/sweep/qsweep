@@ -18,6 +18,7 @@ if [ "$1" = pressure ]; then r=$(_pressure); echo "$r"; case "$r" in "runner pre
 if [ "$1" = push ]; then shift; r=$(_pressure); echo "$r"; case "$r" in "runner pressure: none") exec git push "$@";; *) exit 1;; esac; fi
 # every open PR of bats-lang/quire (subscribed or not): merge state, the failing checks of its head, and what the head is ready for (quire#751, rows 15 and 19):
 #   FIX-NEEDED          a check or a commit status of the head is red, the PR has a merge conflict (dirty), or the newest review names this head and says changes needed
+#   UPDATE-NEEDED       every check is finished and green and the PR is behind main: main is merged in, then the head is checked again
 #   WAIT-FOR-CI         no check-run yet, one not finished, or the aggregate `check` not green: no reviewer starts (a reviewer starts only on green)
 #   READY-FOR-REVIEW    at least one check-run, every one finished, `check` green, no status red, and no review names this head: a reviewer takes the slot
 #   REVIEWED-approved   the newest review names this head and approves
@@ -64,19 +65,25 @@ _read_pr(){  # $1 repository, $2 PR number: sets _st _sha _ref _t _am _created _
 _judge_pr(){  # sets _ready from what _read_pr read
   if [ "$_st" = dirty ] || [ -n "$_fails" ] || [ -n "$_badstatus" ] || [ "$_rv" = "changes-needed-this-head" ]; then _ready=FIX-NEEDED
   elif [ "$_total" -eq 0 ] || [ "$_pend" -gt 0 ] || [ "$_checkok" -eq 0 ]; then _ready=WAIT-FOR-CI
+  elif [ "$_st" = behind ]; then _ready=UPDATE-NEEDED
   elif [ "$_st" != clean ] && [ "$_st" != blocked ]; then _ready=WAIT-FOR-CI
   elif [ "$_rv" = "approved-this-head" ]; then _ready=REVIEWED-approved
   else _ready=READY-FOR-REVIEW; fi
 }
-# the candidates of the NEXT line, one per line "<created_at> <repository>#<number>", for quire and the libraries together: the line is ordered oldest first by the
-# PR's creation date across all repositories (orchestration.md, Agents and slots: "As always inside each category, go by oldest"), not by the API's order or by repository
-_cand_fix=""; _cand_review=""
-_order(){ printf '%s' "$1" | sort | awk '{printf " %s",$2}'; }
+# the candidates of the NEXT line, one per line "<created_at> <repository>#<number> <work>", for quire and the libraries together: every PR that can be worked on, one
+# list ordered oldest first by creation date across all repositories (orchestration.md, Agents and slots, the owner's ruling of 2026-10-26), not by the API's order, by repository or by kind of work
+_cand=""
+_order(){ printf '%s' "$1" | sort | awk '{printf " %s (%s)",$2,$3}'; }
+_add_candidate(){  # $1 repository, $2 number: a PR whose checks are still running (WAIT-FOR-CI) is not a candidate
+  local work=""
+  case $_ready in FIX-NEEDED) work=fix;; UPDATE-NEEDED) work=update;; READY-FOR-REVIEW) work=review;; REVIEWED-approved) [ "$_st" = clean ] && work=merge;; esac
+  [ -n "$work" ] && _cand="$_cand$_created $1#$2 $work"$'\n'
+}
 _quire_numbers=$(_gh "repos/bats-lang/quire/pulls?state=open&per_page=50" --jq '.[].number') || { echo "quire ERROR reading the open pull requests: $(_why)"; _unread="$_unread quire"; }
 for n in $_quire_numbers; do
   if ! _read_pr quire $n; then echo "#$n ERROR reading the pull request: $(_why)"; _unread="$_unread quire#$n"; continue; fi
   _judge_pr
-  case $_ready in FIX-NEEDED) _cand_fix="$_cand_fix$_created quire#$n"$'\n';; READY-FOR-REVIEW) _cand_review="$_cand_review$_created quire#$n"$'\n';; esac
+  _add_candidate quire $n
   echo "#$n [$_st] auto-merge=$_am checks=$_total pending=$_pend skipped=$_skipped fails=[$_fails] statuses-red=[$_badstatus] review=$_rv $_ready $_t ($_ref)"
 done
 
@@ -84,8 +91,8 @@ _lap "quire PRs done"
 # every library repo quire's agents change: each open PR read by the same _read_pr and _judge_pr as quire's, so the same checks, the same two review forms
 # (gated `## Adversarial review` and ungated `Independent review ... of head <sha>`) and the same states.
 # READY-TO-MERGE = REVIEWED-approved and mergeable_state clean: merge it now (do not wait for an event: none arrives).
-# The same one order as the quire PRs above (quire#751, row 19): a library PR with a red check, a conflict or a changes-needed review for its head
-# is a fix; one with every check finished and green and no review of its head is a review. They are added to the NEXT line printed after this loop.
+# The same one order as the quire PRs above (quire#751, row 19): a library PR is a candidate when it is green, red, behind or conflicted, and is added to the
+# NEXT line printed after this loop.
 # The repositories (one list, `_repositories`, which `qsweep repositories` prints; SKILL.md points there): the libraries and the tools agents change.
 for r in $_repositories; do
   _numbers=$(_gh "repos/bats-lang/$r/pulls?state=open&per_page=20" --jq '.[].number') || { echo "$r ERROR reading the open pull requests: $(_why)"; _unread="$_unread $r"; continue; }
@@ -96,16 +103,15 @@ for r in $_repositories; do
     gate=$(_gh "repos/bats-lang/$r/commits/$_sha/status" --jq '[.statuses[]|select(.context=="adversarial-review")]|first|if .==null then "none" else .state+": "+.description end') || gate="ERROR $(_why)"
     # READY-TO-MERGE: every check finished and green (the same rule as a review), clean, and an approval of this very head
     merge=""; [ "$_ready" = REVIEWED-approved ] && [ "$_st" = clean ] && merge=" READY-TO-MERGE"
-    case $_ready in FIX-NEEDED) _cand_fix="$_cand_fix$_created $r#$n"$'\n';; READY-FOR-REVIEW) _cand_review="$_cand_review$_created $r#$n"$'\n';; esac
+    _add_candidate $r $n
     echo "$r #$n [$_st] checks=$_total pending=$_pend skipped=$_skipped fails=[$_fails] statuses-red=[$_badstatus] review=$_rv gate=[$gate] $_ready$merge $_t ($_ref)"
   done
 done
 # a repository or a PR whose call failed was not read: the NEXT line below is incomplete and says so (it never lists a PR it could not read as if nothing were there)
 [ -n "$_unread" ] && echo "UNREAD (the NEXT line is incomplete; look at these by hand):$_unread"
 rm -f "$_errfile"
-# the one NEXT line: the quire PRs and the library PRs together, a fix before a review before a new ticket (orchestration.md, Agents and slots), each category oldest first
-if [ -n "$_cand_fix" ]; then echo "NEXT FOR A FREE SLOT: a fix (an author; any author) for$(_order "$_cand_fix")"
-elif [ -n "$_cand_review" ]; then echo "NEXT FOR A FREE SLOT: a review (not by the author) of$(_order "$_cand_review")"
+# the one NEXT line: every quire and library PR that can be worked on, oldest first by creation date, then the tickets (orchestration.md, Agents and slots; the owner's ruling of 2026-10-26)
+if [ -n "$_cand" ]; then echo "NEXT FOR A FREE SLOT: pull requests, oldest first:$(_order "$_cand"); then the oldest ticket of the highest priority (CLAUDE.md, Priorities)"
 else echo "NEXT FOR A FREE SLOT: the oldest ticket of the highest priority (CLAUDE.md, Priorities)"; fi
 # `qsweep prs` stops here: the pull request lines and the NEXT line only (the tests run it against a fixture gh)
 [ "$1" = prs ] && exit 0
@@ -208,6 +214,6 @@ echo "SWEEP REMINDER: check whether any ticket is closeable (its work merged: re
 echo "SWEEP REMINDER: the agent mix is EXACTLY the slot list: one SONNET slot and one HAIKU slot, both always filled, each by its own model (a different number of slots means a different exact mix). A free slot is refilled the same turn with an agent of ITS model. Run slots set at every spawn and slots free at every hand-back, in the same turn"
 echo "SWEEP REMINDER: check whether any open ticket holds more than one piece, or has rows or steps still owed beside done ones: break it up before work (one ticket per piece from its own steps, original closed with Broken into #a #b, pieces inherit priority; quire/.claude/orchestration.md, agents/worker.md)"
 echo "SWEEP REMINDER: check whether any blocked ticket is unblocked (read the PR or ticket it says it waits for; if that merged or closed, say so on the ticket and make it workable)"
-echo "SWEEP REMINDER: order for a free slot (orchestration.md, Agents and slots): (1) a fix, by an author (any author, not necessarily the one who wrote the PR), for a review that asked for changes, a red CI, or a merge conflict; (2) a review of a PR green on its exact head; (3) the oldest ticket of the highest priority (CLAUDE.md, Priorities); oldest first inside each step. Never a new ticket while a changes-needed review, a red CI or a merge conflict waits for its fix, or a green PR waits for its reviewer"
+echo "SWEEP REMINDER: order for a free slot (orchestration.md, Agents and slots): (1) the oldest open pull request that can be worked on, by creation date, across quire and every library repository (a green one is reviewed, a red one is fixed, a conflicted one and one behind main are updated; one whose checks are still running is skipped); (2) the oldest ticket of the highest priority (CLAUDE.md, Priorities). Never a new ticket while a pull request that can be worked on waits"
 echo "SWEEP REMINDER: workers never wait for CI (owner, 2026-10-20T04:22:32Z: \"Standing rule: agents don't wait for check. They hand back, and trust you to continue the process.\"): every brief says push, then hand back at once with PR, head sha and local runs. The orchestrator watches the checks and continues; a worker found waiting is told to hand back"
 slots show

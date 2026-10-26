@@ -14,8 +14,8 @@ Install on a machine (the running copy is a copy of these files): `install -m 75
   * `WAIT-FOR-CI`: no check-run yet, one not finished, or the aggregate `check` not green. No reviewer starts;
   * `READY-FOR-REVIEW`: at least one check-run, all finished, `check` green, no red status, no review of this head. A reviewer starts;
   * `REVIEWED-approved`.
-  Then `NEXT FOR A FREE SLOT`: a fix for the PRs above, else a review, else the oldest ticket of the highest priority (`.claude/orchestration.md`, "Agents and slots").
-* The library PRs, of the repositories `qsweep repositories` prints (the one list the sweep reads; this file does not copy it), with their checks, the review and the gate's own status with its reason. The `NEXT FOR A FREE SLOT` line orders each category oldest first by the PR's creation date across quire and all of them.
+  Then `NEXT FOR A FREE SLOT`: the PRs above that can be worked on, oldest first by creation date, then the oldest ticket of the highest priority (`.claude/orchestration.md`, "Agents and slots").
+* The library PRs, of the repositories `qsweep repositories` prints (the one list the sweep reads; this file does not copy it), with their checks, the review and the gate's own status with its reason. The `NEXT FOR A FREE SLOT` line orders the PRs that can be worked on oldest first by creation date across quire and all of them (the owner's ruling of 2026-10-26).
 * `STRAY-WORK`: the orchestrator's checkout (`/home/user/<repo>`) that is off main or not clean; `STRAGGLER`: work that exists only on this machine; `REUSABLE WORKTREE`: a finished worktree for the next ticket's branch.
 * `qsweep pressure`: prints `runner pressure: none` and exits 0, or a hold line and exits 1.
 * `qsweep push <git push arguments>`: the pressure check and the push in one command.

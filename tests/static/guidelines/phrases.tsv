@@ -46,3 +46,8 @@ text	2	\bas refs\b	it goes in as Refs	A PR that does not meet its Done-when as w
 text	2	\buse refs\b	use Refs	A PR that does not meet its Done-when as written is not opened as Refs: the verdict is changes needed.
 guide	16	unless the brief says otherwise	new tooling is bats unless the brief says otherwise	A brief does not override CLAUDE.md: non-bats code names the avenue it exhausted.
 guide	14	take a p1 or p2	or take a p1 or p2	CLAUDE.md: a p1 is not started while a p0 is open.
+text	14	fix before	a fix before a review before a new ticket	Pull requests that can be worked on are ordered by creation date, oldest first; no kind of work ranks them (the owner, 2026-10-26).
+text	14	a fix, by an author	(1) a fix, by an author, for a red CI	The state of a pull request says what it needs and never ranks it.
+text	14	\(1\) a fix	in the order: (1) a fix for a review	Step (1) is the oldest pull request that can be worked on.
+text	14	red CI, or a merge conflict	a review that asked for changes, a red CI, or a merge conflict	A red CI and a merge conflict are states of a pull request, not a category that comes first.
+text	14	never a new ticket while a (changes-needed|red)	Never a new ticket while a red CI waits	Never a new ticket while a pull request that can be worked on waits.

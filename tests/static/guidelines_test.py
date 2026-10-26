@@ -431,10 +431,9 @@ class GitHub(unittest.TestCase):
 
 
 SLOT_STEPS = [
-    '(1) a fix, by an author (any author, not necessarily the one who wrote the PR), for a review that asked for changes, a red CI, or a merge conflict',
-    '(2) a review of a PR green on its exact head',
-    '(3) the oldest ticket of the highest priority (CLAUDE.md, Priorities)',
-    'Never a new ticket while a changes-needed review, a red CI or a merge conflict waits for its fix, or a green PR waits for its reviewer',
+    '(1) the oldest open pull request that can be worked on, by creation date, across quire and every library repository',
+    '(2) the oldest ticket of the highest priority (CLAUDE.md, Priorities)',
+    'Never a new ticket while a pull request that can be worked on waits',
 ]
 
 
@@ -516,14 +515,14 @@ class FreeSlotOrder(unittest.TestCase):
     def test_orchestration_qsweep_and_slots_state_the_same_order(self):
         for name, text, steps in (('orchestration.md', read_root('.claude', 'orchestration.md'), SLOT_STEPS),
                                   ('qsweep', read_root('.claude', 'skills', 'sweep', 'qsweep'), SLOT_STEPS),
-                                  ('slots', read_root('.claude', 'skills', 'sweep', 'slots'), SLOT_STEPS[:3])):
+                                  ('slots', read_root('.claude', 'skills', 'sweep', 'slots'), SLOT_STEPS[:2])):
             for step in steps:
                 self.assertIn(step, text, f'{name} does not state: {step}')
 
     def test_the_sweep_reminder_is_the_order_and_nothing_else(self):
         reminder = [line for line in read_root('.claude', 'skills', 'sweep', 'qsweep').split('\n') if 'order for a free slot' in line]
         self.assertEqual(len(reminder), 1, reminder)
-        for step in SLOT_STEPS[:3]:
+        for step in SLOT_STEPS[:2]:
             self.assertIn(step, reminder[0])
 
     def test_the_hourly_trigger_reads_the_section_that_states_the_order(self):
@@ -545,10 +544,11 @@ class NextReadsEveryRepository(unittest.TestCase):
         self.assertIsNotNone(listed)
         for repository in ('arith', 'array', 'sha256', 'zip', 'dom', 'bridge', 'gestures', 'bats', 'builder', 'process', 'pwa', 'capacitor-plugins'):
             self.assertIn(repository, listed.group(1).split(), repository)
-        self.assertEqual(text.count('NEXT FOR A FREE SLOT: a fix'), 1)
-        self.assertGreater(text.index('NEXT FOR A FREE SLOT: a fix'), loop.end())
-        self.assertIn('$(_order "$_cand_fix")', text)
-        self.assertIn('$(_order "$_cand_review")', text)
+        self.assertEqual(text.count('NEXT FOR A FREE SLOT: pull requests, oldest first:'), 1)
+        self.assertGreater(text.index('NEXT FOR A FREE SLOT: pull requests, oldest first:'), loop.end())
+        self.assertIn('$(_order "$_cand")', text)
+        self.assertNotIn('_cand_fix', text)
+        self.assertNotIn('_cand_review', text)
 
     def test_the_installed_qsweep_is_this_file(self):
         installed = '/usr/local/bin/qsweep'
@@ -654,17 +654,40 @@ class QsweepLibraries(unittest.TestCase):
         self.assertIn('REVIEWED-approved READY-TO-MERGE', self.line_of(lines, 'bridge #11 '))
         self.assertIn('FIX-NEEDED', self.line_of(lines, 'bridge #12 '))
 
-    def test_the_next_line_lists_only_what_is_ready_and_in_the_one_order(self):
+    NEXT = 'NEXT FOR A FREE SLOT: pull requests, oldest first:'
+    THEN = '; then the oldest ticket of the highest priority (CLAUDE.md, Priorities)'
+
+    def test_the_next_line_lists_what_can_be_worked_on_in_the_one_order(self):
+        # owner's ruling of 2026-10-26 (quire#898): one list, oldest first by creation date; a running check set is no candidate; the work does not rank
         lines = self.run_qsweep(self.fixture())
-        self.assertEqual(lines[-1], 'NEXT FOR A FREE SLOT: a fix (an author; any author) for sha256#8 dom#9 bridge#12')
-        without_fixes = self.fixture()
-        for number, repository in ((8, 'sha256'), (9, 'dom'), (12, 'bridge')):
-            without_fixes[f'repos/bats-lang/{repository}/pulls'] = [p for p in without_fixes[f'repos/bats-lang/{repository}/pulls'] if p['number'] != number]
-        lines = self.run_qsweep(without_fixes)
-        self.assertEqual(lines[-1], 'NEXT FOR A FREE SLOT: a review (not by the author) of array#3 array#5 sha256#7')
+        self.assertEqual(lines[-1], self.NEXT + ' array#3 (review) array#4 (merge) array#5 (review) sha256#7 (review) sha256#8 (fix) dom#9 (fix) bridge#11 (merge) bridge#12 (fix)' + self.THEN)
+        for running in ('arith#1', 'arith#2', 'sha256#6'):
+            self.assertNotIn(running, lines[-1])
+
+    def test_an_older_green_pull_request_comes_before_a_newer_red_one_and_a_running_one_is_not_named(self):
+        fixture = {}
+        self.pr(fixture, 'bats', 40, 'blocked', (('build', 'in_progress', None), ('check', 'queued', None)), created='2026-10-01T00:00:00Z')
+        self.pr(fixture, 'arith', 41, 'blocked', self.GREEN, created='2026-10-02T00:00:00Z')
+        self.pr(fixture, 'quire', 42, 'unstable', (('build', 'completed', 'failure'), ('check', 'completed', 'failure')), created='2026-10-03T00:00:00Z')
+        lines = self.run_qsweep(fixture)
+        self.assertEqual(lines[-1], self.NEXT + ' arith#41 (review) quire#42 (fix)' + self.THEN)
+        self.assertNotIn('bats#40', lines[-1])
+        self.assertIn('WAIT-FOR-CI', self.line_of(lines, 'bats #40 '))
+
+    def test_a_pull_request_behind_main_with_green_checks_is_an_update_in_the_one_order(self):
+        fixture = {}
+        self.pr(fixture, 'dom', 5, 'behind', self.GREEN, created='2026-10-01T00:00:00Z')
+        self.pr(fixture, 'dom', 6, 'behind', (('build', 'in_progress', None), ('check', 'queued', None)), created='2026-10-02T00:00:00Z')
+        lines = self.run_qsweep(fixture)
+        self.assertEqual(lines[-1], self.NEXT + ' dom#5 (update)' + self.THEN)
+
+    def test_no_pull_request_that_can_be_worked_on_leaves_the_tickets(self):
+        fixture = {}
+        self.pr(fixture, 'dom', 5, 'blocked', (('check', 'in_progress', None),))
+        self.assertEqual(self.run_qsweep(fixture)[-1], 'NEXT FOR A FREE SLOT: the oldest ticket of the highest priority (CLAUDE.md, Priorities)')
 
     def test_the_next_line_is_oldest_first_across_all_repositories(self):
-        # quire#751, row 19: the order inside each category is the PR's creation date, oldest first, not the API's order (newest first) or the repository's place in the list
+        # quire#751, row 19: the order is the PR's creation date, oldest first, not the API's order (newest first) or the repository's place in the list
         fixture = {}
         self.pr(fixture, 'bats', 433, 'blocked', self.GREEN, created='2026-10-21T05:36:39Z')
         self.pr(fixture, 'bats', 429, 'blocked', self.GREEN, created='2026-10-20T19:03:08Z')
@@ -672,14 +695,10 @@ class QsweepLibraries(unittest.TestCase):
         self.pr(fixture, 'arith', 5, 'blocked', self.GREEN, created='2026-10-21T01:00:00Z')
         self.pr(fixture, 'sha256', 60, 'blocked', self.GREEN, created='2026-10-20T14:30:35Z')
         self.pr(fixture, 'quire', 752, 'blocked', self.GREEN, created='2026-10-21T05:04:31Z')
+        self.pr(fixture, 'quire', 700, 'dirty', self.GREEN, created='2026-10-21T03:00:00Z')
+        self.pr(fixture, 'zip', 9, 'dirty', self.GREEN, created='2026-10-19T03:00:00Z')
         lines = self.run_qsweep(fixture)
-        self.assertEqual(lines[-1], 'NEXT FOR A FREE SLOT: a review (not by the author) of sha256#60 bats#423 bats#429 arith#5 quire#752 bats#433')
-        fixes = {}
-        self.pr(fixes, 'quire', 700, 'dirty', self.GREEN, created='2026-10-21T03:00:00Z')
-        self.pr(fixes, 'zip', 9, 'dirty', self.GREEN, created='2026-10-19T03:00:00Z')
-        self.pr(fixes, 'bridge', 8, 'dirty', self.GREEN, created='2026-10-20T03:00:00Z')
-        self.pr(fixes, 'arith', 7, 'dirty', self.GREEN, created='2026-10-22T03:00:00Z')
-        self.assertEqual(self.run_qsweep(fixes)[-1], 'NEXT FOR A FREE SLOT: a fix (an author; any author) for zip#9 bridge#8 quire#700 arith#7')
+        self.assertEqual(lines[-1], self.NEXT + ' zip#9 (fix) sha256#60 (review) bats#423 (review) bats#429 (review) arith#5 (review) quire#700 (fix) quire#752 (review) bats#433 (review)' + self.THEN)
 
     def test_the_repositories_are_listed_once_and_skill_md_points_to_the_list(self):
         import subprocess
