@@ -367,6 +367,7 @@
       "reject/page-turn-forged-sheet",
       "reject/pieces-forged-cut",
       "reject/sync-result-unmatched",
+      "reject/backup-write-answer-unexpected-unmatched",
       "reject/text-byteat-inside-is-minus-one",
       "reject/text-declared-label-of-another-start",
       "reject/text-declscan-mark-past-256",
