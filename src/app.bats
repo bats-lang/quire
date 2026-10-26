@@ -350,6 +350,8 @@ fn _library_menu (): void = let
   val () = ui_menuitem("library-menu-box", "menu-about", "About Quire")
   val () = ui_menuitem("library-menu-box", "menu-catalogues", "Catalogues")
   val () = ui_menuitem("library-menu-box", "menu-stats", "Reading statistics")
+  (* the words looked up, kept with their sentence (keyword: vocabulary) *)
+  val () = ui_menuitem("library-menu-box", "menu-words", "Words")
   (* the shelves apart from the library, each a screen of its own (#404) *)
   val () = ui_menuitem("library-menu-box", "menu-hidden", "Hidden")
   val () = ui_menuitem("library-menu-box", "menu-archived", "Archived")

@@ -2051,6 +2051,7 @@ implement ui_library_search_control (bytes, n, at) = _library_search_control_fro
   | MenuAbout
   | MenuInstall
   | MenuStats
+  | MenuWords
   | MenuCatalogues
   | MenuHidden
   | MenuArchived
@@ -2066,6 +2067,7 @@ implement library_menu_control_id (control) =
   | MenuAbout() => "menu-about"
   | MenuInstall() => "menu-install"
   | MenuStats() => "menu-stats"
+  | MenuWords() => "menu-words"
   | MenuCatalogues() => "menu-catalogues"
   | MenuHidden() => "menu-hidden"
   | MenuArchived() => "menu-archived"
@@ -2080,7 +2082,8 @@ fn _library_menu_control_after (control: library_menu_control): $R.option(librar
   | MenuSync() => $R.some(MenuAbout())
   | MenuAbout() => $R.some(MenuInstall())
   | MenuInstall() => $R.some(MenuStats())
-  | MenuStats() => $R.some(MenuCatalogues())
+  | MenuStats() => $R.some(MenuWords())
+  | MenuWords() => $R.some(MenuCatalogues())
   | MenuCatalogues() => $R.some(MenuHidden())
   | MenuHidden() => $R.some(MenuArchived())
   | MenuArchived() => $R.some(MenuTrash())
@@ -2102,7 +2105,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_library_menu_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(library_menu_control)
-implement ui_library_menu_control (bytes, n, at) = _library_menu_control_from(bytes, n, at, MenuSettings(), 11)
+implement ui_library_menu_control (bytes, n, at) = _library_menu_control_from(bytes, n, at, MenuSettings(), 12)
 
 (* The sort and view menu's choices, done, and its backdrop, each by its element's id (sort_menu_control_id) *)
 #pub datatype sort_menu_control =
@@ -2238,6 +2241,93 @@ end
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_dictionaries_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(dictionaries_control)
 implement ui_dictionaries_control (bytes, n, at) = _dictionaries_control_from(bytes, n, at, DictionariesBack(), 2)
+
+(* The words screen's controls, and its backdrop, each by its element's id (words_control_id; keyword: vocabulary) *)
+#pub datatype words_control =
+  | WordsBack
+  | WordsLearning
+  | WordsMastered
+  | WordsReview
+  | WordsShare
+  | WordsScreen
+
+#pub fn words_control_id (control: words_control): [id_len:pos | id_len < 256] string id_len
+implement words_control_id (control) =
+  case+ control of
+  | WordsBack() => "words-back"
+  | WordsLearning() => "words-tab-learning"
+  | WordsMastered() => "words-tab-mastered"
+  | WordsReview() => "words-review"
+  | WordsShare() => "words-share"
+  | WordsScreen() => "words-screen"
+
+(* The control after control, in the order the decoder tries them *)
+fn _words_control_after (control: words_control): $R.option(words_control) =
+  case+ control of
+  | WordsBack() => $R.some(WordsLearning())
+  | WordsLearning() => $R.some(WordsMastered())
+  | WordsMastered() => $R.some(WordsReview())
+  | WordsReview() => $R.some(WordsShare())
+  | WordsShare() => $R.some(WordsScreen())
+  | WordsScreen() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _words_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: words_control, fuel: int fuel): $R.option(words_control) = let
+  val id = words_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _words_control_after(control) of
+    | ~$R.some(next) => _words_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_words_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(words_control)
+implement ui_words_control (bytes, n, at) = _words_control_from(bytes, n, at, WordsBack(), 6)
+
+(* The review screen's controls, and its backdrop, each by its element's id (review_control_id) *)
+#pub datatype review_control =
+  | ReviewBack
+  | ReviewShow
+  | ReviewKnown
+  | ReviewForgot
+  | ReviewScreen
+
+#pub fn review_control_id (control: review_control): [id_len:pos | id_len < 256] string id_len
+implement review_control_id (control) =
+  case+ control of
+  | ReviewBack() => "review-back"
+  | ReviewShow() => "review-show"
+  | ReviewKnown() => "review-known"
+  | ReviewForgot() => "review-forgot"
+  | ReviewScreen() => "review-screen"
+
+(* The control after control, in the order the decoder tries them *)
+fn _review_control_after (control: review_control): $R.option(review_control) =
+  case+ control of
+  | ReviewBack() => $R.some(ReviewShow())
+  | ReviewShow() => $R.some(ReviewKnown())
+  | ReviewKnown() => $R.some(ReviewForgot())
+  | ReviewForgot() => $R.some(ReviewScreen())
+  | ReviewScreen() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _review_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: review_control, fuel: int fuel): $R.option(review_control) = let
+  val id = review_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _review_control_after(control) of
+    | ~$R.some(next) => _review_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_review_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(review_control)
+implement ui_review_control (bytes, n, at) = _review_control_from(bytes, n, at, ReviewBack(), 5)
 
 (* The sync screen's buttons, each by its element's id (sync_screen_control_id) *)
 #pub datatype sync_screen_control =

@@ -91,6 +91,38 @@ in
     end
 end
 
+(* The CSV file bytes[0, len), named quire-words.csv, shared: as a file (AsFile), or as its text, titled by its name (AsText).
+   The promise says whether it was refused as a file (keyword: vocabulary) *)
+#pub fn share_csv {l:agz}{len:pos} (bytes: !$A.borrow(byte, l, len), len: int len, way: share_as): $P.promise(share_end, $P.Chained)
+
+implement share_csv (bytes, len, way) = let
+  val @(name, name_len) = _bytes_of("quire-words.csv")
+  val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
+in
+  case+ way of
+  | AsFile() => let
+      val @(mime, mime_len) = _bytes_of("text/csv")
+      val @(mime_frozen, mime_bytes) = $A.freeze<byte>(mime)
+      val sharing = $SH.share_file(name_bytes, name_len, bytes, len, mime_bytes, mime_len)
+      val () = release_bytes(mime_frozen, mime_bytes)
+      val () = release_bytes(name_frozen, name_bytes)
+    in
+      $P.and_then<$SH.file_share_outcome><share_end>(sharing, llam(outcome) =>
+        case+ outcome of
+        | $SH.FilesNotShareable() => $P.ret<share_end>(RefusedAsFile())
+        | $SH.FileShared() => $P.ret<share_end>(ShareOver())
+        | $SH.FileShareCancelled() => $P.ret<share_end>(ShareOver())
+        | $SH.FileShareFailed() => $P.ret<share_end>(ShareOver()))
+    end
+  | AsText() => let
+      val sharing = $SH.share_text(name_bytes, name_len, bytes, len)
+      val () = release_bytes(name_frozen, name_bytes)
+    in
+      (* how it ended is the share sheet's to show *)
+      $P.and_then<$SH.share_outcome><share_end>(sharing, llam(_) => $P.ret<share_end>(ShareOver()))
+    end
+end
+
 (* ============================================================
    A selection, quoted and cited
    ============================================================ *)

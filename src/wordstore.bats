@@ -285,7 +285,7 @@ implement wordstore_kept_set (count) = !_kept := count
 (* What to do to a word's record *)
 #pub datavtype word_edit =
   | {contents:wordx} NoteLookup of word_image(contents)     (* a lookup: a new word, or the lookup counted in the one kept *)
-  | {contents:wordx} PutWord of word_image(contents)        (* the word as it is given, whatever is kept (Undo) *)
+  | {contents:wordx} PutWord of (word_image(contents), Int) (* the word as it is given, at this stamp, whatever is kept (Undo) *)
   | {contents:wordx} MergeWord of word_image(contents)      (* the word of another device: taken when it changed later *)
   | MasterWord of (Int)                                      (* mastered, at this stamp *)
   | LearnWordAgain of (Int, Int)                             (* learning again from now: the minute, the stamp *)
@@ -361,7 +361,13 @@ in
       val made = _renumbered(fresh, merged)
       val () = word_image_free(fresh)
     in case+ made of ~Made(image) => Apply(image) | ~NotMade() => NoApply() end
-  | ~PutWord(image) => Apply(image)
+  | ~PutWord(image, stamp) => let
+      var changed: word_numbers = word_image_numbers(image)
+      val () = changed.modified := stamp
+      val () = changed.deleted := 0
+      val made = _renumbered(image, changed)
+      val () = word_image_free(image)
+    in case+ made of ~Made(restamped) => Apply(restamped) | ~NotMade() => NoApply() end
   | ~MergeWord(image) => let
       val image_numbers = word_image_numbers(image)
     in
@@ -428,7 +434,7 @@ fn _create {contents:wordx} (image: word_image(contents), answer: $P.resolver(wo
 implement word_edit_free (edit) =
   case+ edit of
   | ~NoteLookup(image) => word_image_free(image)
-  | ~PutWord(image) => word_image_free(image)
+  | ~PutWord(image, _) => word_image_free(image)
   | ~MergeWord(image) => word_image_free(image)
   | ~MasterWord(_) => ()
   | ~LearnWordAgain(_, _) => ()
@@ -467,7 +473,13 @@ end
 fn _decide_absent (edit: word_edit, answer: $P.resolver(word_saved)): $IDB.writeback =
   case+ edit of
   | ~NoteLookup(image) => _create(image, answer)
-  | ~PutWord(image) => _create_unchecked(image, answer)
+  | ~PutWord(image, stamp) => let
+      var changed: word_numbers = word_image_numbers(image)
+      val () = changed.modified := stamp
+      val () = changed.deleted := 0
+      val made = _renumbered(image, changed)
+      val () = word_image_free(image)
+    in case+ made of ~Made(restamped) => _create_unchecked(restamped, answer) | ~NotMade() => let val () = $P.resolve<word_saved>(answer, WordNotSaved()) in $IDB.Keep() end end
   | ~MergeWord(image) => _create(image, answer)
   | ~MasterWord(_) => let val () = $P.resolve<word_saved>(answer, WordKept()) in $IDB.Keep() end
   | ~LearnWordAgain(_, _) => let val () = $P.resolve<word_saved>(answer, WordKept()) in $IDB.Keep() end
@@ -551,5 +563,35 @@ implement wordstore_forget (id_high, id_low) = let
   val () = release_bytes(key_frozen, key_bytes)
   val () = (if !_kept > 0 then !_kept := !_kept - 1 else ())
 in deleting end
+
+
+(* What reading one word came to *)
+#pub datavtype word_got =
+  | {contents:wordx} WordGot of word_image(contents)
+  | WordNone of ()
+
+#pub fun word_got_free (got: word_got): void
+implement word_got_free (got) = case+ got of ~WordGot(image) => word_image_free(image) | ~WordNone() => ()
+
+implement $P.dispose<word_got>(got) = word_got_free(got)
+
+(* The word id_high, id_low as stored (a tombstone too), or none *)
+#pub fun wordstore_get (id_high: Int, id_low: Int): $P.promise(word_got, $P.Chained)
+
+implement wordstore_get (id_high, id_low) = let
+  val key = wordstore_key(id_high, id_low)
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
+  val stored = $IDB.idb_get(key_bytes, 20)
+  val () = release_bytes(key_frozen, key_bytes)
+in
+  $P.and_then<$IDB.lookup><word_got>(stored, llam(found) =>
+    case+ lookup_content(found) of
+    | ~StoredContent(owner, piece, size) => let
+        val read = _read_word(piece, 0, size)
+        val () = piece_free(owner, piece)
+      in case+ read of ~WordFound(image) => $P.ret<word_got>(WordGot(image)) | ~WordNotFound() => $P.ret<word_got>(WordNone()) end
+    | ~NoStoredContent() => $P.ret<word_got>(WordNone())
+    | ~ContentUnreadable() => $P.ret<word_got>(WordNone()))
+end
 
 end (* #target wasm *)
