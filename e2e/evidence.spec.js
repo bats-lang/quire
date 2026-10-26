@@ -8,7 +8,8 @@
 import { createServer } from 'node:http';
 import { Worker } from 'node:worker_threads';
 import { pathToFileURL } from 'node:url';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { createWriteStream } from 'node:fs';
@@ -659,24 +660,39 @@ test('a ring lock that is empty, is not a time, or is older than the stale limit
   expect(refused.left, 'and the live holder\'s lock stays').toBe(true);
 });
 
+// The re-creation of the lock (ring lock): a file with the same content replaces it at one instant, so no instant has no lock; `gap` is called after the sibling is written and before the rename.
+const recreateSource = `
+function recreate(path, gap) {
+  const before = statSync(path).ino; // the inode the filesystem may give again (ext4 and tmpfs do on the next file made)
+  const text = readFileSync(path, 'utf8'); // the same content, so the content alone does not tell the two locks apart
+  let reused = false;
+  for (let tries = 0; tries < 1000 && !reused; tries++) { writeFileSync(path + '.next', text); gap(); renameSync(path + '.next', path); reused = statSync(path).ino === before; }
+  return reused;
+}
+`;
 // A live holder as another process plays it: `steps` is [[ms, 'write' | 'unlink', content]], from the moment the script starts, on the lock `path`.
 const holderScript = `
 const { writeFileSync, unlinkSync, renameSync, statSync, readFileSync } = require('node:fs');
+${recreateSource}
 const [path, steps] = [process.argv[1], JSON.parse(process.argv[2])];
 const begun = Date.now();
 for (const [ms, action, content] of steps) {
   while (Date.now() - begun < ms) { /* wait */ }
   if (action === 'write') writeFileSync(path, content.replace('NOW', new Date().toISOString() + ' ' + process.pid + '\\n'), content.startsWith('NEW') ? { flag: 'wx' } : {});
   else if (action === 'swap') { writeFileSync(path + '.next', content); renameSync(path + '.next', path); } // another holder's lock in the first one's place, at one instant
-  else if (action === 'recreate') { // the lock replaced at one instant by a file with the same content and the inode it had if the filesystem gives it (ext4 and tmpfs do on the next file made): no instant has no lock, so a waiter never finds the path free
-    const before = statSync(path).ino;
-    const text = readFileSync(path, 'utf8'); // the same content, so the content alone does not tell the two locks apart
-    let reused = false;
-    for (let tries = 0; tries < 1000 && !reused; tries++) { writeFileSync(path + '.next', text); renameSync(path + '.next', path); reused = statSync(path).ino === before; }
-    writeFileSync(path + '.reused', String(reused));
-  } else unlinkSync(path);
+  else if (action === 'recreate') writeFileSync(path + '.reused', String(recreate(path, () => {})));
+  else unlinkSync(path);
 }
 `;
+const productionRecreate = new Function('require', `const { writeFileSync, unlinkSync, renameSync, statSync, readFileSync } = require('node:fs'); ${recreateSource} return recreate;`)(createRequire(import.meta.url));
+// The step the holder had before (ring lock): the lock removed, then made again with an exclusive create, so the path is free between the two.
+const unlinkThenCreate = (path, gap) => {
+  const text = readFileSync(path, 'utf8');
+  unlinkSync(path);
+  gap();
+  writeFileSync(path, text, { flag: 'wx' });
+  return true;
+};
 const UNREADABLE_BRIEF_MS = 40; // a live holder's lock is empty this long: less than the window
 const REPLACED_AT_MS = LOCK_UNREADABLE_MS - 50; // the first lock has been seen unreadable almost for the whole window when another holder's takes its place
 const REPLACEMENT_VALID_AT_MS = REPLACED_AT_MS + 100; // the replacement is unreadable for this long, past the window of the first lock's timer but within its own
@@ -713,6 +729,24 @@ test('a ring lock that is unreadable only briefly, or that another holder replac
   ]);
   expect.soft(replaced.elapsed, 'the other holder\'s lock is not taken down while it is live').toBeGreaterThanOrEqual(REPLACEMENT_GIVEN_BACK_AT_MS - 50);
   expect.soft(replaced.records, 'and no record').toEqual([]);
+});
+
+test('a waiter that takes the lock whenever it finds the path free is let in by the old re-creation and never by the new one (ring lock, unreadable lock)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  // the waiter's move forced into the step's gap: the exact order of the failure, with no timing involved
+  const play = (name, step) => {
+    const dir = testInfo.outputPath(name);
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, LOCK_NAME);
+    writeFileSync(path, `${new Date().toISOString()} 4242\n`);
+    let took = 0;
+    const waiter = () => { if (!existsSync(path)) { writeFileSync(path, 'taken\n', { flag: 'wx' }); took++; } };
+    let error = 'none';
+    try { step(path, waiter); } catch (failure) { error = failure.code; }
+    return { took, error };
+  };
+  expect(play('old-step', unlinkThenCreate), 'the old step finds its lock taken: the exclusive create fails').toEqual({ took: 1, error: 'EEXIST' });
+  expect(play('new-step', productionRecreate), 'the production step never leaves the path free').toEqual({ took: 0, error: 'none' });
 });
 
 test('a ring lock re-created with the same inode and still unreadable when the first one\'s window ends is not taken (ring lock, unreadable lock)', async ({}, testInfo) => {
