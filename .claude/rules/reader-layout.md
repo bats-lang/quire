@@ -140,6 +140,22 @@ sheet is as tall as its tallest tab**: the panels lie in one grid cell
 (`.tabpanels`), the ones not chosen `.unchosen` (`visibility: hidden`), so
 switching tabs moves neither the sheet nor its tabs. Their controls are one `typography_control` datatype.
 
+**A switch row is its label alone (#592, keyword switch-note).** `_switch_row` takes a `switch_note`
+(`NoteHidden | NoteFooter`, matched with `case+`): a row draws the line that describes the switch only
+when it is passed `NoteFooter`, and no row is. The line stays in the page, `sabout readout`, which the
+stylesheet clips to a 1 px box (`position: absolute`, `read_out_only`: a clip and never `display: none`,
+which would leave `aria-describedby` pointing at nothing), so a screen reader still reads the button's
+name, role, state and description (WCAG 3.3.2; 1.3.1 and 4.1.2 are the button's own). The label says what
+the switch does when it is on, so "Full screen" is "Full screen while reading" (the line said the menus and
+the library show the bars, #348). A visible line under a switch is an exception with a reason, in
+`SWITCH_NOTES_SHOWN` (`e2e/controls-shown.js`), and at most one per group, as the group's footer; none
+today. The tap choices keep their line, which is part of the choice's name. `fits` runs `switchNotesShown`
+and `switchNotesMissing` on every screen; `layout.spec.js` measures the sheet with the lines drawn and
+without. Why: the lines took four visible lines of the Page tab on a phone and the sheet is as tall as its
+tallest tab, so every tab paid. Research (Android's settings guidelines: title only, subtext is the status,
+explanations are a group's footer; NN/g toggle guidelines: a short label; Material 3 list items: supporting
+text is optional) is in #592.
+
 ## Split screen and foldables (#412)
 
 * **The window is the reader's size, whatever it is.** A split-screen half
