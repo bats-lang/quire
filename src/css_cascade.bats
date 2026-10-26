@@ -44,9 +44,9 @@
    rare, and what is lost is a size, never a page.
 
    Alignment (keyword: publisher alignment, #868): the same walk matches the
-   rules that give a text-align against the parts of a table (table, its
+   rules that give a text-align against the elements of a table (table, its
    sections, rows and cells, and MathML's mtable, mtr and mtd), a cell's
-   style attribute first, and maps the parts that got one. The selectors
+   style attribute first, and maps the elements that got one. The selectors
    may hold :first-child, :last-child and :nth-child(odd, even or a
    number), which ask for the place of an element among the elements of its
    parent. *)
@@ -486,7 +486,7 @@ implement size_map_take {count} (map, offset) = let
       else @(0, MapCons(each, step, rest))
 in walk(map, offset) end
 
-(* The parts of tables that have a text-align of their own (a rule or a style
+(* The elements of tables that have a text-align of their own (a rule or a style
    attribute), each by where its name is in the document and its alignment,
    in the document's order *)
 #pub datavtype align_map(count:int) =
@@ -527,7 +527,7 @@ implement align_map_count {count} (map) = let
     | AlignMapCons(_, _, rest) => 1 + walk(rest)
 in walk(map) end
 
-(* The alignment of the part whose name is at offset, AlignNone when the
+(* The alignment of the element whose name is at offset, AlignNone when the
    publisher gave it none; the entries before it are passed over (the
    elements are asked for in the document's order), and the one found *)
 #pub fun align_map_take {count:nat} (map: align_map(count), offset: int): [rest:nat] @(align_value, align_map(rest))
@@ -569,7 +569,7 @@ fn _is_uncounted {l:agz}{n:pos}{at,len:nat | at + len <= n}
   else if _is_word(data, at, len, "rt", 2) then true
   else _is_word(data, at, len, "rp", 2)
 
-(* Whether an element is a part of a table, which a book's text-align reaches:
+(* Whether an element is a element of a table, which a book's text-align reaches:
    table, its sections, rows and cells, and MathML's table, row and cell *)
 fn _is_table_part {l:agz}{n:pos}{at,len:nat | at + len <= n}
   (data: !$A.borrow(byte, l, n), at: int at, len: int len): bool =
@@ -584,7 +584,7 @@ fn _is_table_part {l:agz}{n:pos}{at,len:nat | at + len <= n}
   else if _is_word(data, at, len, "tbody", 5) then true
   else _is_word(data, at, len, "tfoot", 5)
 
-(* The alignment of a part of a table: its style attribute's, else the best
+(* The alignment of a element of a table: its style attribute's, else the best
    rule's *)
 fn _align_of_part {l:agz}{n:pos}{ns:pos}{count:nat}{depth:nat}{attr_count:nat}{ls:agz}
   (data: !$A.borrow(byte, l, n), sheet: !$A.borrow(byte, ls, ns), aligns: !align_rules(ns, count),
@@ -789,7 +789,7 @@ implement chapter_size_map_unstyled (data, nodes, initial, base) = let
   val () = $A.free<byte>($A.thaw<byte>(blank_frozen))
 in map end
 
-(* chapter_size_map with the alignments of the parts of tables that the
+(* chapter_size_map with the alignments of the elements of tables that the
    sheet's rules (and the style attributes) give, in a map of their own *)
 #pub fun chapter_maps {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:nat}{count,align_count:nat}
   (data: !$A.borrow(byte, ld, nd), nodes: !$X.xml_node_list(nd, sz), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count),

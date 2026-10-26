@@ -99,7 +99,7 @@ fn _tally_put (new_cell: tally_cell): void = let
 in tally_free(old) end
 
 
-(* The maps of the sizes and of the alignments of the parts of tables of the
+(* The maps of the sizes and of the alignments of the elements of tables of the
    chapter that is being loaded (chapter_index, generation), waiting for its
    render *)
 datavtype sizes_pending =
@@ -169,7 +169,7 @@ implement publisher_sizes_step (offset) = let
   val () = _active_put(SizesActive(rest, aligns))
 in step end
 
-(* The alignment of the part of a table whose name is at offset in the chapter
+(* The alignment of the element of a table whose name is at offset in the chapter
    being rendered, AlignNone when the publisher gave it none. The elements are
    asked for in the document's order *)
 #pub fn publisher_aligns_next (offset: int): align_value
@@ -510,7 +510,7 @@ fun _chapter_measure {chapter_index:nat}{pass:nat | pass <= 1} .<pass>.
    of its elements' sizes for publisher_sizes_begin: against the book's
    dominant size (reading_size is not used), or as the publisher set them
    with root reading_size pixels. No sizes are kept when the book has no
-   dominant size measured; the alignments of the parts of tables (keyword:
+   dominant size measured; the alignments of the elements of tables (keyword:
    publisher alignment) are kept all the same *)
 #pub fun publisher_sizes_load {chapter_index:nat}
   (serial: int, chapter_index: int chapter_index, generation: int, mode: sizes_mode, reading_size: int): $P.promise(measured, $P.Chained)

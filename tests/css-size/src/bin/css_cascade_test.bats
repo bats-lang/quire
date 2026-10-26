@@ -352,7 +352,7 @@ fn check_aligns (): void = let
   val () = expect_text(align_nth(map, 3), "center", "aligns: second row's last")
   val () = align_map_free(map)
 
-  (* a style attribute beats every rule; MathML's cells and rows are parts of a table too *)
+  (* a style attribute beats every rule; MathML's cells and rows are elements of a table too *)
   val map = align_run(
     "<math><mtable><mtr><mtd style=\"text-align:center\">a</mtd><mtd>b</mtd></mtr></mtable></math>",
     "mtable mtd{text-align:left} mtr{text-align:right}")

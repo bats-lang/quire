@@ -2698,7 +2698,7 @@ fn _size_mark {doc_location:agz}{node:nat} (doc: !$D.document(doc_location), nod
     val () = $A.drop<byte>(frozen, view)
   in $A.free<byte>($A.thaw<byte>(frozen)) end
 
-(* A part of a table the publisher aligned: its data-align says how, which the
+(* A element of a table the publisher aligned: its data-align says how, which the
    stylesheet (style-sizes) gives the text-align of; none when align is none *)
 fn _align_mark {doc_location:agz}{node:nat} (doc: !$D.document(doc_location), node: int node, align: align_value): void =
   case+ align of

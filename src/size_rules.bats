@@ -15,7 +15,7 @@
    budget is proven to hold all 51.
 
    The same style element holds the alignments (keyword: publisher
-   alignment, #868): a part of a table the publisher aligned has a
+   alignment, #868): a element of a table the publisher aligned has a
    data-align of left, right or center (reader.bats's _align_mark), and the
    rule for it sets the text-align (text-align, then justify-items); an element has one data-align,
    so no two of the rules reach the same element *)

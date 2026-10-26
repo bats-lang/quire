@@ -448,10 +448,10 @@ implement size_resolve (declared, parent, root) =
 implement proportion_of (size, dominant) = 10 + _bounded((20 * size + dominant / 2) / dominant - 10, 50)
 
 (* ============================================================
-   Alignment of table parts (keyword: publisher alignment, #868)
+   Alignment of table elements (keyword: publisher alignment, #868)
    ============================================================ *)
 
-(* The alignment a publisher gave a part of a table, by text-align or by
+(* The alignment a publisher gave a element of a table, by text-align or by
    justify-items (keyword: publisher alignment): the keywords that do not
    depend on the direction of the text, and for justify-items start and end,
    which a math cell sets left to right whatever the book's direction *)

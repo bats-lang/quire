@@ -1,4 +1,4 @@
-// The alignment of table parts a book's style sheet gives (#868): the columns
+// The alignment of table elements a book's style sheet gives (#868): the columns
 // of the aligned and cases equations of the real book
 // e2e/calculus101-mathml-test.epub (made by Typst's exporter and Sphinx) are
 // aligned as its _static/sphinx-typst-math.css says, and the cells of a plain
