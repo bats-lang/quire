@@ -510,6 +510,53 @@ def shell_code_of(line):
     return ''.join(code)
 
 
+class GhRetry(unittest.TestCase):
+    """gh-retry (#931): a 5xx answer of `gh api` is retried; a persistent one fails naming the call."""
+
+    class Done:
+        def __init__(self, code, out='', err=''):
+            self.returncode, self.stdout, self.stderr = code, out, err
+
+    def run_with(self, answers):
+        calls, waits = [], []
+        saved = gl.GH_RUN, gl.GH_SLEEP
+
+        def fake(command):
+            calls.append(command)
+            return answers(len(calls))
+        gl.GH_RUN, gl.GH_SLEEP = fake, waits.append
+        try:
+            return gl.gh_api('repos/o/r/issues/1/comments?per_page=100&page=1'), calls, waits
+        finally:
+            gl.GH_RUN, gl.GH_SLEEP = saved
+
+    def test_a_502_then_success_passes(self):
+        answer, calls, waits = self.run_with(lambda n: self.Done(1, '', 'gh: Server Error (HTTP 502)') if n == 1 else self.Done(0, '[1]'))
+        self.assertEqual((answer, len(calls), waits), ([1], 2, [gl.GH_API_WAITS[0]]))
+
+    def test_a_502_on_every_call_fails_naming_the_call(self):
+        with self.assertRaises(SystemExit) as caught:
+            self.run_with(lambda n: self.Done(1, '', 'gh: Server Error (HTTP 502)'))
+        self.assertIn('gh api GET repos/o/r/issues/1/comments?per_page=100&page=1 failed', str(caught.exception))
+
+    def test_a_502_on_every_call_is_tried_four_times_with_the_stated_waits(self):
+        calls, waits = [], []
+        saved = gl.GH_RUN, gl.GH_SLEEP
+        gl.GH_RUN, gl.GH_SLEEP = (lambda c: (calls.append(c), self.Done(1, '', 'gh: Server Error (HTTP 502)'))[1]), waits.append
+        try:
+            with self.assertRaises(SystemExit):
+                gl.gh_api('repos/o/r/issues/1')
+        finally:
+            gl.GH_RUN, gl.GH_SLEEP = saved
+        self.assertEqual((len(calls), waits), (gl.GH_API_RETRIES + 1, list(gl.GH_API_WAITS)))
+
+    def test_a_404_is_not_retried(self):
+        calls = []
+        with self.assertRaises(SystemExit):
+            self.run_with(lambda n: (calls.append(n), self.Done(1, '', 'gh: Not Found (HTTP 404)'))[1])
+        self.assertEqual(len(calls), 1)
+
+
 class FreeSlotOrder(unittest.TestCase):
     """quire#751, row 14 and finding 3: the order a free slot is filled in is the same words in every file that states it."""
 
