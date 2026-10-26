@@ -115,6 +115,14 @@ sheet each time and is not used).
   Undo; made final it takes the grant back (`_google_revoke`:
   `google_revoke_access`, or with no account Google's revocation endpoint,
   `drive_grant_revoke`).
+* **The Auto Backup file's read** (#935, keyword: backup-read-answer) asks bridge's
+  `backup_file_read_answer` (`backup_read_answer`) and matches every constructor with `case+`:
+  `BackupReadFound` is the file, `BackupReadNone` and `BackupReadEmpty` are nothing to merge (as an empty
+  WebDAV body is), and `BackupReadNotHere` (`BackupReadUnavailable`), `BackupReadRejected` and
+  `BackupReadThrown` are results of their own, said in the banner (bridge's text of the last two is freed,
+  not shown); `BackupReadUnexpected` (a code JS never gives) goes through `notice_unexpected`.
+  `tests/static/reject/backup-read-answer-unexpected-unmatched` is the match without it. Independent of
+  #933 and #934 (the write): each adds its own constructors to `sync_result`.
 * **Google Drive** is the same store in a browser: the token comes from Google
   Identity Services (about an hour, no refresh token), whose window a page may
   open only at a tap, so it is asked for only when the reader acts, a refused

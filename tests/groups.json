@@ -365,6 +365,7 @@
       "reject/lay-writes-overflow",
       "reject/nav-row-without-summary",
       "reject/page-turn-forged-sheet",
+      "reject/backup-read-answer-unexpected-unmatched",
       "reject/pieces-forged-cut",
       "reject/sync-result-unmatched",
       "reject/text-byteat-inside-is-minus-one",

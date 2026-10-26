@@ -160,10 +160,11 @@ datatype sync_result =
   | FastmailRefused
   | GoogleSignInFailed | GoogleAccountNeeded | GoogleUnreachable | GoogleConsentShowing | GoogleUnexpected
   | GoogleNoAnswer | GoogleAsking
+  | BackupReadUnavailable | BackupReadRejected | BackupReadThrown | BackupReadUnexpected
 
 (* A result as "sync-state" stores it, and back: decoded once, as it is
    read (an unknown number is not synced yet) *)
-fn _result_code (result: sync_result): [code:nat | code <= 29] int code =
+fn _result_code (result: sync_result): [code:nat | code <= 41] int code =
   case+ result of
   | NotSyncedYet() => 0
   | Synced() => 1
@@ -195,6 +196,10 @@ fn _result_code (result: sync_result): [code:nat | code <= 29] int code =
   | GoogleUnexpected() => 27
   | GoogleNoAnswer() => 28
   | GoogleAsking() => 29
+  | BackupReadUnavailable() => 38
+  | BackupReadRejected() => 39
+  | BackupReadThrown() => 40
+  | BackupReadUnexpected() => 41
 
 fn _result_of_code (code: int): sync_result =
   if code = 1 then Synced()
@@ -226,6 +231,10 @@ fn _result_of_code (code: int): sync_result =
   else if code = 27 then GoogleUnexpected()
   else if code = 28 then GoogleNoAnswer()
   else if code = 29 then GoogleAsking()
+  else if code = 38 then BackupReadUnavailable()
+  else if code = 39 then BackupReadRejected()
+  else if code = 40 then BackupReadThrown()
+  else if code = 41 then BackupReadUnexpected()
   else NotSyncedYet()
 
 (* How the last sync ended *)
@@ -600,6 +609,10 @@ fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte
   | Damaged() => _put_literal(out, position, "The sync file isn't one Quire can read.")
   | NoMemory() => _put_literal(out, position, "There isn't enough memory to sync.")
   | NoAddress() => _put_literal(out, position, "Enter the folder's address, starting with https://.")
+  | BackupReadUnavailable() => _put_literal(out, position, "This build of Quire can't read the backup file Android restores after a reinstall.")
+  | BackupReadRejected() => _put_literal(out, position, "Android refused to read the backup file Quire keeps for a reinstall. Try again.")
+  | BackupReadThrown() => _put_literal(out, position, "Reading the backup file Quire keeps for a reinstall failed. Try again.")
+  | BackupReadUnexpected() => _put_literal(out, position, "The backup file Quire keeps for a reinstall gave an answer Quire does not know.")
   | SignInAgain() => _put_literal(out, position, "Sync paused: tap Sync now to sign in to Google again. What changes here meanwhile is kept.")
   | NoGoogleAccount() => _put_literal(out, position, "Android sync needs a Google account on this device.")
   | NotSetUp() =>
@@ -672,6 +685,10 @@ fn _said_when_off (result: sync_result): bool =
   | GoogleUnexpected() => true
   | GoogleNoAnswer() => true
   | GoogleAsking() => true
+  | BackupReadUnavailable() => true
+  | BackupReadRejected() => true
+  | BackupReadThrown() => true
+  | BackupReadUnexpected() => true
   | DropboxNotSetUp() => true
   | DropboxSignInRefused() => true
   | DropboxSignInCanceled() => true
@@ -694,6 +711,7 @@ fn _google_refusal (result: sync_result): bool =
   | GoogleUnexpected() => true
   | GoogleNoAnswer() => false
   | GoogleAsking() => false
+  | BackupReadUnavailable() => false | BackupReadRejected() => false | BackupReadThrown() => false | BackupReadUnexpected() => false
   | SignInCanceled() => false
   | NotSyncedYet() => false | Synced() => false | Unreachable() => false | WrongCredentials() => false
   | FolderNotFound() => false | KeptChanging() => false | ServerError() => false | TooLarge() => false
@@ -710,6 +728,8 @@ fn _told_in_banner (result: sync_result): bool =
   | DropboxSignInCanceled() => false
   | GoogleUnexpected() => false
   | GoogleAsking() => false
+  | BackupReadUnavailable() => true | BackupReadRejected() => true | BackupReadThrown() => true
+  | BackupReadUnexpected() => false
   | GoogleNoAnswer() => true
   | Unreachable() => true | WrongCredentials() => true | FolderNotFound() => true | KeptChanging() => true
   | ServerError() => true | TooLarge() => true | Damaged() => true | NoMemory() => true | Blocked() => true
@@ -791,6 +811,10 @@ in
     | TooLarge() => _tried(out, result)
     | Damaged() => _tried(out, result)
     | NoMemory() => _tried(out, result)
+    | BackupReadUnavailable() => _tried(out, result)
+    | BackupReadRejected() => _tried(out, result)
+    | BackupReadThrown() => _tried(out, result)
+    | BackupReadUnexpected() => _tried(out, result)
     | SignInAgain() => _tried(out, result)
     | NoGoogleAccount() => _tried(out, result)
     | NotSetUp() => _tried(out, result)
@@ -824,6 +848,10 @@ fn _result_short {l:agz}{position:nat | position + 64 <= 512} (out: !$A.arr(byte
   | Damaged() => _put_literal(out, position, "The sync file can't be read")
   | NoMemory() => _put_literal(out, position, "Not enough memory")
   | NoAddress() => _put_literal(out, position, "No folder address")
+  | BackupReadUnavailable() => _put_literal(out, position, "No backup file here")
+  | BackupReadRejected() => _put_literal(out, position, "Backup file refused")
+  | BackupReadThrown() => _put_literal(out, position, "Backup file failed")
+  | BackupReadUnexpected() => _put_literal(out, position, "Backup file: unknown answer")
   | SignInAgain() => _put_literal(out, position, "paused, tap Sync now")
   | GoogleRefused() => _put_literal(out, position, "Google sign-in failed")
   | GoogleSignInFailed() => _put_literal(out, position, "Google sign-in failed")
@@ -895,6 +923,10 @@ in
     | Damaged() => _result_short(out, 0, result, !_last_status)
     | NoMemory() => _result_short(out, 0, result, !_last_status)
     | NoAddress() => _result_short(out, 0, result, !_last_status)
+    | BackupReadUnavailable() => _result_short(out, 0, result, !_last_status)
+    | BackupReadRejected() => _result_short(out, 0, result, !_last_status)
+    | BackupReadThrown() => _result_short(out, 0, result, !_last_status)
+    | BackupReadUnexpected() => _result_short(out, 0, result, !_last_status)
     (* paused, not failed: said after the store's name *)
     | SignInAgain() => _result_short(out, after, result, !_last_status)
     | NoGoogleAccount() => _result_short(out, 0, result, !_last_status)
@@ -1045,6 +1077,10 @@ fn _row_show (service: sync_service): void =
       | NoMemory() => ui_text(_row_state_id(service), "Not syncing")
       | Blocked() => ui_text(_row_state_id(service), "Not syncing")
       | NoAddress() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupReadUnavailable() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupReadRejected() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupReadThrown() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupReadUnexpected() => ui_text(_row_state_id(service), "Not syncing")
       | NoGoogleAccount() => ui_text(_row_state_id(service), "Not syncing")
       | NotSetUp() => ui_text(_row_state_id(service), "Not syncing")
       | GoogleRefused() => ui_text(_row_state_id(service), "Not syncing")
@@ -2193,28 +2229,48 @@ fn _backup_name (): [l:agz] $A.arr(byte, l, 15) = let
   val () = $A.write_text(name, 0, $A.text_lit("quire-sync.json"), 15)
 in name end
 
+(* The text bridge kept of a refused or thrown backup read is not shown: the banner names the outcome (keyword: backup-read-answer) *)
+fn _backup_read_text_free (text: $R.option([n:nat] $BD.dblob(n))): void =
+  case+ text of
+  | ~$R.some(blob) => $BD.blob_free(blob)
+  | ~$R.none() => ()
+
+(* The blob of a backed-up file as the sync file, or why it is not one *)
+fn _backup_blob_taken {size:pos} (blob: $BD.dblob(size)): $P.promise(read_answer, $P.Chained) = let
+  val size = $BD.blob_len(blob)
+in
+  if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(TooLarge(), 0)) end
+  else (case+ piece_new(size) of
+    | ~NoPiece() => let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(NoMemory(), 0)) end
+    | ~Piece(owner, file) => let
+        val () = $BD.blob_read(blob, 0, file, size)
+        val () = $BD.blob_free(blob)
+      in $P.ret<read_answer>(ReadFile(owner, file, size)) end)
+end
+
 (* The backed-up file: the merge as it was last written here, or, after
-   a reinstall, as Auto Backup restored it *)
+   a reinstall, as Auto Backup restored it; each outcome of the read is
+   its own (keyword: backup-read-answer) *)
 fn _backup_read (): $P.promise(read_answer, $P.Chained) = let
   val @(name_frozen, name_bytes) = $A.freeze<byte>(_backup_name())
-  val pending = $BACKUP.backup_file_read(name_bytes, 15)
+  val pending = $BACKUP.backup_file_read_answer(name_bytes, 15)
   val () = release_bytes(name_frozen, name_bytes)
 in
-  $P.and_then<$BACKUP.backup_found><read_answer>(pending, llam(found) =>
+  $P.and_then<$BACKUP.backup_read_answer><read_answer>(pending, llam(found) =>
     case+ found of
-    | ~$BACKUP.BackupNone() => $P.ret<read_answer>(ReadNothing())
-    | ~$BACKUP.BackupUnreadable() => $P.ret<read_answer>(ReadFailed(Damaged(), 0))
-    | ~$BACKUP.BackupFound(blob) => let
-        val size = $BD.blob_len(blob)
-      in
-        if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(TooLarge(), 0)) end
-        else (case+ piece_new(size) of
-          | ~NoPiece() => let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(NoMemory(), 0)) end
-          | ~Piece(owner, file) => let
-              val () = $BD.blob_read(blob, 0, file, size)
-              val () = $BD.blob_free(blob)
-            in $P.ret<read_answer>(ReadFile(owner, file, size)) end)
-      end)
+    | ~$BACKUP.BackupReadNone() => $P.ret<read_answer>(ReadNothing())
+    | ~$BACKUP.BackupReadEmpty() => $P.ret<read_answer>(ReadNothing())
+    | ~$BACKUP.BackupReadNotHere() => $P.ret<read_answer>(ReadFailed(BackupReadUnavailable(), 0))
+    | ~$BACKUP.BackupReadRejected(text) => let
+        val () = _backup_read_text_free(text)
+      in $P.ret<read_answer>(ReadFailed(BackupReadRejected(), 0)) end
+    | ~$BACKUP.BackupReadThrown(text) => let
+        val () = _backup_read_text_free(text)
+      in $P.ret<read_answer>(ReadFailed(BackupReadThrown(), 0)) end
+    | ~$BACKUP.BackupReadUnexpected(code) => let
+        val () = notice_unexpected("reading the backup file", "backup_file_read_answer", CaseNumbered("BackupReadUnexpected", code), NoAnswer())
+      in $P.ret<read_answer>(ReadFailed(BackupReadUnexpected(), 0)) end
+    | ~$BACKUP.BackupReadFound(blob) => _backup_blob_taken(blob))
 end
 
 (* body[0, body_size) as the backed-up file *)
@@ -3391,6 +3447,7 @@ fn _paused (): bool =
   else if _authorize_present() then false
   else case+ !_last_result of
     | SignInAgain() => true
+    | BackupReadUnavailable() => false | BackupReadRejected() => false | BackupReadThrown() => false | BackupReadUnexpected() => false
     | NotSyncedYet() => false | Synced() => false | Unreachable() => false | WrongCredentials() => false
     | FolderNotFound() => false | KeptChanging() => false | ServerError() => false | TooLarge() => false
     | Damaged() => false | NoMemory() => false | Blocked() => false | Syncing() => false | NoAddress() => false
