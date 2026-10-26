@@ -72,6 +72,10 @@ export const LOCK_STALE_MS = 2000;
 export const LOCK_MOST_MS = 5000;
 export const LOCK_UNREADABLE_MS = 500;
 export const LOCK_FAILED_PREFIX = 'ring-lock-failed-';
+// Which lock a read was of: its inode, the nanosecond its file was born and its content. An inode number is reused at once by tmpfs and ext4,
+// so a lock re-created in a removed lock's place has the same inode and, while it is still empty, the same content; its birth is new.
+// The birth is only compared for equality, never against the clock (ring lock, unreadable lock; #870).
+const lockIdentity = (path) => { const found = statSync(path, { bigint: true }); return `${found.ino}:${found.birthtimeNs}:${readFileSync(path, 'utf8')}`; };
 const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** The records of locks that were not had: [{ name, text }], in the output directory `dir`. */
@@ -102,14 +106,14 @@ export function withRingLock(dir, action, { most = LOCK_MOST_MS, stale = LOCK_ST
     try { writeFileSync(path, `${new Date().toISOString()} ${process.pid}\n`, { flag: 'wx' }); locked = true; } catch (error) {
       if (!error || error.code !== 'EEXIST') break; // the directory is gone: nothing to take turns over
       let at = Number.NaN;
-      let seen = null; // which lock this read was of: its file (inode) and its content; null when the lock is gone
-      try { seen = `${statSync(path).ino}:${readFileSync(path, 'utf8')}`; holder = readFileSync(path, 'utf8').trim(); at = Date.parse(holder.split(/\s/)[0]); } catch (gone) { /* it was given back meanwhile */ }
+      let seen = null; // which lock this read was of (lockIdentity); null when the lock is gone
+      try { seen = lockIdentity(path); holder = readFileSync(path, 'utf8').trim(); at = Date.parse(holder.split(/\s/)[0]); } catch (gone) { /* it was given back meanwhile */ }
       // ring lock: unreadable lock. The timer belongs to one observed lock: a lock that is gone, valid, or another file or content restarts it
       if (seen === null || !Number.isNaN(at)) { unreadableSince = 0; unreadableSeen = null; } else if (seen !== unreadableSeen) { unreadableSince = Date.now(); unreadableSeen = seen; }
       const unreadable = seen !== null && Number.isNaN(at);
       let dead = unreadable ? Date.now() - unreadableSince >= LOCK_UNREADABLE_MS : seen !== null && Date.now() - at > stale;
       // looked at once more just before it is taken down, so a lock replaced since the read is not the one unlinked
-      if (dead) { try { dead = `${statSync(path).ino}:${readFileSync(path, 'utf8')}` === seen; } catch (gone) { dead = false; } }
+      if (dead) { try { dead = lockIdentity(path) === seen; } catch (gone) { dead = false; } }
       if (dead) attempt('unlock', () => unlinkSync(path));
       else nap(2);
     }

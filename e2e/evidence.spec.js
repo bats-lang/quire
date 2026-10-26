@@ -661,14 +661,20 @@ test('a ring lock that is empty, is not a time, or is older than the stale limit
 
 // A live holder as another process plays it: `steps` is [[ms, 'write' | 'unlink', content]], from the moment the script starts, on the lock `path`.
 const holderScript = `
-const { writeFileSync, unlinkSync, renameSync } = require('node:fs');
+const { writeFileSync, unlinkSync, renameSync, statSync, readFileSync } = require('node:fs');
 const [path, steps] = [process.argv[1], JSON.parse(process.argv[2])];
 const begun = Date.now();
 for (const [ms, action, content] of steps) {
   while (Date.now() - begun < ms) { /* wait */ }
   if (action === 'write') writeFileSync(path, content.replace('NOW', new Date().toISOString() + ' ' + process.pid + '\\n'), content.startsWith('NEW') ? { flag: 'wx' } : {});
   else if (action === 'swap') { writeFileSync(path + '.next', content); renameSync(path + '.next', path); } // another holder's lock in the first one's place, at one instant
-  else unlinkSync(path);
+  else if (action === 'recreate') { // the lock removed and made again with the same content and the inode it had if the filesystem gives it (ext4 and tmpfs do at once)
+    const before = statSync(path).ino;
+    const text = readFileSync(path, 'utf8'); // the same content, so the content alone does not tell the two locks apart
+    let reused = false;
+    for (let tries = 0; tries < 1000 && !reused; tries++) { unlinkSync(path); writeFileSync(path, text, { flag: 'wx' }); reused = statSync(path).ino === before; }
+    writeFileSync(path + '.reused', String(reused));
+  } else unlinkSync(path);
 }
 `;
 const UNREADABLE_BRIEF_MS = 40; // a live holder's lock is empty this long: less than the window
@@ -707,6 +713,20 @@ test('a ring lock that is unreadable only briefly, or that another holder replac
   ]);
   expect.soft(replaced.elapsed, 'the other holder\'s lock is not taken down while it is live').toBeGreaterThanOrEqual(REPLACEMENT_GIVEN_BACK_AT_MS - 50);
   expect.soft(replaced.records, 'and no record').toEqual([]);
+});
+
+test('a ring lock re-created with the same inode and still unreadable when the first one\'s window ends is not taken (ring lock, unreadable lock)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const dir = testInfo.outputPath('recreated');
+  mkdirSync(dir, { recursive: true });
+  // the first holder's lock is unreadable and stays so; another holder removes it and makes its own at once (the same inode and content), which is unreadable
+  // until its write: past the first lock's window, within its own
+  const holder = playHolder(dir, [[0, 'write', 'NEW'], [REPLACED_AT_MS, 'recreate', ''], [REPLACEMENT_VALID_AT_MS, 'write', 'NOW'], [REPLACEMENT_GIVEN_BACK_AT_MS, 'unlink']]);
+  const ran = withRingLock(dir, () => ({ elapsed: Date.now() - holder.began }), { most: 3000, stale: 60000 });
+  await holder.closed;
+  expect(readFileSync(join(dir, `${LOCK_NAME}.reused`), 'utf8'), 'the lock was made again with the inode of the first').toBe('true');
+  expect.soft(ran.elapsed, 'the re-created lock is not taken down while its holder is live').toBeGreaterThanOrEqual(REPLACEMENT_GIVEN_BACK_AT_MS - 50);
+  expect.soft(lockFailuresIn(dir), 'and no record').toEqual([]);
 });
 
 test('a capture leaves the ring recording on every outcome, the last of two readers resumes it, and a ring left paused is not a record of the next red', async ({}, testInfo) => {
