@@ -31,6 +31,7 @@ staload "file_version.sats"
 staload "mem.sats"
 staload "stats.sats"
 staload "dictionary.sats"
+staload "words.sats"
 staload "clock.sats"
 staload "sync.sats"
 staload "catalogue.sats"
@@ -241,6 +242,16 @@ fn _stats_control (clicked: !target): $R.option(stats_control) =
 fn _dictionaries_control (clicked: !target): $R.option(dictionaries_control) =
   case+ clicked of
   | Target(bytes, n, _) => ui_dictionaries_control(bytes, n, 10)
+  | NoTarget() => $R.none()
+
+fn _words_control (clicked: !target): $R.option(words_control) =
+  case+ clicked of
+  | Target(bytes, n, _) => ui_words_control(bytes, n, 10)
+  | NoTarget() => $R.none()
+
+fn _review_control (clicked: !target): $R.option(review_control) =
+  case+ clicked of
+  | Target(bytes, n, _) => ui_review_control(bytes, n, 10)
   | NoTarget() => $R.none()
 
 fn _sync_screen_control (clicked: !target): $R.option(sync_screen_control) =
@@ -728,11 +739,23 @@ implement $P.dispose<import_outcome>(outcome) = import_outcome_free(outcome)
 fn _opened_of (outcome: load_outcome): opened =
   if load_shown(outcome) then OpenedShown() else OpenedNotShown()
 
+(* Where the words screen's Go to takes the reader once the book it opens is shown: the chapter and content node of the
+   lookup (the chapter -1 when there is none to go to) *)
+val _pending_chapter = ref<Int>(~1)
+val _pending_node = ref<Int>(~1)
+
+fn _pending_jump (): void = let
+  val chapter = !_pending_chapter
+  val node = !_pending_node
+  val () = !_pending_chapter := ~1
+in if chapter >= 0 then reader_jump_to(chapter, 0, node) else () end
+
 fn _opened_checked (result: opened): void =
   case+ result of
-  | OpenedShown() => ()
+  | OpenedShown() => _pending_jump()
   | OpenedInLibrary() => ()
   | OpenedNotShown() => let
+    val () = !_pending_chapter := ~1
     val () = (if _in_reader() then _show_library() else ())
   in notice_say_part(reader_chapter_asked()) end
 
@@ -1294,6 +1317,7 @@ fun _lookup_update {again:nat} .<again>. (again: int again): void =
                 else if _in_reader() then _lookup_update(again - 1)
                 else ())
             in false end): bool
+        val () = words_candidate_set(word, word_len, language, language_len)
         val () = $A.free<byte>(language)
         val () = $A.free<byte>(word)
         val () = ui_show("selection-define", found)
@@ -1749,6 +1773,9 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
           val () = stats_show()
           val () = layer_open(LStats())
         in ui_focus("stats-done") end
+        | ~$R.some(MenuWords()) => let
+          val () = layer_close(LLibraryMenu())
+        in words_screen_open() end
         | ~$R.some(MenuCatalogues()) => let
           val () = layer_close(LLibraryMenu())
         in catalogue_panel_open() end
@@ -2298,6 +2325,10 @@ fn _escape_overlay (): bool =
   | ~Escaped(LShelf()) => let
       val () = _shelf_left()
     in true end
+  (* the review closed: the words follow what was reviewed *)
+  | ~Escaped(LReview()) => let
+      val () = words_review_closed()
+    in true end
   | ~Escaped(_) => true
 
 (* Back, Android's and the browser's (quire#333), one step, as Android's
@@ -2712,8 +2743,11 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
           in false end
         | ~$R.some(SelectionCopy()) => let val () = _copy_selection() in false end
         | ~$R.some(SelectionSearch()) => let val () = _search_selection() in false end
-        | ~$R.some(SelectionDefine()) => let val () = dict_show() in false end
-        | ~$R.some(SelectionLookup()) => false
+        | ~$R.some(SelectionDefine()) => let
+            val () = dict_show()
+            val () = words_lookup_note()
+          in false end
+        | ~$R.some(SelectionLookup()) => let val () = words_lookup_note() in false end
         | ~$R.some(SelectionRead()) => let val () = aloud_from_selection() in false end
         | ~$R.some(SelectionShare()) => let val () = _share_selection() in false end): bool
       val () = (if keep then () else _selection_view_put(ShowingPrimary()))
@@ -3067,6 +3101,157 @@ in
     | $BW.WatchEnded() => ())
 end
 
+(* The Wiktionary search of the word in the language, as the dictionary panel's link to look it up online *)
+fn _word_online {word_loc,code_loc:agz}{word_len:nat | word_len <= 64}{code_len:nat | code_len <= 3}
+  (word: !$A.arr(byte, word_loc, 65), word_len: int word_len, code: !$A.arr(byte, code_loc, 3), code_len: int code_len): void =
+  if code_len <= 0 then () else let
+  val out = $A.alloc<byte>(256)
+  val at = _put_literal(out, 0, "https://")
+  val at = _put_array(out, at, code, code_len)
+  val at = _put_literal(out, at, ".wiktionary.org/wiki/Special:Search?search=")
+  val url_len = _percent_encode(word, word_len, 0, out, at)
+  val () = _online_href(out, url_len)
+in $A.free<byte>(out) end
+
+(* The word looked up in the dictionary of its language, and the link to look it up online made *)
+fn _word_prepare {word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
+  (word: !$A.arr(byte, word_loc, word_len + 1), word_len: int word_len, language: !$A.arr(byte, language_loc, language_len + 1), language_len: int language_len): dict_found =
+  if word_len <= 0 then DictMissing()
+  else if word_len > 64 then DictMissing()
+  else let
+    val code_len = (if language_len > 3 then 3 else language_len): [code_len:nat | code_len <= 3; code_len <= language_len] int code_len
+    val link_code = $A.alloc<byte>(3)
+    val () = _copy_from_to(language, code_len, link_code, 0, 0)
+    val link_word = $A.alloc<byte>(65)
+    val () = _copy_from_to(word, word_len, link_word, 0, 0)
+    val () = _word_online(link_word, word_len, link_code, code_len)
+    val () = $A.free<byte>(link_word)
+    val () = $A.free<byte>(link_code)
+    val code = $A.alloc<byte>(3)
+    val () = _copy_from_to(language, code_len, code, 0, 0)
+    val short = $A.alloc<byte>(65)
+    val () = _copy_from_to(word, word_len, short, 0, 0)
+    val found = dict_find(code, code_len, short, word_len)
+    val () = $A.free<byte>(short)
+    val () = $A.free<byte>(code)
+  in found end
+
+(* What the lookup found, shown in the panel; a dictionary whose files are still being read is, this time, as none *)
+fn _word_shown {word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
+  (found: dict_found, word: $A.arr(byte, word_loc, word_len + 1), word_len: int word_len, language: $A.arr(byte, language_loc, language_len + 1), language_len: int language_len): void =
+  case+ found of
+  | ~DictFound() => let
+      val () = dict_show_listed()
+      val () = $A.free<byte>(word)
+    in $A.free<byte>(language) end
+  | ~DictMissing() => let
+      val () = dict_show_none(word, word_len)
+      val () = $A.free<byte>(word)
+    in $A.free<byte>(language) end
+  | ~DictReading(reading) => let
+      val () = $P.finish<bool>(reading, llam(_) => ())
+      (* ignored: the files were not read, which the panel says as it says a word no dictionary has *)
+      val () = dict_show_none(word, word_len)
+      val () = $A.free<byte>(word)
+    in $A.free<byte>(language) end
+
+(* The dictionary's files were read, or could not be: the word looked up once more, or shown as none *)
+fn _word_read {word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
+  (opened: bool, word: $A.arr(byte, word_loc, word_len + 1), word_len: int word_len, language: $A.arr(byte, language_loc, language_len + 1), language_len: int language_len): void =
+  if opened then let
+    val found = _word_prepare(word, word_len, language, language_len)
+  in _word_shown(found, word, word_len, language, language_len) end
+  else _word_shown(DictMissing(), word, word_len, language, language_len)
+
+(* A word chosen from a list: its dictionary entry in the panel, or that no dictionary has it. A dictionary whose files are
+   read first is looked in once they are *)
+fn _word_define_with {word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
+  (word: $A.arr(byte, word_loc, word_len + 1), word_len: int word_len, language: $A.arr(byte, language_loc, language_len + 1), language_len: int language_len): void =
+  case+ _word_prepare(word, word_len, language, language_len) of
+  | ~DictReading(reading) =>
+    $P.finish<bool>(reading, llam(opened) => _word_read(opened, word, word_len, language, language_len))
+  | ~DictFound() => _word_shown(DictFound(), word, word_len, language, language_len)
+  | ~DictMissing() => _word_shown(DictMissing(), word, word_len, language, language_len)
+
+(* The row's word looked up in the dictionary panel *)
+fn _define_row (row: int): void = let
+  val @(word, word_len, language, language_len) = words_row_word(row)
+in _word_define_with(word, word_len, language, language_len) end
+
+(* The review card's word looked up in the dictionary panel *)
+fn _define_card (): void = let
+  val @(word, word_len, language, language_len) = words_review_word()
+in _word_define_with(word, word_len, language, language_len) end
+
+(* The words as a CSV file shared, as a file where the platform shares them, else as text *)
+fn _share_words (way: share_as): void =
+  $P.finish<share_end>(words_share(way), llam(ended) =>
+    case+ ended of
+    | ShareOver() => ()
+    | RefusedAsFile() => $P.finish<share_end>(words_share(AsText()), llam(_) => ()))
+
+(* The book of the row opened at the place of its lookup *)
+fn _words_go (row: int): void = let
+  val @(book_high, book_low, chapter, node) = words_row_place(row)
+  val index = lib_index_of_id(book_high, book_low)
+in
+  if book_high < 0 then ()
+  else if index < 0 then let
+    val () = modal_inform("Book not found")
+  in modal_text_lit("This word was looked up in a book that is no longer in your library.") end
+  else let
+    val () = layer_close(LWords())
+    val () = !_pending_chapter := chapter
+    val () = !_pending_node := node
+  in _open_book(index, ReaderChose()) end
+end
+
+(* The words screen, its book choice and the review *)
+fn _wire_words {count:nat} (listeners: regs(count)): regs(count + 3) = let
+  val listeners = RCons(listeners, OnEl("words-screen"), "click", llam(h) => let
+      val clicked = _target(h)
+      val define_row = _row_of(clicked, "word-go")
+      val go_row = _row_of(clicked, "word-goto")
+      val master_row = _row_of(clicked, "word-master")
+      val delete_row = _row_of(clicked, "word-delete")
+      val control = _words_control(clicked)
+      val () = _target_free(clicked)
+      val () = (case+ control of
+        | ~$R.some(WordsBack()) => let
+            val () = layer_close(LWords())
+          in ui_focus("library-menu-button") end
+        | ~$R.some(WordsLearning()) => words_tab_set(true)
+        | ~$R.some(WordsMastered()) => words_tab_set(false)
+        | ~$R.some(WordsReview()) => words_review_open()
+        | ~$R.some(WordsShare()) => _share_words(share_as_now())
+        | ~$R.some(WordsScreen()) => ()
+        | ~$R.none() =>
+          if define_row >= 0 then _define_row(define_row)
+          else if go_row >= 0 then _words_go(go_row)
+          else if master_row >= 0 then words_row_master(master_row)
+          else if delete_row >= 0 then words_row_delete(delete_row)
+          else ())
+    in 0 end)
+  val listeners = RCons(listeners, OnEl("words-book"), "change", llam(_) => let val () = words_book_changed() in 0 end)
+  val listeners = RCons(listeners, OnEl("review-screen"), "click", llam(h) => let
+      val clicked = _target(h)
+      val control = _review_control(clicked)
+      val () = _target_free(clicked)
+      val () = (case+ control of
+        | ~$R.some(ReviewBack()) => let
+            val () = layer_close(LReview())
+            val () = words_review_closed()
+          in ui_focus("words-review") end
+        | ~$R.some(ReviewShow()) => let
+            val () = words_review_revealed()
+          in _define_card() end
+        | ~$R.some(ReviewKnown()) => words_review_answer(true)
+        | ~$R.some(ReviewForgot()) => words_review_answer(false)
+        | ~$R.some(ReviewScreen()) => ()
+        | ~$R.none() => ())
+    in 0 end)
+in listeners end
+
 (* The offer of a new version: Reload, or Dismiss *)
 fn _wire_update {count:nat} (listeners: regs(count)): regs(count + 1) =
   RCons(listeners, OnEl("update-toast"), "click", llam(h) => let
@@ -3235,6 +3420,7 @@ implement main0 () = let
   (* every listener, in one table: each one's id is its place in it *)
   val listeners = _wire_platform(_wire_settings_screen(_wire_sync(_wire_catalogues(_wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil()))))))))))))
   val listeners = _wire_update(listeners)
+  val listeners = _wire_words(listeners)
   val listeners = _wire_retry(listeners)
   (* the narration's controls and its audio's events *)
   val listeners = narration_listen(listeners)
@@ -3252,6 +3438,7 @@ implement main0 () = let
   val () = lib_install_hint_load()
   val () = stats_load()
   val () = stamp_load()
+  val () = words_start()
   val () = $P.finish<int>(dict_load(), llam(_) => _trash_dictionaries())
   val () = $P.finish<int>(catalogue_load(), llam(_) => ())
   (* nothing is shown until the view kept by the last run is known: a

@@ -279,6 +279,54 @@ fn _dictionaries (): void = let
   val () = ui_role("dictionaries-status", RStatus)
 in _hide("dictionaries-panel") end
 
+(* The words looked up: a screen of the ones kept, a tab for those still being learned and for those mastered, the book
+   they were looked up in, and their rows (keyword: vocabulary) *)
+fn _words_screen (): void = let
+  val () = ui_el("bats-root", "words-screen", TDiv, "info")
+  val () = ui_labelled("words-screen", NDialog, "words-title")
+  val () = ui_screen_bar("words-screen", "words-bar", "words-back", "words-title", "Words")
+  val () = ui_el("words-screen", "words-box", TDiv, "info-in")
+  val () = ui_el("words-box", "words-tabs", TDiv, "seg")
+  val () = ui_named("words-tabs", NGroup, "Words shown")
+  val () = ui_text_btn("words-tabs", "words-tab-learning", "sbtn", "Learning")
+  val () = ui_text_btn("words-tabs", "words-tab-mastered", "sbtn", "Mastered")
+  val () = ui_el("words-box", "words-book-row", TDiv, "srow")
+  val () = ui_el("words-book-row", "words-book-label", TSpan, "slabel")
+  val () = ui_text("words-book-label", "Book")
+  val () = ui_field("words-book-row", "words-book", FChoice, "ssel", "Book")
+  val () = ui_el("words-box", "words-actions", TDiv, "srow")
+  val () = ui_named("words-actions", NGroup, "Words actions")
+  val () = ui_text_btn("words-actions", "words-review", "btn btn-p", "Review")
+  val () = ui_text_btn("words-actions", "words-share", "btn", "Share as CSV")
+  val () = ui_el("words-box", "words-status", TDiv, "sabout")
+  val () = ui_role("words-status", RStatus)
+  val () = ui_el("words-box", "words-none", TDiv, "cnone")
+  val () = ui_text_long("words-none", "No words yet. Select a word in a book and use Look up; it is kept here with its sentence.")
+  val () = ui_el("words-box", "words-list", TDiv, "sgroup")
+  val () = ui_el("words-box", "words-more", TDiv, "sabout")
+  val () = ui_text_long("words-more", "More words are not shown here. Choose a book to see them.")
+in _hide("words-screen") end
+
+(* The review of the words that are due, one at a time: the word, its sentence with the word marked, the definition behind
+   Show definition, and the answers *)
+fn _review_screen (): void = let
+  val () = ui_el("bats-root", "review-screen", TDiv, "info")
+  val () = ui_labelled("review-screen", NDialog, "review-title")
+  val () = ui_screen_bar("review-screen", "review-bar", "review-back", "review-title", "Review")
+  val () = ui_el("review-screen", "review-box", TDiv, "info-in")
+  val () = ui_el("review-box", "review-progress", TDiv, "sabout")
+  val () = ui_role("review-progress", RStatus)
+  val () = ui_el("review-box", "review-card", TDiv, "sgroup")
+  val () = ui_el("review-card", "review-word", TDiv, "mtitle")
+  val () = ui_el("review-card", "review-sentence", TDiv, "snip")
+  val () = ui_el("review-box", "review-empty", TDiv, "cnone")
+  val () = ui_text_long("review-empty", "Nothing is due. Words come back to be reviewed on the schedule Got it and Forgot set.")
+  val () = ui_el("review-box", "review-buttons", TDiv, "mbtns")
+  val () = ui_text_btn("review-buttons", "review-show", "btn btn-p", "Show definition")
+  val () = ui_text_btn("review-buttons", "review-forgot", "btn", "Forgot")
+  val () = ui_text_btn("review-buttons", "review-known", "btn btn-p", "Got it")
+in _hide("review-screen") end
+
 (* A word looked up in a dictionary, over the page: the headword, its
    article (as text), the dictionary's name, the same word looked up
    online, and Close *)
@@ -1167,6 +1215,8 @@ implement app_build () = let
   val () = _note()
   val () = _image_viewer()
   val () = _dictionaries()
+  val () = _words_screen()
+  val () = _review_screen()
   val () = _dictionary()
   val () = _focus_wrap_end()
   val () = _catalogues()
