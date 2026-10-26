@@ -58,7 +58,7 @@ test("in a book, the reading settings sheet is the one settings place: the top b
   await openReadingSettings(page, 'Turning');
   await expect(readingSettings(page).getByRole('group', { name: 'Tap to turn pages' })).toBeVisible();
   await openReadingSettings(page, 'Page');
-  await expect(readingSettings(page).getByRole('button', { name: 'Full screen', exact: true })).toBeVisible();
+  await expect(readingSettings(page).getByRole('button', { name: 'Full screen while reading', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(readingSettings(page)).toBeHidden();
   await expect(settingsScreen(page)).toBeHidden();

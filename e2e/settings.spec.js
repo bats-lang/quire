@@ -420,7 +420,7 @@ test('in the Android app, the screen: full screen hides both bars while reading,
   await start(page);
   await readBook(page, { title: 'Screened', author: 'Settings Tests', rawChapters: chapters(3) });
   await openReadingSettings(page, 'Page');
-  const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
+  const full = more(page).getByRole('button', { name: 'Full screen while reading', exact: true });
   const lock = more(page).getByRole('button', { name: 'Lock rotation', exact: true });
   const brightness = more(page).getByRole('slider', { name: 'Brightness while reading', exact: true });
   const device = more(page).getByRole('button', { name: 'Same as device', exact: true });
@@ -483,7 +483,7 @@ test('in the Android app, full screen holds: bars the system brought back are hi
   await start(page);
   await readBook(page, { title: 'Held', author: 'Settings Tests', rawChapters: chapters(3, 60) });
   await openReadingSettings(page, 'Page');
-  const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
+  const full = more(page).getByRole('button', { name: 'Full screen while reading', exact: true });
   await full.click();
   await page.keyboard.press('Escape');
   await page.keyboard.press('t');
@@ -547,7 +547,7 @@ test('in a browser, full screen is not kept: the page opened again starts out of
     };
   }));
   await openReadingSettings(page, 'Page');
-  const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
+  const full = more(page).getByRole('button', { name: 'Full screen while reading', exact: true });
   const before = await record();
   await full.click();
   await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
@@ -569,7 +569,7 @@ test('in the Android app, bars the system brought back stay until the next page,
   await start(page);
   await readBook(page, { title: 'Swiped', author: 'Settings Tests', rawChapters: chapters(3, 60) });
   await openReadingSettings(page, 'Page');
-  const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
+  const full = more(page).getByRole('button', { name: 'Full screen while reading', exact: true });
   await full.click();
   await expect.poll(() => switchOn(full)).toBe('on');
   await page.keyboard.press('Escape');
@@ -697,7 +697,7 @@ test('in a browser, Full screen goes into full screen and out of it, its button 
   await start(page);
   await readBook(page, { title: 'Fullscreened', author: 'Settings Tests', rawChapters: chapters(1) });
   await openReadingSettings(page, 'Page');
-  const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
+  const full = more(page).getByRole('button', { name: 'Full screen while reading', exact: true });
   await expect(full).toHaveAttribute('aria-pressed', 'false');
   await full.click();
   await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);

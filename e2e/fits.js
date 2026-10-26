@@ -3,7 +3,7 @@
 // (layout.spec.js, display-size.spec.js)
 
 import { expect } from './fixtures.js';
-import { strayGrounds, cutOff, statesUnseen, insetsShort, peekAbove, sheetReach, offScale, rowIsTarget, looksActionable, toastClear, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort } from './controls-shown.js';
+import { strayGrounds, cutOff, statesUnseen, insetsShort, peekAbove, sheetReach, offScale, rowIsTarget, looksActionable, toastClear, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort, switchNotesShown, switchNotesMissing } from './controls-shown.js';
 
 /** Expects nothing cut off on the screen shown (controls-shown.js), no
     toggle whose state shows only in aria-pressed, no control nearer its
@@ -18,6 +18,8 @@ export async function fits(page, screen) {
   expect(await onOffPairs(page), `two-state settings on ${screen} that are not switches`).toEqual([]);
   expect(await labelsShown(page), `fields without a visible label on ${screen}`).toEqual([]);
   expect(await labelInName(page), `buttons whose name is not their words on ${screen}`).toEqual([]);
+  expect(await switchNotesShown(page), `switches on ${screen} with a description line drawn under them`).toEqual([]);
+  expect(await switchNotesMissing(page), `switches on ${screen} whose description is missing`).toEqual([]);
   expect(await strayGrounds(page), `text on a ground other than the one behind it on ${screen}`).toEqual([]);
   expect(await targetsShort(page), `touch targets under 48 px on ${screen}`).toEqual([]);
   expect(await looksActionable(page), `chevron rows not drawn as controls on ${screen}`).toEqual([]);
