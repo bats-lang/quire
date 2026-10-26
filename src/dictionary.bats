@@ -1186,7 +1186,7 @@ in
     in _article_unread() end
 end
 
-(* Shows the word the last dict_find found, in the dictionary panel: clear of the selection when it is about one (keyword: vocabulary) *)
+(* Shows the word the last dict_find found, in the dictionary panel: clear of the selection when it is about one *)
 fn _show_hit (from_selection: bool): void =
   case+ _hit_take() of
   | ~NoHit() => ()

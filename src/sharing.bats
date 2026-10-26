@@ -86,7 +86,7 @@ in
       val sharing = $SH.share_text(name_bytes, name_len, bytes, len)
       val () = release_bytes(name_frozen, name_bytes)
     in
-      (* how it ended is the share sheet's to show (keyword: vocabulary) *)
+      (* how it ended is the share sheet's to show *)
       $P.and_then<$SH.share_outcome><share_end>(sharing, llam(_) => $P.ret<share_end>(ShareOver()))
     end
 end
