@@ -515,12 +515,18 @@ async function restoreWords(page, json) {
   await expect(settingsScreen(page)).toBeHidden();
 }
 
-/** The Words screen, opened again until it lists count words (the restore puts them into the store after it has reported) */
+/** The Words screen, opened once the store holds count words: the restore puts them into the store after it has reported, and the store is
+    read through a backup, not through this screen, which opened over and over holds the store's updates back (quire#565, keyword: vocabulary) */
 async function openWordsHolding(page, count) {
   await expect(async () => {
-    await openWords(page);
-    await expect(wordsScreen(page).getByRole('status')).toContainText(`${count} due, ${count} learning, 0 mastered`, { timeout: 2000 });
-  }).toPass({ timeout: 300000, intervals: [1000, 2000, 5000] });
+    await librarySettings(page);
+    const held = JSON.parse(await exportedBackup(page)).words.length;
+    await page.keyboard.press('Escape');
+    await expect(settingsScreen(page)).toBeHidden();
+    expect(held).toBe(count);
+  }).toPass({ timeout: 400000, intervals: [20000] });
+  await openWords(page);
+  await expect(wordsScreen(page).getByRole('status')).toContainText(`${count} due, ${count} learning, 0 mastered`, { timeout: 180000 });
 }
 
 const ALERT_TIMEOUT = { timeout: 30000 };
