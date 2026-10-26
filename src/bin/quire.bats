@@ -2491,8 +2491,8 @@ fn _gesture_record (h: $EV.event_payload): void =
   | ~NoBlobBytes() => ()
   | ~BlobBytes(record, record_len) =>
     if record_len < 48 then $A.free<byte>(record)
-    (* a finger on the reading ruler's band drags it, and the page does not turn *)
-    else if ruler_pointer(_int32_at(record, 0), _int32_at(record, 4), _int32_at(record, 8), _int32_at(record, 12), _int32_at(record, 20)) then $A.free<byte>(record)
+    (* reading ruler: a finger on its band drags it *)
+    else if ruler_pointer(ruler_record_of_code(_int32_at(record, 0)), _int32_at(record, 4), _int32_at(record, 8), _int32_at(record, 12), ruler_device_of_code(_int32_at(record, 20))) then $A.free<byte>(record)
     else (case+ _gestures_take() of
       | ~GSome(state, source) => let
           val @(events, asked) = $GS.gestures_raw(source, state, record, 0)
