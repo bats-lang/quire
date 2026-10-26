@@ -181,7 +181,7 @@ fun _attr_find {l:agz}{n:pos}{count:nat}{m:nat} .<count>.
   name_at + name_len <= n; class_at + class_len <= n; id_at + id_len <= n]
   @(int name_at, int name_len, int class_at, int class_len, int id_at, int id_len, int place, bool)
 
-(* Its place among the elements of its parent (from 1) and whether it is the last of them *)
+(* The facts of an element: its place among its parent's elements, and whether it is the last (keyword: publisher alignment) *)
 fn _facts_of {l:agz}{n:pos}{name_at,name_len:nat | name_at + name_len <= n}{count:nat}{place:nat}
   (data: !$A.borrow(byte, l, n), name_at: int name_at, name_len: int name_len, attrs: !$X.xml_attr_list(n, count),
    place: int place, last: bool): element_facts(n) = let
@@ -198,8 +198,7 @@ datavtype ancestors(n:int, depth:int) =
    Matching a selector
    ============================================================ *)
 
-(* Whether a structural pseudo-class holds for an element at place, the last
-   of its parent's elements or not *)
+(* Whether a structural pseudo-class holds for an element (keyword: publisher alignment) *)
 fn _pseudo_holds (kind: pseudo_kind, index: int, place: int, last: bool): bool =
   case+ kind of
   | PseudoFirstChild() => place = 1
@@ -208,8 +207,7 @@ fn _pseudo_holds (kind: pseudo_kind, index: int, place: int, last: bool): bool =
   | PseudoEven() => place % 2 = 0
   | PseudoIndex() => place = index
 
-(* Whether the compound sheet[at, stop) (names, .classes, #ids and structural
-   pseudo-classes with nothing between them) holds for an element of these facts *)
+(* Whether the compound sheet[at, stop) holds for an element of these facts (keyword: publisher alignment) *)
 fun _compound_matches {ls:agz}{ns:pos}{ld:agz}{nd:pos}{at,stop:nat | at <= stop; stop <= ns} .<stop - at>.
   (sheet: !$A.borrow(byte, ls, ns), at: int at, stop: int stop, data: !$A.borrow(byte, ld, nd), facts: element_facts(nd)): bool =
   if at >= stop then true
@@ -486,9 +484,7 @@ implement size_map_take {count} (map, offset) = let
       else @(0, MapCons(each, step, rest))
 in walk(map, offset) end
 
-(* The elements of tables that have a text-align of their own (a rule or a style
-   attribute), each by where its name is in the document and its alignment,
-   in the document's order *)
+(* The table elements with an alignment of their own, in document order (keyword: publisher alignment) *)
 #pub datavtype align_map(count:int) =
   | AlignMapNil(0) of ()
   | {count:nat} AlignMapCons(count + 1) of (int, align_value, align_map(count))
@@ -527,9 +523,7 @@ implement align_map_count {count} (map) = let
     | AlignMapCons(_, _, rest) => 1 + walk(rest)
 in walk(map) end
 
-(* The alignment of the element whose name is at offset, AlignNone when the
-   publisher gave it none; the entries before it are passed over (the
-   elements are asked for in the document's order), and the one found *)
+(* The alignment of the element whose name is at offset, AlignNone if none (keyword: publisher alignment) *)
 #pub fun align_map_take {count:nat} (map: align_map(count), offset: int): [rest:nat] @(align_value, align_map(rest))
 
 implement align_map_take {count} (map, offset) = let
@@ -569,8 +563,7 @@ fn _is_uncounted {l:agz}{n:pos}{at,len:nat | at + len <= n}
   else if _is_word(data, at, len, "rt", 2) then true
   else _is_word(data, at, len, "rp", 2)
 
-(* Whether an element is a element of a table, which a book's text-align reaches:
-   table, its sections, rows and cells, and MathML's table, row and cell *)
+(* Whether an element is a table, section, row or cell, HTML or MathML (keyword: publisher alignment) *)
 fn _is_table_part {l:agz}{n:pos}{at,len:nat | at + len <= n}
   (data: !$A.borrow(byte, l, n), at: int at, len: int len): bool =
   if _is_word(data, at, len, "td", 2) then true
@@ -584,8 +577,7 @@ fn _is_table_part {l:agz}{n:pos}{at,len:nat | at + len <= n}
   else if _is_word(data, at, len, "tbody", 5) then true
   else _is_word(data, at, len, "tfoot", 5)
 
-(* The alignment of a element of a table: its style attribute's, else the best
-   rule's *)
+(* The alignment of a table element: its style attribute's, else the best rule's (keyword: publisher alignment) *)
 fn _align_of_part {l:agz}{n:pos}{ns:pos}{count:nat}{depth:nat}{attr_count:nat}{ls:agz}
   (data: !$A.borrow(byte, l, n), sheet: !$A.borrow(byte, ls, ns), aligns: !align_rules(ns, count),
    facts: element_facts(n), chain: !ancestors(n, depth), attrs: !$X.xml_attr_list(n, attr_count)): align_value = let
@@ -656,8 +648,7 @@ fn _rule_size (best: best_rule): size_read =
 datavtype walked(n:int, depth:int) =
   | {depth:nat}{kinds,mapped,aligned:nat} Walked(n, depth) of (ancestors(n, depth), size_tally(kinds), size_map(mapped), align_map(aligned))
 
-(* The children of an element, or the top nodes: the elements among them are
-   counted once, so each knows its place and whether it is the last *)
+(* The children of an element or the top nodes, each knowing its place (keyword: publisher alignment) *)
 fun _walk_nodes {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:nat}{count,align_count:nat}{depth:nat} .<sz, 2>.
   (data: !$A.borrow(byte, ld, nd), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count), aligns: !align_rules(ns, align_count),
    nodes: !$X.xml_node_list(nd, sz), state: walked(nd, depth), parent: size_computed, root: size_computed,
@@ -789,8 +780,7 @@ implement chapter_size_map_unstyled (data, nodes, initial, base) = let
   val () = $A.free<byte>($A.thaw<byte>(blank_frozen))
 in map end
 
-(* chapter_size_map with the alignments of the elements of tables that the
-   sheet's rules (and the style attributes) give, in a map of their own *)
+(* chapter_size_map with the table alignments, in a map of their own (keyword: publisher alignment) *)
 #pub fun chapter_maps {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:nat}{count,align_count:nat}
   (data: !$A.borrow(byte, ld, nd), nodes: !$X.xml_node_list(nd, sz), sheet: !$A.borrow(byte, ls, ns), rules: !css_rules(ns, count),
    aligns: !align_rules(ns, align_count), initial: size_computed, base: size_computed): [mapped,aligned:nat] @(size_map(mapped), align_map(aligned))
@@ -800,7 +790,7 @@ implement chapter_maps (data, nodes, sheet, rules, aligns, initial, base) = let
   val () = tally_free(tally)
 in @(map, align_map) end
 
-(* chapter_maps for a chapter with no style sheet: only its style attributes give an alignment *)
+(* chapter_maps with no style sheet: only style attributes align (keyword: publisher alignment) *)
 #pub fun chapter_maps_unstyled {ld:agz}{nd:pos}{sz:nat}
   (data: !$A.borrow(byte, ld, nd), nodes: !$X.xml_node_list(nd, sz), initial: size_computed, base: size_computed)
   : [mapped,aligned:nat] @(size_map(mapped), align_map(aligned))

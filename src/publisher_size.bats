@@ -99,9 +99,7 @@ fn _tally_put (new_cell: tally_cell): void = let
 in tally_free(old) end
 
 
-(* The maps of the sizes and of the alignments of the elements of tables of the
-   chapter that is being loaded (chapter_index, generation), waiting for its
-   render *)
+(* The size and alignment maps of the chapter being loaded (keyword: publisher alignment) *)
 datavtype sizes_pending =
   | NoSizesPending of ()
   | {mapped,placed:nat} SizesPending of (int, int, size_map(mapped), align_map(placed))
@@ -124,7 +122,7 @@ fn _pending_take (): sizes_pending = let
   val () = ref_exch_elt<sizes_pending>(_pending, cell)
 in cell end
 
-(* The maps of the chapter being rendered *)
+(* The maps of the chapter being rendered (keyword: publisher alignment) *)
 datavtype sizes_active = {mapped,placed:nat} SizesActive of (size_map(mapped), align_map(placed))
 
 val _active = ref<sizes_active>(SizesActive(size_map_new(), align_map_new()))
@@ -169,9 +167,7 @@ implement publisher_sizes_step (offset) = let
   val () = _active_put(SizesActive(rest, aligns))
 in step end
 
-(* The alignment of the element of a table whose name is at offset in the chapter
-   being rendered, AlignNone when the publisher gave it none. The elements are
-   asked for in the document's order *)
+(* The alignment of the table element at offset, AlignNone if none (keyword: publisher alignment) *)
 #pub fn publisher_aligns_next (offset: int): align_value
 
 implement publisher_aligns_next (offset) = let
@@ -335,8 +331,7 @@ fun _entries_read {file_size:pos}{count:nat} .<count>. (serial: int, file_size: 
    One chapter
    ============================================================ *)
 
-(* The sizes map to give the page: against the book's dominant size none is
-   given while the book has none measured (the alignments are given all the same) *)
+(* The sizes map to give the page; alignments are given all the same (keyword: publisher alignment) *)
 fn _sizes_unless_unmeasured {mapped:nat} (mode: sizes_mode, map: size_map(mapped)): [more:nat] size_map(more) =
   case+ mode of
   | SizesRespected() => map

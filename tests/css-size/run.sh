@@ -28,23 +28,8 @@ i = s.rstrip().rfind("\nend")
 open(sys.argv[2], "w").write(s[:i] + "\n")
 PY
 done
-# the real book of quire#868: its chapter and the sheets it links, put in the test as strings
-python3 - "$ROOT/e2e/calculus101-mathml-test.epub" "$TMP/src/bin/css_book_test.bats" <<'PY'
-import re, sys, zipfile
-book = zipfile.ZipFile(sys.argv[1])
-chapter = book.read("index.xhtml").decode("utf-8")
-links = re.findall(r'<link rel="stylesheet" type="text/css" href="([^"]+)"', chapter)
-assert links[-1] == "_static/sphinx-typst-math.css", links
-def literal(text):
-    return text.replace("\\", "\\\\").replace('"', '\\"').replace("\r", "").replace("\n", "\\n")
-sheets = "".join(book.read(name).decode("utf-8") + "\n" for name in links)
-typst = book.read("_static/sphinx-typst-math.css").decode("utf-8")
-source = open(sys.argv[2]).read()
-for marker, value in (("@@CHAPTER@@", chapter), ("@@BOOK_SHEETS@@", sheets), ("@@TYPST_SHEET@@", typst)):
-    assert marker in source
-    source = source.replace(marker, literal(value))
-open(sys.argv[2], "w").write(source)
-PY
+# the real book of quire#868, read by css_book_test.bats from book/ (unzip is the one tool call: bats has no inflate)
+unzip -q "$ROOT/e2e/calculus101-mathml-test.epub" -d "$TMP/book"
 cd "$TMP"
 bats build --repository "$1" > build.log 2>&1 || { cat build.log; exit 1; }
 LIMIT=""

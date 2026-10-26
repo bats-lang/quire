@@ -150,10 +150,7 @@ fun _rules_from {left:nat}{step:int | 10 <= step; step <= 61 ; 69 * (61 - step) 
     val sheet = close(sheet)
   in _rules_from(sheet, step + 1) end
 
-(* The rules of the alignments: left, right and center, each a selector and
-   the text-align a table cell takes, then the justify-items a MathML cell
-   takes (Chromium leaves the content of an mtd where it was for a plain
-   text-align; the book's own sheet writes both) *)
+(* The alignment rules: text-align, then justify-items for MathML cells (keyword: publisher alignment) *)
 fn _align_rules {left:nat | 336 <= left} (sheet: sheet(left, false, false)): [after:nat | after >= left - 336] sheet(after, false, false) = let
   val sheet = rule(sheet, ".caf [data-align=\"left\"]")
   val sheet = lay(sheet, TextAlign(), "left")
@@ -169,7 +166,7 @@ fn _align_rules {left:nat | 336 <= left} (sheet: sheet(left, false, false)): [af
   val sheet = close(sheet)
 in sheet end
 
-(* The style sheet of the sizes: one rule for each step, and the alignments *)
+(* The style sheet of the sizes and alignments (keyword: publisher alignment) *)
 #pub fn size_style (): [l:agz][k:nat | k < 65536] @($A.arr(byte, l, $B.BUILDER_CAP), int k)
 
 implement size_style () = let
