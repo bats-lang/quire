@@ -475,8 +475,8 @@ test('a stall of the machine names the memory, io and cpu pressure and the swap,
   desktopOnly(testInfo);
   const proc = testInfo.outputPath('proc909');
   const out = testInfo.outputPath('stalls909');
-  const dog = new Watchdog({ root: process.pid, out, gapMs: 300, proc });
   lay909(proc, { memory: 1000000, io: 50000, cpu: 20000, swapin: 10, swapout: 20, major: 30, reclaim: 5, steal: 100 });
+  const dog = new Watchdog({ root: process.pid, out, gapMs: 300, proc });
   dog.tick(1000);
   dog.tick(1100);
   // the machine stood still for 7.9 s while memory was reclaimed: 7.5 s of stalled tasks, 40 swap-outs, 8 direct reclaims
