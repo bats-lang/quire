@@ -102,10 +102,41 @@ paths:
   later timeout. Contents shows "Back to <chapter> · page N" (`contents-back`)
   while a position is kept. Opening or closing a book forgets them
   (`reader_stack_clear`). The first-book hint says both gestures
-  (`gesture_hint`), lies in the band the text keeps clear of (`hint_band`) and is
-  up for 8 s after the bars first hide. `tests/static` holds code that must not
+  (`gesture_hint`) and lies in the band the text keeps clear of (`hint_band`); how
+  it and the bars go is "The bars and the hint go when the reader acts" below. `tests/static` holds code that must not
   type-check (a forged `TIMED`, another timeout's proof) and code that must
   (`_back_offer`).
+
+## The bars and the hint go when the reader acts (#560)
+
+No timer hides the reader's bars or the first-book hint (keyword: reader acts). Hiding either
+takes a `reader_act` (`src/reader_act.bats`: `ActMiddleTap`, `ActPageTurn`, `ActJump`, `ActEscape`,
+`ActHintTap`, `ActFirstOpen`), so a timer, which has none to pass, cannot call `_chrome_hide`
+(`tests/static/reject/chrome-hidden-without-act`; the accept fixture passes an act).
+
+* **Bars.** They come up on a tap in the middle (or the `t` key), a scrubber touch, or a book
+  opening, and go on a tap in the middle, a page turn (`_next`, `_previous`), Escape, a jump from
+  Contents, the page list or a bookmark (`_jumped`, which gives the page the focus), and the
+  first book's opening. A panel open leaves them under its scrim. The back button's own 10 s
+  (`TIMED`) is unchanged.
+* **Hint.** `hint_hide` takes the act and goes at `ActPageTurn` (the funnels of every turn in
+  `reader.bats`: `page_next`, `page_prev`, `reader_chapter_step`, and `reader_turn_on`, which
+  reading aloud uses) and `ActHintTap` (the hint takes pointer events and is a click target of
+  its own); every other act leaves it. It still shows once.
+* **They do not hide each other.** The first book opens with the bars down (`ActFirstOpen`,
+  `_hint_offer`). The alternative, the hint where the bars do not cover it, was measured
+  (`layout.spec.js`, "on a first open no bar covers the hint", 320, 412 and the other widths):
+  with the bars up the top bar covers the hint at every width, and the band the text keeps clear
+  of is the bar's height, so a hint below the bar would lie over the text.
+* **Research** (the ticket's, kept). Kobo, Readest, Google Play Books and Apple Books show the
+  controls on a tap in the middle and document no timer; Android's immersive guidance gives none,
+  and hiding after a few seconds is a video player's convention; WCAG 2.2.1 (Timing Adjustable)
+  counts a time limit the content sets; Adobe Spectrum's coach mark goes when the user does the
+  thing; NN/g: one tip per interaction. Kindle and KOReader were not checked on a device.
+* **Tests.** `reader.spec.js` ("the reader's bars stay up 30 s", "the hint goes at the first turn:
+  <route>", the hint staying 30 s). `openBook` taps the middle after a first open so that other
+  specs see the bars as every other book has them (`asOpened: true` leaves them as the app
+  opened them); `bareReader` takes bars and hint down by the reader's acts.
 
 ## The picture viewer (#382)
 

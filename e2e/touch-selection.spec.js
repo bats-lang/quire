@@ -83,7 +83,7 @@ import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, placeChanged, bookPage, control, showChrome, dialog, selectionButton, marks, oneColumn,
   openReadingSettings, readingSettings,
-  rawMouse, runUntil,
+  rawMouse, bareReader,
 } from './helpers.js';
 import { cutOff, insetsShort, labelInName, coveredByBanner } from './controls-shown.js';
 import { selectionBooks } from './selection-books.js';
@@ -285,10 +285,8 @@ async function open(page, name, opts = {}) {
   await page.keyboard.press('Escape');
   await expect(readingSettings(page)).toBeHidden();
   if (opts.oneColumn) await oneColumn(page);
-  // the bars are up as the book opens, and the app hides them 5 s after
-  // they were shown (quire.bats): the page's clock runs until they are
-  // gone, and a bars timer that never fires makes this time out (#657)
-  await runUntil(page, async () => !(await barsUp(page)));
+  // the bars and the hint stay until the reader acts (#560)
+  await bareReader(page);
   await settled(page);
 }
 

@@ -15,16 +15,16 @@
  *     app just opened has none until the reader acts, and must draw
  *     none by itself;
  *   - the pointer's hover: the mouse is moved off every control first;
- *   - a moment's things (the reader's bars, its back button, the hint on
- *     turning pages), which go by themselves: run out on the fake clock
- *     (`settled`, #657);
+ *   - a moment's things (the reader's back button), which goes by itself: run
+ *     out on the fake clock (`settled`, #657); the reader's bars and the hint
+ *     on turning pages stay until the reader acts (#560), so `settled` acts;
  *   - the renderer's own noise: a pixel drawn up to 16 levels a channel
  *     apart (an edge's anti-aliasing) is not counted as changed.
  */
 
 import { writeFileSync } from 'node:fs';
 import { test, expect, onAndroid, androidInsets } from './fixtures.js';
-import { indicator, librarySearch, libraryShown, rawMouse } from './helpers.js';
+import { indicator, librarySearch, libraryShown, rawMouse, bareReader } from './helpers.js';
 
 /** The time the tests' clock stands at */
 export const FIXED_TIME = new Date('2026-06-01T10:00:00Z');
@@ -127,13 +127,13 @@ export async function rested(page) {
   await writesDone(page);
 }
 
-/** Longer than the longest moment (the hint's 13 s) */
+/** Longer than the longest moment (the back button's 10 s) */
 const MOMENT_MS = 15000;
 
 /** Waits until the app is still: what it keeps has not changed for
     a second and a half (every launch step, a sync included, has ended),
-    and the reader's bars and its back button, which go by themselves,
-    have gone */
+    and the reader's bars and hint are down and its back button, which goes
+    by itself, has gone */
 export async function settled(page) {
   let last = null;
   let still = 0;
@@ -146,22 +146,20 @@ export async function settled(page) {
     still = now === last ? still + 1 : 0;
     last = now;
   }
-  // the bars hide 5 s after they are shown (quire.bats), the back button
-  // 10 s after a jump (BACK_SHOWN), the hint on turning pages 13 s after
-  // the first book opens: all a moment's, not the app's state. Under a
-  // fake clock installed before the page opened (`fixedClock` does, so
-  // does `page.clock.install()`) the moment is run, not waited out
-  // (#657): `runFor` fires every timer due in it in order, those a timer
-  // sets in turn too, and leaves the network and IndexedDB, which are not
-  // the clock's, alone
+  // the back button goes 10 s after a jump (BACK_SHOWN): a moment's, not the
+  // app's state. Under a fake clock installed before the page opened
+  // (`fixedClock` does, so does `page.clock.install()`) the moment is run,
+  // not waited out (#657): `runFor` fires every timer due in it in order,
+  // those a timer sets in turn too, and leaves the network and IndexedDB,
+  // which are not the clock's, alone
   if (await page.evaluate(() => globalThis.__pwClock !== undefined)) {
     await page.clock.runFor(MOMENT_MS);
     await writesDone(page);
   }
+  // the reader's bars and the hint on turning pages stay until the reader acts (#560)
+  await bareReader(page);
   // whichever way it passed, the assertions are the same
-  await expect(page.getByRole('toolbar', { name: 'Page controls' })).toBeHidden({ timeout: 15000 });
   await expect(page.getByRole('button', { name: '↩ Back' })).toBeHidden({ timeout: 15000 });
-  await expect(page.getByText('Tap the middle for the menu.')).toBeHidden({ timeout: 15000 });
 }
 
 /** How far each element shown is scrolled (the page, the library's

@@ -38,13 +38,13 @@ for (const ncx of [false, true]) {
     // the entry to a place inside a chapter shows that place
     await entries(page).filter({ hasText: 'Deep in two' }).click();
     await expect(contents(page)).toBeHidden();
-    await expect(chapterTitle(page)).toHaveText('The Middle');
+    await expect.poll(async () => (await place(page)).ch).toBe('The Middle');
     await expect.poll(() => visibleText(page)).toContain('Deep target 2');
     expect((await place(page)).p).toBeGreaterThan(1);
     // back to where the jump was made
     await expect(jumpBack(page)).toBeVisible();
     await jumpBack(page).click();
-    await expect(chapterTitle(page)).toHaveText('Opening & Intro');
+    await expect.poll(async () => (await place(page)).ch).toBe('Opening & Intro');
     // the page indicator names the chapter by its title too
     expect(await place(page)).toMatchObject({ ch: 'Opening & Intro', p: 1 });
     await expect(jumpBack(page)).toBeHidden();
@@ -58,7 +58,7 @@ test('reading on from where a jump landed puts the back button away', async ({ p
   await showChrome(page);
   await control(page, 'Contents').click();
   await entries(page).filter({ hasText: 'The End' }).click();
-  await expect(chapterTitle(page)).toHaveText('The End');
+  await expect.poll(async () => (await place(page)).ch).toBe('The End');
   await expect(jumpBack(page)).toBeVisible();
   // turning the page on keeps the new place: nothing to go back to
   await page.keyboard.press('ArrowRight');
@@ -68,7 +68,7 @@ test('reading on from where a jump landed puts the back button away', async ({ p
   await showChrome(page);
   await control(page, 'Contents').click();
   await entries(page).filter({ hasText: 'The Middle' }).click();
-  await expect(chapterTitle(page)).toHaveText('The Middle');
+  await expect.poll(async () => (await place(page)).ch).toBe('The Middle');
   await expect(jumpBack(page)).toBeVisible();
   await page.keyboard.press('ArrowLeft');
   await expect.poll(async () => (await place(page)).ch).toBe('Opening & Intro');
@@ -83,7 +83,7 @@ test('the back button goes on its own after ten seconds, and with it the place i
   await showChrome(page);
   await control(page, 'Contents').click();
   await entries(page).filter({ hasText: 'The End' }).click();
-  await expect(chapterTitle(page)).toHaveText('The End');
+  await expect.poll(async () => (await place(page)).ch).toBe('The End');
   await expect(jumpBack(page)).toBeVisible();
   await page.clock.runFor(9000);
   await expect(jumpBack(page)).toBeVisible();
@@ -93,9 +93,9 @@ test('the back button goes on its own after ten seconds, and with it the place i
   await showChrome(page);
   await control(page, 'Contents').click();
   await entries(page).filter({ hasText: 'The Middle' }).click();
-  await expect(chapterTitle(page)).toHaveText('The Middle');
+  await expect.poll(async () => (await place(page)).ch).toBe('The Middle');
   await jumpBack(page).click();
-  await expect(chapterTitle(page)).toHaveText('The End');
+  await expect.poll(async () => (await place(page)).ch).toBe('The End');
   await expect(jumpBack(page)).toBeHidden();
   expect(errors).toEqual([]);
 });
@@ -107,9 +107,8 @@ test('bringing up the bars puts the back button away', async ({ page }) => {
   await showChrome(page);
   await control(page, 'Contents').click();
   await entries(page).filter({ hasText: 'The End' }).click();
-  await expect(chapterTitle(page)).toHaveText('The End');
-  // the bars go by themselves after five seconds; the button stays
-  await page.clock.runFor(6000);
+  await expect.poll(async () => (await place(page)).ch).toBe('The End');
+  // the jump took the bars down (#560); the button stays
   await expect(control(page, 'Previous page')).toBeHidden();
   await expect(jumpBack(page)).toBeVisible();
   await showChrome(page);
@@ -147,7 +146,7 @@ test('the scrubber shows where the page is, and dragging it goes there', async (
   await expect(page.getByRole('tooltip')).toBeVisible();
   await expect(page.getByRole('tooltip')).toContainText('The End');
   await rawMouse(page, 'up');
-  await expect(chapterTitle(page)).toHaveText('The End');
+  await expect.poll(async () => (await place(page)).ch).toBe('The End');
   await showChrome(page);
   const pct = +(await scrubber.getAttribute('aria-valuenow'));
   expect(pct).toBeGreaterThanOrEqual(70);
@@ -155,7 +154,7 @@ test('the scrubber shows where the page is, and dragging it goes there', async (
   // the jump can be gone back from
   await expect(jumpBack(page)).toBeVisible();
   await jumpBack(page).click();
-  await expect(chapterTitle(page)).toHaveText('Opening & Intro');
+  await expect.poll(async () => (await place(page)).ch).toBe('Opening & Intro');
 });
 
 for (const ncx of [false, true]) {
@@ -183,7 +182,7 @@ for (const ncx of [false, true]) {
     await rows.filter({ hasText: '5' }).click();
     await expect(contents(page)).toBeHidden();
     await expect.poll(async () => (await place(page)).ch).toBe(2);
-    await page.keyboard.press('t');
+    // the jump took the bars down (#560), which shows the footer
     await expect(footerPage).toHaveText(' · page 5 in print');
     await expect(jumpBack(page)).toBeVisible();
   });

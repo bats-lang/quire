@@ -604,7 +604,7 @@ fn reader_rules_scrubber {left:nat | left >= 2950} (sheet: sheet(left, false, fa
   val sheet = close(sheet)
   (* scrolled, on the chapter's last screen: at the right, apart from
      Back at the left *)
-  (* the hint on turning pages, over the page's middle *)
+  (* the hint on turning pages, in the band above the text; a tap on it takes it away *)
   val sheet = rule(sheet, ".hint")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Left(), "max(16px,var(--safe-left))")
@@ -620,7 +620,6 @@ fn reader_rules_scrubber {left:nat | left >= 2950} (sheet: sheet(left, false, fa
   val sheet = lay(sheet, LineHeight(), "1.25")
   val sheet = lay(sheet, TextAlign(), "center")
   val sheet = lay(sheet, BoxShadow(), "0 2px 8px rgba(0,0,0,.3)")
-  val sheet = lay(sheet, PointerEvents(), "none")
   val sheet = close(sheet)
   (* in the band above the first line of text, below the status bar's inset *)
   val sheet = rule(sheet, ".hint-top")

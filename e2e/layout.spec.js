@@ -847,3 +847,29 @@ test('the library menu is reachable under the banner of records that cannot be u
   await expect(dialog(page, 'Sync')).toBeVisible();
   await reachable();
 });
+
+// #560: on a first open the hint is not covered by a bar, in every project (320 px wide in narrow,
+// 412 px in the phones). The bars, once up, do cover it: the top bar is as tall as the band the text
+// keeps clear of, so the hint cannot lie below the bar without lying over the text; this is why the
+// first book opens with the bars down
+test('on a first open no bar covers the hint, and the bars would', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Uncovered', author: 'Layout Tests', rawChapters: chapters(2, 20) }, { asOpened: true });
+  const hint = page.getByRole('status').filter({ hasText: 'Tap the sides to turn pages. Tap the middle for the menu.' });
+  await expect(hint).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Page controls' })).toBeHidden();
+  const overlap = async () => page.evaluate(() => {
+    const hintBox = [...document.querySelectorAll('#turn-hint')][0].getBoundingClientRect();
+    const covers = [...document.querySelectorAll('.top, .bot')].filter(bar => bar.checkVisibility({ visibilityProperty: true })).map(bar => {
+      const box = bar.getBoundingClientRect();
+      return box.left < hintBox.right && box.right > hintBox.left && box.top < hintBox.bottom && box.bottom > hintBox.top;
+    });
+    return { width: innerWidth, bars: covers.length, covered: covers.some(Boolean) };
+  });
+  const down = await overlap();
+  expect(down.covered, `a bar over the hint at ${down.width} px with the bars down`).toBe(false);
+  await showChrome(page);
+  const up = await overlap();
+  expect(up.bars).toBeGreaterThan(0);
+  expect(up.covered, `the bars over the hint at ${up.width} px`).toBe(true);
+});

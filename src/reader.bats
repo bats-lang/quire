@@ -22,6 +22,7 @@ staload "pages.sats"
 staload "paths.sats"
 staload "overlay.sats"
 staload "ui.sats"
+staload "reader_act.sats"
 staload "notice.sats"
 staload "layer.sats"
 staload "image_viewer.sats"
@@ -6112,11 +6113,13 @@ implement reader_scrolled () =
    the back button goes *)
 #pub fun page_next(): void
 implement page_next() = let
+  val () = hint_hide(ActPageTurn())
   val () = reader_back_rest()
 in _page_next() end
 
 #pub fun page_prev(): void
 implement page_prev() = let
+  val () = hint_hide(ActPageTurn())
   val () = reader_back_rest()
 in _page_previous() end
 
@@ -6124,6 +6127,7 @@ in _page_previous() end
    first page; nothing when there is none *)
 #pub fun reader_chapter_step (direction: Int): void
 implement reader_chapter_step (direction) = let
+  val () = hint_hide(ActPageTurn())
   val () = reader_back_rest()
 in
   case+ reading_get() of
@@ -7005,6 +7009,7 @@ implement $P.dispose<turned>(_) = ()
 #pub fun reader_turn_on (): $P.promise(turned, $P.Chained)
 
 implement reader_turn_on () = let
+  val () = hint_hide(ActPageTurn())
   val () = reader_back_rest()
   val () = !_anchor_kept := ~1
 in

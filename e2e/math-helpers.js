@@ -6,8 +6,8 @@ import { expect } from '@playwright/test';
 import { createEpub } from './create-epub.js';
 import { mathBooks } from './math-books.js';
 import {
-  importFiles, openBook, bookPage, rawFile, cards, openReadingSettings, readingSettings, topBar, place, placeChanged,
-  runUntil,
+  importFiles, openBook, bookPage, rawFile, cards, openReadingSettings, readingSettings, place, placeChanged,
+  bareReader,
 } from './helpers.js';
 
 export const MATHML_NAMESPACE = 'http://www.w3.org/1998/Math/MathML';
@@ -80,10 +80,9 @@ async function pixelsOf(page, rect) {
     (its most common colour) by more than 48 in some channel, in viewport CSS px, and the pixel
     that differs most. null for a region with no ink */
 export async function inkIn(page, rect, threshold = 48) {
-  // the bars of the reader lie over the page's head and foot, and the hint on turning pages over its
-  // middle, until they hide themselves (5 s and 13 s after they show, quire.bats): the page's fake
-  // clock, installed before it opened (math-native and math-images do so), runs until both are gone (#657)
-  await runUntil(page, async () => !(await topBar(page).isVisible()) && !(await page.getByText('Swipe or tap the sides to turn the page').isVisible()));
+  // the bars of the reader lie over the page's head and foot, and the hint on turning pages in its head,
+  // until the reader acts (#560): the t key and a tap on the hint
+  await bareReader(page);
   const { clip, base64 } = await pixelsOf(page, rect);
   const found = await page.evaluate(async ({ base64, clip, threshold }) => {
     const image = new Image();

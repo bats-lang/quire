@@ -19,9 +19,8 @@ export async function readMinutes(page, n) {
   }
 }
 
-/** Bookmarks the page shown. The bars hide 5 s after they were last
-    shown, which a loaded machine can pass between one step and this: the
-    bars are brought up and the click made again until it lands, as
+/** Bookmarks the page shown. The bars go with a turn or a jump
+    between one step and this: the bars are brought up and the click made again until it lands, as
     clickControl does for the bottom bar's buttons */
 export async function bookmarkPage(page) {
   await expect(async () => {
