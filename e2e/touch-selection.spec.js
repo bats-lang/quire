@@ -540,7 +540,7 @@ test('a selection across the gap between two columns is whole, and is one highli
   await readingSettings(page).getByRole('group', { name: 'Pages on screen' }).getByRole('button', { name: 'Two', exact: true }).click();
   await page.keyboard.press('Escape');
   await expect(readingSettings(page)).toBeHidden();
-  await expect(control(page, 'Previous page')).toBeHidden({ timeout: 20000 });
+  await bareReader(page);
   await settled(page);
   const words = await pageWords(page);
   const width = page.viewportSize().width;
@@ -688,7 +688,7 @@ for (const how of ['extend', 'shorten']) {
     await highlightWithNote(page, testInfo, anchor, end, 'My thought');
     const old = wordsFrom(words, anchor, end);
     expect(squash((await marks(page)).text)).toBe(old);
-    await expect(control(page, 'Previous page')).toBeHidden({ timeout: 20000 });
+    await bareReader(page);
 
     // tapping the highlight shows the toolbar with the highlight selected
     await tapAt(page, testInfo, middle);

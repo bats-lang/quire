@@ -292,7 +292,11 @@ export const jumpBack = page => page.getByRole('button', { name: '↩ Back' });
 export async function openBook(page, text, { asOpened = false } = {}) {
   await card(page, text).click();
   await pageShown(page);
-  if (!asOpened) await showChrome(page);
+  // the t key, not a tap: a tap in the middle can land on a link or a player of the book
+  if (!asOpened && !(await control(page, 'Previous page').isVisible())) {
+    await page.keyboard.press('t');
+    await expect(control(page, 'Previous page')).toBeVisible();
+  }
 }
 
 /** Waits until the book just opened shows its page: the reader is up
@@ -684,6 +688,13 @@ export async function bareReader(page) {
   if (await hint.isVisible()) await hint.click();
   await expect(bars).toBeHidden();
   await expect(hint).toBeHidden();
+}
+
+/** Waits for the chapter named by the page indicator, which is read with the bars down. A page
+    turn or a jump takes the bars down (#560), and bringing them up to read the title in them
+    would put away the back button a jump leaves, so the bars are left as they are */
+export async function expectChapter(page, title, { timeout = 10000 } = {}) {
+  await expect.poll(async () => ((await indicator(page).textContent()) ?? '').replace(/\s·\s+pages?\s.*$/s, '').trim(), { timeout }).toBe(title);
 }
 
 /** Clicks the bottom bar's control name, bringing the bars up first.

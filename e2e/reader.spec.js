@@ -7,7 +7,7 @@ import zlib from 'node:zlib';
 import { TINY_PNG } from './create-epub.js';
 import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
-  showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
+  showChrome, chapters, card, bookPage, chapterTitle, expectChapter, control, jumpBack, librarySearch, openSettings, reload, dialog,
   importFiles, indicator, chapterBody, oneColumn, selectText, selectionButton, selectionPick,
   readingSettings, openReadingSettings, expectBarFollows, libraryShown,
   rawMouse, clockNow, expectMoment,
@@ -20,7 +20,7 @@ test('a book opens on its first page with its first chapter shown', async ({ pag
   await readBook(page, book('First Page'));
   expect(await place(page)).toMatchObject({ ch: 1, p: 1 });
   expect(await visibleText(page)).toContain('Para 1.0');
-  await expect(chapterTitle(page)).toHaveText('Chapter 1');
+  await expectChapter(page, 'Chapter 1');
   expect(errors).toEqual([]);
 });
 
@@ -316,18 +316,18 @@ test('links: out of the book open outside it, inside it jump and can go back', a
   await asked.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(asked).toBeHidden();
   await bookPage(page).getByRole('link', { name: 'the far place' }).click();
-  await expect(chapterTitle(page)).toHaveText('Chapter 2');
+  await expectChapter(page, 'Chapter 2');
   expect(await visibleText(page)).toContain('FAR-TARGET');
   await expect(jumpBack(page)).toBeVisible();
   await jumpBack(page).click();
-  await expect(chapterTitle(page)).toHaveText('Chapter 1');
+  await expectChapter(page, 'Chapter 1');
   expect(await place(page)).toMatchObject({ ch: 1, p: 1 });
   // the link is reached and followed from the keyboard too
   const inside = bookPage(page).getByRole('link', { name: 'the far place' });
   await inside.focus();
   await expect(inside).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(chapterTitle(page)).toHaveText('Chapter 2');
+  await expectChapter(page, 'Chapter 2');
   expect(await visibleText(page)).toContain('FAR-TARGET');
 });
 
@@ -369,14 +369,14 @@ test('a note\'s reference opens the note over the page, which can be gone to', a
   await expect(note).toBeVisible();
   await note.getByRole('button', { name: 'Go to note' }).click();
   await expect(note).toBeHidden();
-  await expect(chapterTitle(page)).toHaveText('Chapter 3');
+  await expectChapter(page, 'Chapter 3');
   expect(await visibleText(page)).toContain("The endnote's own");
   await expect(jumpBack(page)).toBeVisible();
   await jumpBack(page).click();
   await expect.poll(() => place(page)).toEqual(at);
   // a reference to a note that is not there is followed as a link
   await bookPage(page).getByRole('link', { name: '3', exact: true }).click();
-  await expect(chapterTitle(page)).toHaveText('Chapter 2');
+  await expectChapter(page, 'Chapter 2');
   await expect(note).toBeHidden();
 });
 
@@ -1524,7 +1524,7 @@ test('read aloud goes on into the next chapter, from a selection, at the speed a
   // on into the next chapter
   await page.evaluate(() => window.sentenceSpoken());
   await expect.poll(async () => (await spoken(page)).map(s => s.text)).toEqual(['Two!', 'Three?']);
-  await expect(chapterTitle(page)).toHaveText('Chapter 2');
+  await expectChapter(page, 'Chapter 2');
   // the choices are kept
   await reload(page);
   await openReadingSettings(page, 'Read aloud');

@@ -6,7 +6,7 @@
 import { test, expect, onAndroid } from './fixtures.js';
 import {
   start, epubFile, importFiles, readBook, openBook, showChrome, chapters, cards, importInput, bookPage,
-  chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
+  chapterTitle, bareReader, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
   readingSettings, openReadingSettings, openShelf, emptyTrashDialog, shelfTitle, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
   rawMouse,
@@ -497,12 +497,9 @@ test('in the app, scrolled and in full screen with the bars still shown, no text
 /** The bars put down, so the running footer shows (a tap on the page's
     middle brings them up and puts them down) */
 async function barsDown(page) {
-  const footer = page.locator('#footer');
-  if (!(await footer.isVisible())) {
-    const box = await bookPage(page).boundingBox();
-    await rawMouse(page, 'click', box.x + box.width / 2, box.y + box.height / 2);
-  }
-  await expect(footer).toBeVisible();
+  // by the reader's acts (#560): a tap in the middle can land on the hint, which only takes the hint away
+  await bareReader(page);
+  await expect(page.locator('#footer')).toBeVisible();
 }
 
 // A paged page keeps its last line clear of its running footer, the

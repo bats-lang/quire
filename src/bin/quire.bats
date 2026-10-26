@@ -607,8 +607,11 @@ end
 
 (* A jump from a panel lands: the bars go and the page has the focus the panel's close gave back to
    the button that opened it *)
+(* reader-bars: a jump of any kind takes the bars down *)
+fn _bars_down_for_jump (): void = if !_chrome then _chrome_hide(ActJump()) else ()
+
 fn _jumped (): void = let
-  val () = (if !_chrome then _chrome_hide(ActJump()) else ())
+  val () = _bars_down_for_jump()
 in ui_focus("page") end
 
 (* The tap in the middle, or the t key *)
@@ -1835,7 +1838,7 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
         | ~$R.none() => ()
         | ~$R.some(SyncGo()) => let
           val @(chapter, page, anchor) = sync_further_take()
-        in if chapter >= 0 then (if _in_reader() then reader_jump_to(chapter, page, anchor) else ()) else () end
+        in if chapter >= 0 then (if _in_reader() then let val () = reader_jump_to(chapter, page, anchor) in _bars_down_for_jump() end else ()) else () end
         | ~$R.some(SyncOfferClose()) => sync_further_dismiss())
     in 0 end)
   val listeners = RCons(listeners, OnDocument(), "visibilitychange", llam(_) => let
@@ -2763,7 +2766,7 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
         | ~$R.some(FootnoteGo()) => let
           val () = layer_close(LNote())
           val () = reader_note_go()
-        in ui_focus("page") end
+        in _jumped() end
         (* the link opens in its own tab; the question is answered *)
         | ~$R.some(FootnoteOpen()) => layer_close(LNote())
         (* the focus goes back where it was (layer.bats) *)
