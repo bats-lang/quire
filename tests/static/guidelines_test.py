@@ -266,12 +266,12 @@ class Overlap(unittest.TestCase):
         self.assertEqual(gl.lint_brief(brief, self.TICKET, PHRASES), [])
 
     def test_a_review_that_wants_the_removal_ticket_p1_is_refused(self):
-        review = GOOD_REVIEW.replace('The Done-when is met.', 'It changes the public signature.\nOverlap check: the old form is still there; the removal ticket exists, is p1, and was filed before the change.')
+        review = GOOD_REVIEW.replace('The Done-when is met.', 'It changes the public signature.\nOverlap check: the old form is still there; the removal ticket exists, is p1, and is cited in the deprecation comment.')
         found = gl.lint_review(review, PHRASES)
         self.assertTrue(any('p2, never p1' in line for line in found), found)
 
     def test_a_review_that_wants_the_removal_ticket_p2_is_accepted(self):
-        review = GOOD_REVIEW.replace('The Done-when is met.', 'It changes the public signature.\nOverlap check: the old form is still there; the removal ticket exists, is p2, and was filed before the change.')
+        review = GOOD_REVIEW.replace('The Done-when is met.', 'It changes the public signature.\nOverlap check: the old form is still there; the removal ticket exists, is p2, and is cited in the deprecation comment.')
         self.assertEqual(gl.lint_review(review, PHRASES), [])
 
     def test_the_rule_texts_say_p2_and_never_p1_for_the_removal_ticket(self):
@@ -279,6 +279,20 @@ class Overlap(unittest.TestCase):
             for line in read_root(*parts).split('\n'):
                 if gl.REMOVAL_LINE.search(line):
                     self.assertFalse(gl.PRIORITY_P1.search(line), (parts, line[:100]))
+
+    def test_the_rule_texts_do_not_ask_when_the_removal_ticket_was_filed(self):
+        for parts in (('CLAUDE.md',), ('.claude', 'orchestration.md')):
+            self.assertIsNone(OLD_FILING_CHECK.search(read_root(*parts)), parts)
+
+    def test_the_corrected_review_check_is_in_the_rule_texts(self):
+        for parts in (('CLAUDE.md',), ('.claude', 'orchestration.md')):
+            self.assertIn('is p2, and is cited in the deprecation comment', read_root(*parts), parts)
+
+    def test_the_old_filing_phrase_is_found_when_it_returns(self):
+        old = 'fil' + 'ed '
+        self.assertTrue(OLD_FILING_CHECK.search('the removal ticket exists, is p2, and was ' + old + 'bef' + 'ore the change'))
+        self.assertTrue(OLD_FILING_CHECK.search('F' + old[1:] + 'BEF' + 'ORE the change'))
+        self.assertIsNone(OLD_FILING_CHECK.search('the p2 removal ticket is filed with the change'))
 
     def test_claude_md_and_orchestration_md_carry_the_rule(self):
         for parts, needle in ((('CLAUDE.md',), 'at least* one version of overlap'), (('.claude', 'orchestration.md'), 'Overlap check:'), (('.claude', 'orchestration.md'), '`Overlap: ')):
@@ -422,6 +436,9 @@ SLOT_STEPS = [
     '(3) the oldest ticket of the highest priority (CLAUDE.md, Priorities)',
     'Never a new ticket while a changes-needed review, a red CI or a merge conflict waits for its fix, or a green PR waits for its reviewer',
 ]
+
+
+OLD_FILING_CHECK = re.compile(r'(?i)filed\s+before')
 
 
 def read_root(*parts):
