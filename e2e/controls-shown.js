@@ -26,6 +26,12 @@
  *   vanishes as it is typed in (WCAG 3.3.2, 1.3.1; quire#361).
  * - labelInName: a button's accessible name holds the words it shows
  *   (WCAG 2.5.3), so a glyph drawn into its text is not part of it.
+ * - switchNotesShown: a switch is its label alone; the line that
+ *   describes it is read out and not seen, unless the switch is named in
+ *   SWITCH_NOTES_SHOWN with its reason (quire#592).
+ * - switchNotesMissing: every switch button's aria-describedby names an
+ *   element that has text, so hiding the line did not remove the
+ *   description (quire#592).
  * - insetsShort: every control keeps the spacing scale's least inset
  *   from the edges of the container it is drawn in (#331).
  * - coveredByBanner: while the error banner is up, no control outside it
@@ -752,6 +758,45 @@ export async function sheetReach(page) {
         }
       }
       sheet.scrollTop = 0;
+    }
+    return bad;
+  });
+}
+
+/** The switches whose description line is drawn, by the switch button's id,
+    each with the reason (quire#592: the label carries the meaning, so a
+    line under a switch is the exception, and one per group at most, as
+    the group's footer). None today. */
+export const SWITCH_NOTES_SHOWN = {};
+
+/** The visible switches whose description is drawn as a line (a box
+    wider or taller than the 1 px a clipped, read-out-only box has) and
+    that SWITCH_NOTES_SHOWN does not name. Each is named */
+export async function switchNotesShown(page, allowed = SWITCH_NOTES_SHOWN) {
+  return page.evaluate(allowed => {
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const bad = [];
+    for (const button of document.querySelectorAll('button.switch')) {
+      if (!shown(button) || button.id in allowed) continue;
+      const note = document.getElementById(button.getAttribute('aria-describedby') || '');
+      if (!note || !shown(note)) continue;
+      const box = note.getBoundingClientRect();
+      if (box.width > 1 || box.height > 1) bad.push(`${button.id}: "${note.textContent.trim().slice(0, 40)}" is drawn ${Math.round(box.width)} x ${Math.round(box.height)} px`);
+    }
+    return bad;
+  }, allowed);
+}
+
+/** The switches (shown or not) whose aria-describedby names no element,
+    or an element with no text. Each is named */
+export async function switchNotesMissing(page) {
+  return page.evaluate(() => {
+    const bad = [];
+    for (const button of document.querySelectorAll('button.switch')) {
+      const target = button.getAttribute('aria-describedby');
+      const note = target ? document.getElementById(target) : null;
+      if (!note) bad.push(`${button.id}: aria-describedby ${target ? `"${target}" is not in the page` : 'is missing'}`);
+      else if (!note.textContent.trim()) bad.push(`${button.id}: its description "${target}" has no text`);
     }
     return bad;
   });
