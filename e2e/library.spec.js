@@ -805,6 +805,22 @@ test('Book info reads EPUB 2\'s accessibility metadata too, and says when there 
   await expect(a11y.locator('div div')).toHaveText(['This book gives no accessibility information.']);
 });
 
+// quire#459: a book that says something is shown that, and no "No information" line or empty heading
+test('Book info leaves out a group the book says nothing of', async ({ page }) => {
+  await start(page);
+  const hazardOnly = '    <meta property="schema:accessibilityHazard">none</meta>\n';
+  const summaryOnly = '    <meta property="schema:accessibilitySummary">Read it with care.</meta>\n';
+  await importFiles(page, [
+    epubFile({ title: 'Hazard Only', author: 'A', metadata: hazardOnly, rawChapters: chapters(1) }),
+    epubFile({ title: 'Summary Only', author: 'B', metadata: summaryOnly, rawChapters: chapters(1) }),
+  ], 2);
+  let a11y = await infoOf(page, 'Hazard Only');
+  await expect(a11y.locator('div div')).toHaveText(['Hazards', 'No hazards']);
+  await dialog(page, 'Book info').getByRole('button', { name: /Library/ }).click();
+  a11y = await infoOf(page, 'Summary Only');
+  await expect(a11y.locator('div div')).toHaveText(['Accessibility summary', 'Read it with care.']);
+});
+
 // quire#386 (Material 3: a menu's items are grouped by a divider or a small
 // gap): reading first, filing apart from taking out of view, and Read or
 // Continue in Book info, whose author is on the page's own ground

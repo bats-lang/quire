@@ -99,11 +99,10 @@ fn _tally_put (new_cell: tally_cell): void = let
 in tally_free(old) end
 
 
-(* The map of the sizes of the chapter that is being loaded (chapter_index,
-   generation), waiting for its render *)
+(* The size and alignment maps of the chapter being loaded (keyword: publisher alignment) *)
 datavtype sizes_pending =
   | NoSizesPending of ()
-  | {mapped:nat} SizesPending of (int, int, size_map(mapped))
+  | {mapped,placed:nat} SizesPending of (int, int, size_map(mapped), align_map(placed))
 
 val _pending = ref<sizes_pending>(NoSizesPending())
 
@@ -113,7 +112,9 @@ fn _pending_put (new_cell: sizes_pending): void = let
 in
   case+ cell of
   | ~NoSizesPending() => ()
-  | ~SizesPending(_, _, old) => size_map_free(old)
+  | ~SizesPending(_, _, old, old_aligns) => let
+      val () = size_map_free(old)
+    in align_map_free(old_aligns) end
 end
 
 fn _pending_take (): sizes_pending = let
@@ -121,21 +122,22 @@ fn _pending_take (): sizes_pending = let
   val () = ref_exch_elt<sizes_pending>(_pending, cell)
 in cell end
 
-(* The map of the chapter being rendered *)
-datavtype sizes_active = {mapped:nat} SizesActive of (size_map(mapped))
+(* The maps of the chapter being rendered (keyword: publisher alignment) *)
+datavtype sizes_active = {mapped,placed:nat} SizesActive of (size_map(mapped), align_map(placed))
 
-val _active = ref<sizes_active>(SizesActive(size_map_new()))
+val _active = ref<sizes_active>(SizesActive(size_map_new(), align_map_new()))
 
 fn _active_take (): sizes_active = let
-  var cell: sizes_active = SizesActive(size_map_new())
+  var cell: sizes_active = SizesActive(size_map_new(), align_map_new())
   val () = ref_exch_elt<sizes_active>(_active, cell)
 in cell end
 
 fn _active_put (new_cell: sizes_active): void = let
   var cell: sizes_active = new_cell
   val () = ref_exch_elt<sizes_active>(_active, cell)
-  val+ ~SizesActive(old) = cell
-in size_map_free(old) end
+  val+ ~SizesActive(old, old_aligns) = cell
+  val () = size_map_free(old)
+in align_map_free(old_aligns) end
 
 (* The sizes of chapter chapter_index, loaded for generation, are the page's
    from here until publisher_sizes_end; none are if they were not loaded *)
@@ -143,14 +145,16 @@ in size_map_free(old) end
 
 implement publisher_sizes_begin (chapter_index, generation) =
   case+ _pending_take() of
-  | ~NoSizesPending() => _active_put(SizesActive(size_map_new()))
-  | ~SizesPending(chapter, loaded, map) =>
-    if chapter = chapter_index then (if loaded = generation then _active_put(SizesActive(map)) else let
+  | ~NoSizesPending() => _active_put(SizesActive(size_map_new(), align_map_new()))
+  | ~SizesPending(chapter, loaded, map, aligns) =>
+    if chapter = chapter_index then (if loaded = generation then _active_put(SizesActive(map, aligns)) else let
         val () = size_map_free(map)
-      in _active_put(SizesActive(size_map_new())) end)
+        val () = align_map_free(aligns)
+      in _active_put(SizesActive(size_map_new(), align_map_new())) end)
     else let
       val () = size_map_free(map)
-    in _active_put(SizesActive(size_map_new())) end
+      val () = align_map_free(aligns)
+    in _active_put(SizesActive(size_map_new(), align_map_new())) end
 
 (* The step (from 10 to 60 twentieths of the base size) of the element whose
    name is at offset in the chapter being rendered, 0 when the publisher
@@ -158,14 +162,23 @@ implement publisher_sizes_begin (chapter_index, generation) =
 #pub fn publisher_sizes_step (offset: int): int
 
 implement publisher_sizes_step (offset) = let
-  val+ ~SizesActive(map) = _active_take()
+  val+ ~SizesActive(map, aligns) = _active_take()
   val @(step, rest) = size_map_take(map, offset)
-  val () = _active_put(SizesActive(rest))
+  val () = _active_put(SizesActive(rest, aligns))
 in step end
+
+(* The alignment of the table element at offset, AlignNone if none (keyword: publisher alignment) *)
+#pub fn publisher_aligns_next (offset: int): align_value
+
+implement publisher_aligns_next (offset) = let
+  val+ ~SizesActive(map, aligns) = _active_take()
+  val @(align, rest) = align_map_take(aligns, offset)
+  val () = _active_put(SizesActive(map, rest))
+in align end
 
 #pub fn publisher_sizes_end (): void
 
-implement publisher_sizes_end () = _active_put(SizesActive(size_map_new()))
+implement publisher_sizes_end () = _active_put(SizesActive(size_map_new(), align_map_new()))
 
 (* ============================================================
    Style sheets joined
@@ -318,6 +331,16 @@ fun _entries_read {file_size:pos}{count:nat} .<count>. (serial: int, file_size: 
    One chapter
    ============================================================ *)
 
+(* The sizes map to give the page; alignments are given all the same (keyword: publisher alignment) *)
+fn _sizes_unless_unmeasured {mapped:nat} (mode: sizes_mode, map: size_map(mapped)): [more:nat] size_map(more) =
+  case+ mode of
+  | SizesRespected() => map
+  | SizesNormalised() =>
+    if !_dominant <= 0 then let
+      val () = size_map_free(map)
+    in size_map_new() end
+    else map
+
 (* The chapter's elements' sizes, as the purpose says, under the sheets
    joined in acc (freed) and the chapter's own style elements: the characters
    tallied by the size they are set in, or the map of the sizes kept for the
@@ -353,15 +376,19 @@ in
     end
   | Sizing() =>
     (case+ joined of
-     | ~NoSheets() => _pending_put(SizesPending(chapter_index, generation, chapter_size_map_unstyled(xhtml, nodes, initial, base)))
+     | ~NoSheets() => let
+         val @(map, aligned) = chapter_maps_unstyled(xhtml, nodes, initial, base)
+       in _pending_put(SizesPending(chapter_index, generation, _sizes_unless_unmeasured(mode, map), aligned)) end
      | ~SheetsHeld(owner, held, size) => let
          val @(frozen, sheet) = $A.freeze<byte>(held)
          val ~SheetRead(_, _, rules) = sheet_rules_read(sheet, size)
-         val map = chapter_size_map(xhtml, nodes, sheet, rules, initial, base)
+         val aligns = sheet_aligns_read(sheet, size)
+         val @(map, aligned) = chapter_maps(xhtml, nodes, sheet, rules, aligns, initial, base)
          val () = css_rules_free(rules)
+         val () = align_rules_free(aligns)
          val () = $A.drop<byte>(frozen, sheet)
          val () = piece_free(owner, $A.thaw<byte>(frozen))
-       in _pending_put(SizesPending(chapter_index, generation, map)) end)
+       in _pending_put(SizesPending(chapter_index, generation, _sizes_unless_unmeasured(mode, map), aligned)) end)
 end
 
 (* Whether the sheets a chapter links to are in the joined sheets already,
@@ -477,19 +504,16 @@ fun _chapter_measure {chapter_index:nat}{pass:nat | pass <= 1} .<pass>.
 (* Reads chapter chapter_index of book serial for the page, and keeps the map
    of its elements' sizes for publisher_sizes_begin: against the book's
    dominant size (reading_size is not used), or as the publisher set them
-   with root reading_size pixels. Nothing is kept when the book has no
-   dominant size measured *)
+   with root reading_size pixels. No sizes are kept when the book has no
+   dominant size measured; the alignments of the elements of tables (keyword:
+   publisher alignment) are kept all the same *)
 #pub fun publisher_sizes_load {chapter_index:nat}
   (serial: int, chapter_index: int chapter_index, generation: int, mode: sizes_mode, reading_size: int): $P.promise(measured, $P.Chained)
 
 implement publisher_sizes_load (serial, chapter_index, generation, mode, reading_size) = let
   val () = _pending_put(NoSizesPending())
 in
-  case+ mode of
-  | SizesNormalised() =>
-    if !_dominant <= 0 then $P.ret<measured>(Measured())
-    else _chapter_measure(Sizing(), mode, reading_size, serial, chapter_index, generation, NoSheets(), LinksUnknown())
-  | SizesRespected() => _chapter_measure(Sizing(), mode, reading_size, serial, chapter_index, generation, NoSheets(), LinksUnknown())
+  _chapter_measure(Sizing(), mode, reading_size, serial, chapter_index, generation, NoSheets(), LinksUnknown())
 end
 
 (* ============================================================
