@@ -100,7 +100,8 @@
       "font-scale.spec.js",
       "settings-screen.spec.js",
       "raw-mouse.spec.js",
-      "evidence.spec.js"
+      "evidence.spec.js",
+      "stability-ruler.spec.js"
     ],
     "perf": [
       "pathological.spec.js",

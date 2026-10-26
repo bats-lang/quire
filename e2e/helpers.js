@@ -289,6 +289,19 @@ export const jumpBack = page => page.getByRole('button', { name: '↩ Back' });
 export async function openBook(page, text) {
   await card(page, text).click();
   await pageShown(page);
+  await rulerOnWhenAsked(page);
+}
+
+/** With QUIRE_READING_RULER set to a style's name (say Lightbox), a book just opened has the reading
+    ruler on in that style, chosen in the Look tab as a reader does (reading-ruler.spec.js, #566) */
+async function rulerOnWhenAsked(page) {
+  const style = process.env.QUIRE_READING_RULER;
+  if (!style) return;
+  await openReadingSettings(page, 'Look');
+  const sheet = readingSettings(page);
+  await sheet.getByRole('group', { name: 'Reading ruler', exact: true }).getByRole('button', { name: style, exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(sheet).toBeHidden();
 }
 
 /** Waits until the book just opened shows its page: the reader is up
