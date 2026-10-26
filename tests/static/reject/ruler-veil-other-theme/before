@@ -1,1 +1,1 @@
-(* The band and the veils are laid over the text area (inside the paddings the page keeps clear, so the
+(* The band and the veils are laid over the text area (inside the paddings the page keeps clear, so the footer is never dimmed), by the placement the reader writes (reading_ruler.bats, style-ruler); the style chosen is the class of ruler. Neither takes a tap *)
