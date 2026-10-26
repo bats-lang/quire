@@ -992,7 +992,12 @@ test('books of a series are shown with their number, and sorted by series togeth
 
 // Collections: a book's menu puts it in any of them, the library shows
 // one, and one is renamed or deleted (with Undo)
-const collectionRow = page => page.getByRole('group', { name: 'Collection' });
+const collectionRow = page => page.getByRole('button', { name: /^Collection:/ });
+// the collection menu (quire#861): the button names the collection shown
+const collectionChoice = async (page, name) => {
+  await collectionRow(page).click();
+  await page.getByRole('menu', { name: 'Collection' }).getByRole('menuitemradio', { name, exact: true }).click();
+};
 const collectionsPanel = page => dialog(page, 'Collections');
 
 test('a collection is made from a book\'s menu, shows its books, and is renamed or deleted', async ({ page }) => {
@@ -1026,29 +1031,31 @@ test('a collection is made from a book\'s menu, shows its books, and is renamed 
   await page.keyboard.press('Escape');
   await expect(collectionsPanel(page)).toBeHidden();
   // the library shows the collection's books only
-  await collectionRow(page).getByRole('button', { name: 'To read' }).click();
+  await collectionChoice(page, 'To read');
   await expect(cards(page)).toHaveCount(2);
   await expect(card(page, 'Left Out')).toHaveCount(0);
-  await collectionRow(page).getByRole('button', { name: 'All books' }).click();
+  await collectionChoice(page, 'All books');
   await expect(cards(page)).toHaveCount(3);
   // kept
   await reload(page);
-  await collectionRow(page).getByRole('button', { name: 'To read' }).click();
+  await collectionChoice(page, 'To read');
   await expect(cards(page)).toHaveCount(2);
   // renamed, the dialog holding its name
-  await page.getByRole('button', { name: 'Rename' }).click();
+  await collectionRow(page).click();
+  await page.getByRole('menuitem', { name: 'Rename collection' }).click();
   const rename = dialog(page, 'Rename collection').getByRole('textbox', { name: 'Name' });
   await expect(rename).toHaveValue('To read');
   await rename.fill('Favourites');
   await dialog(page, 'Rename collection').getByRole('button', { name: 'Rename' }).click();
-  await expect(collectionRow(page).getByRole('button', { name: 'Favourites' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(collectionRow(page)).toHaveText(/Favourites/);
   await expect(cards(page)).toHaveCount(2);
   // deleted: every book shown, none lost; Undo puts it back with its books
-  await page.getByRole('button', { name: 'Delete collection' }).click();
+  await collectionRow(page).click();
+  await page.getByRole('menuitem', { name: 'Delete collection' }).click();
   await expect(collectionRow(page)).toBeHidden();
   await expect(cards(page)).toHaveCount(3);
   await page.getByRole('button', { name: 'Undo' }).click();
-  await collectionRow(page).getByRole('button', { name: 'Favourites' }).click();
+  await collectionChoice(page, 'Favourites');
   await expect(cards(page)).toHaveCount(2);
   await expect(card(page, 'Left Out')).toHaveCount(0);
   expect(errors).toEqual([]);

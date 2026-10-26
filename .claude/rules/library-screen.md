@@ -66,6 +66,19 @@ Decided by research (what comparable library apps do) in #375, #376, #377, #404:
   fails if the two views differ.
 * **One word for a book's state** (`reading_state`: `StateUnread | StateReading |
   StateFinished`): the filter and the card use it.
+* **Two kinds of control, aligned** (#861; research: quire#861, comment 6392265973). The
+  status filter (All, Unread, Reading, Finished; derived, `reading_state`) is one
+  segmented row of two pairs (`segpair`), so a narrow line holds two and two, never three and
+  one. The collection is one button (`collection-button`, "Collection: <name>", shown once
+  there is a collection) that opens the collection menu (`LCollectionMenu`,
+  `collection-menu`, `menuitemradio`s: All books and each collection, the shown one
+  checked); Rename collection and Delete collection are in that menu, for the shown one only
+  (Kobo and Play Books keep a collection's actions on the collection's own place). Rule: every
+  chip and button is 48 px tall (the base rule), one 8 px gap (Material's) between neighbours and
+  between lines, every line starts at the search field's left edge, labels never wrap (the
+  collection's name ends in an ellipsis). The collections stay flat, a book in several (a bit
+  each); series and author grouping would be a feature of its own. `e2e/library-grouping.spec.js`
+  measures this in every project (and at 200% in android) and injects each class.
 * `e2e/library.spec.js` plays each of these; `e2e/walk.js` walks the sort and view
   menu and the shelf screens, so the layout, safe area, target size and Back
   specs cover them.

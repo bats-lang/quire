@@ -68,6 +68,7 @@
       "dictionary.spec.js",
       "fixed.spec.js",
       "fractional-window.spec.js",
+      "library-grouping.spec.js",
       "library-records.spec.js",
       "library.spec.js",
       "math-layout.spec.js",

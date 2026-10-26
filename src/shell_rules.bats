@@ -9,7 +9,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn shell_rules {left:nat | left >= 9484} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9484] sheet(after, false, false)
+#pub fn shell_rules {left:nat | left >= 9856} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9856] sheet(after, false, false)
 
 (* The library page, from body on *)
 fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1919] sheet(after, false, false) = let
@@ -244,7 +244,7 @@ fn shell_rules_fields_and_banners {left:nat | left >= 2241} (sheet: sheet(left, 
 in sheet end
 
 (* The import and book lists, from .banner span on *)
-fn shell_rules_import_and_book_lists {left:nat | left >= 1358} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1358] sheet(after, false, false) = let
+fn shell_rules_import_and_book_lists {left:nat | left >= 1730} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1730] sheet(after, false, false) = let
   (* the message takes the row and the buttons wrap under it on a narrow
      window, rather than Report being squeezed until its text is cut *)
   val sheet = rule(sheet, ".banner span")
@@ -290,13 +290,23 @@ fn shell_rules_import_and_book_lists {left:nat | left >= 1358} (sheet: sheet(lef
   val sheet = spaced(sheet, Gap(), SpaceSmall())
   val sheet = spaced_pair(sheet, Margin(), SpaceSmall(), SpaceNone())
   val sheet = close(sheet)
-  (* which books takes its labels' width: when it and List and Grid do
-     not fit one line (320 px, #265), List and Grid go to the next *)
+  (* the status filters are one segmented row (a segment is a chip as
+     tall as every other control: 48 px, one 8 px gap everywhere, same
+     as Material's), their pairs of segments wrapping as pairs so a
+     line never ends in one lone segment; a label never wraps (library-screen) *)
   val sheet = rule(sheet, ".lview>.seg")
   val sheet = lay(sheet, Flex(), "1 1 auto")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".seg.vseg")
-  val sheet = lay(sheet, Flex(), "none")
+  val sheet = rule(sheet, ".lview .seg")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".segpair")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
+  val sheet = lay(sheet, Flex(), "1 1 auto")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".lview .seg button")
+  val sheet = lay(sheet, WhiteSpace(), "nowrap")
   val sheet = close(sheet)
   (* reading aloud, sharing and the screen's controls are shown only
      where the platform has them: by their elements' data-hide
@@ -327,13 +337,28 @@ fn shell_rules_import_and_book_lists {left:nat | left >= 1358} (sheet: sheet(lef
   val sheet = lay(sheet, BorderRadius(), "8px")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
-  (* the collections, a row of their own under the view's controls *)
-  val sheet = rule(sheet, ".crow")
-  val sheet = lay(sheet, Display(), "flex")
-  val sheet = lay(sheet, FlexWrap(), "wrap")
-  val sheet = spaced(sheet, Gap(), SpaceSmall())
+  (* the collection button, a control of its own kind under the filters:
+     the whole line, the collection's name between its label and a
+     caret, the name cut with an ellipsis rather than wrapped *)
+  val sheet = rule(sheet, ".btn.cpick")
   val sheet = lay(sheet, Flex(), "1 1 100%")
+  val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = lay(sheet, JustifyContent(), "flex-start")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
+  val sheet = lay(sheet, FontSize(), "14px")
+  val sheet = lay(sheet, WhiteSpace(), "nowrap")
+  val sheet = lay(sheet, TextAlign(), "left")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".cval")
+  val sheet = lay(sheet, Flex(), "1 1 auto")
+  val sheet = lay(sheet, MinWidth(), "0")
+  val sheet = lay(sheet, FontWeight(), "600")
+  val sheet = lay(sheet, OverflowX(), "hidden")
+  val sheet = lay(sheet, TextOverflow(), "ellipsis")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".ccaret")
+  val sheet = lay(sheet, Flex(), "none")
   val sheet = close(sheet)
 in sheet end
 
