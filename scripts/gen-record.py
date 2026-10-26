@@ -1,4 +1,4 @@
-# Generates src/<name>rec.bats: python3 gen_record.py book | index
+# Generates src/<name>rec.bats: python3 gen_record.py book | index | word
 import sys
 import os
 NAME = sys.argv[1]
@@ -296,6 +296,6 @@ in dec end
 """)
 emit("end")
 text = "\n".join(lines) + "\n"
-RESULT_PREFIX = "BR" if NAME == "book" else "IR"
+RESULT_PREFIX = {"book": "BR", "index": "IR", "word": "WR"}[NAME]
 text = text.replace("@QU@", RESULT_PREFIX).replace("@ql@", RESULT_PREFIX.lower()).replace("@K@", str(KIND)).replace("@U@", UPPER).replace("@C@", CAPITAL).replace("@p@", PREFIX)
 open(f"src/{PREFIX}rec.bats", "w").write(text)

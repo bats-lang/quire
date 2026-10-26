@@ -386,6 +386,25 @@ fn _sort_menu (): void = let
   val () = ui_menuitem("sort-menu-box", "sort-menu-done", "Close")
 in _hide("sort-menu") end
 
+(* A switch, a row of its own (in parent): a button named by its label
+   alone (a toggle, aria-pressed off at first), holding a drawn track and
+   its knob (decorative, hidden from assistive technology; the stylesheet
+   moves the knob and fills the track when it is pressed), and a line
+   under it saying what it does, which describes it (quire#300) *)
+fn _switch_row {parent_len,row_len,button_len,track_len,knob_len,about_len:pos | parent_len < 256; row_len < 256; button_len < 256; track_len < 256; knob_len < 256; about_len < 256}
+  {label_len,text_len:pos | label_len < 256; text_len < 256}
+  (parent: string parent_len, row: string row_len, button: string button_len, track: string track_len,
+   knob: string knob_len, about: string about_len, label: string label_len, text: string text_len): void = let
+  val () = ui_el(parent, row, TDiv, "srow stack")
+  val () = ui_text_btn(row, button, "sbtn switch", label)
+  val () = ui_attr(button, APressed, "false")
+  val () = ui_el(button, track, TSpan, "track")
+  val () = ui_attr(track, AHidden, "true")
+  val () = ui_el(track, knob, TSpan, "knob")
+  val () = ui_el(row, about, TSpan, "sabout")
+  val () = ui_text(about, text)
+in ui_attr(button, ADescribedBy, about) end
+
 (* The Settings screen, opened from the library menu:
    one screen of groups, each complex area a screen of its own opened
    from a row that says its state (Android's settings pattern). Sync
@@ -410,6 +429,9 @@ fn _settings_screen (): void = let
   (* the dictionaries' screen *)
   val () = ui_nav_row("settings-data", "settings-dictionaries-row", "settings-dictionaries", "settings-dictionaries-about",
     "Dictionaries", "Offline lookup for the words you select")
+  (* the words looked up are kept, with their sentence, in Words (keyword: vocabulary) *)
+  val () = _switch_row("settings-data", "settings-words-row", "settings-words-keep", "settings-words-keep-track",
+    "settings-words-keep-knob", "settings-words-keep-about", "Keep the words I look up", "Saves each word with its sentence, to review in Words")
   (* the backup *)
   val () = ui_el("settings-box", "settings-data-about", TDiv, "sabout")
   val () = ui_text_long("settings-data-about", "Moving to a new phone? Sync keeps your places, shelves and notes the same on your devices; a backup below holds them in a file. Neither holds the books' files: keep your EPUB files.")
@@ -797,25 +819,6 @@ fn _toc (): void = let
   val () = ui_labelled("pages-list", NTabpanel, "pages-tab")
   val () = _hide("pages-list")
 in _hide("contents-panel") end
-
-(* A switch, a row of its own (in parent): a button named by its label
-   alone (a toggle, aria-pressed off at first), holding a drawn track and
-   its knob (decorative, hidden from assistive technology; the stylesheet
-   moves the knob and fills the track when it is pressed), and a line
-   under it saying what it does, which describes it (quire#300) *)
-fn _switch_row {parent_len,row_len,button_len,track_len,knob_len,about_len:pos | parent_len < 256; row_len < 256; button_len < 256; track_len < 256; knob_len < 256; about_len < 256}
-  {label_len,text_len:pos | label_len < 256; text_len < 256}
-  (parent: string parent_len, row: string row_len, button: string button_len, track: string track_len,
-   knob: string knob_len, about: string about_len, label: string label_len, text: string text_len): void = let
-  val () = ui_el(parent, row, TDiv, "srow stack")
-  val () = ui_text_btn(row, button, "sbtn switch", label)
-  val () = ui_attr(button, APressed, "false")
-  val () = ui_el(button, track, TSpan, "track")
-  val () = ui_attr(track, AHidden, "true")
-  val () = ui_el(track, knob, TSpan, "knob")
-  val () = ui_el(row, about, TSpan, "sabout")
-  val () = ui_text(about, text)
-in ui_attr(button, ADescribedBy, about) end
 
 (* A choice of where taps turn pages, a line of its own: its button,
    holding a drawing of the page's zones (decorative, hidden from

@@ -1752,6 +1752,7 @@ fun _id_is {l:agz}{n:nat}{at:nat}{text_len:nat}{i:nat | i <= text_len} .<text_le
   | SettingsGoalSixty
   | SettingsSync
   | SettingsDictionaries
+  | SettingsWordsKeep
   | SettingsExportBackup
   | SettingsSetAside
   | SettingsResetSettings
@@ -1769,6 +1770,7 @@ implement settings_control_id (control) =
   | SettingsGoalSixty() => "settings-goal-60"
   | SettingsSync() => "settings-sync"
   | SettingsDictionaries() => "settings-dictionaries"
+  | SettingsWordsKeep() => "settings-words-keep"
   | SettingsExportBackup() => "settings-export-backup"
   | SettingsSetAside() => "settings-set-aside"
   | SettingsResetSettings() => "settings-reset-settings"
@@ -1785,7 +1787,8 @@ fn _settings_control_after (control: settings_control): $R.option(settings_contr
   | SettingsGoalThirty() => $R.some(SettingsGoalSixty())
   | SettingsGoalSixty() => $R.some(SettingsSync())
   | SettingsSync() => $R.some(SettingsDictionaries())
-  | SettingsDictionaries() => $R.some(SettingsExportBackup())
+  | SettingsDictionaries() => $R.some(SettingsWordsKeep())
+  | SettingsWordsKeep() => $R.some(SettingsExportBackup())
   | SettingsExportBackup() => $R.some(SettingsSetAside())
   | SettingsSetAside() => $R.some(SettingsResetSettings())
   | SettingsResetSettings() => $R.some(SettingsFactoryReset())
@@ -1807,7 +1810,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_settings_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(settings_control)
-implement ui_settings_control (bytes, n, at) = _settings_control_from(bytes, n, at, SettingsGoalOff(), 12)
+implement ui_settings_control (bytes, n, at) = _settings_control_from(bytes, n, at, SettingsGoalOff(), 13)
 
 (* The library view's filters, layouts and collections' buttons, each by its element's id (library_view_control_id) *)
 #pub datatype library_view_control =

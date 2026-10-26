@@ -37,6 +37,7 @@ staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
+staload SP = "wasm.bats-packages.dev/bridge/src/speech.sats"
 
 (* A quote's and a note's most bytes; the most annotations a book has;
    the bytes one takes when stored, at most *)
@@ -1346,6 +1347,173 @@ implement annot_selection_in_page () = let
      (a triple click) still starts in the text *)
   val _ = _node_number_of(end_blob)
 in start_node >= 0 end
+
+(* ============================================================
+   The sentence of a selection (keyword: vocabulary)
+   ============================================================ *)
+
+fn _is_continuation (code: int): bool = $AR.band_int_int(code, 192) = 128
+
+(* The first place at or after at, in text[0, len), where a character begins *)
+fun _forward_to_start {l:agz}{n:pos}{len:nat | len <= n}{at:nat | at <= len} .<len - at>.
+  (text: !$A.arr(byte, l, n), len: int len, at: int at): [start:nat | at <= start; start <= len] int start =
+  if at >= len then len
+  else if _is_continuation(byte2int0($A.get<byte>(text, at))) then _forward_to_start(text, len, at + 1)
+  else at
+
+(* The last place at or before at, in text[0, len), where a character begins *)
+fun _backward_to_start {l:agz}{n:pos}{len:nat | len <= n}{at:nat | at <= len} .<at>.
+  (text: !$A.arr(byte, l, n), len: int len, at: int at): [start:nat | start <= at] int start =
+  if at <= 0 then 0
+  else if at >= len then at
+  else if _is_continuation(byte2int0($A.get<byte>(text, at))) then _backward_to_start(text, len, at - 1)
+  else at
+
+(* The byte place of the units-th UTF-16 unit of text[0, len) (JavaScript's offsets), counted from at *)
+fun _bytes_for_units {l:agz}{n:pos}{len:nat | len <= n}{at:nat | at <= len} .<len - at>.
+  (text: !$A.arr(byte, l, n), len: int len, at: int at, units: int): [stop:nat | at <= stop; stop <= len] int stop =
+  if at >= len then len
+  else if units <= 0 then at
+  else let
+    val lead = byte2int0($A.get<byte>(text, at))
+    val step = (if lead >= 240 then 2 else 1): int
+    val next = _forward_to_start(text, len, at + 1)
+  in _bytes_for_units(text, len, next, units - step) end
+
+fn _is_white (code: int): bool = code <= 32
+
+fun _skip_white {l:agz}{n:pos}{len:nat | len <= n}{at:nat | at <= len} .<len - at>.
+  (text: !$A.arr(byte, l, n), len: int len, at: int at): [start:nat | at <= start; start <= len] int start =
+  if at >= len then len
+  else if _is_white(byte2int0($A.get<byte>(text, at))) then _skip_white(text, len, at + 1)
+  else at
+
+fun _trim_white {l:agz}{n:pos}{len:nat | len <= n}{start:nat}{stop:nat | start <= stop; stop <= len} .<stop - start>.
+  (text: !$A.arr(byte, l, n), len: int len, start: int start, stop: int stop): [last:nat | start <= last; last <= stop] int last =
+  if stop <= start then start
+  else if _is_white(byte2int0($A.get<byte>(text, stop - 1))) then _trim_white(text, len, start, stop - 1)
+  else stop
+
+(* The start and the end of the sentence that holds byte place place, of the sentences the segmenter found *)
+fun _sentence_around {n:pos}{first:nat | first <= n} .<n - first>.
+  (starts: $SP.sentences(n, first), n: int n, place: Int, start: Int): @(Int, Int) =
+  case+ starts of
+  | ~$SP.SentencesEnd() => @(start, n)
+  | ~$SP.Sentence(at, rest) =>
+    if at > place then let val () = $SP.sentences_free(rest) in @(start, at) end
+    else _sentence_around(rest, n, place, at)
+
+fun _copy_range {l,out_l:agz}{n:pos}{count:nat}{from:nat | from + count <= n}{i:nat | i <= count} .<count - i>.
+  (text: !$A.arr(byte, l, n), from: int from, count: int count, out: !$A.arr(byte, out_l, 511), i: int i): void =
+  if i >= count then ()
+  else if i >= 511 then ()
+  else let
+    val () = $A.set<byte>(out, i, $A.get<byte>(text, from + i))
+  in _copy_range(text, from, count, out, i + 1) end
+
+(* The sentence text[start, stop) in a new array, trimmed, and cut to the most a record keeps: the bytes around place when
+   it is longer, cut where characters begin *)
+fn _sentence_text {l:agz}{n:pos}{len:nat | len <= n}
+  (text: !$A.arr(byte, l, n), len: int len, start_at: Int, stop_at: Int, place: Int): [out_l:agz][count:nat | count <= 510] @($A.arr(byte, out_l, 511), int count) = let
+  val [start:int] start = (if start_at < 0 then 0 else if start_at > len then len else start_at): [start:nat | start <= len] int start
+  val [stop:int] stop = (if stop_at < start then start else if stop_at > len then len else stop_at): [stop:nat | start <= stop; stop <= len] int stop
+  val skipped = _skip_white(text, len, start)
+  val [first:int] first = (if skipped > stop then stop else skipped): [first:nat | start <= first; first <= stop] int first
+  val last = _trim_white(text, len, first, stop)
+  val out = $A.alloc<byte>(511)
+in
+  if last - first <= 510 then let
+    val count = last - first
+    val () = _copy_range(text, first, count, out, 0)
+  in @(out, count) end
+  else let
+    val wanted = (if place - 200 > first then place - 200 else first): [w:nat] int w
+    val clipped = (if wanted > last then last else wanted): [wanted:nat | wanted <= len] int wanted
+    val [from:int] from = _forward_to_start(text, len, clipped)
+    val [bound:int] bound = (if from + 510 > last then last else from + 510): [bound:nat | bound <= len; bound <= from + 510] int bound
+    val till = _backward_to_start(text, len, bound)
+  in
+    if till <= from then @(out, 0)
+    else let
+      val count = till - from
+      val () = _copy_range(text, from, count, out, 0)
+    in @(out, count) end
+  end
+end
+
+(* Where a selection starts and the sentence it starts in *)
+#pub datavtype selection_place =
+  | {l:agz}{n:nat | n <= 510} SelectionPlace of (Int, Int, Int, $A.arr(byte, l, 511), int n)
+  | NoSelectionPlace of ()
+
+#pub fun selection_place_free (place: selection_place): void
+implement selection_place_free (place) =
+  case+ place of
+  | ~SelectionPlace(_, _, _, sentence, _) => $A.free<byte>(sentence)
+  | ~NoSelectionPlace() => ()
+
+(* A blob's text read into text, when it fits: its length, else 0 *)
+fn _blob_fits {blob_size:nat}{l:agz}{most:pos} (blob: $BD.dblob(blob_size), text: !$A.arr(byte, l, most), most: int most): [count:nat | count <= most] int count = let
+  val blob_len = $BD.blob_len(blob)
+in
+  if blob_len > most then let val () = $BD.blob_free(blob) in 0 end
+  else let
+    val read_len = (if blob_len < most then blob_len else most): [read_len:nat | read_len <= most; read_len <= blob_size] int read_len
+    val () = _blob_read(blob, text, read_len)
+    val () = $BD.blob_free(blob)
+  in read_len end
+end
+
+(* The text of content node node, up to most bytes; none when it has no text or more *)
+fn _node_text {node:nat}{most:pos | most <= 65536} (node: int node, most: int most): [l:agz][text_len:nat | text_len <= most] @($A.arr(byte, l, most), int text_len) = let
+  val @(node_id, node_id_len) = nid_pad3("c", node)
+  val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
+  val content = $DR.read_text_content(node_bytes, node_id_len)
+  val () = release_bytes(node_frozen, node_bytes)
+  val text = $A.alloc<byte>(most)
+in
+  case+ content of
+  | ~$R.none() => @(text, 0)
+  | ~$R.some(blob) => let val count = _blob_fits(blob, text, most) in @(text, count) end
+end
+
+(* The chapter, content node and UTF-16 offset the selection starts at, and the sentence there (the node's text cut by the
+   segmenter in the book's language lang[0, lang_len)); none when nothing is selected in the chapter's text *)
+#pub fn annot_selection_place {lang_loc:agz}{lang_len:nat | lang_len <= 36} (lang: $A.arr(byte, lang_loc, 36), lang_len: int lang_len): selection_place
+
+implement annot_selection_place (lang, lang_len) = let
+  val @(start_blob, end_blob) = $DR.get_selection_range()
+  val offset = $DR.get_measure_x()
+  val node = _node_number_of(start_blob)
+  val _ = _node_number_of(end_blob)
+in
+  if node < 0 then let val () = $A.free<byte>(lang) in NoSelectionPlace() end
+  else let
+    val @(text, text_len) = _node_text(node, 65536)
+    val chapter = _chapter()
+  in
+    if text_len <= 0 then let
+      val () = $A.free<byte>(text)
+      val () = $A.free<byte>(lang)
+    in SelectionPlace(chapter, node, offset, $A.alloc<byte>(511), 0) end
+    else let
+      val place = _bytes_for_units(text, text_len, 0, offset)
+      val @(text_frozen, text_bytes) = $A.freeze<byte>(text)
+      val @(lang_frozen, lang_bytes) = $A.freeze<byte>(lang)
+      val @(used, rest) = $A.borrow_split<byte>(text_frozen, text_bytes, text_len)
+      val segmented = $SP.segment_sentences(used, text_len, lang_bytes, lang_len)
+      val () = release_bytes(lang_frozen, lang_bytes)
+      val text_bytes = $A.borrow_join<byte>(text_frozen, used, rest)
+      val () = $A.drop<byte>(text_frozen, text_bytes)
+      val text = $A.thaw<byte>(text_frozen)
+      val @(start, stop) = (case+ segmented of
+        | ~$R.some(starts) => _sentence_around(starts, text_len, place, 0)
+        | ~$R.none() => @(0, text_len)): @(Int, Int)
+      val @(sentence, count) = _sentence_text(text, text_len, start, stop, place)
+      val () = $A.free<byte>(text)
+    in SelectionPlace(chapter, node, offset, sentence, count) end
+  end
+end
 
 (* ============================================================
    Notes

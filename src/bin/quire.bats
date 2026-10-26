@@ -1459,6 +1459,12 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
           val @(code, code_len) = reader_lang_code()
           val () = dict_panel_open(code, code_len)
         in $A.free<byte>(code) end
+        | ~$R.some(SettingsWordsKeep()) => let
+          val () = (case+ set_words_get() of
+            | WordsKept() => set_words_set(WordsNotKept())
+            | WordsNotKept() => set_words_set(WordsKept()))
+          val () = set_save(lib_state_get())
+        in set_show() end
         | ~$R.some(SettingsExportBackup()) => backup_export()
         | ~$R.some(SettingsSetAside()) => lib_aside_run()
         | ~$R.some(SettingsResetSettings()) => _settings_reset()
