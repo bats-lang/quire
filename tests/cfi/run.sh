@@ -6,9 +6,14 @@
 # as they are (cfi, xhtml_parse and entity name no target, so the same
 # source is the one compiled for wasm); what the types cannot say is what is
 # tested. Avenue exhausted (quire#646): `bats test` builds a package's own
-# sources, and a test of a module of another package (the app) needs them in
-# a package of its own, as tests/codec/run.sh does; there is no bats command
-# that does this copy.
+# sources; a `{ path = ... }` dependency (bats's lock.bats) names a whole
+# package directory with a src/lib.bats, and quire is kind = "bin", so it
+# cannot name the four modules of src/ this test needs; there is no bats
+# command that builds a test package from chosen modules of another one, so the
+# copy is made here, as tests/codec/run.sh does. bats.lock is made in the layout
+# this script builds (modules copied, then `bats lock --repository <dir>` with
+# the clone .github/repository-version names): in tests/cfi alone no module is
+# there to #use str, so a lock made there drops it.
 #
 # usage: tests/cfi/run.sh <repository-dir>   (bats must be on PATH)
 set -eu
