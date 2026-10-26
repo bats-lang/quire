@@ -115,7 +115,31 @@ it (bats-lang/bats#243).
   buttons that always shows all has) and no `aria-level` (MDN, from the ARIA
   spec: redundant when the nesting says it, and a risk of misinformation).
   `e2e/toc-levels.spec.js` checks the tree with `toMatchAriaSnapshot`; what a
-  screen reader says is for quire#692 (Guidepup).
+  screen reader says is `e2e/screen-reader.spec.js` (the next rule).
+* **Screen reader (keyword: screen-reader; #692, #925).** `e2e/screen-reader.spec.js`
+  (group `settings`, project `desktop` only: the tree does not change with the viewport)
+  reads the reader's top bar, bottom bar and the nested Contents with Guidepup's Virtual
+  Screen Reader (`@guidepup/virtual-screen-reader`, MIT, exact version in `package.json`;
+  0.33.0 published 2026-09-20, its dependencies html-aria, dom-accessibility-api and
+  Testing Library). `e2e/screen-reader.js` reads the package's browser build (the
+  `browser` export of its `package.json`, one ES module with no imports) in Node, and in
+  the page makes a blob URL of it and `import()`s it (the app has no CSP), then
+  `virtual.start({ container })`, `next()` until the container's "end of" phrase and
+  `spokenPhraseLog()`. Test titles start "Virtual Screen Reader (simulation):" because it
+  is a simulation. It speaks roles, names, levels (`heading ... level 1`, `listitem, level
+  3, position 1, set size 1`), positions, and states (`not pressed`, `selected`, `current
+  item`, `modal`); a test asserts those phrases (and not the layout's words: page
+  numbers, percentages). It cannot say what NVDA or VoiceOver say (their own rules for
+  what to announce, verbosity and order are not in it), its README documents no live-region announcements
+  (an alert or status change is not asserted here, so those stay attribute checks until
+  a spike shows otherwise), and its accessible names are its own computation (the README:
+  396 Web Platform Test suites passing, 81 failing tests, 338 skipped); the tree it reads
+  is the one `toc-levels.spec.js` asserts with `toMatchAriaSnapshot`.
+  The test that makes a control inaccessible (a name and a role taken away) shows the
+  phrases change, so the tests above see a missing name or role. Real NVDA and VoiceOver on
+  hosted runners are #926 (pwa#229). **Device-only**: TalkBack on a real Android device
+  (Guidepup does not drive it, and no hosted runner has it), and the screen readers' own
+  speech (voice, rate, braille) on any platform.
 * Listeners are registered only as one table (`regs` in `src/ui.bats`), each
   with its position as its id, and the table's length, in its type, is at most
   127: the bridge's last slot (of 128) is the media query listener's

@@ -73,6 +73,7 @@
       "math-layout.spec.js",
       "old-library.spec.js",
       "publisher-sizes.spec.js",
+      "screen-reader.spec.js",
       "search.spec.js",
       "titles-redraw.spec.js",
       "vertical.spec.js"
