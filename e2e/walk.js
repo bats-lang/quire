@@ -10,7 +10,7 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, bookPage,
   libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, topBar,
-  readingSettings, openReadingSettings, selectText, rawFile, openSortMenu, shelfTitle, openShelf, emptyTrashDialog, toLibrary,
+  readingSettings, openReadingSettings, selectText, rawFile, openSortMenu, shelfTitle, openShelf, emptyTrashDialog, toLibrary, openBook,
 } from './helpers.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
@@ -231,6 +231,8 @@ export async function walkEveryScreen(page, { look, back }) {
   await check('Review');
   await back();
   await back();
+  // and the book again, where the walk ends
+  await openBook(page, 'A Rather Long Title, Read');
   const unwalked = await page.evaluate(seen => [...document.querySelectorAll('[role=dialog]')]
     .map(e => e.id).filter(id => !seen.includes(id)), [...seen]);
   expect(unwalked, 'screens this walk never checked: walk them here').toEqual([]);

@@ -237,7 +237,7 @@ in
     end
     else if jr_key_is(key, key_len, "modified") then let
       val @(stamp_ok, stamp, after) = jr_stamp(buf, n, value_at)
-      val () = (if stamp_ok then $A.set<Int>(values, 13, stamp) else ())
+      val () = (if stamp_ok then let val () = stamp_seen(stamp) in $A.set<Int>(values, 13, stamp) end else ())
     in _members(buf, n, jr_skip(buf, n, value_at), key, word_buffer, language_buffer, sentence_buffer, values, word_len, language_len, sentence_len) end
     else let
       val slot = _slot_of(key, key_len)

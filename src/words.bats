@@ -259,6 +259,12 @@ fun _books_add {count:nat} .<count>. (list: books(count), high: Int, low: Int): 
     if book_high = high then (if book_low = low then BooksCons(book_high, book_low, rest) else BooksCons(book_high, book_low, _books_add(rest, high, low)))
     else BooksCons(book_high, book_low, _books_add(rest, high, low))
 
+(* The books kept again after the select was drawn from them, for the choice made in it *)
+fn _books_put {count:nat} (list: books(count)): void = let
+  var previous: [count:nat] books(count) = list
+  val () = ref_exch_elt<[count:nat] books(count)>(_books, previous)
+in _books_free(previous) end
+
 (* The book added to the books the words are of, when it is not there *)
 fn _books_put_one (high: Int, low: Int): void = let
   val list = _books_take()
@@ -669,7 +675,7 @@ implement words_render () =
         val () = ui_option("words-book", all_id, all_id_len, all_value, 3, all_label, 9, !_book_all)
         val books = _books_take()
         val () = _book_options(books, 0, !_book_all, !_book_high, !_book_low)
-        val () = _books_free(books)
+        val () = _books_put(books)
         val () = _status_show()
         val () = ui_show("words-none", !_learning_count + !_mastered_count = 0)
         val () = ui_show("words-more", !_hidden_count > 0)

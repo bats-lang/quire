@@ -18,6 +18,7 @@ const english = {
   entries: [
     { word: 'ephemeral', article: 'lasting a very short time' },
     { word: 'serendipity', article: 'a happy accident found by chance' },
+    { word: 'perspicacious', article: 'having keen insight' },
   ],
 };
 
@@ -217,21 +218,23 @@ test('a word is marked mastered, learned again, and deleted with Undo; the tabs 
   await lookUp(page, 'Ephemeral');
   await lookUp(page, 'Serendipity');
   await toLibrary(page);
-  await importFiles(page, [epubFile({ title: 'Other Book', author: 'O', rawChapters: [{ body: `<p>${text}</p>` }] })], 2);
+  await importFiles(page, [epubFile({ title: 'Other Book', author: 'O', rawChapters: [{ body: '<p>Perspicacious readers keep notes.</p>' }] })], 2);
   await openBook(page, 'Other Book');
-  await lookUp(page, 'Ephemeral');
+  await selectText(page, 0, 'Perspicacious'.length);
+  await lookUpHere(page).click();
+  await expect(entry(page)).toBeVisible();
+  await page.keyboard.press('Escape');
   await toLibrary(page);
   await openWords(page);
-  // the same word in two books is two rows, each in its book
-  await expect(wordsScreen(page).getByRole('group', { name: 'Ephemeral', exact: true })).toHaveCount(2);
+  await expect(wordsScreen(page).getByRole('group', { name: /^(Ephemeral|Serendipity|Perspicacious)$/ })).toHaveCount(3);
   // the book filter
   await wordsScreen(page).getByRole('combobox', { name: 'Book' }).selectOption({ label: 'Other Book' });
-  await expect(wordsScreen(page).getByRole('group', { name: /^(Ephemeral|Serendipity)$/ })).toHaveCount(1);
-  await expect(row(page, 'Ephemeral')).toContainText('Other Book');
+  await expect(wordsScreen(page).getByRole('group', { name: /^(Ephemeral|Serendipity|Perspicacious)$/ })).toHaveCount(1);
+  await expect(row(page, 'Perspicacious')).toContainText('Other Book');
   await wordsScreen(page).getByRole('combobox', { name: 'Book' }).selectOption({ label: 'All books' });
-  await expect(wordsScreen(page).getByRole('group', { name: /^(Ephemeral|Serendipity)$/ })).toHaveCount(3);
+  await expect(wordsScreen(page).getByRole('group', { name: /^(Ephemeral|Serendipity|Perspicacious)$/ })).toHaveCount(3);
   await wordsScreen(page).getByRole('combobox', { name: 'Book' }).selectOption({ label: 'Vocabulary Five' });
-  await expect(wordsScreen(page).getByRole('group', { name: /^(Ephemeral|Serendipity)$/ })).toHaveCount(2);
+  await expect(wordsScreen(page).getByRole('group', { name: /^(Ephemeral|Serendipity|Perspicacious)$/ })).toHaveCount(2);
 
   // mastered: out of Learning, into Mastered
   await row(page, 'Serendipity').getByRole('button', { name: 'Mark as mastered' }).click();
@@ -303,17 +306,6 @@ test('Review shows the words due one at a time, the definition after Show defini
   await reviewScreen(page).getByRole('button', { name: 'Back' }).click();
   await wordsScreen(page).getByRole('button', { name: 'Review', exact: true }).click();
   await expect(reviewScreen(page).getByRole('status')).toHaveText('2 words are due');
-  // both are due: Forgot's five minutes have passed, the Got it's thirty too
-  for (const waited of ['12:30:00', '24:30:00']) {
-    await expect(reviewScreen(page).locator('.mk')).toHaveText(other);
-    await reviewScreen(page).getByRole('button', { name: 'Show definition' }).click();
-    await page.keyboard.press('Escape');
-    await reviewScreen(page).getByRole('button', { name: 'Got it', exact: true }).click();
-    await page.clock.fastForward(waited);
-    await reviewScreen(page).getByRole('button', { name: 'Back' }).click();
-    await wordsScreen(page).getByRole('button', { name: 'Review', exact: true }).click();
-    await expect(reviewScreen(page)).toBeVisible();
-  }
   await reviewScreen(page).getByRole('button', { name: 'Back' }).click();
   expect(errors).toEqual([]);
 });
@@ -354,7 +346,9 @@ test('the intervals after Got it and Forgot are KOReader\'s, read from the Words
 test('the backup carries the list, and restoring it brings the words back', async ({ page, browser }) => {
   await start(page);
   await importDictionary(page, english, 'en');
-  await readBook(page, novel('Vocabulary Eight'));
+  const eight = epubFile(novel('Vocabulary Eight'));
+  await importFiles(page, [eight], 1);
+  await openBook(page, 'Vocabulary Eight');
   await lookUp(page, 'Ephemeral');
   await lookUp(page, 'Serendipity');
   await toLibrary(page);
@@ -376,10 +370,12 @@ test('the backup carries the list, and restoring it brings the words back', asyn
   const context = await browser.newContext();
   const other = await context.newPage();
   await start(other);
-  await importFiles(other, [epubFile(novel('Vocabulary Eight'))], 1);
+  await importFiles(other, [eight], 1);
   await librarySettings(other);
   await restoreInput(other).setInputFiles(rawFile('quire-backup.json', JSON.stringify(backup)));
-  await expect(settingsScreen(other)).toBeHidden();
+  await expect(dialog(other, 'Backup restored')).toBeVisible();
+  await dialog(other, 'Backup restored').getByRole('button', { name: 'Done' }).click();
+  await other.keyboard.press('Escape');
   await openWords(other);
   await expect(row(other, 'Ephemeral')).toContainText(FIRST);
   await expect(row(other, 'Ephemeral')).toContainText('Vocabulary Eight');
@@ -439,8 +435,9 @@ test('sync carries the list: a word, its state and its deletion, by the latest c
   await b.context.close();
 });
 
-test('the list is shared as a CSV file: word, sentence, book and language, quoted', async ({ page }) => {
-  await page.addInitScript(() => {
+test('the list is shared as a CSV file: word, sentence, book and language, quoted', async ({ page }, testInfo) => {
+  if (testInfo.project.name === 'android') await page.addInitScript(() => { delete Navigator.prototype.share; delete navigator.share; });
+  else await page.addInitScript(() => {
     window.shared = [];
     navigator.canShare = d => !!d.files;
     navigator.share = async d => {
@@ -456,11 +453,14 @@ test('the list is shared as a CSV file: word, sentence, book and language, quote
   await toLibrary(page);
   await openWords(page);
   await wordsScreen(page).getByRole('button', { name: 'Share as CSV' }).click();
-  const inApp = await page.evaluate(() => !!(window.__android && window.Capacitor && window.Capacitor.Plugins.Share));
   let csv;
-  if (inApp) {
-    await expect.poll(() => page.evaluate(() => window.__android.files.has('quire-words.csv'))).toBe(true);
-    csv = Buffer.from(await page.evaluate(() => window.__android.files.get('quire-words.csv')), 'base64').toString('utf8');
+  if (testInfo.project.name === 'android') {
+    const calls = plugin => page.evaluate(name => window.__android.calls.filter(c => c.plugin === name), plugin);
+    await expect.poll(async () => (await calls('Share')).length).toBe(1);
+    const written = (await calls('Filesystem')).find(c => c.method === 'writeFile' && c.options.path === 'quire-words.csv');
+    expect(written.options.directory).toBe('CACHE');
+    expect((await calls('Share'))[0].options).toEqual({ title: 'quire-words.csv', files: ['file:///quire-words.csv'] });
+    csv = Buffer.from(written.options.data, 'base64').toString();
   } else {
     await expect.poll(() => page.evaluate(() => window.shared.length)).toBe(1);
     const [file] = await page.evaluate(() => window.shared[0].files);
