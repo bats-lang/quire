@@ -307,8 +307,7 @@ fn _words_screen (): void = let
   val () = ui_text_long("words-more", "More words are not shown here. Choose a book to see them.")
 in _hide("words-screen") end
 
-(* The review of the words that are due, one at a time: the word, its sentence with the word marked, the definition behind
-   Show definition, and the answers *)
+(* The review of the words that are due (keyword: vocabulary) *)
 fn _review_screen (): void = let
   val () = ui_el("bats-root", "review-screen", TDiv, "info")
   val () = ui_labelled("review-screen", NDialog, "review-title")
@@ -436,11 +435,7 @@ fn _sort_menu (): void = let
   val () = ui_menuitem("sort-menu-box", "sort-menu-done", "Close")
 in _hide("sort-menu") end
 
-(* A switch, a row of its own (in parent): a button named by its label
-   alone (a toggle, aria-pressed off at first), holding a drawn track and
-   its knob (decorative, hidden from assistive technology; the stylesheet
-   moves the knob and fills the track when it is pressed), and a line
-   under it saying what it does, which describes it (quire#300) *)
+(* A switch, a row of its own (in parent) (keyword: vocabulary) *)
 fn _switch_row {parent_len,row_len,button_len,track_len,knob_len,about_len:pos | parent_len < 256; row_len < 256; button_len < 256; track_len < 256; knob_len < 256; about_len < 256}
   {label_len,text_len:pos | label_len < 256; text_len < 256}
   (parent: string parent_len, row: string row_len, button: string button_len, track: string track_len,

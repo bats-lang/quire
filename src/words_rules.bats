@@ -4,33 +4,30 @@
 
 #include "share/atspre_staload.hats"
 
-(* The most bytes of a word looked up (the selection toolbar copies as many), of a language code, and of the sentence it
-   was in: kept in the two strings of a record, a head and a tail *)
+(* The most bytes of a word looked up (the selection toolbar copies as many) (keyword: vocabulary) *)
 #pub stadef WORD_BYTES_MOST = 64
 #pub stadef LANGUAGE_BYTES_MOST = 36
 #pub stadef SENTENCE_HALF_BYTES = 255
 #pub stadef SENTENCE_BYTES_MOST = 510
 
-(* The words kept at most, tombstones among them: a word looked up when this many are kept is not kept, and the reader is told *)
+(* The words kept at most, tombstones among them (keyword: vocabulary) *)
 #pub stadef WORDS_MOST = 10000
 
 #pub fn words_most (): int
 implement words_most () = 10000
 
-(* The rows of the words screen drawn at most: the newest, with a line saying how many are not shown *)
+(* The rows of the words screen drawn at most: the newest, with a line saying how many are not shown (keyword: vocabulary) *)
 #pub stadef WORDS_SHOWN_MOST = 500
 
-(* Minutes after which a deleted word's tombstone is dropped (a hundred and eighty days) *)
+(* Minutes after which a deleted word's tombstone is dropped (a hundred and eighty days) (keyword: vocabulary) *)
 #pub fn words_tombstone_minutes (): int
 implement words_tombstone_minutes () = 259200
 
-(* Minutes until a word is due again after Forgot *)
+(* Minutes until a word is due again after Forgot (keyword: vocabulary) *)
 #pub fn words_forgot_minutes (): int
 implement words_forgot_minutes () = 5
 
-(* Minutes until a word is due again after Got it made its streak streak: KOReader's schedule (its gotOrForgot, the
-   vocabulary builder plugin): thirty minutes, twelve hours, one, two, four, seven and fifteen days, then thirty days
-   times two to the streak less eight, the exponent at most six *)
+(* Minutes until a word is due again after Got it made its streak streak (keyword: vocabulary) *)
 #pub fn words_got_it_minutes {streak:int} (streak: int streak): int
 
 implement words_got_it_minutes {streak} (streak) =
@@ -47,7 +44,7 @@ implement words_got_it_minutes {streak} (streak) =
     val exponent = (if streak - 8 > 6 then 6 else streak - 8): [exponent:nat | exponent <= 6] int exponent
   in double(43200, exponent) end
 
-(* The streak and the minute a word is due at after a review at minute now: Got it adds one to the streak, Forgot ends it *)
+(* The streak and the minute a word is due at after a review at minute now: Got it adds one to the streak, Forgot ends it (keyword: vocabulary) *)
 #pub fn words_review_next {streak:int} (streak: int streak, known: bool, now: int): @(int, int)
 implement words_review_next {streak} (streak, known, now) =
   if known then let
@@ -55,4 +52,4 @@ implement words_review_next {streak} (streak, known, now) =
   in @(next, now + words_got_it_minutes(next)) end
   else @(0, now + words_forgot_minutes())
 
-end (* #target wasm *)
+end (* #target wasm (keyword: vocabulary) *)

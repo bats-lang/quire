@@ -35,7 +35,7 @@ staload "back.sats"
   | LSortMenu      (* the sort and view menu (#377, #404) *)
   | LShelf         (* a shelf's own screen over the library: Hidden, Archived or Trash (#404) *)
   | LWords         (* the words looked up, kept with their sentence (keyword: vocabulary) *)
-  | LReview        (* the words due, one at a time, over the words screen *)
+  | LReview        (* the words due, one at a time, over the words screen (keyword: vocabulary) *)
 
 fn _element_id (overlay: layer): [id_len:pos | id_len < 128] string id_len =
   case+ overlay of

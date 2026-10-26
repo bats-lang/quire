@@ -49,8 +49,7 @@ implement $P.dispose<settled>(_) = ()
    The word being looked up
    ============================================================ *)
 
-(* The word the selection toolbar offers to look up, and the language of the book: kept as the selection changes, so a
-   click on Look up or Look up online notes the very word the buttons were made for *)
+(* The word the selection toolbar offers to look up (keyword: vocabulary) *)
 datavtype candidate =
   | NoCandidate of ()
   | {word_loc,language_loc:agz}{word_len:nat | word_len <= 64}{language_len:nat | language_len <= 3}
@@ -77,11 +76,11 @@ fun _copy_into {source_loc,target_loc:agz}{source_size,target_size:pos}{count:na
     val () = $A.set<byte>(target, i, $A.get<byte>(source, i))
   in _copy_into(source, target, count, i + 1) end
 
-(* position, or the nearest of 0 and most *)
+(* position, or the nearest of 0 and most (keyword: vocabulary) *)
 fn _within {most:nat} (position: Int, most: int most): [stop:nat | stop <= most] int stop =
   if position < 0 then 0 else if position > most then most else position
 
-(* The word of the selection (up to the most the toolbar copies) in the book's language language[0, language_len) *)
+(* The word of the selection (up to the most the toolbar copies) in the book's language language[0, language_len) (keyword: vocabulary) *)
 #pub fn words_candidate_set {word_loc,language_loc:agz}{word_len:nat | word_len <= 64}{language_len:nat | language_len <= 3}
   (word: !$A.arr(byte, word_loc, 65), word_len: int word_len, language: !$A.arr(byte, language_loc, 3), language_len: int language_len): void
 
@@ -103,7 +102,7 @@ fun _copy_part {l,part_loc:agz}{n,size:pos}{from,count:nat | from + count <= n; 
     val () = $A.set<byte>(part, i, $A.get<byte>(sentence, from + i))
   in _copy_part(sentence, part, from, count, i + 1) end
 
-(* sentence[from, from + count) as a new array of count + 1 bytes *)
+(* sentence[from, from + count) as a new array of count + 1 bytes (keyword: vocabulary) *)
 fn _part {l:agz}{n:pos}{from,count:nat | from + count <= n; count < 256}
   (sentence: !$A.arr(byte, l, n), from: int from, count: int count): [part_loc:agz] $A.arr(byte, part_loc, count + 1) = let
   val part = $A.alloc<byte>(count + 1)
@@ -114,7 +113,7 @@ in part end
    A lookup, noted
    ============================================================ *)
 
-(* The lookup made into a record of the sentence of the selection, sentence[0, count), and stored *)
+(* The lookup made into a record of the sentence of the selection, sentence[0, count), and stored (keyword: vocabulary) *)
 fn _note_place {word_loc,language_loc,sentence_loc:agz}{word_len:nat | word_len <= 64}{language_len:nat | language_len <= 3}{count:nat | count <= 510}
   (word: !$A.arr(byte, word_loc, 65), word_len: int word_len, language: !$A.arr(byte, language_loc, 3), language_len: int language_len,
    book_high: Int, book_low: Int, chapter: Int, node: Int, offset: Int, sentence: $A.arr(byte, sentence_loc, 511), count: int count): void = let
@@ -145,8 +144,7 @@ in
   | ~WordNotImaged() => ()
 end
 
-(* The word and the selection's place and sentence made into a record, and put in the store: the same word again is the
-   same word (its id), counted, with the latest place *)
+(* The word and the selection's place and sentence made into a record (keyword: vocabulary) *)
 fn _note_word {word_loc,language_loc:agz}{word_len:nat | word_len <= 64}{language_len:nat | language_len <= 3}
   (word: !$A.arr(byte, word_loc, 65), word_len: int word_len, language: !$A.arr(byte, language_loc, 3), language_len: int language_len): void = let
   val index = lib_index_of_key(open_key_get())
@@ -166,7 +164,7 @@ in
       end)
 end
 
-(* The word the selection toolbar offered is looked up (Look up, or Look up online): kept, unless the setting says not to *)
+(* The word the selection toolbar offered is looked up (Look up, or Look up online): kept, unless the setting says not to (keyword: vocabulary) *)
 #pub fn words_lookup_note (): void
 
 implement words_lookup_note () =
@@ -193,12 +191,12 @@ fun _forget_old {count:nat} .<count>. (words: stored_words(count), now: Int): vo
       val () = (if numbers.deleted > 0 then
           (if now - numbers.deleted > words_tombstone_minutes() then
             $P.finish<$IDB.stored>(wordstore_forget(id_high, id_low), llam(_) => ())
-            (* ignored: a tombstone that stays is dropped at the next start *)
+            (* ignored: a tombstone that stays is dropped at the next start (keyword: vocabulary) *)
           else ())
         else ())
     in _forget_old(rest, now) end
 
-(* Reads the words kept: how many there are (which a new word is checked against), and drops the tombstones that are old *)
+(* Reads the words kept: how many there are (which a new word is checked against), and drops the tombstones that are old (keyword: vocabulary) *)
 #pub fn words_start (): void
 
 implement words_start () =
@@ -214,15 +212,15 @@ implement words_start () =
    The words screen: what is shown
    ============================================================ *)
 
-(* Which words the screen lists: those still being learned, or those mastered *)
+(* Which words the screen lists: those still being learned, or those mastered (keyword: vocabulary) *)
 datatype words_tab = TabLearning | TabMastered
 
 val _tab = ref<words_tab>(TabLearning())
 
-(* The book the words are of: its place in the books the words came from, -1 for every book *)
+(* The book the words are of: its place in the books the words came from, -1 for every book (keyword: vocabulary) *)
 val _book_chosen = ref<int>(~1)
 
-(* The books the words are of, in the order the select lists them *)
+(* The books the words are of, in the order the select lists them (keyword: vocabulary) *)
 datavtype books(int) =
   | BooksNil(0) of ()
   | {count:nat} BooksCons(count + 1) of (Int, Int, books(count))
@@ -245,13 +243,13 @@ fun _books_has {count:nat} .<count>. (list: !books(count), high: Int, low: Int):
   | BooksCons(book_high, book_low, rest) =>
     if book_high = high then (if book_low = low then true else _books_has(rest, high, low)) else _books_has(rest, high, low)
 
-(* The book at place place of the select, or its ids as -1 *)
+(* The book at place place of the select, or its ids as -1 (keyword: vocabulary) *)
 fun _books_at {count:nat} .<count>. (list: !books(count), place: int): @(Int, Int) =
   case+ list of
   | BooksNil() => @(~1, ~1)
   | BooksCons(high, low, rest) => if place <= 0 then @(high, low) else _books_at(rest, place - 1)
 
-(* list with the book added at its end, when it is not there *)
+(* list with the book added at its end, when it is not there (keyword: vocabulary) *)
 fun _books_add {count:nat} .<count>. (list: books(count), high: Int, low: Int): [total:nat] books(total) =
   case+ list of
   | ~BooksNil() => BooksCons(high, low, BooksNil())
@@ -259,21 +257,20 @@ fun _books_add {count:nat} .<count>. (list: books(count), high: Int, low: Int): 
     if book_high = high then (if book_low = low then BooksCons(book_high, book_low, rest) else BooksCons(book_high, book_low, _books_add(rest, high, low)))
     else BooksCons(book_high, book_low, _books_add(rest, high, low))
 
-(* The books kept again after the select was drawn from them, for the choice made in it *)
+(* The books kept again after the select was drawn from them, for the choice made in it (keyword: vocabulary) *)
 fn _books_put {count:nat} (list: books(count)): void = let
   var previous: [count:nat] books(count) = list
   val () = ref_exch_elt<[count:nat] books(count)>(_books, previous)
 in _books_free(previous) end
 
-(* The book added to the books the words are of, when it is not there *)
+(* The book added to the books the words are of, when it is not there (keyword: vocabulary) *)
 fn _books_put_one (high: Int, low: Int): void = let
   val list = _books_take()
   var next: [count:nat] books(count) = _books_add(list, high, low)
   val () = ref_exch_elt<[count:nat] books(count)>(_books, next)
 in _books_free(next) end
 
-(* One row of the list as it is drawn: the word's id, whether it is mastered, the book it was looked up in, the chapter and
-   content node of its place, and the word and its language as the dictionary is asked for them *)
+(* One row of the list as it is drawn (keyword: vocabulary) *)
 datavtype shown(int) =
   | ShownNil(0) of ()
   | {count:nat}{word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
@@ -299,7 +296,7 @@ fn _shown_put {count:nat} (list: shown(count)): void = let
   val () = ref_exch_elt<[count:nat] shown(count)>(_shown, previous)
 in _shown_free(previous) end
 
-(* A synchronized word is told by the row it is in: the ids of the row row of the list, or -1 *)
+(* A synchronized word is told by the row it is in: the ids of the row row of the list, or -1 (keyword: vocabulary) *)
 fun _shown_row {count:nat} .<count>. (list: !shown(count), row: int): @(Int, Int, bool, Int, Int, Int, Int) =
   case+ list of
   | ShownNil() => @(~1, ~1, false, ~1, ~1, ~1, ~1)
@@ -322,7 +319,7 @@ fun _shown_word {count:nat} .<count>. (list: !shown(count), row: int): [word_loc
       in @(word_copy, word_len, language_copy, language_len) end
     else _shown_word(rest, row - 1)
 
-(* The words as the screen lists them: how many are due, still learning and mastered, whatever the tab and the book *)
+(* The words as the screen lists them: how many are due, still learning and mastered, whatever the tab and the book (keyword: vocabulary) *)
 val _due_count = ref<Int>(0)
 val _learning_count = ref<Int>(0)
 val _mastered_count = ref<Int>(0)
@@ -331,7 +328,7 @@ val _hidden_count = ref<Int>(0)
 fn _numbers_of (word: !stored_word): word_numbers =
   case+ word of StoredWord(_, _, image) => word_image_numbers(image)
 
-(* Whether word is newer than other: looked up later, or changed later *)
+(* Whether word is newer than other: looked up later, or changed later (keyword: vocabulary) *)
 fn _newer (word: !stored_word, other: !stored_word): bool = let
   val first = _numbers_of(word)
   val second = _numbers_of(other)
@@ -341,7 +338,7 @@ in
   else first.modified > second.modified
 end
 
-(* sorted with word in its place, the newest first *)
+(* sorted with word in its place, the newest first (keyword: vocabulary) *)
 fun _insert_newest {count:nat} .<count>. (word: stored_word, sorted: stored_words(count)): stored_words(count + 1) =
   case+ sorted of
   | ~StoredWordsNone() => StoredWordsSome(word, StoredWordsNone())
@@ -349,8 +346,7 @@ fun _insert_newest {count:nat} .<count>. (word: stored_word, sorted: stored_word
     if _newer(word, first) then StoredWordsSome(word, StoredWordsSome(first, rest))
     else StoredWordsSome(first, _insert_newest(word, rest))
 
-(* The words the screen lists, newest first: the live ones (a tombstone is none) of the tab and of the book chosen. The
-   counts of every tab, and the books, are made as the words pass *)
+(* The words the screen lists, newest first (keyword: vocabulary) *)
 fun _gather {count,kept:nat} .<count>.
   (words: stored_words(count), now: Int, learning: bool, book_all: bool, book_high: Int, book_low: Int, listed: stored_words(kept))
   : [total:nat] stored_words(total) =
@@ -388,14 +384,14 @@ fun _put_literal_at {l:agz}{n:pos}{text_len:nat}{at:nat | at + text_len <= n}{i:
     val () = $A.set<byte>(out, at + i, $A.int2byte($AR.byte_of_char(string_get_at(text, i))))
   in _put_literal_at(out, at, text, text_len, i + 1) end
 
-(* text at out[at, at + its length) *)
+(* text at out[at, at + its length) (keyword: vocabulary) *)
 fn _put_literal {l:agz}{n:pos}{text_len:nat}{at:nat | at + text_len <= n}
   (out: !$A.arr(byte, l, n), at: int at, text: string text_len): int(at + text_len) = let
   val text_len = g1u2i(string1_length(text))
   val () = _put_literal_at(out, at, text, text_len, 0)
 in at + text_len end
 
-(* source[0, count) at target[at, at + count) *)
+(* source[0, count) at target[at, at + count) (keyword: vocabulary) *)
 fun _copy_at {source_loc,target_loc:agz}{source_size,target_size:pos}{count:nat | count <= source_size}{at:nat | at + count <= target_size}{i:nat | i <= count} .<count - i>.
   (source: !$A.arr(byte, source_loc, source_size), target: !$A.arr(byte, target_loc, target_size), count: int count, at: int at, i: int i): void =
   if i >= count then ()
@@ -403,7 +399,7 @@ fun _copy_at {source_loc,target_loc:agz}{source_size,target_size:pos}{count:nat 
     val () = $A.set<byte>(target, at + i, $A.get<byte>(source, i))
   in _copy_at(source, target, count, at, i + 1) end
 
-(* A count and its unit at out[at, ...): "5 minutes", "12 hours", "1 day" *)
+(* A count and its unit, in words (keyword: vocabulary) *)
 fn _put_wait {l:agz}{at:nat | at + 40 <= 400}{minutes:nat} (out: !$A.arr(byte, l, 400), at: int at, minutes: int minutes): [stop:nat | stop <= 400] int stop = let
   val unit_minutes = (if minutes < 60 then 1 else if minutes < 1440 then 60 else 1440): [unit_minutes:pos] int unit_minutes
   val whole = minutes / unit_minutes
@@ -416,7 +412,7 @@ in
   else (if count = 1 then _put_literal(out, after, " day") else _put_literal(out, after, " days"))
 end
 
-(* What a word's state is, in words: Mastered, or Learning and when it is due *)
+(* What a word's state is, in words: Mastered, or Learning and when it is due (keyword: vocabulary) *)
 fn _put_state {l:agz}{at:nat | at + 80 <= 400}{due,now:int} (out: !$A.arr(byte, l, 400), at: int at, mastered: bool, due: int due, now: int now): [stop:nat | stop <= 400] int stop =
   if mastered then _put_literal(out, at, "Mastered")
   else if due <= now then _put_literal(out, at, "Learning, due now")
@@ -424,7 +420,7 @@ fn _put_state {l:agz}{at:nat | at + 80 <= 400}{due,now:int} (out: !$A.arr(byte, 
     val after = _put_literal(out, at, "Learning, due in ")
   in _put_wait(out, after, due - now) end
 
-(* A child element of numbered parent parent_prefix<k>, numbered child_prefix<k> *)
+(* A child element of numbered parent parent_prefix<k>, numbered child_prefix<k> (keyword: vocabulary) *)
 fn _child {parent_prefix_len,child_prefix_len:pos | parent_prefix_len <= 16; child_prefix_len <= 16}{k:nat}{class_len:pos | class_len < 256}
   (parent_prefix: string parent_prefix_len, child_prefix: string child_prefix_len, k: int k, element_tag: tag, class_name: string class_len): void = let
   val @(parent_id, parent_id_len) = nid_make(parent_prefix, k)
@@ -448,14 +444,14 @@ in ui_btn_nn(parent_id, parent_id_len, child_id, child_id_len, class_name) end
 fn _lower {code:nat | code < 256} (code: int code): [lowered:nat | lowered < 256] int lowered =
   if code >= 65 then (if code <= 90 then code + 32 else code) else code
 
-(* Whether word[0, word_len) is sentence[at, at + word_len), the ASCII capitals not told apart *)
+(* Whether word[0, word_len) is sentence[at, at + word_len), the ASCII capitals not told apart (keyword: vocabulary) *)
 fun _same_at {sentence_loc,word_loc:agz}{len,size:pos}{word_len:nat | word_len <= size}{at:nat | at + word_len <= len}{j:nat | j <= word_len} .<word_len - j>.
   (sentence: !$A.arr(byte, sentence_loc, len), word: !$A.arr(byte, word_loc, size), word_len: int word_len, at: int at, j: int j): bool =
   if j >= word_len then true
   else if _lower($AR.low_byte(byte2int0($A.get<byte>(sentence, at + j)))) <> _lower($AR.low_byte(byte2int0($A.get<byte>(word, j)))) then false
   else _same_at(sentence, word, word_len, at, j + 1)
 
-(* Where the word first is in sentence[0, len), or -1 *)
+(* Where the word first is in sentence[0, len), or -1 (keyword: vocabulary) *)
 fun _find_word {sentence_loc,word_loc:agz}{size:pos}{len:nat | len <= size}{word_size:pos}{word_len:nat | word_len <= word_size; word_len > 0}{at:nat | at <= len} .<len - at>.
   (sentence: !$A.arr(byte, sentence_loc, size), len: int len, word: !$A.arr(byte, word_loc, word_size), word_len: int word_len, at: int at): Int =
   if at + word_len > len then ~1
@@ -463,7 +459,7 @@ fun _find_word {sentence_loc,word_loc:agz}{size:pos}{len:nat | len <= size}{word
   else _find_word(sentence, len, word, word_len, at + 1)
 
 
-(* The sentence of a word as it is in a record: the head and the tail together, in an array of one more than the most *)
+(* The sentence of a word as it is in a record: the head and the tail together, in an array of one more than the most (keyword: vocabulary) *)
 fn _sentence_of {c:wordx} (image: !word_image(c)): [l:agz][count:nat | count <= 510] @($A.arr(byte, l, 511), int count) = let
   val @(head, head_len) = word_image_sentence_head(image)
   val @(tail, tail_len) = word_image_sentence_tail(image)
@@ -481,7 +477,7 @@ in
   in @(out, head_len + tail_len) end
 end
 
-(* The sentence of the row shown, with the word marked where it is in it: the words before and after it and the word itself *)
+(* The sentence of the row shown, with the word marked where it is in it: the words before and after it and the word itself (keyword: vocabulary) *)
 fn _sentence_show {k:nat}{sentence_loc,word_loc:agz}{count:nat | count <= 510}{word_len:nat | word_len < 256}
   (k: int k, sentence: $A.arr(byte, sentence_loc, 511), count: int count, word: !$A.arr(byte, word_loc, word_len + 1), word_len: int word_len): void =
   if count <= 0 then $A.free<byte>(sentence)
@@ -513,7 +509,7 @@ fn _sentence_show {k:nat}{sentence_loc,word_loc:agz}{count:nat | count <= 510}{w
     in release_bytes(frozen, bytes) end
   end
 
-(* The book's title for a row: the library's, or a line saying the book is not there *)
+(* The book's title for a row: the library's, or a line saying the book is not there (keyword: vocabulary) *)
 fn _book_title (high: Int, low: Int): [l:agz][n:nat | n < 256] @($A.arr(byte, l, n + 1), int n) = let
   val index = lib_find(high, low)
 in
@@ -530,7 +526,7 @@ fun _words_count {count:nat} .<count>. (words: !stored_words(count)): int count 
   | StoredWordsNone() => 0
   | StoredWordsSome(_, rest) => 1 + _words_count(rest)
 
-(* A number's decimal digits in a new array *)
+(* A number's decimal digits in a new array (keyword: vocabulary) *)
 fn _digits {k:nat} (k: int k): [l:agz][n:pos | n <= 20] @($A.arr(byte, l, n), int n) = let
   val buffer = $A.alloc<byte>(20)
   val ended = $S.int_to_str(buffer, 0, 20, k)
@@ -540,7 +536,7 @@ fn _digits {k:nat} (k: int k): [l:agz][n:pos | n <= 20] @($A.arr(byte, l, n), in
   val () = $A.free<byte>(buffer)
 in @(digits, ended) end
 
-(* How many times the word was looked up, in words, at the start of out *)
+(* How many times the word was looked up, in words, at the start of out (keyword: vocabulary) *)
 fn _put_times {l:agz} (out: !$A.arr(byte, l, 80), lookups: Int): [stop:nat | stop <= 79] int stop =
   if lookups <= 1 then _within(_put_literal(out, 0, "Looked up once"), 79)
   else let
@@ -548,7 +544,7 @@ fn _put_times {l:agz} (out: !$A.arr(byte, l, 80), lookups: Int): [stop:nat | sto
     val after = _within($S.int_to_str(out, after, 80, lookups), 40)
   in _within(_put_literal(out, after, " times"), 79) end
 
-(* A row of the list: the word, the book and the word's state, its sentence with the word marked, and the buttons *)
+(* A row of the list: the word, the book and the word's state, its sentence with the word marked, and the buttons (keyword: vocabulary) *)
 fn _row_draw {k:nat}{c:wordx} (k: int k, image: !word_image(c), now: Int): void = let
   val numbers = word_image_numbers(image)
   val @(row_id, row_id_len) = nid_make("word-row", k)
@@ -587,7 +583,7 @@ fn _row_draw {k:nat}{c:wordx} (k: int k, image: !word_image(c), now: Int): void 
     else _child_text_button("word-tools", "word-master", k, "hbtn", "Mark as mastered"))
 in _child_text_button("word-tools", "word-delete", k, "hbtn quiet", "Delete") end
 
-(* The rows of the words sorted, from row k on, at most as many as the screen draws: the list of what they are *)
+(* The rows of the words sorted, from row k on, at most as many as the screen draws: the list of what they are (keyword: vocabulary) *)
 fun _rows {count,k:nat} .<count>. (words: stored_words(count), k: int k, now: Int): [shown_count:nat] shown(shown_count) =
   case+ words of
   | ~StoredWordsNone() => ShownNil()
@@ -613,7 +609,7 @@ fun _rows {count,k:nat} .<count>. (words: stored_words(count), k: int k, now: In
 fn _pressed {id_len:pos | id_len < 256} (id: string id_len, on: bool): void =
   if on then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
 
-(* The options of the book select: every book, then each book the words are of, the chosen one selected *)
+(* The options of the book select: every book, then each book the words are of, the chosen one selected (keyword: vocabulary) *)
 fun _book_options {count:nat}{k:nat} .<count>. (list: !books(count), k: int k, book_all: bool, chosen_high: Int, chosen_low: Int): void =
   case+ list of
   | BooksNil() => ()
@@ -629,12 +625,12 @@ fun _book_options {count:nat}{k:nat} .<count>. (list: !books(count), k: int k, b
         in $A.free<byte>(title) end)
     in _book_options(rest, k + 1, book_all, chosen_high, chosen_low) end
 
-(* The book the words are of that the select has chosen: every book, or the ids of the one *)
+(* The book the words are of that the select has chosen: every book, or the ids of the one (keyword: vocabulary) *)
 val _book_all = ref<bool>(true)
 val _book_high = ref<Int>(0)
 val _book_low = ref<Int>(0)
 
-(* The line under the tabs: how many words are due, still being learned and mastered *)
+(* The line under the tabs: how many words are due, still being learned and mastered (keyword: vocabulary) *)
 fn _status_show (): void = let
   val line = $A.alloc<byte>(400)
   val at = _within($S.int_to_str(line, 0, 400, !_due_count), 20)
@@ -645,7 +641,7 @@ fn _status_show (): void = let
   val at = _put_literal(line, at, " mastered")
 in ui_text_buf("words-status", line, at) end
 
-(* The screen drawn from the words kept: the tab's and the book's, newest first *)
+(* The screen drawn from the words kept: the tab's and the book's, newest first (keyword: vocabulary) *)
 #pub fn words_render (): void
 
 implement words_render () =
@@ -686,7 +682,7 @@ implement words_render () =
    The words screen: opened, and what its controls do
    ============================================================ *)
 
-(* The screen opened over the library, listing the words kept *)
+(* The screen opened over the library, listing the words kept (keyword: vocabulary) *)
 #pub fn words_screen_open (): void
 
 implement words_screen_open () = let
@@ -694,14 +690,14 @@ implement words_screen_open () = let
   val () = words_render()
 in ui_focus("words-back") end
 
-(* The tab chosen: the words being learned, or the mastered ones *)
+(* The tab chosen: the words being learned, or the mastered ones (keyword: vocabulary) *)
 #pub fn words_tab_set (learning: bool): void
 
 implement words_tab_set (learning) = let
   val () = !_tab := (if learning then TabLearning() else TabMastered())
 in words_render() end
 
-(* A select's value as the number it names, or -1 (every book) *)
+(* A select's value as the number it names, or -1 (every book) (keyword: vocabulary) *)
 fn _chosen_number (): int = let
   val id = $A.alloc<byte>(10)
   val () = $A.write_text(id, 0, $A.text_lit("words-book"), 10)
@@ -731,7 +727,7 @@ in
     end
 end
 
-(* The book select changed: the words of the book it names, or of every book *)
+(* The book select changed: the words of the book it names, or of every book (keyword: vocabulary) *)
 #pub fn words_book_changed (): void
 
 implement words_book_changed () = let
@@ -750,7 +746,7 @@ in
   in words_render() end
 end
 
-(* What an edit came to, told when it did not keep the change; the list follows what is stored *)
+(* What an edit came to, told when it did not keep the change; the list follows what is stored (keyword: vocabulary) *)
 fn _after_edit (saved: word_saved): void = let
   val () = (case+ saved of
     | WordNotSaved() => notice_say(WordsNotStored())
@@ -760,7 +756,7 @@ fn _after_edit (saved: word_saved): void = let
     | WordFull() => ())
 in words_render() end
 
-(* The row's word marked mastered, or to be learned again when it is mastered *)
+(* The row's word marked mastered, or to be learned again when it is mastered (keyword: vocabulary) *)
 #pub fn words_row_master (row: int): void
 
 implement words_row_master (row) = let
@@ -774,7 +770,7 @@ in
   in $P.finish<word_saved>(wordstore_edit(high, low, edit), llam(saved) => _after_edit(saved)) end
 end
 
-(* The row's word deleted, offered back by Undo: only its tombstone is kept until the offer is final *)
+(* The row's word deleted, offered back by Undo: only its tombstone is kept until the offer is final (keyword: vocabulary) *)
 #pub fn words_row_delete (row: int): void
 
 implement words_row_delete (row) = let
@@ -804,7 +800,7 @@ in
           | WordFull() => word_image_free(image)))
 end
 
-(* The book, chapter and content node of the row's lookup; the book's ids -1 when there is no such row *)
+(* The book, chapter and content node of the row's lookup; the book's ids -1 when there is no such row (keyword: vocabulary) *)
 #pub fn words_row_place (row: int): @(Int, Int, Int, Int)
 
 implement words_row_place (row) = let
@@ -813,7 +809,7 @@ implement words_row_place (row) = let
   val () = _shown_put(list)
 in @(book_high, book_low, chapter, node) end
 
-(* The word of the row and its language, in new arrays: for the dictionary *)
+(* The word of the row and its language, in new arrays: for the dictionary (keyword: vocabulary) *)
 #pub fn words_row_word (row: int): [word_loc,language_loc:agz][word_len,language_len:nat | word_len < 256; language_len < 256]
   @($A.arr(byte, word_loc, word_len + 1), int word_len, $A.arr(byte, language_loc, language_len + 1), int language_len)
 
@@ -828,7 +824,7 @@ in found end
    Review: the words that are due, one at a time
    ============================================================ *)
 
-(* The word being reviewed: its ids, and the word and its language as the dictionary is asked for them *)
+(* The word being reviewed: its ids, and the word and its language as the dictionary is asked for them (keyword: vocabulary) *)
 datavtype card =
   | NoCard of ()
   | {word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
@@ -848,7 +844,7 @@ fn _card_swap (next: card): card = let
   val () = ref_exch_elt<card>(_card, previous)
 in previous end
 
-(* The word that has been due the longest, of the words that are due *)
+(* The word that has been due the longest, of the words that are due (keyword: vocabulary) *)
 datavtype best =
   | NoBest of ()
   | Best of stored_word
@@ -880,7 +876,7 @@ fun _earliest {count:nat} .<count>. (words: stored_words(count), now: Int, held:
       end
     end
 
-(* The sentence of the review, with the word marked, in its element *)
+(* The sentence of the review, with the word marked, in its element (keyword: vocabulary) *)
 fn _review_sentence {sentence_loc,word_loc:agz}{count:nat | count <= 510}{word_len:nat | word_len < 256}
   (sentence: $A.arr(byte, sentence_loc, 511), count: int count, word: !$A.arr(byte, word_loc, word_len + 1), word_len: int word_len): void =
   if count <= 0 then $A.free<byte>(sentence)
@@ -918,7 +914,7 @@ fn _review_sentence {sentence_loc,word_loc:agz}{count:nat | count <= 510}{word_l
     in release_bytes(frozen, bytes) end
   end
 
-(* Nothing is due: the card is gone, and the screen says so *)
+(* Nothing is due: the card is gone, and the screen says so (keyword: vocabulary) *)
 fn _review_empty (): void = let
   val () = _card_free(_card_swap(NoCard()))
   val () = ui_show("review-card", false)
@@ -928,11 +924,11 @@ fn _review_empty (): void = let
   val () = ui_show("review-forgot", false)
 in ui_text("review-progress", "No words are due.") end
 
-(* " word is due" or " words are due" at out[at, ...) *)
+(* " word is due" or " words are due" at out[at, ...) (keyword: vocabulary) *)
 fn _put_due {l:agz}{at:nat | at + 14 <= 400}{due:int} (out: !$A.arr(byte, l, 400), at: int at, due: int due): [stop:nat | stop <= 400] int stop =
   if due = 1 then _put_literal(out, at, " word is due") else _put_literal(out, at, " words are due")
 
-(* The card shown for the word, and the count of the words due *)
+(* The card shown for the word, and the count of the words due (keyword: vocabulary) *)
 fn _review_draw {c:wordx} (id_high: Int, id_low: Int, image: !word_image(c), due: Int): void = let
   val @(title_text, title_len) = word_image_word(image)
   val () = ui_text_buf("review-word", title_text, title_len)
@@ -955,7 +951,7 @@ fn _review_draw {c:wordx} (id_high: Int, id_low: Int, image: !word_image(c), due
   val () = ui_show("review-forgot", false)
 in () end
 
-(* The word most overdue shown, as a card *)
+(* The word most overdue shown, as a card (keyword: vocabulary) *)
 fn _review_next (): void =
   $P.finish<words_read>(wordstore_read(), llam(read) =>
     case+ read of
@@ -972,7 +968,7 @@ fn _review_next (): void =
           in word_image_free(image) end
       end)
 
-(* The review screen opened over the words, at the word most overdue *)
+(* The review screen opened over the words, at the word most overdue (keyword: vocabulary) *)
 #pub fn words_review_open (): void
 
 implement words_review_open () = let
@@ -980,7 +976,7 @@ implement words_review_open () = let
   val () = _review_next()
 in ui_focus("review-back") end
 
-(* Show definition pressed: the answer buttons come up (the definition is the dictionary's panel, which the caller opens) *)
+(* Show definition pressed: the answer buttons come up (the definition is the dictionary's panel, which the caller opens) (keyword: vocabulary) *)
 #pub fn words_review_revealed (): void
 
 implement words_review_revealed () = let
@@ -988,7 +984,7 @@ implement words_review_revealed () = let
   val () = ui_show("review-known", true)
 in ui_show("review-forgot", true) end
 
-(* The card's word and its language, in new arrays: for the dictionary *)
+(* The card's word and its language, in new arrays: for the dictionary (keyword: vocabulary) *)
 #pub fn words_review_word (): [word_loc,language_loc:agz][word_len,language_len:nat | word_len < 256; language_len < 256]
   @($A.arr(byte, word_loc, word_len + 1), int word_len, $A.arr(byte, language_loc, language_len + 1), int language_len)
 
@@ -1006,7 +1002,7 @@ implement words_review_word () =
       val () = _card_free(_card_swap(Card(id_high, id_low, word, word_len, language, language_len)))
     in @(word_copy, word_len, language_copy, language_len) end
 
-(* The card answered, Got it or Forgot: the word is due again as the schedule says, and the next card comes *)
+(* The card answered, Got it or Forgot: the word is due again as the schedule says, and the next card comes (keyword: vocabulary) *)
 #pub fn words_review_answer (known: bool): void
 
 implement words_review_answer (known) =
@@ -1026,7 +1022,7 @@ implement words_review_answer (known) =
       in _review_next() end)
     end
 
-(* The review closed: the words screen follows what was reviewed *)
+(* The review closed: the words screen follows what was reviewed (keyword: vocabulary) *)
 #pub fn words_review_closed (): void
 
 implement words_review_closed () = let
@@ -1037,10 +1033,10 @@ in words_render() end
    The list as a CSV file
    ============================================================ *)
 
-(* The most bytes a word takes in the file: each of its four fields at its longest, every byte a quote doubled, in quotes *)
+(* The most bytes a word takes in the file: each of its four fields at its longest, every byte a quote doubled, in quotes (keyword: vocabulary) *)
 #define CSV_ROW_MAX 2600
 
-(* text[i, count) quoted, onto out *)
+(* text[i, count) quoted, onto out (keyword: vocabulary) *)
 fun _csv_text {l,text_loc:agz}{arena:addr}{n:nat}{text_size:pos}{count:nat | count <= text_size}{i:nat | i <= count}{position:nat | position + 2 * (count - i) <= n} .<count - i>.
   (out: !$A.arrx(byte, l, n, arena), position: int position, text: !$A.arr(byte, text_loc, text_size), count: int count, i: int i)
   : [next:nat | next <= position + 2 * (count - i)] int next =
@@ -1057,7 +1053,7 @@ fun _csv_text {l,text_loc:agz}{arena:addr}{n:nat}{text_size:pos}{count:nat | cou
     in _csv_text(out, position + 1, text, count, i + 1) end
   end
 
-(* text[0, count) as a field, with a quote on each side *)
+(* text[0, count) as a field, with a quote on each side (keyword: vocabulary) *)
 fn _csv_field {l,text_loc:agz}{arena:addr}{n:nat}{text_size:pos}{count:nat | count <= text_size}{position:nat | position + 2 * count + 2 <= n}
   (out: !$A.arrx(byte, l, n, arena), position: int position, text: !$A.arr(byte, text_loc, text_size), count: int count)
   : [next:nat | next <= position + 2 * count + 2] int next = let
@@ -1070,7 +1066,7 @@ fn _csv_separator {l:agz}{arena:addr}{n:nat}{position:nat | position + 1 <= n} (
   val () = $A.write_byte(out, position, $AR.low_byte(code))
 in position + 1 end
 
-(* A word as a line: the word, its sentence, its book's title and its language *)
+(* A word as a line: the word, its sentence, its book's title and its language (keyword: vocabulary) *)
 fn _csv_row {l:agz}{arena:addr}{n:nat}{c:wordx}{position:nat | position + 2600 <= n}
   (out: !$A.arrx(byte, l, n, arena), position: int position, image: !word_image(c)): [next:nat | next <= position + 2600] int next = let
   val numbers = word_image_numbers(image)
@@ -1089,7 +1085,7 @@ fn _csv_row {l:agz}{arena:addr}{n:nat}{c:wordx}{position:nat | position + 2600 <
   val () = $A.free<byte>(language)
 in after end
 
-(* The live words onto sorted, the newest first *)
+(* The live words onto sorted, the newest first (keyword: vocabulary) *)
 fun _alive_sorted {count,kept:nat} .<count>. (words: stored_words(count), sorted: stored_words(kept)): [total:nat] stored_words(total) =
   case+ words of
   | ~StoredWordsNone() => sorted
@@ -1100,7 +1096,7 @@ fun _alive_sorted {count,kept:nat} .<count>. (words: stored_words(count), sorted
       else _alive_sorted(rest, _insert_newest(word, sorted))
     end
 
-(* The rows of words onto out *)
+(* The rows of words onto out (keyword: vocabulary) *)
 fun _csv_rows {l:agz}{arena:addr}{n:nat}{count:nat}{position:nat | position + CSV_ROW_MAX * count <= n} .<count>.
   (out: !$A.arrx(byte, l, n, arena), position: int position, words: !stored_words(count)): [next:nat | next <= position + CSV_ROW_MAX * count] int next =
   case+ words of
@@ -1111,7 +1107,7 @@ fun _csv_rows {l:agz}{arena:addr}{n:nat}{count:nat}{position:nat | position + CS
          val after = _csv_row(out, position, image)
        in _csv_rows(out, after, rest) end)
 
-(* The words sorted as the file of a CSV, shared *)
+(* The words sorted as the file of a CSV, shared (keyword: vocabulary) *)
 fn _csv_build {count:nat | count <= 10000} (sorted: stored_words(count), count: int count, way: share_as): $P.promise(share_end, $P.Chained) =
   case+ piece_new(100 + CSV_ROW_MAX * count) of
   | ~NoPiece() => let val () = stored_words_free(sorted) in $P.ret<share_end>(ShareOver()) end
@@ -1128,8 +1124,7 @@ fn _csv_build {count:nat | count <= 10000} (sorted: stored_words(count), count: 
       val () = piece_free(owner, $A.thaw<byte>(out_frozen))
     in ending end
 
-(* The words as a CSV file (word, sentence, book, language), shared as a file where the platform shares files, else as its
-   text: readers take such lists to Anki *)
+(* The words as a CSV file (word, sentence (keyword: vocabulary) *)
 #pub fn words_share (way: share_as): $P.promise(share_end, $P.Chained)
 
 implement words_share (way) =
@@ -1144,4 +1139,4 @@ implement words_share (way) =
         else _csv_build(sorted, count, way)
       end)
 
-end (* #target wasm *)
+end (* #target wasm (keyword: vocabulary) *)

@@ -2991,7 +2991,7 @@ fn _words_take (): void =
       val parsed = words_from_file(file, n)
       val () = _held_free(_held_swap(_written, Held(owner, file, n, names_at, books, devices)))
     in
-      (* ignored: how many words were put; one that was not stays as it was, and is merged by the next sync *)
+      (* ignored: how many words were put; one that was not stays as it was, and is merged by the next sync (keyword: vocabulary) *)
       $P.finish<Int>(words_restore(parsed, false), llam(_) => _done())
     end
 
@@ -3263,7 +3263,7 @@ fun _remote_books {l:agz}{owner:addr}{n:nat | n <= 268435456}{count:nat} .<count
       val () = _push(jchunk_copy(file, start, stop))
     in _remote_books(file, rest, false) end
 
-(* The file joined, held and written *)
+(* The file joined, held and written (keyword: vocabulary) *)
 fn _finish_file (): void =
   case+ jfile_join(_out_take()) of
   | ~JNoWhole() => _fail(NoMemory(), 0)

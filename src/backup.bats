@@ -89,7 +89,7 @@ fn _fullscreen_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
   | FullscreenOn() => jw_lit(out, position, "true")
   | FullscreenOff() => jw_lit(out, position, "false")
 
-(* Whether the words looked up are kept: true or false *)
+(* Whether the words looked up are kept: true or false (keyword: vocabulary) *)
 fn _words_kept_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
   (out: !$A.arrx(byte, l, n, owner), position: int position): [stop:nat | stop <= position + 5] int stop =
   case+ set_words_get() of
@@ -1545,7 +1545,7 @@ in
          val read = words_parse(buf, n, value_start)
          val stop = jr_skip(buf, n, value_start)
          val replace = (case+ !_mode of PutBack() => true | FromFile() => false): bool
-         (* ignored: the words are put into the store as the restore goes on; one that is not stays as it was *)
+         (* ignored: the words are put into the store as the restore goes on; one that is not stays as it was (keyword: vocabulary) *)
          val () = $P.finish<Int>(words_restore(read, replace), llam(_) => ())
        in _top_members(buf, n, stop, key, numbers, map, quire, books, sort) end
        else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, map, quire, books, sort))

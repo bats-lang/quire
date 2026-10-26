@@ -1354,14 +1354,14 @@ in start_node >= 0 end
 
 fn _is_continuation (code: int): bool = $AR.band_int_int(code, 192) = 128
 
-(* The first place at or after at, in text[0, len), where a character begins *)
+(* The first place at or after at, in text[0, len), where a character begins (keyword: vocabulary) *)
 fun _forward_to_start {l:agz}{n:pos}{len:nat | len <= n}{at:nat | at <= len} .<len - at>.
   (text: !$A.arr(byte, l, n), len: int len, at: int at): [start:nat | at <= start; start <= len] int start =
   if at >= len then len
   else if _is_continuation(byte2int0($A.get<byte>(text, at))) then _forward_to_start(text, len, at + 1)
   else at
 
-(* The last place at or before at, in text[0, len), where a character begins *)
+(* The last place at or before at, in text[0, len), where a character begins (keyword: vocabulary) *)
 fun _backward_to_start {l:agz}{n:pos}{len:nat | len <= n}{at:nat | at <= len} .<at>.
   (text: !$A.arr(byte, l, n), len: int len, at: int at): [start:nat | start <= at] int start =
   if at <= 0 then 0
@@ -1369,7 +1369,7 @@ fun _backward_to_start {l:agz}{n:pos}{len:nat | len <= n}{at:nat | at <= len} .<
   else if _is_continuation(byte2int0($A.get<byte>(text, at))) then _backward_to_start(text, len, at - 1)
   else at
 
-(* The byte place of the units-th UTF-16 unit of text[0, len) (JavaScript's offsets), counted from at *)
+(* The byte place of the units-th UTF-16 unit of text[0, len) (JavaScript's offsets), counted from at (keyword: vocabulary) *)
 fun _bytes_for_units {l:agz}{n:pos}{len:nat | len <= n}{at:nat | at <= len} .<len - at>.
   (text: !$A.arr(byte, l, n), len: int len, at: int at, units: int): [stop:nat | at <= stop; stop <= len] int stop =
   if at >= len then len
@@ -1394,7 +1394,7 @@ fun _trim_white {l:agz}{n:pos}{len:nat | len <= n}{start:nat}{stop:nat | start <
   else if _is_white(byte2int0($A.get<byte>(text, stop - 1))) then _trim_white(text, len, start, stop - 1)
   else stop
 
-(* The start and the end of the sentence that holds byte place place, of the sentences the segmenter found *)
+(* The start and the end of the sentence that holds byte place place, of the sentences the segmenter found (keyword: vocabulary) *)
 fun _sentence_around {n:pos}{first:nat | first <= n} .<n - first>.
   (starts: $SP.sentences(n, first), n: int n, place: Int, start: Int): @(Int, Int) =
   case+ starts of
@@ -1411,8 +1411,7 @@ fun _copy_range {l,out_l:agz}{n:pos}{count:nat}{from:nat | from + count <= n}{i:
     val () = $A.set<byte>(out, i, $A.get<byte>(text, from + i))
   in _copy_range(text, from, count, out, i + 1) end
 
-(* The sentence text[start, stop) in a new array, trimmed, and cut to the most a record keeps: the bytes around place when
-   it is longer, cut where characters begin *)
+(* The sentence text[start, stop) in a new array (keyword: vocabulary) *)
 fn _sentence_text {l:agz}{n:pos}{len:nat | len <= n}
   (text: !$A.arr(byte, l, n), len: int len, start_at: Int, stop_at: Int, place: Int): [out_l:agz][count:nat | count <= 510] @($A.arr(byte, out_l, 511), int count) = let
   val [start:int] start = (if start_at < 0 then 0 else if start_at > len then len else start_at): [start:nat | start <= len] int start
@@ -1441,7 +1440,7 @@ in
   end
 end
 
-(* Where a selection starts and the sentence it starts in *)
+(* Where a selection starts and the sentence it starts in (keyword: vocabulary) *)
 #pub datavtype selection_place =
   | {l:agz}{n:nat | n <= 510} SelectionPlace of (Int, Int, Int, $A.arr(byte, l, 511), int n)
   | NoSelectionPlace of ()
@@ -1452,7 +1451,7 @@ implement selection_place_free (place) =
   | ~SelectionPlace(_, _, _, sentence, _) => $A.free<byte>(sentence)
   | ~NoSelectionPlace() => ()
 
-(* A blob's text read into text, when it fits: its length, else 0 *)
+(* A blob's text read into text, when it fits: its length, else 0 (keyword: vocabulary) *)
 fn _blob_fits {blob_size:nat}{l:agz}{most:pos} (blob: $BD.dblob(blob_size), text: !$A.arr(byte, l, most), most: int most): [count:nat | count <= most] int count = let
   val blob_len = $BD.blob_len(blob)
 in
@@ -1464,7 +1463,7 @@ in
   in read_len end
 end
 
-(* The text of content node node, up to most bytes; none when it has no text or more *)
+(* The text of content node node, up to most bytes; none when it has no text or more (keyword: vocabulary) *)
 fn _node_text {node:nat}{most:pos | most <= 65536} (node: int node, most: int most): [l:agz][text_len:nat | text_len <= most] @($A.arr(byte, l, most), int text_len) = let
   val @(node_id, node_id_len) = nid_pad3("c", node)
   val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
@@ -1477,8 +1476,7 @@ in
   | ~$R.some(blob) => let val count = _blob_fits(blob, text, most) in @(text, count) end
 end
 
-(* The chapter, content node and UTF-16 offset the selection starts at, and the sentence there (the node's text cut by the
-   segmenter in the book's language lang[0, lang_len)); none when nothing is selected in the chapter's text *)
+(* The chapter, content node and UTF-16 offset the selection starts at (keyword: vocabulary) *)
 #pub fn annot_selection_place {lang_loc:agz}{lang_len:nat | lang_len <= 36} (lang: $A.arr(byte, lang_loc, 36), lang_len: int lang_len): selection_place
 
 implement annot_selection_place (lang, lang_len) = let

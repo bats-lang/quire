@@ -1186,7 +1186,7 @@ in
     in _article_unread() end
 end
 
-(* Shows the word the last dict_find found, in the dictionary panel: clear of the selection when it is about one *)
+(* Shows the word the last dict_find found, in the dictionary panel: clear of the selection when it is about one (keyword: vocabulary) *)
 fn _show_hit (from_selection: bool): void =
   case+ _hit_take() of
   | ~NoHit() => ()
@@ -1215,11 +1215,11 @@ fn _show_hit (from_selection: bool): void =
 #pub fn dict_show (): void
 implement dict_show () = _show_hit(true)
 
-(* The same for a word chosen from a list (the words kept), which no selection is behind *)
+(* The same for a word chosen from a list (the words kept), which no selection is behind (keyword: vocabulary) *)
 #pub fn dict_show_listed (): void
 implement dict_show_listed () = _show_hit(false)
 
-(* The dictionary panel for a word no dictionary has: the word, and that no dictionary has it (its link looks it up online) *)
+(* The dictionary panel for a word no dictionary has: the word, and that no dictionary has it (its link looks it up online) (keyword: vocabulary) *)
 #pub fn dict_show_none {word_loc:agz}{word_size:pos}{word_len:nat | word_len <= word_size; word_len < 65536}
   (word: !$A.arr(byte, word_loc, word_size), word_len: int word_len): void
 

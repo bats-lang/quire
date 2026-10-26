@@ -28,18 +28,18 @@ staload "library.sats"
 
 implement $P.dispose<$IDB.stored>(_) = ()
 
-(* A record longer than this is not a word's *)
+(* A record longer than this is not a word's (keyword: vocabulary) *)
 #define WORD_RECORD_MAX 4096
 
 (* ============================================================
    Ids and keys
    ============================================================ *)
 
-(* A byte lower-cased when it is an ASCII capital *)
+(* A byte lower-cased when it is an ASCII capital (keyword: vocabulary) *)
 fn _lower {code:nat | code < 256} (code: int code): [lowered:nat | lowered < 256] int lowered =
   if code >= 65 then (if code <= 90 then code + 32 else code) else code
 
-(* text[start, start + count) := the word's first count bytes, lower-cased *)
+(* text[start, start + count) := the word's first count bytes, lower-cased (keyword: vocabulary) *)
 fun _put_lowered {text_loc,word_loc:agz}{word_size:pos}{count:nat | count <= word_size}{start:nat | start + count <= 128}{i:nat | i <= count} .<count - i>.
   (text: !$A.arr(byte, text_loc, 128), word: !$A.arr(byte, word_loc, word_size), count: int count, start: int start, i: int i): void =
   if i >= count then ()
@@ -47,7 +47,7 @@ fun _put_lowered {text_loc,word_loc:agz}{word_size:pos}{count:nat | count <= wor
     val () = $A.write_byte(text, start + i, _lower($AR.low_byte(byte2int0($A.get<byte>(word, i)))))
   in _put_lowered(text, word, count, start, i + 1) end
 
-(* text[start, start + count) := the first count bytes of a language code *)
+(* text[start, start + count) := the first count bytes of a language code (keyword: vocabulary) *)
 fun _put_code {text_loc,language_loc:agz}{language_size:pos}{count:nat | count <= language_size}{start:nat | start + count <= 128}{i:nat | i <= count} .<count - i>.
   (text: !$A.arr(byte, text_loc, 128), language: !$A.arr(byte, language_loc, language_size), count: int count, start: int start, i: int i): void =
   if i >= count then ()
@@ -55,8 +55,7 @@ fun _put_code {text_loc,language_loc:agz}{language_size:pos}{count:nat | count <
     val () = $A.write_byte(text, start + i, $AR.low_byte(byte2int0($A.get<byte>(language, i))))
   in _put_code(text, language, count, start, i + 1) end
 
-(* A word's id: the first 14 hex digits of the SHA-256 of the word (its ASCII capitals lower-cased), a colon and its
-   language, as two halves of 28 bits as a book's id is: the same on every device, so sync meets the same word *)
+(* A word's id: the digest of the word (its ASCII capitals lower-cased) and its language (keyword: vocabulary) *)
 #pub fn wordstore_id {word_loc,language_loc:agz}{word_size,language_size:pos}{word_len:nat | word_len <= word_size; word_len <= 64}{language_len:nat | language_len <= language_size; language_len <= 36}
   (word: !$A.arr(byte, word_loc, word_size), word_len: int word_len, language: !$A.arr(byte, language_loc, language_size), language_len: int language_len): @(Int, Int)
 
@@ -74,7 +73,7 @@ implement wordstore_id (word, word_len, language, language_len) = let
   val () = $A.free<byte>(digest)
 in id end
 
-(* The key of a word's record: "words/" and the 14 hex digits of its id *)
+(* The key of a word's record: the prefix and the hex digits of its id (keyword: vocabulary) *)
 #pub fn wordstore_key (id_high: Int, id_low: Int): [l:agz] $A.arr(byte, l, 20)
 
 implement wordstore_key (id_high, id_low) = let
@@ -94,7 +93,7 @@ in key end
    Words, read
    ============================================================ *)
 
-(* A word of the store: its id and what it holds *)
+(* A word of the store: its id and what it holds (keyword: vocabulary) *)
 #pub datavtype stored_word =
   | {contents:wordx} StoredWord of (Int, Int, word_image(contents))
 
@@ -102,7 +101,7 @@ in key end
   | StoredWordsNone(0) of ()
   | {count:nat} StoredWordsSome(count + 1) of (stored_word, stored_words(count))
 
-(* What reading the words came to: they could not be read (nothing may be said of them), or the words *)
+(* What reading the words came to: they could not be read (nothing may be said of them), or the words (keyword: vocabulary) *)
 #pub datavtype words_read =
   | WordsUnreadable of ()
   | {count:nat} WordsRead of (stored_words(count), int count)
@@ -131,7 +130,7 @@ fn _hex_value {byte_value:nat | byte_value < 256} (byte_value: int byte_value): 
     else if byte_value >= 97 then (if byte_value <= 102 then byte_value - 87 else ~1) else ~1)
   else ~1
 
-(* The 7 hex digits at source[at, at + 7) as a number, or -1 when one is not a digit *)
+(* The hex digits of a key's id as a number, or -1 when one is not a digit (keyword: vocabulary) *)
 fn _seven_hex_at {l:agz}{owner:addr}{n:nat}{at:nat | at + 7 <= n}
   (source: !$A.arrx(byte, l, n, owner), at: int at): [value:int | ~1 <= value] int value = let
   fun accumulate {i:nat | i <= 7}{total:nat} .<7 - i>. (source: !$A.arrx(byte, l, n, owner), i: int i, total: int total): [value:int | ~1 <= value] int value =
@@ -147,7 +146,7 @@ fn _u16_at {l:agz}{owner:addr}{n:nat}{at:nat | at + 2 <= n}
   (source: !$A.arrx(byte, l, n, owner), at: int at): [value:nat | value < 65536] int value =
   $AR.low_byte(byte2int0($A.get<byte>(source, at))) + 256 * $AR.low_byte(byte2int0($A.get<byte>(source, at + 1)))
 
-(* The little-endian u32 at source[at, at + 4), or -1 when it is 2 to the 28 or more *)
+(* The little-endian length in a stored record, or -1 when it is too large to count (keyword: vocabulary) *)
 fn _u32_at {l:agz}{owner:addr}{n:nat}{at:nat | at + 4 <= n}
   (source: !$A.arrx(byte, l, n, owner), at: int at): [value:int | ~1 <= value; value < 268435456] int value = let
   val first_byte = $AR.low_byte(byte2int0($A.get<byte>(source, at)))
@@ -158,7 +157,7 @@ in
   if fourth_byte >= 16 then ~1 else first_byte + 256 * (second_byte + 256 * (third_byte + 256 * fourth_byte))
 end
 
-(* The id of the key source[at, at + 20) when it is "words/" and 14 hex digits, else -1 in the first *)
+(* The id of a word's key when it is the prefix and the hex digits of an id, else -1 in the first (keyword: vocabulary) *)
 fn _key_id {l:agz}{owner:addr}{n:nat}{at:nat | at + 20 <= n}
   (source: !$A.arrx(byte, l, n, owner), at: int at): @(Int, Int) = let
   fun prefix_is {i:nat | i <= 6} .<6 - i>. (source: !$A.arrx(byte, l, n, owner), i: int i): bool =
@@ -176,7 +175,7 @@ in
   in if high < 0 then @(~1, 0) else if low < 0 then @(~1, 0) else @(high, low) end
 end
 
-(* The word of the record at piece[at, at + len) when it can be used: read whole, or with what it lost standing in *)
+(* The word of the record at piece[at, at + len) when it can be used: read whole, or with what it lost standing in (keyword: vocabulary) *)
 datavtype word_found =
   | {contents:wordx} WordFound of word_image(contents)
   | WordNotFound of ()
@@ -204,7 +203,7 @@ fn _read_word {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
     | ~WR_damaged() => WordNotFound()
   end
 
-(* The words of the blob get_prefix gave, from at on, onto words *)
+(* The words of the blob get_prefix gave, from at on, onto words (keyword: vocabulary) *)
 fun _read_entries {l:agz}{owner:addr}{n:nat}{at:nat | at <= n}{count:nat | count <= WORDS_MOST} .<n - at>.
   (piece: !$A.arrx(byte, l, n, owner), size: int n, at: int at, words: stored_words(count), count: int count)
   : [total:nat | total <= WORDS_MOST] @(stored_words(total), int total) =
@@ -234,8 +233,7 @@ fun _read_entries {l:agz}{owner:addr}{n:nat}{at:nat | at <= n}{count:nat | count
     end
   end
 
-(* The words kept: every record under "words/" in one view; they are not in any order, and a deleted word's tombstone is
-   among them *)
+(* The words kept: every record under "words/" in one view (keyword: vocabulary) *)
 #pub fun wordstore_read (): $P.promise(words_read, $P.Chained)
 
 implement wordstore_read () = let
@@ -263,17 +261,17 @@ end
    Words, changed
    ============================================================ *)
 
-(* What an edit of a word's record came to *)
+(* What an edit of a word's record came to (keyword: vocabulary) *)
 #pub datatype word_saved =
-  | WordSaved        (* the record is stored as the edit made it *)
-  | WordKept         (* the edit changed nothing: no such word, or it was changed later elsewhere *)
-  | WordFull         (* a new word was not kept: as many are kept as the store holds *)
-  | WordRefused      (* the stored record is not one this Quire can change: nothing was written *)
-  | WordNotSaved     (* it could not be read or written: nothing was kept *)
+  | WordSaved        (* the record is stored as the edit made it (keyword: vocabulary) *)
+  | WordKept         (* the edit changed nothing: no such word, or it was changed later elsewhere (keyword: vocabulary) *)
+  | WordFull         (* a new word was not kept: as many are kept as the store holds (keyword: vocabulary) *)
+  | WordRefused      (* the stored record is not one this Quire can change: nothing was written (keyword: vocabulary) *)
+  | WordNotSaved     (* it could not be read or written: nothing was kept (keyword: vocabulary) *)
 
 implement $P.dispose<word_saved>(_) = ()
 
-(* How many records are kept, counted when the store is read at start and followed as words are made and dropped *)
+(* How many records are kept, counted when the store is read at start and followed as words are made and dropped (keyword: vocabulary) *)
 val _kept = ref<int>(0)
 
 #pub fn wordstore_kept (): int
@@ -282,21 +280,21 @@ implement wordstore_kept () = !_kept
 #pub fn wordstore_kept_set (count: int): void
 implement wordstore_kept_set (count) = !_kept := count
 
-(* What to do to a word's record *)
+(* What to do to a word's record (keyword: vocabulary) *)
 #pub datavtype word_edit =
-  | {contents:wordx} NoteLookup of word_image(contents)     (* a lookup: a new word, or the lookup counted in the one kept *)
-  | {contents:wordx} PutWord of (word_image(contents), Int) (* the word as it is given, at this stamp, whatever is kept (Undo) *)
-  | {contents:wordx} MergeWord of word_image(contents)      (* the word of another device: taken when it changed later *)
-  | MasterWord of (Int)                                      (* mastered, at this stamp *)
-  | LearnWordAgain of (Int, Int)                             (* learning again from now: the minute, the stamp *)
-  | ReviewWord of (bool, Int, Int)                           (* reviewed, known or not: at this minute and stamp *)
-  | DeleteWord of (Int, Int)                                 (* deleted at this minute and stamp: only the tombstone is kept *)
+  | {contents:wordx} NoteLookup of word_image(contents)     (* a lookup: a new word, or the lookup counted in the one kept (keyword: vocabulary) *)
+  | {contents:wordx} PutWord of (word_image(contents), Int) (* the word as it is given, at this stamp, whatever is kept (Undo) (keyword: vocabulary) *)
+  | {contents:wordx} MergeWord of word_image(contents)      (* the word of another device: taken when it changed later (keyword: vocabulary) *)
+  | MasterWord of (Int)                                      (* mastered, at this stamp (keyword: vocabulary) *)
+  | LearnWordAgain of (Int, Int)                             (* learning again from now: the minute, the stamp (keyword: vocabulary) *)
+  | ReviewWord of (bool, Int, Int)                           (* reviewed, known or not: at this minute and stamp (keyword: vocabulary) *)
+  | DeleteWord of (Int, Int)                                 (* deleted at this minute and stamp: only the tombstone is kept (keyword: vocabulary) *)
 
 datavtype word_made =
   | {contents:wordx} Made of word_image(contents)
   | NotMade of ()
 
-(* The image with these numbers and its own strings *)
+(* The image with these numbers and its own strings (keyword: vocabulary) *)
 fn _renumbered {contents:wordx} (image: !word_image(contents), numbers: word_numbers): word_made = let
   val @(language, language_len) = word_image_language(image)
   val @(head, head_len) = word_image_sentence_head(image)
@@ -308,10 +306,10 @@ in
   | ~WordNotImaged() => NotMade()
 end
 
-(* The image with these numbers and the strings of another image *)
+(* The image with these numbers and the strings of another image (keyword: vocabulary) *)
 fn _renumbered_from {contents:wordx} (strings: !word_image(contents), numbers: word_numbers): word_made = _renumbered(strings, numbers)
 
-(* A deleted word's tombstone: its numbers cleared but when it changed and was deleted, and no strings *)
+(* A deleted word's tombstone: its numbers cleared but when it changed and was deleted, and no strings (keyword: vocabulary) *)
 fn _tombstone (minute: Int, stamp: Int): word_made = let
   val numbers = @{book_high = 0, book_low = 0, lookups = 0, first_minute = 0, last_minute = 0, modified = stamp, deleted = minute,
     chapter = 0, node = 0, offset = 0, mastered = 0, streak = 0, due = 0}
@@ -321,7 +319,7 @@ in
   | ~WordNotImaged() => NotMade()
 end
 
-(* A word's image as the bytes of its record, kept in a new record or patched into the one read (a newer Quire's chunks stay) *)
+(* A word's image as the bytes of its record (keyword: vocabulary) *)
 datavtype word_bytes =
   | {l:agz}{n:pos | n <= WORD_RECORD_MAX} WordBytes of ($A.arr(byte, l, n), int n)
   | NoWordBytes of ()
@@ -338,12 +336,12 @@ in
   in WordBytes(bytes, count) end
 end
 
-(* What an edit makes of the word read: the image to write, or nothing to write *)
+(* What an edit makes of the word read: the image to write, or nothing to write (keyword: vocabulary) *)
 datavtype applied =
   | {contents:wordx} Apply of word_image(contents)
   | NoApply of ()
 
-(* The edit applied to the word read, own (consumed) *)
+(* The edit applied to the word read, own (consumed) (keyword: vocabulary) *)
 fn _apply {own_value:wordx} (edit: word_edit, own: !word_image(own_value)): applied = let
   val own_numbers = word_image_numbers(own)
 in
@@ -421,7 +419,7 @@ in
     in $IDB.Keep() end
 end
 
-(* A new word: kept unless as many are kept as the store holds *)
+(* A new word: kept unless as many are kept as the store holds (keyword: vocabulary) *)
 fn _create {contents:wordx} (image: word_image(contents), answer: $P.resolver(word_saved)): $IDB.writeback =
   if !_kept >= words_most() then let
     val () = word_image_free(image)
@@ -441,7 +439,7 @@ implement word_edit_free (edit) =
   | ~ReviewWord(_, _, _) => ()
   | ~DeleteWord(_, _) => ()
 
-(* The edit applied to the record read: the image it makes patched into the record, which keeps a newer Quire's chunks *)
+(* The edit applied to the record read: the image it makes patched into the record, which keeps a newer Quire's chunks (keyword: vocabulary) *)
 fn _decide_record {contents:wordx}{version,least_version:int}{chunks:extras}
   (record: wordrecord(contents, version, least_version, chunks), edit: word_edit, answer: $P.resolver(word_saved)): $IDB.writeback = let
   val own = word_record_image(record)
@@ -469,7 +467,7 @@ in
     end
 end
 
-(* A record written whole for a word that is not stored, or whose record cannot be read as one *)
+(* A record written whole for a word that is not stored, or whose record cannot be read as one (keyword: vocabulary) *)
 fn _decide_absent (edit: word_edit, answer: $P.resolver(word_saved)): $IDB.writeback =
   case+ edit of
   | ~NoteLookup(image) => _create(image, answer)
@@ -487,7 +485,7 @@ fn _decide_absent (edit: word_edit, answer: $P.resolver(word_saved)): $IDB.write
   | ~DeleteWord(_, _) => let val () = $P.resolve<word_saved>(answer, WordKept()) in $IDB.Keep() end
 
 
-(* What an update of a word's record decides, from what it read *)
+(* What an update of a word's record decides, from what it read (keyword: vocabulary) *)
 fn _decide (found: $IDB.lookup, edit: word_edit, answer: $P.resolver(word_saved)): $IDB.writeback =
   case+ found of
   | ~$IDB.Unreadable(cause) => let
@@ -530,12 +528,11 @@ fn _decide (found: $IDB.lookup, edit: word_edit, answer: $P.resolver(word_saved)
       end
     end
 
-(* An answer whose update did not commit is not the answer *)
+(* An answer whose update did not commit is not the answer (keyword: vocabulary) *)
 fn _unsaved (answer: $P.promise(word_saved, $P.Pending)): $P.promise(word_saved, $P.Chained) =
   $P.and_then<word_saved><word_saved>(answer, llam(_) => $P.ret<word_saved>(WordNotSaved()))
 
-(* The word id_high, id_low edited: its record is read in the same transaction, the edit applied to it and the result
-   written; two edits of one word never overwrite each other's change *)
+(* The word id_high, id_low edited (keyword: vocabulary) *)
 #pub fun wordstore_edit (id_high: Int, id_low: Int, edit: word_edit): $P.promise(word_saved, $P.Chained)
 
 implement wordstore_edit (id_high, id_low, edit) = let
@@ -553,7 +550,7 @@ in
     | ~$IDB.NotUpdated(cause) => let val () = $IDB.write_failure_free(cause) in _unsaved(answer) end)
 end
 
-(* A word's record deleted for good (a tombstone kept long enough), the count of the records kept following *)
+(* A word's record deleted for good (a tombstone kept long enough), the count of the records kept following (keyword: vocabulary) *)
 #pub fun wordstore_forget (id_high: Int, id_low: Int): $P.promise($IDB.stored, $P.Chained)
 
 implement wordstore_forget (id_high, id_low) = let
@@ -565,7 +562,7 @@ implement wordstore_forget (id_high, id_low) = let
 in deleting end
 
 
-(* What reading one word came to *)
+(* What reading one word came to (keyword: vocabulary) *)
 #pub datavtype word_got =
   | {contents:wordx} WordGot of word_image(contents)
   | WordNone of ()
@@ -575,7 +572,7 @@ implement word_got_free (got) = case+ got of ~WordGot(image) => word_image_free(
 
 implement $P.dispose<word_got>(got) = word_got_free(got)
 
-(* The word id_high, id_low as stored (a tombstone too), or none *)
+(* The word id_high, id_low as stored (a tombstone too), or none (keyword: vocabulary) *)
 #pub fun wordstore_get (id_high: Int, id_low: Int): $P.promise(word_got, $P.Chained)
 
 implement wordstore_get (id_high, id_low) = let
@@ -594,4 +591,4 @@ in
     | ~ContentUnreadable() => $P.ret<word_got>(WordNone()))
 end
 
-end (* #target wasm *)
+end (* #target wasm (keyword: vocabulary) *)

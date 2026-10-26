@@ -739,8 +739,7 @@ implement $P.dispose<import_outcome>(outcome) = import_outcome_free(outcome)
 fn _opened_of (outcome: load_outcome): opened =
   if load_shown(outcome) then OpenedShown() else OpenedNotShown()
 
-(* Where the words screen's Go to takes the reader once the book it opens is shown: the chapter and content node of the
-   lookup (the chapter -1 when there is none to go to) *)
+(* Where the words screen's Go to takes the reader once the book it opens is shown (keyword: vocabulary) *)
 val _pending_chapter = ref<Int>(~1)
 val _pending_node = ref<Int>(~1)
 
@@ -2325,7 +2324,7 @@ fn _escape_overlay (): bool =
   | ~Escaped(LShelf()) => let
       val () = _shelf_left()
     in true end
-  (* the review closed: the words follow what was reviewed *)
+  (* the review closed: the words follow what was reviewed (keyword: vocabulary) *)
   | ~Escaped(LReview()) => let
       val () = words_review_closed()
     in true end
@@ -3101,7 +3100,7 @@ in
     | $BW.WatchEnded() => ())
 end
 
-(* The Wiktionary search of the word in the language, as the dictionary panel's link to look it up online *)
+(* The Wiktionary search of the word in the language, as the dictionary panel's link to look it up online (keyword: vocabulary) *)
 fn _word_online {word_loc,code_loc:agz}{word_len:nat | word_len <= 64}{code_len:nat | code_len <= 3}
   (word: !$A.arr(byte, word_loc, 65), word_len: int word_len, code: !$A.arr(byte, code_loc, 3), code_len: int code_len): void =
   if code_len <= 0 then () else let
@@ -3113,7 +3112,7 @@ fn _word_online {word_loc,code_loc:agz}{word_len:nat | word_len <= 64}{code_len:
   val () = _online_href(out, url_len)
 in $A.free<byte>(out) end
 
-(* The word looked up in the dictionary of its language, and the link to look it up online made *)
+(* The word looked up in the dictionary of its language, and the link to look it up online made (keyword: vocabulary) *)
 fn _word_prepare {word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
   (word: !$A.arr(byte, word_loc, word_len + 1), word_len: int word_len, language: !$A.arr(byte, language_loc, language_len + 1), language_len: int language_len): dict_found =
   if word_len <= 0 then DictMissing()
@@ -3136,7 +3135,7 @@ fn _word_prepare {word_loc,language_loc:agz}{word_len,language_len:nat | word_le
     val () = $A.free<byte>(code)
   in found end
 
-(* What the lookup found, shown in the panel; a dictionary whose files are still being read is, this time, as none *)
+(* What the lookup found, shown in the panel; a dictionary whose files are still being read is, this time, as none (keyword: vocabulary) *)
 fn _word_shown {word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
   (found: dict_found, word: $A.arr(byte, word_loc, word_len + 1), word_len: int word_len, language: $A.arr(byte, language_loc, language_len + 1), language_len: int language_len): void =
   case+ found of
@@ -3150,12 +3149,12 @@ fn _word_shown {word_loc,language_loc:agz}{word_len,language_len:nat | word_len 
     in $A.free<byte>(language) end
   | ~DictReading(reading) => let
       val () = $P.finish<bool>(reading, llam(_) => ())
-      (* ignored: the files were not read, which the panel says as it says a word no dictionary has *)
+      (* ignored: the files were not read, which the panel says as it says a word no dictionary has (keyword: vocabulary) *)
       val () = dict_show_none(word, word_len)
       val () = $A.free<byte>(word)
     in $A.free<byte>(language) end
 
-(* The dictionary's files were read, or could not be: the word looked up once more, or shown as none *)
+(* The dictionary's files were read, or could not be: the word looked up once more, or shown as none (keyword: vocabulary) *)
 fn _word_read {word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
   (opened: bool, word: $A.arr(byte, word_loc, word_len + 1), word_len: int word_len, language: $A.arr(byte, language_loc, language_len + 1), language_len: int language_len): void =
   if opened then let
@@ -3163,8 +3162,7 @@ fn _word_read {word_loc,language_loc:agz}{word_len,language_len:nat | word_len <
   in _word_shown(found, word, word_len, language, language_len) end
   else _word_shown(DictMissing(), word, word_len, language, language_len)
 
-(* A word chosen from a list: its dictionary entry in the panel, or that no dictionary has it. A dictionary whose files are
-   read first is looked in once they are *)
+(* A word chosen from a list: its dictionary entry in the panel (keyword: vocabulary) *)
 fn _word_define_with {word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
   (word: $A.arr(byte, word_loc, word_len + 1), word_len: int word_len, language: $A.arr(byte, language_loc, language_len + 1), language_len: int language_len): void =
   case+ _word_prepare(word, word_len, language, language_len) of
@@ -3173,24 +3171,24 @@ fn _word_define_with {word_loc,language_loc:agz}{word_len,language_len:nat | wor
   | ~DictFound() => _word_shown(DictFound(), word, word_len, language, language_len)
   | ~DictMissing() => _word_shown(DictMissing(), word, word_len, language, language_len)
 
-(* The row's word looked up in the dictionary panel *)
+(* The row's word looked up in the dictionary panel (keyword: vocabulary) *)
 fn _define_row (row: int): void = let
   val @(word, word_len, language, language_len) = words_row_word(row)
 in _word_define_with(word, word_len, language, language_len) end
 
-(* The review card's word looked up in the dictionary panel *)
+(* The review card's word looked up in the dictionary panel (keyword: vocabulary) *)
 fn _define_card (): void = let
   val @(word, word_len, language, language_len) = words_review_word()
 in _word_define_with(word, word_len, language, language_len) end
 
-(* The words as a CSV file shared, as a file where the platform shares them, else as text *)
+(* The words as a CSV file shared, as a file where the platform shares them, else as text (keyword: vocabulary) *)
 fn _share_words (way: share_as): void =
   $P.finish<share_end>(words_share(way), llam(ended) =>
     case+ ended of
     | ShareOver() => ()
     | RefusedAsFile() => $P.finish<share_end>(words_share(AsText()), llam(_) => ()))
 
-(* The book of the row opened at the place of its lookup *)
+(* The book of the row opened at the place of its lookup (keyword: vocabulary) *)
 fn _words_go (row: int): void = let
   val @(book_high, book_low, chapter, node) = words_row_place(row)
   val index = lib_index_of_id(book_high, book_low)
@@ -3206,7 +3204,7 @@ in
   in _open_book(index, ReaderChose()) end
 end
 
-(* The words screen, its book choice and the review *)
+(* The words screen, its book choice and the review (keyword: vocabulary) *)
 fn _wire_words {count:nat} (listeners: regs(count)): regs(count + 3) = let
   val listeners = RCons(listeners, OnEl("words-screen"), "click", llam(h) => let
       val clicked = _target(h)

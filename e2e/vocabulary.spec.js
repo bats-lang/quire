@@ -488,3 +488,127 @@ test('the Words screen and the Review screen are screens: Back and Escape leave 
   await page.keyboard.press('Escape');
   await expect(wordsScreen(page)).toBeHidden();
 });
+
+// Bounds, each said when reached (quire#565, keyword: vocabulary): a sentence cut at a character, the rows the screen draws,
+// the words the store holds, a write that fails.
+
+const STAMP = 1780000020000;
+const STAMP_MINUTE = STAMP / 60000;
+
+/** A backup file holding count words named name0.. (their ids are 1.. in 14 hex digits), all due, each with a short sentence */
+const wordsBackup = (count, name) => JSON.stringify({
+  quire: 1,
+  words: Array.from({ length: count }, (_, i) => ({
+    id: (i + 1).toString(16).padStart(14, '0'), word: `${name}${i}`, language: 'en', sentence: `A sentence with ${name}${i} in it.`,
+    lookups: 1, mastered: 0, streak: 0, due: STAMP_MINUTE, first: STAMP_MINUTE, last: STAMP_MINUTE, modified: STAMP, deleted: 0,
+    chapter: 0, node: 0, offset: 0,
+  })),
+});
+
+/** Restores the words of a backup file and returns to the library */
+async function restoreWords(page, json) {
+  await librarySettings(page);
+  await restoreInput(page).setInputFiles(rawFile('quire-backup.json', json));
+  await expect(dialog(page, 'Backup restored')).toBeVisible({ timeout: 200000 });
+  await dialog(page, 'Backup restored').getByRole('button', { name: 'Done' }).click();
+  await page.keyboard.press('Escape');
+  await expect(settingsScreen(page)).toBeHidden();
+}
+
+/** The Words screen, opened again until it lists count words (the restore puts them into the store after it has reported) */
+async function openWordsHolding(page, count) {
+  await expect(async () => {
+    await openWords(page);
+    await expect(wordsScreen(page).getByRole('status')).toContainText(`${count} due, ${count} learning, 0 mastered`, { timeout: 2000 });
+  }).toPass({ timeout: 300000, intervals: [1000, 2000, 5000] });
+}
+
+const ALERT_TIMEOUT = { timeout: 30000 };
+
+test('a sentence longer than the list keeps is cut at a character: the word is in it, no character is broken', async ({ page }) => {
+  const errors = await start(page);
+  await importDictionary(page, english, 'en');
+  const long = `${'café '.repeat(200)}Ephemeral ${'café '.repeat(200)}end.`;
+  await readBook(page, {
+    title: 'Vocabulary Long', author: 'Vocabulary Tests', language: 'en',
+    rawChapters: [{ body: `<p>${long}</p>` + '<p>lorem ipsum dolor sit amet</p>'.repeat(10) }],
+  });
+  const from = long.indexOf('Ephemeral');
+  await selectText(page, from, from + 'Ephemeral'.length);
+  await expect(selection(page)).toBeVisible();
+  await lookUpHere(page).click();
+  await expect(entry(page)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await toLibrary(page);
+  await openWords(page);
+  const sentence = row(page, 'Ephemeral').locator('.snip');
+  await expect(sentence).toBeVisible();
+  const kept = (await sentence.innerText()).trim();
+  expect(Buffer.byteLength(kept)).toBeLessThanOrEqual(510);
+  expect(Buffer.byteLength(kept)).toBeGreaterThan(400);
+  expect(kept).toContain('Ephemeral');
+  expect(kept).not.toContain('�');
+  expect(kept.length).toBeLessThan(long.length);
+  expect(kept.replace(/\s+/g, ' ')).toMatch(/^(café )*(café)?\s?(café )*Ephemeral( café)*/);
+  expect(errors).toEqual([]);
+});
+
+test('past 500 words the screen draws the newest 500 and says the rest are not shown, until a book is chosen', async ({ page }) => {
+  test.setTimeout(240000);
+  await start(page);
+  await restoreWords(page, wordsBackup(501, 'many'));
+  await openWordsHolding(page, 501);
+  const rows = wordsScreen(page).locator('.hrow');
+  await expect(rows).toHaveCount(500);
+  await expect(wordsScreen(page).getByText('More words are not shown here. Choose a book to see them.')).toBeVisible();
+});
+
+test('500 words or fewer are all drawn, with no line about words not shown', async ({ page }) => {
+  test.setTimeout(240000);
+  await start(page);
+  await restoreWords(page, wordsBackup(500, 'few'));
+  await openWordsHolding(page, 500);
+  await expect(wordsScreen(page).locator('.hrow')).toHaveCount(500);
+  await expect(wordsScreen(page).getByText('More words are not shown here')).toBeHidden();
+});
+
+test('when 10000 words are kept a new word is not kept, and the reader is told what to do', async ({ page }) => {
+  test.setTimeout(600000);
+  await start(page);
+  await importDictionary(page, english, 'en');
+  await importFiles(page, [epubFile(novel('Vocabulary Full'))], 1);
+  await restoreWords(page, wordsBackup(10000, 'full'));
+  await openWordsHolding(page, 10000);
+  await closeWords(page);
+  await openBook(page, 'Vocabulary Full');
+  await lookUp(page, 'Ephemeral');
+  await expect(page.getByRole('alert').filter({ hasText: 'This word was not kept: your words are full' })).toContainText(
+    'Delete words you no longer need in Words, then look it up again.', ALERT_TIMEOUT);
+  await toLibrary(page);
+  await librarySettings(page);
+  const backup = JSON.parse(await exportedBackup(page));
+  expect(backup.words.length).toBe(10000);
+  expect(backup.words.some(w => w.word === 'Ephemeral')).toBe(false);
+});
+
+test('a lookup that cannot be written is said, and the word is not listed', async ({ page }) => {
+  await start(page);
+  await importDictionary(page, english, 'en');
+  await readBook(page, novel('Vocabulary Unwritten'));
+  await page.evaluate(() => {
+    IDBObjectStore.prototype.put = function () {
+      this.transaction.abort();
+      return {};
+    };
+  });
+  const [from, to] = at('Ephemeral');
+  await selectText(page, from, to);
+  await expect(selection(page)).toBeVisible();
+  await lookUpHere(page).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'This word could not be kept in your words' })).toContainText(
+    'Reopen Quire to try again.', ALERT_TIMEOUT);
+  await page.keyboard.press('Escape');
+  await toLibrary(page);
+  await openWords(page);
+  await expect(wordsScreen(page).getByText('No words yet')).toBeVisible();
+});

@@ -20,9 +20,12 @@ words I look up", on by default) turns keeping off; it is in the backup as `word
   word), create time, review time, due time and a streak; Got it adds one to the streak and the due time is 30 minutes,
   12 hours, 1, 2, 4, 7, 15 days, then 30 days times 2 to the (streak - 8), the exponent capped at 6; Forgot sets the streak
   to 0 and due in 5 minutes. Taken: the schedule exactly (`words_got_it_minutes` in `src/words_rules.bats`).
-* Kobo (Vocabulary / Word Dictionary) and Apple Books keep looked-up words per book and offer no review of their own;
-  Readwise Reader keeps highlights with the sentence; Anki's lesson is that the card is the sentence with the word marked,
-  the definition behind a reveal. Taken: sentence with the word marked (`.mk`), the definition shown only on request.
+* Kobo's My Words (a beta feature since firmware 4.26, February 2021) keeps the words looked up, listed under More > Activity
+  ([the-ebook-reader](https://blog.the-ebook-reader.com/2021/02/17/kobo-firmware-update-4-26-released-adds-new-my-words-feature/)).
+  Apple Books, Play Books, Moon+ Reader and Thorium: no such list was found (quire#565 searched their help pages and
+  MobileRead); this note makes no claim about them. Anki's lesson, from its card design, is that the card is the sentence with
+  the word marked, the definition behind a reveal. Taken: sentence with the word marked (`.mk`), the definition shown only on
+  request.
 * No definition is stored: it is read again from the dictionary the reader has now, so a dictionary removed or added
   changes what the card shows and nothing stale is kept (and a licensed dictionary's text is not copied into the list).
 
@@ -73,5 +76,5 @@ language`, quoted, `quire-words.csv`) goes through `share_file`. `e2e/walk.js` w
 
 Proved by types: the record codec's groups and CRC (the codec is the proof-carrying one of `src/record.bats`), array bounds
 of every buffer here, each match is `case+`. Tested only: the schedule's numbers (`e2e/vocabulary.spec.js`, by a fake
-clock), the JSON round trips (`tests/codec` for the record; the backup and sync specs for the JSON), the sentence cut.
+clock), the JSON round trips (`tests/codec` for the record; the backup and sync specs for the JSON), the sentence cut (a case of its own in `e2e/vocabulary.spec.js`).
 `mutation/wordrec` (`tests/groups.json`, `mutation-bytes-records`) mutates the generated module's lemmas in CI.

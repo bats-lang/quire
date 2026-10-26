@@ -30,8 +30,7 @@ implement $P.dispose<words_read>(read) = words_read_free(read)
 implement $P.dispose<word_saved>(_) = ()
 implement $P.dispose<Int>(_) = ()
 
-(* The bytes a word takes in JSON, at most: its fixed text and numbers, and its three strings at their longest, every byte
-   escaped *)
+(* The bytes a word takes in JSON (keyword: vocabulary) *)
 #define WORD_JSON_MAX 7200
 
 (* ============================================================
@@ -45,7 +44,7 @@ fun _copy_into {source_loc,target_loc:agz}{source_size,target_size:pos}{count:na
     val () = $A.set<byte>(target, at + i, $A.get<byte>(source, i))
   in _copy_into(source, target, count, at, i + 1) end
 
-(* The head and the tail of a sentence joined in sentence, when they fit: how long it is (0 when they do not) *)
+(* The head and the tail of a sentence joined in sentence, when they fit: how long it is (keyword: vocabulary) *)
 fn _join {head_loc,tail_loc,sentence_loc:agz}{head_len,tail_len:nat | head_len < 256; tail_len < 256}
   (head: !$A.arr(byte, head_loc, head_len + 1), head_len: int head_len, tail: !$A.arr(byte, tail_loc, tail_len + 1), tail_len: int tail_len,
    sentence: !$A.arr(byte, sentence_loc, 511)): [total:nat | total <= 510] int total =
@@ -55,7 +54,7 @@ fn _join {head_loc,tail_loc,sentence_loc:agz}{head_len,tail_len:nat | head_len <
     val () = _copy_into(tail, sentence, tail_len, head_len, 0)
   in head_len + tail_len end
 
-(* A word as its JSON object at out[position, stop): the stop is within a word's most *)
+(* A word as its JSON object at out[position, stop): the stop is within a word's most (keyword: vocabulary) *)
 fn _word_json {l:agz}{arena:addr}{n:nat}{c:wordx}{position:nat | position + 7100 <= n}
   (out: !$A.arrx(byte, l, n, arena), position: int position, id_high: Int, id_low: Int, image: !word_image(c)): [stop:nat | stop <= position + 7100] int stop = let
   val numbers = word_image_numbers(image)
@@ -108,7 +107,7 @@ in
   in jw_lit(out, at, "}") end
 end
 
-(* The words of list as JSON objects, each after a comma but the first: the live ones, or every one with its tombstone *)
+(* The words of list as JSON objects, each after a comma but the first: the live ones, or every one with its tombstone (keyword: vocabulary) *)
 fun _words_json {l:agz}{arena:addr}{n:nat}{count:nat}{position:nat | position + 7200 * count + 1 <= n} .<count>.
   (out: !$A.arrx(byte, l, n, arena), position: int position, words: !stored_words(count), first: bool, tombstones: bool, now: Int)
   : [stop:nat | stop <= position + 7200 * count] int stop =
@@ -132,7 +131,7 @@ fun _words_count {count:nat} .<count>. (words: !stored_words(count)): int count 
   | StoredWordsNone() => 0
   | StoredWordsSome(_, rest) => 1 + _words_count(rest)
 
-(* The words as a JSON array in a chunk, under the key "words" after a comma: none when they cannot be had *)
+(* The words as a JSON array in a chunk, under the key "words" after a comma: none when they cannot be had (keyword: vocabulary) *)
 fn _chunk_of {count:nat | count <= 20000} (words: !stored_words(count), count: int count, tombstones: bool): jchunk =
   case+ piece_new(64 + 7200 * count) of
   | ~NoPiece() => JNone()
@@ -142,11 +141,11 @@ fn _chunk_of {count:nat | count <= 20000} (words: !stored_words(count), count: i
       val stop2 = jw_lit(out, stop, "]")
     in JChunk(owner, out, stop2) end
 
-(* The chunk when there are no more words than a file takes *)
+(* The chunk when there are no more words than a file takes (keyword: vocabulary) *)
 fn _chunk_guarded {count:nat} (words: !stored_words(count), count: int count, tombstones: bool): jchunk =
   if count > 20000 then JNone() else _chunk_of(words, count, tombstones)
 
-(* The words kept, as a backup holds them: the live ones *)
+(* The words kept, as a backup holds them: the live ones (keyword: vocabulary) *)
 #pub fn words_backup_chunk (): $P.promise(jchunk, $P.Chained)
 
 implement words_backup_chunk () =
@@ -163,9 +162,7 @@ implement words_backup_chunk () =
    Reading
    ============================================================ *)
 
-(* A word's numbers as they are read: values[0] and [1] its id, [2] and [3] its book's, [4] chapter, [5] node, [6] offset,
-   [7] first, [8] last, [9] lookups, [10] mastered, [11] streak, [12] due, [13] modified, [14] deleted, [15] whether it
-   has an id *)
+(* A word's numbers as they are read (keyword: vocabulary) *)
 #define VALUES 16
 
 fn _slot_of {key_loc:agz}{key_len:nat | key_len <= 16} (key: !$A.arr(byte, key_loc, 16), key_len: int key_len): [slot:int | ~1 <= slot; slot < 16] int slot =
@@ -184,8 +181,7 @@ fn _slot_of {key_loc:agz}{key_len:nat | key_len <= 16} (key: !$A.arr(byte, key_l
 fun _zero_values {values_loc:agz}{i:nat | i <= VALUES} .<VALUES - i>. (values: !$A.arr(Int, values_loc, VALUES), i: int i): void =
   if i >= VALUES then () else let val () = $A.set<Int>(values, i, 0) in _zero_values(values, i + 1) end
 
-(* The members of a word's object from position, to its closing brace: its numbers into values, its strings into the
-   buffers; whether it was read whole, the strings' lengths and where it ends *)
+(* The members of a word's object from position (keyword: vocabulary) *)
 fun _members {l,key_loc,word_loc,language_loc,sentence_loc,values_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n} .<n - position>.
   (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, 16),
    word_buffer: !$A.arr(byte, word_loc, 256), language_buffer: !$A.arr(byte, language_loc, 256), sentence_buffer: !$A.arr(byte, sentence_loc, 511),
@@ -251,7 +247,7 @@ in
   end
 end
 
-(* source[from, from + count) in a new array of count + 1 bytes *)
+(* source[from, from + count) in a new array of count + 1 bytes (keyword: vocabulary) *)
 fun _slice_copy {l,out_loc:agz}{size,out_size:pos}{from,count:nat | from + count <= size; count < out_size}{i:nat | i <= count} .<count - i>.
   (source: !$A.arr(byte, l, size), out: !$A.arr(byte, out_loc, out_size), from: int from, count: int count, i: int i): void =
   if i >= count then ()
@@ -265,8 +261,7 @@ fn _slice {l:agz}{size:pos}{from,count:nat | from + count <= size; count < 256}
   val () = _slice_copy(source, out, from, count, 0)
 in out end
 
-(* The word made of the members read: a live word needs its id and its word; a tombstone, its id and the stamp it was
-   deleted at *)
+(* The word made of the members read (keyword: vocabulary) *)
 fn _word_of {word_loc,language_loc,sentence_loc,values_loc:agz}{w,g,s:nat | w <= 255; g <= 255; s <= 510}
   (values: !$A.arr(Int, values_loc, VALUES), word_buffer: !$A.arr(byte, word_loc, 256), word_len: int w,
    language_buffer: !$A.arr(byte, language_loc, 256), language_len: int g, sentence_buffer: !$A.arr(byte, sentence_loc, 511), sentence_len: int s): $R.option(stored_word) =
@@ -294,7 +289,7 @@ fn _word_of {word_loc,language_loc,sentence_loc,values_loc:agz}{w,g,s:nat | w <=
     end
   end
 
-(* The words of a JSON array's items from position, to its closing bracket, onto words (at most the store holds) *)
+(* The words of a JSON array's items from position, to its closing bracket, onto words (at most the store holds) (keyword: vocabulary) *)
 fun _items {l,key_loc,word_loc,language_loc,sentence_loc,values_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n}{count:nat | count <= 10000} .<n - position>.
   (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, 16),
    word_buffer: !$A.arr(byte, word_loc, 256), language_buffer: !$A.arr(byte, language_loc, 256), sentence_buffer: !$A.arr(byte, sentence_loc, 511),
@@ -318,7 +313,7 @@ in
   else @(false, words, count)
 end
 
-(* Where the value of the top-level member "words" of the JSON file buf[0, n) starts, or -1 *)
+(* Where the value of the top-level member "words" of the JSON file buf[0, n) starts, or -1 (keyword: vocabulary) *)
 #pub fn words_array_at {l:agz}{owner:addr}{n:nat} (buf: !$A.arrx(byte, l, n, owner), n: int n): [at:int | ~1 <= at; at < n] int at
 
 implement words_array_at (buf, n) = let
@@ -333,8 +328,7 @@ in
   in at end
 end
 
-(* The words of the array at position of the JSON file (checked here as it is read): unreadable when the array is not
-   whole, else the words, a word it cannot make left out *)
+(* The words of the array at position of the JSON file (checked here as it is read) (keyword: vocabulary) *)
 #pub fn words_parse {l:agz}{owner:addr}{n:nat}{position:nat | position <= n}
   (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position): words_read
 
@@ -362,8 +356,7 @@ implement words_parse (buf, n, position) =
    Putting words into the store
    ============================================================ *)
 
-(* The words of the JSON file buf[0, n): those of its "words" member, none when it has none, unreadable when the member is not
-   a whole array *)
+(* The words of a JSON file's words member: none when it has none, unreadable when it is not a whole array (keyword: vocabulary) *)
 #pub fn words_from_file {l:agz}{owner:addr}{n:nat} (buf: !$A.arrx(byte, l, n, owner), n: int n): words_read
 
 implement words_from_file (buf, n) = let
@@ -373,8 +366,7 @@ in
   else words_parse(buf, n, at)
 end
 
-(* Each word of words edited into the store, one after another, by merging (the latest change wins) or as it is given;
-   the number done *)
+(* Each word of words edited into the store (keyword: vocabulary) *)
 fun _apply {count:nat} .<count>. (words: stored_words(count), replace: bool, done: Int): $P.promise(Int, $P.Chained) =
   case+ words of
   | ~StoredWordsNone() => $P.ret<Int>(done)
@@ -385,7 +377,7 @@ fun _apply {count:nat} .<count>. (words: stored_words(count), replace: bool, don
       $P.and_then<word_saved><Int>(wordstore_edit(id_high, id_low, edit), llam(_) => _apply(rest, replace, done + 1))
     end
 
-(* Whether words holds the word with the id *)
+(* Whether words holds the word with the id (keyword: vocabulary) *)
 fun _holds {count:nat} .<count>. (words: !stored_words(count), high: Int, low: Int): bool =
   case+ words of
   | StoredWordsNone() => false
@@ -394,7 +386,7 @@ fun _holds {count:nat} .<count>. (words: !stored_words(count), high: Int, low: I
      | StoredWord(word_high, word_low, _) =>
        if word_high = high then (if word_low = low then true else _holds(rest, high, low)) else _holds(rest, high, low))
 
-(* Each live word of nearby that words does not hold deleted, as a snapshot put back leaves none of what it did not have *)
+(* Each live word of nearby that words does not hold deleted, as a snapshot put back leaves none of what it did not have (keyword: vocabulary) *)
 fun _delete_missing {count,kept:nat} .<count>. (nearby: stored_words(count), words: !stored_words(kept)): void =
   case+ nearby of
   | ~StoredWordsNone() => ()
@@ -404,12 +396,11 @@ fun _delete_missing {count,kept:nat} .<count>. (nearby: stored_words(count), wor
       val () = word_image_free(image)
       val () = (if numbers.deleted > 0 then ()
         else if _holds(words, high, low) then ()
-        (* ignored: a word that is not deleted stays, and is deleted by the next restore *)
+        (* ignored: a word that is not deleted stays, and is deleted by the next restore (keyword: vocabulary) *)
         else $P.finish<word_saved>(wordstore_edit(high, low, DeleteWord($TM.epoch_minutes(), stamp_now())), llam(_) => ()))
     in _delete_missing(rest, words) end
 
-(* The words of a file put into the store: merged by the latest change of each, or, when replace, the store made to hold
-   exactly these (what it holds that they do not is deleted), as a snapshot put back does. The number put *)
+(* The words of a file put into the store (keyword: vocabulary) *)
 #pub fn words_restore (read: words_read, replace: bool): $P.promise(Int, $P.Chained)
 
 implement words_restore (read, replace) =
@@ -434,7 +425,7 @@ datavtype taken =
   | NotTaken of ()
   | Taken of stored_word
 
-(* words without the word of the id, which is given when there is one *)
+(* words without the word of the id, which is given when there is one (keyword: vocabulary) *)
 fun _take_id {count:nat} .<count>. (words: stored_words(count), high: Int, low: Int): [rest:nat] @(taken, stored_words(rest)) =
   case+ words of
   | ~StoredWordsNone() => @(NotTaken(), StoredWordsNone())
@@ -465,7 +456,7 @@ fn _image_modified {c:wordx} (image: !word_image(c)): Int = let
   val numbers = word_image_numbers(image)
 in numbers.modified end
 
-(* The words of both devices: of each id the one changed later (this device's when they were changed together) *)
+(* The words of both devices: of each id the one changed later (this device's when they were changed together) (keyword: vocabulary) *)
 fun _merged {here,there,done:nat} .<there>. (nearby: stored_words(here), remote: stored_words(there), acc: stored_words(done)): [total:nat] stored_words(total) =
   case+ remote of
   | ~StoredWordsNone() => _append(nearby, acc)
@@ -484,8 +475,7 @@ fun _merged {here,there,done:nat} .<there>. (nearby: stored_words(here), remote:
         in _merged(left, rest, StoredWordsSome(here_word, acc)) end
     end
 
-(* The words of this device and of the file, merged, as the JSON the file is written with, under "words" after a comma:
-   the file's alone when this device's cannot be read *)
+(* The words of this device and of the file (keyword: vocabulary) *)
 #pub fn words_sync_chunk (remote: words_read): $P.promise(jchunk, $P.Chained)
 
 implement words_sync_chunk (remote) =
@@ -510,4 +500,4 @@ implement words_sync_chunk (remote) =
       in $P.ret<jchunk>(chunk) end)
 
 
-end (* #target wasm *)
+end (* #target wasm (keyword: vocabulary) *)

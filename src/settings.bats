@@ -709,14 +709,14 @@ fn _fullscreen_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int 
   else if byte2int0($A.get<byte>(record, at)) <> 70 then !_fullscreen := FullscreenOff()
   else !_fullscreen := _fullscreen_of_code(byte2int0($A.get<byte>(record, at + 1)))
 
-(* "K" and the byte of whether the words looked up are kept at record[at, at + 2) *)
+(* "K" and the byte of whether the words looked up are kept at record[at, at + 2) (keyword: vocabulary) *)
 fn _words_write {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
   if at + 2 > n then ()
   else let
     val () = $A.write_byte(record, at, 75)
   in $A.write_byte(record, at + 1, _words_code(!_words)) end
 
-(* The words' byte after "K" at record[at]: checked here, once; kept when there is none (a record written before it) *)
+(* The words' byte after "K" at record[at]: checked here, once; kept when there is none (a record written before it) (keyword: vocabulary) *)
 fn _words_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
   if at + 2 > n then !_words := WordsKept()
   else if byte2int0($A.get<byte>(record, at)) <> 75 then !_words := WordsKept()
