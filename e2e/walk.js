@@ -173,7 +173,7 @@ export async function walkEveryScreen(page, { look, back }) {
   }
   // each toggle of the Page tab on, too: its look on is checked as well
   await openReadingSettings(page, 'Page');
-  for (const name of ['Full screen', 'Lock rotation']) {
+  for (const name of ['Full screen while reading', 'Lock rotation']) {
     const toggle = readingSettings(page).getByRole('button', { name, exact: true });
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-pressed', 'true');
