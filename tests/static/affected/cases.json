@@ -3,7 +3,7 @@
   {"name": "a rule, the orchestration notes, an agent and a skill of the agents", "changes": [["M", ".claude/rules/x.md"], ["A", ".claude/orchestration.md"], ["M", ".claude/agents/reviewer.md"], ["A", ".claude/skills/a/b/SKILL.md"]], "e2e": "none", "static": ["checkers"]},
   {"name": "a note of the agents beside a source change selects what the source selects", "changes": [["M", ".claude/x.md"], ["M", "src/foo.bats"]], "e2e": "all", "static": "all"},
   {"name": "the guidelines only: the checker that reads them", "changes": [["M", "CLAUDE.md"]], "e2e": "none", "static": ["checkers"]},
-  {"name": "the text lint's workflow is a run of its own", "changes": [["M", ".github/workflows/text-lint.yml"]], "e2e": "none", "static": "none"},
+  {"name": "the text lint's workflow is read by the checker's test (no draft condition)", "changes": [["M", ".github/workflows/text-lint.yml"]], "e2e": "none", "static": ["checkers"]},
   {"name": "the text lint and its phrases", "changes": [["M", "tests/static/guidelines.py"], ["M", "tests/static/guidelines/phrases.tsv"]], "e2e": "none", "static": ["checkers"]},
   {"name": "several notes", "changes": [["M", "README.md"], ["A", "ux-review/new.md"], ["M", "reports/quire-w3c-epub-tests.md"], ["M", "plan.txt"]], "e2e": "none", "static": "none"},
   {"name": "another workflow", "changes": [["M", ".github/workflows/deploy.yml"]], "e2e": "none", "static": "none"},
