@@ -139,7 +139,7 @@ const injections = {
   'height': '#filter-unread { height: 90px; }',
   'gap': '#filter-books-first { gap: 30px; }',
   'left-edge': '#collection-button { margin-left: 12px; }',
-  'lone-button': '.segpair { display: contents; } .lview > .seg { max-width: 200px; }',
+  'lone-button': '.segpair { display: contents; } #filter-finished { flex: 1 0 100%; }',
 };
 
 for (const [broken, style] of Object.entries(injections)) {

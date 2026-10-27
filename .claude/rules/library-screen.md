@@ -90,6 +90,9 @@ Decided by research (what comparable library apps do) in #375, #376, #377, #404:
   collection's name ends in an ellipsis). The collections stay flat, a book in several (a bit
   each); series and author grouping would be a feature of its own. `e2e/library-grouping.spec.js`
   measures this in every project (and at 200% in android) and injects each class.
+  The Trash panel (`trash-panel`, `.tpanel`) is `display: none` while nothing in it is shown
+  (`:has(>:not([data-hide='1']))`): empty it was a zero-height flex item that, at 200% where the
+  filters fill the line, took a line and a second 8 px gap (16 px) between the filters and the collection.
 * `e2e/library.spec.js` plays each of these; `e2e/walk.js` walks the sort and view
   menu and the shelf screens, so the layout, safe area, target size and Back
   specs cover them.

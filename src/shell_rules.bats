@@ -9,7 +9,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn shell_rules {left:nat | left >= 9856} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9856] sheet(after, false, false)
+#pub fn shell_rules {left:nat | left >= 9926} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9926] sheet(after, false, false)
 
 (* The library page, from body on *)
 fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1919] sheet(after, false, false) = let
@@ -244,7 +244,7 @@ fn shell_rules_fields_and_banners {left:nat | left >= 2241} (sheet: sheet(left, 
 in sheet end
 
 (* The import and book lists, from .banner span on *)
-fn shell_rules_import_and_book_lists {left:nat | left >= 1770} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1770] sheet(after, false, false) = let
+fn shell_rules_import_and_book_lists {left:nat | left >= 1840} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1840] sheet(after, false, false) = let
   (* the message takes the row and the buttons wrap under it on a narrow
      window, rather than Report being squeezed until its text is cut *)
   val sheet = rule(sheet, ".banner span")
@@ -340,6 +340,12 @@ fn shell_rules_import_and_book_lists {left:nat | left >= 1770} (sheet: sheet(lef
   (* the collection button, a control of its own kind under the filters:
      the whole line, the collection's name between its label and a
      caret, the name cut with an ellipsis rather than wrapped *)
+  (* the Trash panel is a block of its own with nothing shown in it
+     until a book or a dictionary is in the Trash: empty it takes no
+     line and so no gap (library-screen; at 200% it had a line of its own) *)
+  val sheet = rule(sheet, ".tpanel:not(:has(>:not([data-hide='1'])))")
+  val sheet = lay(sheet, Display(), "none")
+  val sheet = close(sheet)
   val sheet = rule(sheet, ".btn.cpick")
   val sheet = lay(sheet, Flex(), "1 1 100%")
   val sheet = lay(sheet, Display(), "flex")
