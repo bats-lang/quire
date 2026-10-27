@@ -128,7 +128,7 @@ in Sheet(builder) end
 
 #pub datatype prop =
   | Display | FlexDirection | Flex | FlexWrap | FlexBasis | AlignItems
-  | AlignSelf | JustifyContent | Order
+  | AlignSelf | JustifyContent | JustifyItems | Order
   | Width | MaxWidth | MinWidth | Height | MinHeight | BoxSizing
   | FontFamily | FontSize | FontWeight | FontStyle | Font | LineHeight
   | LetterSpacing | TextTransform | TextAlign | TextOverflow | TextDecoration
@@ -146,7 +146,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   case+ property of
   | Display() => "display" | FlexDirection() => "flex-direction" | Flex() => "flex"
   | FlexWrap() => "flex-wrap" | FlexBasis() => "flex-basis" | AlignItems() => "align-items"
-  | AlignSelf() => "align-self" | JustifyContent() => "justify-content"
+  | AlignSelf() => "align-self" | JustifyContent() => "justify-content" | JustifyItems() => "justify-items"
   | Order() => "order" | Width() => "width" | MaxWidth() => "max-width"
   | MinWidth() => "min-width" | Height() => "height"
   | MinHeight() => "min-height" | BoxSizing() => "box-sizing" | FontFamily() => "font-family"

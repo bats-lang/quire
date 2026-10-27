@@ -50,6 +50,17 @@ Decided by research (what comparable library apps do) in #375, #376, #377, #404:
   (`e2e/controls-shown.js`) fails a text element whose own ground is not the one
   behind it unless it is a control or a card. A book whose metadata says nothing
   of its accessibility is told so once, not by a line under each heading.
+* **a11y-display: Book info's accessibility section shows what the book says, and only that**
+  (quire#459). A group with no statement (Ways of reading, Conformance, Navigation, Rich
+  content, Hazards) is left out with its heading, and so is each "No information ... is
+  available" line; a book with a summary and no features shows the summary alone. The W3C
+  display guide (Accessibility Metadata Display Guide 2.1, sections 1.2, 2.1.4 and 3.1 to 3.2)
+  says Ways of reading and Conformance "should be rendered even if there is no metadata" and
+  leaves the choice of what to show to the reading system; the owner's ticket says that
+  information is useless, so it is left out. Other reading systems checked: none was found
+  to document a "No information" line (the search turned up only the guide and its
+  techniques), so the guide is the one comparable source and it permits hiding (sections
+  2.1.5, 3.3, 3.5, 3.8: "Hiding such sections is acceptable").
 * **An empty library says what to do, and only that one** (`emptiness`:
   `NoBooksYet | NoMatch | NoCollection | NoUnread | NoneReading | NoneFinished |
   NothingHidden | NothingArchived | TrashEmpty`, by `_emptiness_of`,
