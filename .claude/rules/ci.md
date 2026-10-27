@@ -26,14 +26,19 @@ The pins and the relock are in CLAUDE.md. Specifics:
   it, so package releases publish first and the quire PR with the new lock follows.
 * The relock moves a workflow pin with `RELOCK_TOKEN` (set in quire) and lists it as not
   moved without one. It moves each pin's `uses:` line, and with `pin-copies` in `relock.yml`
-  (`bats-lang/pwa/.github/workflows/android.yml pwa-ref`) every `pwa-ref:` line of the files that
-  call `android.yml` to the same commit. `pwa-ref` repeats the pin because a reusable workflow
+  (`bats-lang/pwa/.github/workflows/android.yml pwa-ref` and `.../play-release.yml pwa-ref`, area
+  pwa-ref, #851) every `pwa-ref:` line of the files that call the pin to the same commit. `pwa-ref` repeats the pin because a reusable workflow
   cannot read its own ref, and pwa's workflows check pwa out at it; two copies of one commit
   drift at every relock unless one tool writes both (#821). So every `pwa-ref:` of `check.yml`
-  equals the commit of its `android.yml@` pin, `play-internal`'s included, and a `pwa-ref` line
+  equals the commit of its `android.yml@` pin and of its `play-release.yml@` pin (`play-internal`'s), and a `pwa-ref` line
   is a plain 40-hex value (a quoted or computed one is refused by the relock).
-  `play-release.yml` is not in `workflow-pins`; it is called at its own commit. `e2e-setup` has
-  no `pwa-ref` and is moved whole.
+  `play-release.yml` is in `workflow-pins` and in `pin-copies` beside `android.yml`: both pins are
+  pwa's main, so one relock moves them to one commit (before #851 it was called at its own commit,
+  and its pwa-ref was `android.yml`'s, so the Play release ran two pwa commits). `e2e-setup` has
+  no `pwa-ref` and is moved whole. The relock test that fails when pins of one repository drift is the `skew` job of repository-prototype's
+  `relock-pins-test.yml` (keyword: relock heads, #494; `skew_check` on `tests/relock-pins/skew`: two pins of one
+  repository and a `pwa-ref` copy for both, a stand-in `git` whose `ls-remote` answer differs at every call, one call
+  required for each repository). The fixtures `tests/relock-pins/copies` test the rewrite of one pin's copies.
 
 ### The Android project's lock (keyword: android lock, #735)
 
