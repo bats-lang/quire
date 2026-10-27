@@ -4925,10 +4925,6 @@ fn _opening_pages (count: Int): bool =
 fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
   if times <= 0 then (if generation <> !_settle_generation then ()
     else let
-      (* reader acts, settle: the place kept is found again once, as laid out last *)
-      val anchor = !_anchor_kept
-      val () = (if anchor >= 0 then (if _scrolled() then (case+ reading_get() of
-        | @(page, _, _, _) => _show_kept(page, anchor)) else ()) else ())
       val () = !_settling := false
     in _record_position() end)
   else $P.finish<Int>($P.vow($TM.timer_set(250)), llam(_) =>
@@ -4946,9 +4942,10 @@ fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
             if count_now <= 0 then ()
             (* opening, laid out as when the place was kept (its face
                come in): that very page *)
+            (* settle: showing the page clears the node kept, so it is kept again for the next count *)
             else if count_now <> page_count && _opening_pages(count_now) then let
               val () = _measure_pagination()
-            in _show_target(!_dated_page, _opening_anchor()) end
+            in _show_kept(!_dated_page, _opening_anchor()) end
             else if count_now <> page_count then let
               val @(target_page, target_anchor) = _place_kept(page, page_count)
               val () = _measure_pagination()
@@ -5251,8 +5248,8 @@ in
     val () = _measure_pagination()
     val count_now = (case+ reading_get() of @(_, page_count, _, _) => (page_count: Int)): Int
   in
-    (* opening, laid out as when the place was kept: that very page *)
-    if _opening_pages(count_now) then _show_target(!_dated_page, _opening_anchor())
+    (* opening, laid out as when the place was kept: that very page, its node kept again (settle) *)
+    if _opening_pages(count_now) then _show_kept(!_dated_page, _opening_anchor())
     else _show_kept(page, anchor)
   end
 end
@@ -6111,8 +6108,6 @@ implement reader_scrolled () =
            the top of what is seen, not the screenful's first (#485); a
            scroll the page itself made is where it put it *)
         (if top - !_scroll_set <= 2 && !_scroll_set - top <= 2 then ()
-        (* settle: a scroll within the screenful while the layout settles is the layout's, found again at its end *)
-        else if !_settling then ()
         else let
           val () = !_scroll_set := top
           val () = !_anchor_kept := ~1
