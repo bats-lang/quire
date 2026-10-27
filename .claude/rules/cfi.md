@@ -42,11 +42,19 @@ and `cfi_resolve` reads them back to a `cfi_place`, a linear datatype that every
   element that has no text there (an empty chunk at offset 0, or the step after the last element);
   `CfiNoPlace`, nothing. (Inside the module a walk adds `WalkLookForId`, an `[id]` to look for in the
   chapter, which `_settle` answers before anything leaves; no reader returns it.)
+* The writers answer constructors too: `cfi_of`, `cfi_of_at`, `cfi_make` and `cfi_make_range` give a
+  `cfi_written(bn)` (`CfiWritten(length)`, `CfiNowhere` for a position that is no element's name and in
+  no text, `CfiNoRoom` for steps that do not fit the buffer: two answers a caller tells apart), and
+  `cfi_put_spine` a `cfi_spine_written(bn)` (`CfiSpineWritten(length)`, `CfiSpineNoRoom`; a spine step
+  is never nowhere). The private helpers that answered -1 answer `of_walk`, `units_position`,
+  `terminal_found`, `comma_found` and `comma_pair` (none, one or two commas), each matched with `case+`.
+  The count of bytes a writer has put saturates at `bn + 1` once the buffer was full (a quantity, tested
+  once at the end), and no integer in the module stands for a case.
 * The other answers are constructors too: `cfi_side` (`CfiSideNone`, `CfiSideBefore`, `CfiSideAfter`,
   from `cfi_terminal`), `cfi_spine_step` (`CfiSpineItem(n)`, `CfiNotSpine`, from `cfi_spine`), and
   `cfi_resolve_range` gives the pair of `cfi_place` of the ends. The module is new (#901), so these
   are its first signatures, not a change of a published one. `tests/static/reject/cfi-*-unmatched`
-  leave one constructor out of a `case+` and are rejected, with `accept/cfi-*-matched` as controls.
+  (place, side, spine, written) leave one constructor out of a `case+` and are rejected, with `accept/cfi-*-matched` as controls.
 * The text between two elements is one chunk though the parser makes several text nodes of it where
   a comment was; the offset counts the units of all of them. A place at the start of a text that follows
   a comment in a chunk that has text has the steps of the end of the text before it, so it resolves to
@@ -70,7 +78,7 @@ and `cfi_resolve` reads them back to a `cfi_place`, a linear datatype that every
 
 Proved by types and termination metrics (no `praxi`, no `assume`, no `$UNSAFE`): every read of the
 chapter and of the CFI is at an index inside its array, every walk of the tree and of the steps ends,
-the writer never writes past its buffer (a full buffer is a result, -1, not a cut CFI), and a node's
+the writer never writes past its buffer (a full buffer is a result, `CfiNoRoom`, not a cut CFI), and a node's
 span is inside the chapter (xml-tree's constructors). The module has no lemma of its own, so there is no
 statement to make false for the mutation check (`tests/static/mutation_check.py` finds "no lemma to mutate").
 

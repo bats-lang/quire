@@ -42,10 +42,56 @@ staload "entity.sats"
   | CfiSpineItem of (Int)
   | CfiNotSpine
 
+(* What a writer answered, for a buffer of bn bytes: the steps are in the
+   buffer and this is their length (CfiWritten), the position is no element's
+   name and in no text (CfiNowhere), or the steps do not fit in the buffer
+   (CfiNoRoom): two different answers a caller tells apart. Linear: a caller
+   matches every constructor with case+. *)
+#pub datavtype cfi_written(bn:int) =
+  | {length:nat | length <= bn} CfiWritten(bn) of (int length)
+  | CfiNowhere(bn)
+  | CfiNoRoom(bn)
+
+(* What cfi_put_spine answered: the length written, or no room for the step
+   in the buffer (a spine step is the package's, so it is never nowhere) *)
+#pub datavtype cfi_spine_written(bn:int) =
+  | {length:nat | length <= bn} CfiSpineWritten(bn) of (int length)
+  | CfiSpineNoRoom(bn)
+
 (* How far a walk of the steps got, inside this module: the three places
    and nowhere as cfi_place has them, and an [id] to look for in the whole
    chapter (see _settle), which no reader answers *)
 datatype walk_kind = WalkElement | WalkText | WalkEmptyText | WalkNothing | WalkLookForId
+
+(* How far the writing of the steps got in a buffer of bn bytes: the count
+   of bytes after them (it stops at bn + 1 once the buffer was full), or a
+   position that is nowhere *)
+datavtype of_walk(bn:int) =
+  | {next:nat | next <= bn + 1} OfWalked(bn) of (int next)
+  | OfNowhere(bn)
+
+(* Where a text position falls in text data[from, limit]: at a byte, or the
+   text ended before the units were reached *)
+datavtype units_position(limit:int) =
+  | {at:nat | at <= limit} UnitsAt(limit) of (int at)
+  | UnitsEnded(limit)
+
+(* The first '[' of an assertion after an offset in cfi[start, stop), or none *)
+datavtype terminal_found(start:int, stop:int) =
+  | {found:nat | start <= found; found < stop} TerminalAt(start, stop) of (int found)
+  | TerminalNone(start, stop)
+
+(* The first unescaped ',' of cfi[.., stop), or none *)
+datavtype comma_found(stop:int) =
+  | {found:nat | found < stop} CommaAt(stop) of (int found)
+  | CommaNone(stop)
+
+(* The top-level commas of "P,S,E" in cfi[start, stop): two, one (not a
+   range) or none (one place) *)
+datavtype comma_pair(start:int, stop:int) =
+  | {first,second:int | start <= first; first < second; second < stop} CommasTwo(start, stop) of (int first, int second)
+  | CommasOne(start, stop)
+  | CommasNone(start, stop)
 
 (* ============================================================
    Characters and UTF-16 units
@@ -117,17 +163,17 @@ fun _units {l:agz}{n:pos}{limit,until:nat | until <= limit; limit <= n}{from:nat
   in _units(data, limit, until, stop, units + step_units) end
 
 (* The byte position in data[from, limit] that is target units on from
-   units so far; -1 when the text ends first. A target in the middle of a
-   pair is the pair's start. *)
+   units so far, or UnitsEnded when the text ends first. A target in the
+   middle of a pair is the pair's start. *)
 fun _position_of_units {l:agz}{n:pos}{limit:nat | limit <= n}{from:nat | from <= limit} .<limit - from>.
   (data: !$A.borrow(byte, l, n), limit: int limit, from: int from, units: Nat, target: Int)
-  : [at:int | ~1 <= at; at <= limit] int at =
-  if units >= target then from
-  else if from >= limit then ~1
+  : units_position(limit) =
+  if units >= target then UnitsAt(from)
+  else if from >= limit then UnitsEnded()
   else let
     val @(stop, step_units) = _unit_step(data, limit, from)
   in
-    if units + step_units > target then from
+    if units + step_units > target then UnitsAt(from)
     else _position_of_units(data, limit, stop, units + step_units, target)
   end
 
@@ -210,15 +256,15 @@ end
    elements are the elements passed, chunk_units the units of the text
    since the last of them (the text between two elements is one chunk,
    though a comment may have split it in the tree). Returns where the
-   writing ended in buf, -1 when the position is in no text and is no
-   element's name. *)
+   writing ended in buf, OfNowhere when the position is in no text and is
+   no element's name. *)
 fun _of_list {l:agz}{n:pos}{bl:agz}{bn:pos}{size:nat}{position,elements:nat}{at:nat | at <= bn + 1} .<size, 1>.
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), position: int position, elements: int elements, chunk_units: Nat,
-   buf: !$A.arr(byte, bl, bn), cap: int bn, at: int at): [next:int | ~1 <= next; next <= bn + 1] int next =
+   buf: !$A.arr(byte, bl, bn), cap: int bn, at: int at): of_walk(bn) =
   case+ nodes of
-  | $X.xml_nodes_nil() => ~1
+  | $X.xml_nodes_nil() => OfNowhere()
   | $X.xml_nodes_cons(node, rest) =>
-    if _start_of(node) > position then ~1
+    if _start_of(node) > position then OfNowhere()
     else if _starts_by(rest, position) then
       (case+ node of
        | $X.xml_text(offset, text_len) =>
@@ -228,55 +274,57 @@ fun _of_list {l:agz}{n:pos}{bl:agz}{bn:pos}{size:nat}{position,elements:nat}{at:
 
 and _of_node {l:agz}{n:pos}{bl:agz}{bn:pos}{size:pos}{position,elements:nat}{at:nat | at <= bn + 1} .<size, 0>.
   (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, size), position: int position, elements: int elements, chunk_units: Nat,
-   buf: !$A.arr(byte, bl, bn), cap: int bn, at: int at): [next:int | ~1 <= next; next <= bn + 1] int next =
+   buf: !$A.arr(byte, bl, bn), cap: int bn, at: int at): of_walk(bn) =
   case+ node of
   | $X.xml_text(offset, text_len) =>
-    if position > offset + text_len then ~1
+    if position > offset + text_len then OfNowhere()
     else let
       val at1 = _put(buf, cap, at, 47)
       val at2 = _put_number(buf, cap, at1, 2 * elements + 1)
       val at3 = _put(buf, cap, at2, 58)
-    in _put_number(buf, cap, at3, chunk_units + _units(data, offset + text_len, position, offset, 0)) end
+    in OfWalked(_put_number(buf, cap, at3, chunk_units + _units(data, offset + text_len, position, offset, 0))) end
   | $X.xml_element(name_offset, _, attrs, children) =>
-    if position < name_offset then ~1
+    if position < name_offset then OfNowhere()
     else let
       val at1 = _put(buf, cap, at, 47)
       val at2 = _put_number(buf, cap, at1, 2 * (elements + 1))
       val at3 = _put_assertion(buf, cap, at2, data, attrs)
     in
-      if position = name_offset then at3
+      if position = name_offset then OfWalked(at3)
       else _of_list(data, children, position, 0, 0, buf, cap, at3)
     end
 
 (* The document element is the first element of the top level *)
 fun _of_root {l:agz}{n:pos}{bl:agz}{bn:pos}{size:nat}{position:nat}{at:nat | at <= bn + 1} .<size>.
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), position: int position,
-   buf: !$A.arr(byte, bl, bn), cap: int bn, at: int at): [next:int | ~1 <= next; next <= bn + 1] int next =
+   buf: !$A.arr(byte, bl, bn), cap: int bn, at: int at): of_walk(bn) =
   case+ nodes of
-  | $X.xml_nodes_nil() => ~1
+  | $X.xml_nodes_nil() => OfNowhere()
   | $X.xml_nodes_cons(node, rest) =>
     (case+ node of
      | $X.xml_text(_, _) => _of_root(data, rest, position, buf, cap, at)
      | $X.xml_element(name_offset, _, _, children) =>
-       if position = name_offset then at
+       if position = name_offset then OfWalked(at)
        else if position > name_offset then _of_list(data, children, position, 0, 0, buf, cap, at)
-       else ~1)
+       else OfNowhere())
 
 (* The steps (from the document element, "/4[body01]/10[para05]/3:10") to
-   byte position in the chapter, written at buf[at, length); -1 when the
-   position is no element's name and in no text, or the steps do not fit in
-   cap bytes (keep 11 bytes of room: a number is written whole or not) *)
+   byte position in the chapter, written at buf[at, length): CfiWritten and
+   the length, CfiNowhere when the position is no element's name and in no
+   text, CfiNoRoom when the steps do not fit in cap bytes (keep 11 bytes of
+   room: a number is written whole or not) *)
 #pub fn cfi_of_at {l:agz}{n:pos}{size:nat}{bl:agz}{bn:pos}{at:nat | at <= bn}
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), position: Nat,
-   buf: !$A.arr(byte, bl, bn), cap: int bn, at: int at): [length:int | ~1 <= length; length <= bn] int length
+   buf: !$A.arr(byte, bl, bn), cap: int bn, at: int at): cfi_written(bn)
 
-implement cfi_of_at (data, nodes, position, buf, cap, at) = let
-  val next = _of_root(data, nodes, position, buf, cap, at)
-in if next > cap then ~1 else next end
+implement cfi_of_at (data, nodes, position, buf, cap, at) =
+  case+ _of_root(data, nodes, position, buf, cap, at) of
+  | ~OfWalked(next) => if next > cap then CfiNoRoom() else CfiWritten(next)
+  | ~OfNowhere() => CfiNowhere()
 
 #pub fn cfi_of {l:agz}{n:pos}{size:nat}{bl:agz}{bn:pos}
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), position: Nat,
-   buf: !$A.arr(byte, bl, bn), cap: int bn): [length:int | ~1 <= length; length <= bn] int length
+   buf: !$A.arr(byte, bl, bn), cap: int bn): cfi_written(bn)
 
 implement cfi_of (data, nodes, position, buf, cap) = cfi_of_at(data, nodes, position, buf, cap, 0)
 
@@ -351,7 +399,10 @@ fun _in_chunk {l:agz}{n:pos}{size:nat}{chunk,elements:nat} .<size>.
        if elements = chunk then let
          val total = _units(data, offset + text_len, offset + text_len, offset, 0)
        in
-         if remaining <= total then @(WalkText(), _position_of_units(data, offset + text_len, offset, 0, remaining))
+         if remaining <= total then
+           (case+ _position_of_units(data, offset + text_len, offset, 0, remaining) of
+            | ~UnitsAt(at) => @(WalkText(), at)
+            | ~UnitsEnded() => @(WalkNothing(), 0))
          else _in_chunk(data, rest, chunk, elements, remaining - total, self)
        end
        else _in_chunk(data, rest, chunk, elements, remaining, self)
@@ -530,7 +581,8 @@ fun _put_text {bl:agz}{bn:pos}{m:nat}{at:nat | at <= bn + 1}{i:nat | i <= m} .<m
    assertion when it has one (idref data[offset, offset + idref_len)), and
    "!": the part of a CFI that names the chapter. The package holds the
    idref and the index (the spine is its third child: metadata, manifest,
-   spine, as EPUB's package document orders them). -1 when it does not fit. *)
+   spine, as EPUB's package document orders them). CfiSpineNoRoom when it does
+   not fit. *)
 (* "[idref]" unless it is empty *)
 fn _put_idref {bl:agz}{bn:pos}{l:agz}{n:pos}{offset,idref_len:nat | offset + idref_len <= n}{at:nat | at <= bn + 1}
   (buf: !$A.arr(byte, bl, bn), cap: int bn, at: int at, idref: !$A.borrow(byte, l, n), offset: int offset, idref_len: int idref_len)
@@ -543,38 +595,35 @@ fn _put_idref {bl:agz}{bn:pos}{l:agz}{n:pos}{offset,idref_len:nat | offset + idr
 
 #pub fn cfi_put_spine {bl:agz}{bn:pos}{l:agz}{n:pos}{offset,idref_len:nat | offset + idref_len <= n}{at:nat | at <= bn}
   (buf: !$A.arr(byte, bl, bn), cap: int bn, at: int at, index: Nat, idref: !$A.borrow(byte, l, n), offset: int offset, idref_len: int idref_len)
-  : [next:int | ~1 <= next; next <= bn] int next
+  : cfi_spine_written(bn)
 
 implement cfi_put_spine (buf, cap, at, index, idref, offset, idref_len) = let
   val at1 = _put_text(buf, cap, at, "/6/", 3, 0)
   val at2 = _put_number(buf, cap, at1, 2 * (index + 1))
   val at3 = _put_idref(buf, cap, at2, idref, offset, idref_len)
   val at4 = _put(buf, cap, at3, 33)
-in if at4 > cap then ~1 else at4 end
+in if at4 > cap then CfiSpineNoRoom() else CfiSpineWritten(at4) end
 
 (* "epubcfi(", the spine step, the steps to position and ")": the CFI of a
-   place, written at buf[0, length); -1 when the position is nowhere or
-   the identifier does not fit *)
+   place, written at buf[0, length): CfiNowhere when the position is
+   nowhere, CfiNoRoom when the identifier does not fit *)
 #pub fn cfi_make {l:agz}{n:pos}{size:nat}{bl:agz}{bn:pos}{il:agz}{idref_size:pos}{offset,idref_len:nat | offset + idref_len <= idref_size}
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), position: Nat, index: Nat,
    idref: !$A.borrow(byte, il, idref_size), offset: int offset, idref_len: int idref_len, buf: !$A.arr(byte, bl, bn), cap: int bn)
-  : [length:int | ~1 <= length; length <= bn] int length
+  : cfi_written(bn)
 
 implement cfi_make (data, nodes, position, index, idref, offset, idref_len, buf, cap) = let
   val at1 = _put_text(buf, cap, 0, "epubcfi(", 8, 0)
 in
-  if at1 > cap then ~1
-  else let
-    val at2 = cfi_put_spine(buf, cap, at1, index, idref, offset, idref_len)
-  in
-    if at2 < 0 then ~1
-    else let
-      val at3 = cfi_of_at(data, nodes, position, buf, cap, at2)
-    in
-      if at3 < 0 then ~1
-      else let val at4 = _put(buf, cap, at3, 41) in if at4 > cap then ~1 else at4 end
-    end
-  end
+  if at1 > cap then CfiNoRoom()
+  else
+    (case+ cfi_put_spine(buf, cap, at1, index, idref, offset, idref_len) of
+     | ~CfiSpineNoRoom() => CfiNoRoom()
+     | ~CfiSpineWritten(at2) =>
+       (case+ cfi_of_at(data, nodes, position, buf, cap, at2) of
+        | ~CfiNowhere() => CfiNowhere()
+        | ~CfiNoRoom() => CfiNoRoom()
+        | ~CfiWritten(at3) => let val at4 = _put(buf, cap, at3, 41) in if at4 > cap then CfiNoRoom() else CfiWritten(at4) end))
 end
 
 (* buf[at..) := source[from, until) *)
@@ -603,21 +652,17 @@ fun _last_slash {al:agz}{an:pos}{from:nat | from <= an}{i:nat | i <= from} .<i>.
    steps and E the rest of the end's (the specification's range, which
    is what Readium's annotations hold too, the wrapper and the spine step
    taken off). cap is at most 1048576 for the two paths made on the way;
-   -1 as cfi_make. *)
+   the answers are cfi_make's (CfiNowhere when either end is nowhere). *)
 #pub fn cfi_make_range {l:agz}{n:pos}{size:nat}{bl:agz}{bn:pos | bn <= 1048576}{il:agz}{idref_size:pos}{offset,idref_len:nat | offset + idref_len <= idref_size}
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), start: Nat, finish: Nat, index: Nat,
    idref: !$A.borrow(byte, il, idref_size), offset: int offset, idref_len: int idref_len, buf: !$A.arr(byte, bl, bn), cap: int bn)
-  : [length:int | ~1 <= length; length <= bn] int length
-
-(* len, or 0 for -1 (a path that was not made) *)
-fn _non_negative {len,cap:int | ~1 <= len; len <= cap; 0 <= cap} (len: int len, cap: int cap): [k:nat | k <= cap] int k =
-  if len >= 0 then len else 0
+  : cfi_written(bn)
 
 fn _range_into {bl:agz}{bn:pos}{il:agz}{idref_size:pos}{sl:agz}{fl:agz}{offset,idref_len:nat | offset + idref_len <= idref_size}
   {start_len,finish_len:nat | start_len <= bn; finish_len <= bn}
   (buf: !$A.arr(byte, bl, bn), cap: int bn, index: Nat, idref: !$A.borrow(byte, il, idref_size), offset: int offset, idref_len: int idref_len,
    start_steps: !$A.arr(byte, sl, bn), start_len: int start_len, finish_steps: !$A.arr(byte, fl, bn), finish_len: int finish_len)
-  : [length:int | ~1 <= length; length <= bn] int length = let
+  : cfi_written(bn) = let
   val limit = (if start_len <= finish_len then start_len else finish_len): [m:nat | m <= start_len; m <= finish_len] int m
   val shared = _common(start_steps, finish_steps, limit, 0)
   (* the shared bytes end at a step when each of the two ends or goes on with '/' *)
@@ -628,32 +673,53 @@ fn _range_into {bl:agz}{bn:pos}{il:agz}{idref_size:pos}{sl:agz}{fl:agz}{offset,i
   val split_finish = (if split <= finish_len then split else finish_len): [s:nat | s <= finish_len] int s
   val at1 = _put_text(buf, cap, 0, "epubcfi(", 8, 0)
 in
-  if at1 > cap then ~1
-  else let
-    val at2 = cfi_put_spine(buf, cap, at1, index, idref, offset, idref_len)
-  in
-  if at2 < 0 then ~1
-  else let
-    val at3 = _put_array(buf, cap, at2, start_steps, split_start, 0)
-    val at4 = _put(buf, cap, at3, 44)
-    val at5 = _put_array(buf, cap, at4, start_steps, start_len, split_start)
-    val at6 = _put(buf, cap, at5, 44)
-    val at7 = _put_array(buf, cap, at6, finish_steps, finish_len, split_finish)
-    val at8 = _put(buf, cap, at7, 41)
-  in if at8 > cap then ~1 else at8 end
-  end
+  if at1 > cap then CfiNoRoom()
+  else
+    (case+ cfi_put_spine(buf, cap, at1, index, idref, offset, idref_len) of
+     | ~CfiSpineNoRoom() => CfiNoRoom()
+     | ~CfiSpineWritten(at2) => let
+         val at3 = _put_array(buf, cap, at2, start_steps, split_start, 0)
+         val at4 = _put(buf, cap, at3, 44)
+         val at5 = _put_array(buf, cap, at4, start_steps, start_len, split_start)
+         val at6 = _put(buf, cap, at5, 44)
+         val at7 = _put_array(buf, cap, at6, finish_steps, finish_len, split_finish)
+         val at8 = _put(buf, cap, at7, 41)
+       in if at8 > cap then CfiNoRoom() else CfiWritten(at8) end)
 end
+
+(* The range from the two ends' answers: nowhere when either is, no room
+   when either does not fit, else the range *)
+fn _range_of {bl:agz}{bn:pos}{il:agz}{idref_size:pos}{sl:agz}{fl:agz}{offset,idref_len:nat | offset + idref_len <= idref_size}
+  (buf: !$A.arr(byte, bl, bn), cap: int bn, index: Nat, idref: !$A.borrow(byte, il, idref_size), offset: int offset, idref_len: int idref_len,
+   start_steps: !$A.arr(byte, sl, bn), start_written: cfi_written(bn), finish_steps: !$A.arr(byte, fl, bn), finish_written: cfi_written(bn))
+  : cfi_written(bn) =
+  case+ start_written of
+  | ~CfiNowhere() =>
+    (case+ finish_written of
+     | ~CfiWritten(_) => CfiNowhere()
+     | ~CfiNowhere() => CfiNowhere()
+     | ~CfiNoRoom() => CfiNowhere())
+  | ~CfiNoRoom() =>
+    (case+ finish_written of
+     | ~CfiWritten(_) => CfiNoRoom()
+     | ~CfiNowhere() => CfiNowhere()
+     | ~CfiNoRoom() => CfiNoRoom())
+  | ~CfiWritten(start_len) =>
+    (case+ finish_written of
+     | ~CfiNowhere() => CfiNowhere()
+     | ~CfiNoRoom() => CfiNoRoom()
+     | ~CfiWritten(finish_len) =>
+       _range_into(buf, cap, index, idref, offset, idref_len, start_steps, start_len, finish_steps, finish_len))
 
 implement cfi_make_range (data, nodes, start, finish, index, idref, offset, idref_len, buf, cap) = let
   val start_steps = $A.alloc<byte>(cap)
   val finish_steps = $A.alloc<byte>(cap)
-  val start_len = cfi_of(data, nodes, start, start_steps, cap)
-  val finish_len = cfi_of(data, nodes, finish, finish_steps, cap)
-  val length = _range_into(buf, cap, index, idref, offset, idref_len, start_steps, _non_negative(start_len, cap), finish_steps, _non_negative(finish_len, cap))
-  val length = (if start_len < 0 then ~1 else if finish_len < 0 then ~1 else length)
+  val start_written = cfi_of(data, nodes, start, start_steps, cap)
+  val finish_written = cfi_of(data, nodes, finish, finish_steps, cap)
+  val written = _range_of(buf, cap, index, idref, offset, idref_len, start_steps, start_written, finish_steps, finish_written)
   val () = $A.free<byte>(start_steps)
   val () = $A.free<byte>(finish_steps)
-in length end
+in written end
 
 (* ---------------- reading an identifier ---------------- *)
 
@@ -687,16 +753,27 @@ implement cfi_spine (cfi, start, stop) =
     if stop2 < stop then (if _byte(cfi, stop2) = 33 then @(CfiSpineItem(step), stop2 + 1) else @(CfiNotSpine(), start)) else @(CfiNotSpine(), start)
   end
 
-(* The two commas of "P,S,E" that are not in an assertion or escaped, as
-   their places in cfi[start, stop); -1 for one that is not there *)
-fun _commas {cl:agz}{cn:pos}{stop:nat | stop <= cn}{at:nat | at <= stop} .<stop - at>.
-  (cfi: !$A.borrow(byte, cl, cn), stop: int stop, at: int at, first: Int): @(Int, Int) =
-  if at >= stop then @(first, ~1)
+(* The second top-level comma of "P,S,E" after the first one at first (not
+   in an assertion or escaped): both, or only the one *)
+fun _second_comma {cl:agz}{cn:pos}{start,first:nat | start <= first; first < cn}{stop:nat | stop <= cn; first < stop}{at:nat | at <= stop} .<stop - at>.
+  (cfi: !$A.borrow(byte, cl, cn), start: int start, first: int first, stop: int stop, at: int at): comma_pair(start, stop) =
+  if at >= stop then CommasOne()
   else let val c = _byte(cfi, at) in
-    if c = 94 then _commas(cfi, stop, _skip_pair(stop, at), first)
-    else if c = 91 then _commas(cfi, stop, _assertion_close(cfi, stop, at + 1), first)
-    else if c = 44 then (if first < 0 then _commas(cfi, stop, at + 1, at) else @(first, at))
-    else _commas(cfi, stop, at + 1, first)
+    if c = 94 then _second_comma(cfi, start, first, stop, _skip_pair(stop, at))
+    else if c = 91 then _second_comma(cfi, start, first, stop, _assertion_close(cfi, stop, at + 1))
+    else if c = 44 then (if first < at then CommasTwo(first, at) else _second_comma(cfi, start, first, stop, at + 1))
+    else _second_comma(cfi, start, first, stop, at + 1)
+  end
+
+(* The top-level commas of "P,S,E" in cfi[at, stop), from the start start *)
+fun _commas {cl:agz}{cn:pos}{start:nat}{stop:nat | stop <= cn}{at:nat | start <= at; at <= stop} .<stop - at>.
+  (cfi: !$A.borrow(byte, cl, cn), start: int start, stop: int stop, at: int at): comma_pair(start, stop) =
+  if at >= stop then CommasNone()
+  else let val c = _byte(cfi, at) in
+    if c = 94 then _commas(cfi, start, stop, _skip_pair(stop, at))
+    else if c = 91 then _commas(cfi, start, stop, _assertion_close(cfi, stop, at + 1))
+    else if c = 44 then _second_comma(cfi, start, at, stop, at + 1)
+    else _commas(cfi, start, stop, at + 1)
   end
 
 (* cfi[from, until) is copied to joined[at..) *)
@@ -740,41 +817,40 @@ implement cfi_resolve_range (data, nodes, cfi, len) =
   if len > 1048576 then @(CfiNoPlace(), CfiNoPlace())
   else let
     val @(start, stop) = cfi_body(cfi, len)
-    val @(first, second) = _commas(cfi, stop, start, ~1)
   in
-    if first < start then let
-      val only = _resolve_joined(data, nodes, cfi, len, start, stop, stop, stop)
-    in _twice(only) end
-    else if second <= first then @(CfiNoPlace(), CfiNoPlace())
-    else if second >= stop then @(CfiNoPlace(), CfiNoPlace())
-    else let
-      val start_place = _resolve_joined(data, nodes, cfi, len, start, first, first + 1, second)
-      val finish_place = _resolve_joined(data, nodes, cfi, len, start, first, second + 1, stop)
-    in @(start_place, finish_place) end
+    case+ _commas(cfi, start, stop, start) of
+    | ~CommasNone() => let
+        val only = _resolve_joined(data, nodes, cfi, len, start, stop, stop, stop)
+      in _twice(only) end
+    | ~CommasOne() => @(CfiNoPlace(), CfiNoPlace())
+    | ~CommasTwo(first, second) => let
+        val start_place = _resolve_joined(data, nodes, cfi, len, start, first, first + 1, second)
+        val finish_place = _resolve_joined(data, nodes, cfi, len, start, first, second + 1, stop)
+      in @(start_place, finish_place) end
   end
 
 (* ---------------- the text assertion and the side bias ---------------- *)
 
-(* Index of the '[' of the assertion that follows the offset ":N" in
-   cfi[at, stop), or -1; after_offset says the last thing read was one *)
-fun _terminal {cl:agz}{cn:pos}{stop:nat | stop <= cn}{at:nat | at <= stop} .<stop - at>.
-  (cfi: !$A.borrow(byte, cl, cn), stop: int stop, at: int at, after_offset: bool): [found:int | ~1 <= found; found < stop] int found =
-  if at >= stop then ~1
+(* The '[' of the assertion that follows the offset ":N" in cfi[at, stop);
+   after_offset says the last thing read was one *)
+fun _terminal {cl:agz}{cn:pos}{start:nat}{stop:nat | stop <= cn}{at:nat | start <= at; at <= stop} .<stop - at>.
+  (cfi: !$A.borrow(byte, cl, cn), start: int start, stop: int stop, at: int at, after_offset: bool): terminal_found(start, stop) =
+  if at >= stop then TerminalNone()
   else let val c = _byte(cfi, at) in
-    if c = 94 then _terminal(cfi, stop, _skip_pair(stop, at), false)
+    if c = 94 then _terminal(cfi, start, stop, _skip_pair(stop, at), false)
     else if c = 91 then
-      (if after_offset then at else _terminal(cfi, stop, _assertion_close(cfi, stop, at + 1), false))
-    else if c = 58 then let val @(_, digits_end) = _number(cfi, stop, at + 1, 0) in _terminal(cfi, stop, digits_end, true) end
-    else _terminal(cfi, stop, at + 1, false)
+      (if after_offset then TerminalAt(at) else _terminal(cfi, start, stop, _assertion_close(cfi, stop, at + 1), false))
+    else if c = 58 then let val @(_, digits_end) = _number(cfi, stop, at + 1, 0) in _terminal(cfi, start, stop, digits_end, true) end
+    else _terminal(cfi, start, stop, at + 1, false)
   end
 
-(* The first unescaped ',' of cfi[at, stop), or -1 *)
+(* The first unescaped ',' of cfi[at, stop) *)
 fun _comma_in {cl:agz}{cn:pos}{stop:nat | stop <= cn}{at:nat | at <= stop} .<stop - at>.
-  (cfi: !$A.borrow(byte, cl, cn), stop: int stop, at: int at): [found:int | ~1 <= found; found < stop] int found =
-  if at >= stop then ~1
+  (cfi: !$A.borrow(byte, cl, cn), stop: int stop, at: int at): comma_found(stop) =
+  if at >= stop then CommaNone()
   else let val c = _byte(cfi, at) in
     if c = 94 then _comma_in(cfi, stop, _skip_pair(stop, at))
-    else if c = 44 then at
+    else if c = 44 then CommaAt(at)
     else _comma_in(cfi, stop, at + 1)
   end
 
@@ -789,26 +865,25 @@ fun _comma_in {cl:agz}{cn:pos}{stop:nat | stop <= cn}{at:nat | at <= stop} .<sto
   : [before_lo,before_hi,after_lo,after_hi:int | start <= before_lo; before_lo <= before_hi; before_hi <= stop; start <= after_lo; after_lo <= after_hi; after_hi <= stop]
     @(cfi_side, int before_lo, int before_hi, int after_lo, int after_hi)
 
-implement cfi_terminal (cfi, start, stop) = let
-  val open_at = _terminal(cfi, stop, start, false)
-in
-  if open_at < start then @(CfiSideNone(), start, start, start, start)
-  else if open_at >= stop then @(CfiSideNone(), start, start, start, start)
-  else let
-    val value_start = open_at + 1
-    val close = _assertion_close(cfi, stop, value_start)
-    val text_end = _value_end(cfi, stop, value_start)
-    val comma = _comma_in(cfi, text_end, value_start)
-    val params = text_end + 1
-    val side = (if params + 2 < close then
-        (if _byte(cfi, params) = 115 then
-          (if _byte(cfi, params + 1) = 61 then
-            (if _byte(cfi, params + 2) = 98 then CfiSideBefore() else if _byte(cfi, params + 2) = 97 then CfiSideAfter() else CfiSideNone())
+implement cfi_terminal (cfi, start, stop) =
+  case+ _terminal(cfi, start, stop, start, false) of
+  | ~TerminalNone() => @(CfiSideNone(), start, start, start, start)
+  | ~TerminalAt(open_at) => let
+      val value_start = open_at + 1
+      val close = _assertion_close(cfi, stop, value_start)
+      val text_end = _value_end(cfi, stop, value_start)
+      val params = text_end + 1
+      val side = (if params + 2 < close then
+          (if _byte(cfi, params) = 115 then
+            (if _byte(cfi, params + 1) = 61 then
+              (if _byte(cfi, params + 2) = 98 then CfiSideBefore() else if _byte(cfi, params + 2) = 97 then CfiSideAfter() else CfiSideNone())
+             else CfiSideNone())
            else CfiSideNone())
-         else CfiSideNone())
-      else CfiSideNone()): cfi_side
-  in
-    if comma >= value_start then @(side, value_start, comma, comma + 1, text_end)
-    else @(side, value_start, text_end, start, start)
-  end
-end
+        else CfiSideNone()): cfi_side
+    in
+      case+ _comma_in(cfi, text_end, value_start) of
+      | ~CommaAt(comma) =>
+        if comma >= value_start then @(side, value_start, comma, comma + 1, text_end)
+        else @(side, value_start, text_end, start, start)
+      | ~CommaNone() => @(side, value_start, text_end, start, start)
+    end

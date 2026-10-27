@@ -47,6 +47,29 @@ fn is_no_place (kind: place_kind): bool = same_kind(kind, NoPlaceKind())
 fn is_element (kind: place_kind): bool = same_kind(kind, ElementKind())
 fn is_text (kind: place_kind): bool = same_kind(kind, TextKind())
 
+(* What a check expects of a writer's answer; written_parts matches every
+   constructor of cfi_written (case+), so a constructor added to it fails here *)
+datatype written_kind = WrittenKind | NowhereKind | NoRoomKind
+
+fn written_parts {bn:nat} (written: cfi_written(bn)): [length:nat | length <= bn] @(written_kind, int length) =
+  case+ written of
+  | ~CfiWritten(length) => @(WrittenKind(), length)
+  | ~CfiNowhere() => @(NowhereKind(), 0)
+  | ~CfiNoRoom() => @(NoRoomKind(), 0)
+
+fn is_written (kind: written_kind): bool =
+  case+ kind of | WrittenKind() => true | NowhereKind() => false | NoRoomKind() => false
+fn is_nowhere (kind: written_kind): bool =
+  case+ kind of | WrittenKind() => false | NowhereKind() => true | NoRoomKind() => false
+fn is_no_room (kind: written_kind): bool =
+  case+ kind of | WrittenKind() => false | NowhereKind() => false | NoRoomKind() => true
+
+(* What cfi_put_spine answered: the length, or none when it did not fit *)
+fn spine_written_length {bn:nat} (written: cfi_spine_written(bn)): [length:nat | length <= bn] @(bool, int length) =
+  case+ written of
+  | ~CfiSpineWritten(length) => @(true, length)
+  | ~CfiSpineNoRoom() => @(false, 0)
+
 fn same_side (found: cfi_side, wanted: cfi_side): bool =
   case+ found of
   | CfiSideNone() => (case+ wanted of | CfiSideNone() => true | CfiSideBefore() => false | CfiSideAfter() => false)
@@ -98,9 +121,9 @@ fn check_of {l:agz}{n:pos}{size:nat}{m:nat | m <= 255}
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), position: Int, text: string m, m: int m, what: string): void = let
   val buf = $A.alloc<byte>(256)
   val clamped = (if position >= 0 then position else 0): Nat
-  val length = cfi_of(data, nodes, clamped, buf, 256)
+  val @(kind, length) = written_parts(cfi_of(data, nodes, clamped, buf, 256))
   val same = same_bytes(buf, text, m, 0)
-  val () = expect(length = m, what)
+  val () = expect(is_written(kind) && length = m, what)
   val () = (if length = m then expect(same, what) else ())
   val () = $A.free<byte>(buf)
 in end
@@ -129,8 +152,8 @@ fn check_spine {l:agz}{n:pos}{size:nat}
   val @(idref_frozen, idref_bytes) = $A.freeze<byte>(idref)
   val made = $A.alloc<byte>(256)
   val position = (if digits >= 0 then digits + 10 else 0): Nat
-  val length = cfi_make(data, nodes, position, 1, idref_bytes, 0, 9, made, 256)
-  val () = expect(length = 51, "make: the length of the whole identifier")
+  val @(made_kind, length) = written_parts(cfi_make(data, nodes, position, 1, idref_bytes, 0, 9, made, 256))
+  val () = expect(is_written(made_kind) && length = 51, "make: the length of the whole identifier")
   val whole = same_bytes(made, "epubcfi(/6/4[chap01ref]!/4[body01]/10[para05]/3:10)", 51, 0)
   val () = expect(whole, "make: epubcfi(/6/4[chap01ref]!/4[body01]/10[para05]/3:10)")
   val () = $A.free<byte>(made)
@@ -138,11 +161,40 @@ fn check_spine {l:agz}{n:pos}{size:nat}
   val range = $A.alloc<byte>(256)
   val range_start = (if yyy >= 0 then yyy + 1 else 0): Nat
   val range_end = (if digits >= 0 then digits + 4 else 0): Nat
-  val range_len = cfi_make_range(data, nodes, range_start, range_end, 1, idref_bytes, 0, 9, range, 256)
-  val () = expect(range_len = 58, "range: the length")
+  val @(range_kind, range_len) = written_parts(cfi_make_range(data, nodes, range_start, range_end, 1, idref_bytes, 0, 9, range, 256))
+  val () = expect(is_written(range_kind) && range_len = 58, "range: the length")
   val range_same = same_bytes(range, "epubcfi(/6/4[chap01ref]!/4[body01]/10[para05],/2/1:1,/3:4)", 58, 0)
   val () = expect(range_same, "range: epubcfi(/6/4[chap01ref]!/4[body01]/10[para05],/2/1:1,/3:4)")
   val () = $A.free<byte>(range)
+  (* the other two answers of each writer: a position that is nowhere, a buffer too small *)
+  val small = $A.alloc<byte>(12)
+  val @(small_kind, _) = written_parts(cfi_of(data, nodes, position, small, 12))
+  val () = expect(is_no_room(small_kind), "of: the steps do not fit in 12 bytes")
+  val @(small_make_kind, _) = written_parts(cfi_make(data, nodes, position, 1, idref_bytes, 0, 9, small, 12))
+  val () = expect(is_no_room(small_make_kind), "make: the spine step does not fit in 12 bytes")
+  val () = $A.free<byte>(small)
+  val spine_buf = $A.alloc<byte>(8)
+  val @(spine_fits, _) = spine_written_length(cfi_put_spine(spine_buf, 8, 0, 1, idref_bytes, 0, 9))
+  val () = expect(not(spine_fits), "put_spine: the spine step does not fit in 8 bytes")
+  val () = $A.free<byte>(spine_buf)
+  val spine_room = $A.alloc<byte>(32)
+  val @(spine_fits_room, spine_length) = spine_written_length(cfi_put_spine(spine_room, 32, 0, 1, idref_bytes, 0, 9))
+  val () = expect(spine_fits_room && spine_length = 16, "put_spine: /6/4[chap01ref]! is 16 bytes")
+  val () = $A.free<byte>(spine_room)
+  val tight = $A.alloc<byte>(24)
+  val @(tight_kind, _) = written_parts(cfi_make(data, nodes, position, 1, idref_bytes, 0, 9, tight, 24))
+  val () = expect(is_no_room(tight_kind), "make: the identifier does not fit in 24 bytes")
+  val roomy = $A.alloc<byte>(256)
+  val @(nowhere_kind, _) = written_parts(cfi_make(data, nodes, 4090, 1, idref_bytes, 0, 9, roomy, 256))
+  val () = expect(is_nowhere(nowhere_kind), "make: a position past the chapter is nowhere")
+  val @(range_nowhere_kind, _) = written_parts(cfi_make_range(data, nodes, 4090, range_end, 1, idref_bytes, 0, 9, roomy, 256))
+  val () = expect(is_nowhere(range_nowhere_kind), "range: a start past the chapter is nowhere")
+  val @(range_nowhere_end_kind, _) = written_parts(cfi_make_range(data, nodes, range_start, 4090, 1, idref_bytes, 0, 9, roomy, 256))
+  val () = expect(is_nowhere(range_nowhere_end_kind), "range: an end past the chapter is nowhere")
+  val @(range_tight_kind, _) = written_parts(cfi_make_range(data, nodes, range_start, range_end, 1, idref_bytes, 0, 9, tight, 24))
+  val () = expect(is_no_room(range_tight_kind), "range: the range does not fit in 24 bytes")
+  val () = $A.free<byte>(roomy)
+  val () = $A.free<byte>(tight)
   val () = $A.drop<byte>(idref_frozen, idref_bytes)
   val () = $A.free<byte>($A.thaw<byte>(idref_frozen))
 in end
@@ -211,25 +263,25 @@ fun round_trip_all {l:agz}{n:pos}{size:nat}{position:nat | position <= n} .<n - 
   if position >= size then count
   else let
     val made = $A.alloc<byte>(256)
-    val length = cfi_of(data, nodes, position, made, 256)
-    val used = (if length >= 0 then length else 0): [k:nat | k <= 256] int k
+    val @(made_kind, used) = written_parts(cfi_of(data, nodes, position, made, 256))
+    val length_made = is_written(made_kind)
     val again = $A.alloc<byte>(256)
     val @(made_frozen, made_bytes) = $A.freeze<byte>(made)
     val @(kind, found) = place_parts(cfi_resolve(data, nodes, made_bytes, used, 0))
     val found_nat = (if found >= 0 then found else 0): Nat
-    val again_length = cfi_of(data, nodes, found_nat, again, 256)
+    val @(again_kind, again_length) = written_parts(cfi_of(data, nodes, found_nat, again, 256))
     val () = $A.drop<byte>(made_frozen, made_bytes)
     val made_back = $A.thaw<byte>(made_frozen)
     val identical = same_arrays(made_back, again, used, 0)
     val lead = byte2int0($A.read<byte>(data, position))
     val inside_character = lead >= 128 && lead < 192
-    val () = (if length >= 0 then (expect(is_element(kind) || is_text(kind), "round trip: the steps resolve to a place");
+    val () = (if length_made then (expect(is_element(kind) || is_text(kind), "round trip: the steps resolve to a place");
                                    expect(inside_character || found = position, "round trip: the place is the position");
-                                   expect(again_length = length, "round trip: the same length of steps");
+                                   expect(is_written(again_kind) && again_length = used, "round trip: the same length of steps");
                                    expect(identical, "round trip: the same steps")) else ())
     val () = $A.free<byte>(made_back)
     val () = $A.free<byte>(again)
-  in round_trip_all(data, nodes, size, position + 1, (if length >= 0 then count + 1 else count)) end
+  in round_trip_all(data, nodes, size, position + 1, (if length_made then count + 1 else count)) end
 
 (* ---------------- the spec's chapter ---------------- *)
 
@@ -278,6 +330,7 @@ fn check_spec (): void = let
   val () = check_resolve(data, nodes, "/6/4[chap01ref]!/4", 18, NoPlaceKind(), 0, "the spine step is not the chapter's steps")
   val () = check_spine(data, nodes, digits, yyy)
   val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4[body01]/10[para05],/2/1:1,/3:4)", 58, TextKind(), yyy + 1, TextKind(), digits + 4, "the specification's range")
+  val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4[body01]/10[para05],/3:4)", 51, NoPlaceKind(), 0, NoPlaceKind(), 0, "one comma is not a range")
   val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4[body01]/10[para05]/3:10)", 51, TextKind(), digits + 10, TextKind(), digits + 10, "one place is both ends")
   val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4[body01]/10[para05]/2,/1:1,/1:2)", 58, TextKind(), yyy + 1, TextKind(), yyy + 2, "a range inside one element")
   val () = check_parts("epubcfi(/6/4[chap01ref]!/4[body01]/10[para05]/3:10)", 51, 8, 50, true, 4, CfiSideNone(), "the parts of an identifier")
@@ -360,9 +413,9 @@ fn check_epubjs (): void = let
   val made = $A.alloc<byte>(256)
   val start_position = (if first >= 0 then first + 15 + 6 else 0): Nat
   val end_position = (if second >= 0 then second + 15 + 27 else 0): Nat
-  val length = cfi_make_range(data, nodes, start_position, end_position, 1, idref_bytes, 0, 9, made, 256)
+  val @(made_kind, length) = written_parts(cfi_make_range(data, nodes, start_position, end_position, 1, idref_bytes, 0, 9, made, 256))
   val same = same_bytes(made, "epubcfi(/6/4[chap01ref]!/4/2,/10/2[c001p0004]/1:6,/16/2[c001p0007]/1:27)", 72, 0)
-  val () = expect(length = 72, "epub.js: the range made is the one epub.js makes (length)")
+  val () = expect(is_written(made_kind) && length = 72, "epub.js: the range made is the one epub.js makes (length)")
   val () = expect(same, "epub.js: the range made is the one epub.js makes")
   val () = $A.free<byte>(made)
   val () = $A.drop<byte>(idref_frozen, idref_bytes)
@@ -660,9 +713,9 @@ fn check_made {l:agz}{n:pos}{size:nat}{m:pos | m <= 255}
   val idref = $A.alloc<byte>(16)
   val @(idref_frozen, idref_bytes) = $A.freeze<byte>(idref)
   val made = $A.alloc<byte>(256)
-  val length = cfi_make_range(data, nodes, start, finish, 4, idref_bytes, 0, 0, made, 256)
+  val @(made_kind, length) = written_parts(cfi_make_range(data, nodes, start, finish, 4, idref_bytes, 0, 0, made, 256))
   val same = same_bytes(made, text, m, 0)
-  val () = expect(length = m, what)
+  val () = expect(is_written(made_kind) && length = m, what)
   val () = (if length = m then expect(same, what) else ())
   val () = $A.free<byte>(made)
   val () = $A.drop<byte>(idref_frozen, idref_bytes)
@@ -773,13 +826,13 @@ fn check_entry {l:agz}{n:pos}{size:nat}{ll:agz}
   val position = log_get(log, at + 1) * 256 + log_get(log, at + 2)
   val length = log_get(log, at + 3)
   val made = $A.alloc<byte>(256)
-  val produced = cfi_of(data, nodes, position, made, 256)
+  val @(produced_kind, produced) = written_parts(cfi_of(data, nodes, position, made, 256))
   val steps = $A.alloc<byte>(256)
   val () = log_into(steps, log, at + 4, length, 0)
   val same = same_as_log(made, log, at + 4, length, 0)
-  val () = (if kind = 9 then expect(produced = ~1, "outside: no steps for a position in a tag or a comment")
-    else if kind = 1 then expect(produced = length && same, "an element's steps")
-    else expect(produced = length && same, "a text position's steps"))
+  val () = (if kind = 9 then expect(is_nowhere(produced_kind), "outside: no steps for a position in a tag or a comment")
+    else if kind = 1 then expect(is_written(produced_kind) && produced = length && same, "an element's steps")
+    else expect(is_written(produced_kind) && produced = length && same, "a text position's steps"))
   val @(steps_frozen, steps_bytes) = $A.freeze<byte>(steps)
   val @(found_kind, found_position) = place_parts(cfi_resolve(data, nodes, steps_bytes, length, 0))
   val () = (if kind = 1 then (expect(is_element(found_kind), "an element's steps resolve to an element"); expect(found_position = position, "an element's steps resolve to the element")) else ())
@@ -788,8 +841,8 @@ fn check_entry {l:agz}{n:pos}{size:nat}{ll:agz}
   (* and the position found has the same steps *)
   val again = $A.alloc<byte>(256)
   val found_nat = (if found_position >= 0 then found_position else 0): Nat
-  val again_length = cfi_of(data, nodes, found_nat, again, 256)
-  val () = (if kind = 3 then (if is_text(found_kind) then expect(again_length = length, "the position found after a comment has the same steps") else ()) else ())
+  val @(again_kind, again_length) = written_parts(cfi_of(data, nodes, found_nat, again, 256))
+  val () = (if kind = 3 then (if is_text(found_kind) then expect(is_written(again_kind) && again_length = length, "the position found after a comment has the same steps") else ()) else ())
   val again_same = same_as_log(again, log, at + 4, length, 0)
   val () = (if kind = 3 then (if is_text(found_kind) then expect(again_same, "the position found after a comment has the same steps (bytes)") else ()) else ())
   val () = $A.drop<byte>(steps_frozen, steps_bytes)
