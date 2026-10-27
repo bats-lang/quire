@@ -347,7 +347,8 @@
       "reject/text-textof-single-conv-of-another-length",
       "reject/text-textof-utf16-conv-of-a-table-source",
       "reject/text-unit16-little-as-big",
-      "reject/text-utf8-scan-of-other-cells"
+      "reject/text-utf8-scan-of-other-cells",
+      "reject/text-share-answer-unexpected-unmatched"
     ],
     "rest": [
       "accept/codec-absent-added-group",
