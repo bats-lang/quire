@@ -1,7 +1,7 @@
 (* sharing -- the system's share sheet: a selection with its citation,
    and the annotations as a Markdown file *)
 
-(* Bridge's share_text and share_file: Web Share in a browser, the
+(* Bridge's share_text_answer and share_file: Web Share in a browser, the
    Share plugin in the app. Share is offered only where text can be
    shared (share_available); a file is shared as one where files can be
    (share_file_available), and as its text where they cannot, or where
@@ -18,6 +18,7 @@
 
 staload "ui.sats"
 staload "mem.sats"
+staload "notice.sats"
 staload SH = "wasm.bats-packages.dev/bridge/src/share.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
@@ -57,6 +58,20 @@ fn _bytes_of {text_len:pos | text_len < 256} (text: string text_len): [l:agz] @(
   val _ = _put_from(bytes, 0, text, text_len, 0)
 in @(bytes, text_len) end
 
+(* How a text's share ended, each outcome its own (keyword: share-text-answer):
+   the sheet took it or the reader closed it, which need no word; the others
+   are said with their outcome as the code, and the unexpected as such *)
+fn _text_share_said (answer: $SH.text_share_answer): void =
+  case+ answer of
+  | ~$SH.TextAnswerShared() => ()
+  | ~$SH.TextAnswerCancelled() => ()
+  | ~$SH.TextAnswerFailed(text) => notice_share_failed("TextAnswerFailed", text)
+  | ~$SH.TextAnswerNotHere() => notice_share_failed("TextAnswerNotHere", $R.none())
+  | ~$SH.TextAnswerRejected(text) => notice_share_failed("TextAnswerRejected", text)
+  | ~$SH.TextAnswerThrown(text) => notice_share_failed("TextAnswerThrown", text)
+  | ~$SH.TextAnswerUnexpected(code) =>
+    notice_unexpected("sharing text", "share_text_answer", CaseNumbered("TextAnswerUnexpected", code), NoAnswer())
+
 (* The Markdown file bytes[0, len), named quire-annotations.md, shared:
    as a file (AsFile), or as its text, titled by its name (AsText).
    The promise says whether it was refused as a file, for the caller
@@ -83,11 +98,12 @@ in
         | $SH.FileShareFailed() => $P.ret<share_end>(ShareOver()))
     end
   | AsText() => let
-      val sharing = $SH.share_text(name_bytes, name_len, bytes, len)
+      val sharing = $SH.share_text_answer(name_bytes, name_len, bytes, len)
       val () = release_bytes(name_frozen, name_bytes)
     in
-      (* how it ended is the share sheet's to show *)
-      $P.and_then<$SH.share_outcome><share_end>(sharing, llam(_) => $P.ret<share_end>(ShareOver()))
+      $P.and_then<$SH.text_share_answer><share_end>(sharing, llam(answer) => let
+        val () = _text_share_said(answer)
+      in $P.ret<share_end>(ShareOver()) end)
     end
 end
 
@@ -166,13 +182,12 @@ implement share_selection (citation, citation_len) =
           val @(shared, rest) = $A.borrow_split<byte>(out_frozen, out_bytes, out_len)
           val title = $A.alloc<byte>(1)
           val @(title_frozen, title_bytes) = $A.freeze<byte>(title)
-          val sharing = $SH.share_text(title_bytes, 0, shared, out_len)
+          val sharing = $SH.share_text_answer(title_bytes, 0, shared, out_len)
           val () = release_bytes(title_frozen, title_bytes)
           val out_bytes = $A.borrow_join<byte>(out_frozen, shared, rest)
           val () = release_bytes(out_frozen, out_bytes)
         in
-          (* how it ended is the share sheet's to show *)
-          $P.finish<$SH.share_outcome>(sharing, llam(_) => ())
+          $P.finish<$SH.text_share_answer>(sharing, llam(answer) => _text_share_said(answer))
         end
         end
       end

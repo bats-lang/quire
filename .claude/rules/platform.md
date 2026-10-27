@@ -75,7 +75,10 @@ control is shown only where its platform has it**, by its own `data-hide`.
   * `e2e/controls-shown.js` checks on every screen the layout spec walks that no
     control's text is cut and every toggle looks different on and off.
 * **Sharing** (`src/sharing.bats`): the selection, quoted and cited
-  (`share_text`); the annotations' Markdown file by `share_file` where files can
+  (`share_text_answer`: shared and closed are not said; a failure, no way to share, a
+  rejection and a throw each are a banner with their outcome as the code
+  (`notice_share_failed`), an unexpected code `notice_unexpected`; keyword:
+  share-text-answer); the annotations' Markdown file by `share_file` where files can
   be shared (`share_as`: `AsFile | AsText`), else, or on `FilesNotShareable`,
   as text.
 * **Installing and keeping the storage** (`src/platform.bats`): Install Quire is
