@@ -38,6 +38,7 @@
       "page-marks.spec.js",
       "progress.spec.js",
       "publisher.spec.js",
+      "table-alignment.spec.js",
       "settings.spec.js",
       "stall-capture.spec.js",
       "sanitizer.spec.js",
