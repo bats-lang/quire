@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import {
   start, readBook, bookPage, place, showChrome, topBar, control, readingSettings, openReadingSettings,
   rawMouse, exportedBackup, toLibrary, openBook, reload, oneColumn, rawFile, dialog,
-  librarySettings, settingsButton, restoreInput,
+  librarySettings, settingsButton, restoreInput, clockNow,
 } from './helpers.js';
 
 const sentences = k => `Sentence ${k} one is said here. Then comes a second one, which is a little longer than the first. Last of the three ends.`;
@@ -17,6 +17,14 @@ const sentences = k => `Sentence ${k} one is said here. Then comes a second one,
 const paragraphs = `<p>${sentences(0)} ${'lorem ipsum dolor sit amet '.repeat(60)}</p>`
   + Array.from({ length: 60 }, (_, k) => `<p>${sentences(k + 1)} ${'lorem ipsum dolor sit amet '.repeat(6)}</p>`).join('');
 const book = title => ({ title, author: 'Ruler Tests', rawChapters: [{ body: paragraphs }, { body: paragraphs }] });
+
+// reading ruler: the retry ruler_retry arms (src/reading_ruler.bats, timer_set) for a ruler that could not be placed under the sheet
+const RULER_RETRY_MS = 50;
+
+// the page's clock is the fake one (#657), installed before the page opens, so the retry is run to, never waited for
+test.beforeEach(async ({ page }) => {
+  await page.clock.install();
+});
 
 /** Sets the reading ruler's style (and the lines it holds) from the reading settings' Look tab */
 async function choose(page, style, lines) {
@@ -27,6 +35,7 @@ async function choose(page, style, lines) {
     .getByRole('button', { name: lines === 1 ? '1 line' : `${lines} lines`, exact: true }).click();
   await page.keyboard.press('Escape');
   await expect(sheet).toBeHidden();
+  await page.clock.runFor(RULER_RETRY_MS);
 }
 
 /** The text area, the band and the two veils as drawn (null for one not shown), in viewport px */
@@ -100,6 +109,21 @@ test('the ruler is off to begin with, and nothing of it is drawn', async ({ page
   await expect(group.getByRole('button', { name: 'Off', exact: true })).toHaveAttribute('aria-pressed', 'true');
   // the height is a choice of the styles that have one
   await expect(readingSettings(page).getByRole('group', { name: 'Ruler height', exact: true })).toBeHidden();
+});
+
+test('a ruler chosen under the settings sheet is placed by the retry after the sheet closes, not before', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Retry'));
+  // the clock stands still from here: the retry's moment comes only when the test runs it
+  await page.clock.pauseAt((await clockNow(page)) + 1000);
+  await openReadingSettings(page, 'Look');
+  const sheet = readingSettings(page);
+  await sheet.getByRole('group', { name: 'Reading ruler', exact: true }).getByRole('button', { name: 'Grey bar', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(sheet).toBeHidden();
+  expect((await drawn(page)).placed).toBe(false);
+  await page.clock.runFor(RULER_RETRY_MS);
+  await expect.poll(async () => (await drawn(page)).placed).toBe(true);
 });
 
 for (const [style, kind] of STYLES) {

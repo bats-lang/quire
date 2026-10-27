@@ -25,10 +25,10 @@ staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 (* Reading ruler: the device of a pointer record, a mouse or a finger or pen *)
 #pub datatype ruler_device = RulerDeviceMouse | RulerDeviceTouchOrPen
 
-(* Reading ruler: decodes the record's kind number once, as the host sends it *)
+(* Reading ruler: decodes the record's kind once *)
 #pub fn ruler_record_of_code (code: int): ruler_record
 
-(* Reading ruler: decodes the record's pointer type number once, 1 is a mouse *)
+(* Reading ruler: decodes the record's pointer type once *)
 #pub fn ruler_device_of_code (code: int): ruler_device
 
 (* Reading ruler: a page is shown, the ruler goes to its first line *)
@@ -127,15 +127,18 @@ fn _spread (): bool = let
   val () = ui_measure("spread-probe")
 in $DR.get_measure_w() > 0 end
 
-(* Reading ruler: the content node at x, y, or -1 *)
-fn _node_at (x: int, y: int): [node:int | node >= ~1] int node =
+(* Reading ruler: the content node at a point, or none *)
+datavtype ruler_node = RulerNodeNone | {node:nat} RulerNodeAt of (int node)
+
+(* Reading ruler: the content node at x, y *)
+fn _node_at (x: int, y: int): ruler_node =
   case+ $DR.element_at_point(x, y) of
-  | ~$R.none() => ~1
+  | ~$R.none() => RulerNodeNone()
   | ~$R.some(blob) => let
       val blob_len = $BD.blob_len(blob)
     in
-      if blob_len <= 0 then let val () = $BD.blob_free(blob) in ~1 end
-      else if blob_len > 16 then let val () = $BD.blob_free(blob) in ~1 end
+      if blob_len <= 0 then let val () = $BD.blob_free(blob) in RulerNodeNone() end
+      else if blob_len > 16 then let val () = $BD.blob_free(blob) in RulerNodeNone() end
       else let
         val id_text = $A.alloc<byte>(blob_len)
         val () = $BD.blob_read(blob, 0, id_text, blob_len)
@@ -143,7 +146,7 @@ fn _node_at (x: int, y: int): [node:int | node >= ~1] int node =
         val @(id_frozen, id_bytes) = $A.freeze<byte>(id_text)
         val node = nid_parse(id_bytes, blob_len, 0, "c")
         val () = release_bytes(id_frozen, id_bytes)
-      in node end
+      in if node >= 0 then RulerNodeAt(node) else RulerNodeNone() end
     end
 
 (* Reading ruler: where offset of content node node is, in the measure slots *)
@@ -285,11 +288,10 @@ end
 val _found_centre = ref<int>(0)
 val _found_cross = ref<int>(0)
 
-fn _line_at (view: ruler_view, x: int, y: int): bool = let
-  val node = _node_at(x, y)
-in
-  if node < 0 then false
-  else let
+fn _line_at (view: ruler_view, x: int, y: int): bool =
+  case+ _node_at(x, y) of
+  | ~RulerNodeNone() => false
+  | ~RulerNodeAt(node) => let
     val offset = (case+ $DR.caret_position_from_point(x, y) of
       | ~$R.some(offset) => offset
       | ~$R.none() => 0): int
@@ -309,7 +311,6 @@ in
         in true end
     end
   end
-end
 
 (* Reading ruler: puts it on the line at x, y; whether there was one *)
 fn _place_at (view: ruler_view, x: int, y: int): bool =
@@ -447,9 +448,17 @@ in
   else _place_at(view, x, y)
 end
 
-(* Reading ruler: the pointer that is dragging it, or -1 *)
-#define NO_DRAG ~1
-val _drag_id = ref<int>(NO_DRAG)
+(* Reading ruler: whether a pointer is dragging it; the pointer's id is kept while it is *)
+datatype ruler_drag = RulerIdle | RulerDragging
+val _drag = ref<ruler_drag>(RulerIdle())
+val _drag_id = ref<int>(0)
+
+fn _drag_by (id: int): bool =
+  case+ !_drag of
+  | RulerIdle() => false
+  | RulerDragging() => !_drag_id = id
+
+fn _drag_end (): void = !_drag := RulerIdle()
 
 implement ruler_record_of_code (code) =
   if code = 0 then RulerRecordDown()
@@ -464,11 +473,13 @@ implement ruler_device_of_code (code) =
 
 (* Reading ruler: a finger or pen down on the band of a paged page drags it *)
 fn _drag_begin (view: ruler_view, id: int, px: int, py: int): bool =
-  if !_drag_id <> NO_DRAG then false
-  else if ~(_drawn(view)) then false
-  else if ~(_area_measure()) then false
-  else if ~(_on_band(view, px, py)) then false
-  else let val () = !_drag_id := id in true end
+  case+ !_drag of
+  | RulerDragging() => false
+  | RulerIdle() =>
+    (if ~(_drawn(view)) then false
+     else if ~(_area_measure()) then false
+     else if ~(_on_band(view, px, py)) then false
+     else let val () = !_drag_id := id val () = !_drag := RulerDragging() in true end)
 
 implement ruler_pointer (record, id, x, y, device) = let
   val view = !_view
@@ -488,15 +499,15 @@ in
         | RulerDownRight() => _drag_begin(view, id, px, py)
         | RulerDownLeft() => _drag_begin(view, id, px, py)))
   | RulerRecordMove() =>
-    (if !_drag_id <> id then false
+    (if ~(_drag_by(id)) then false
      else let val _ = _place_at(view, px, py) in true end)
   | RulerRecordUp() =>
-    (if !_drag_id <> id then false
-     else let val () = !_drag_id := NO_DRAG in true end)
+    (if ~(_drag_by(id)) then false
+     else let val () = _drag_end() in true end)
   | RulerRecordCancel() =>
-    (if !_drag_id <> id then false
-     else let val () = !_drag_id := NO_DRAG in true end)
-  | RulerRecordHidden() => let val () = !_drag_id := NO_DRAG in false end
+    (if ~(_drag_by(id)) then false
+     else let val () = _drag_end() in true end)
+  | RulerRecordHidden() => let val () = _drag_end() in false end
   | RulerRecordOther() => false
 
 end
