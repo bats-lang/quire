@@ -97,9 +97,9 @@ implement page_turn_rules (sheet) = let
   val sheet = fill(sheet, RoleGround())
   val sheet = close(sheet)
   (* the book's edge (book-edge keyword, reader.md): a bar of role edge
-     along the side the refused turn pushed against, in the page's
-     margin (8px at least, the bar 6px), a ground with no text, so it
-     covers none; no motion at all, so reduced motion changes nothing,
+     along the side the refused turn pushed against, 6px wide in the
+     page's margin, a ground with no text, over none (e2e/page-turn.spec.js
+     expectNoTextUnder measures it in every project); no motion at all, so reduced motion changes nothing,
      and the status toast says the same in words *)
   val sheet = rule(sheet, ".edge")
   val sheet = lay(sheet, Position(), "absolute")

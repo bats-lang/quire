@@ -274,8 +274,9 @@ status toast (`edge-status`, `role=status`). Every way of turning ends in
   stretch, Flutter's `GlowingOverscrollIndicator`, iOS's rubber band), and WCAG
   4.1.3 asks for the words to be a status message.
 * **Colour**: the bar is a `fill` in role `edge` (style.bats' proven ground with no
-  text, 3:1 against the grounds), 6px wide in the page's margin (8px at least),
-  so it covers no text. There is no shadow: a black shadow is invisible on
+  text, 3:1 against the grounds), 6px wide in the page's margin;
+  `expectNoTextUnder` (e2e/page-turn.spec.js) checks, at every edge shown, that no rectangle of text in
+  the page meets the bar's, in every project (a bar widened to 200px fails it). There is no shadow: a black shadow is invisible on
   Night's ground (its veil strength is 0, `V_night_0`).
 * **Motion**: none, the bar appears and goes at once, so `prefers-reduced-motion`
   changes nothing and the static indication stays (WCAG 2.3.3).

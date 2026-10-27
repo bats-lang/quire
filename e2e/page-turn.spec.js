@@ -325,11 +325,37 @@ async function toLastPage(page, arrow = 'ArrowRight') {
   throw new Error('no last page');
 }
 
+// The bar is in the page's margin, over no text: no rectangle of any text
+// in the page meets the bar's (#860, the "covers no text" claim)
+async function expectNoTextUnder(page) {
+  const covered = await page.evaluate(() => {
+    const bar = document.getElementById('book-edge').getBoundingClientRect();
+    const walker = document.createTreeWalker(document.getElementById('page'), NodeFilter.SHOW_TEXT);
+    const hits = [];
+    let texts = 0;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.nodeValue.trim()) continue;
+      texts++;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const r of range.getClientRects()) {
+        if (r.width > 0 && r.height > 0 && r.left < bar.right && r.right > bar.left && r.top < bar.bottom && r.bottom > bar.top) {
+          hits.push(`${node.nodeValue.trim().slice(0, 20)} [${r.left},${r.top},${r.right},${r.bottom}]`);
+        }
+      }
+    }
+    return { texts, bar: [bar.left, bar.top, bar.right, bar.bottom], hits };
+  });
+  expect(covered.texts).toBeGreaterThan(0);
+  expect(covered.hits, `text under the bar ${covered.bar}`).toEqual([]);
+}
+
 // The edge is up on the side, in words, and the page is where it was; then
 // it goes by itself
 async function expectEdge(page, here, { side, words, since }) {
   await expect(bookEdge(page)).toBeVisible();
   await expect(bookEdge(page)).toHaveClass(new RegExp(`edge-${side}`));
+  await expectNoTextUnder(page);
   await expect(edgeWords(page, words)).toBeVisible();
   expect(await place(page)).toEqual(here);
   await expectMoment(page, bookEdge(page), { since, ms: 1500, slack: 1000 });
