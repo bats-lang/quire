@@ -10,5 +10,18 @@
       "Bash(mount -t tracefs nodev /sys/kernel/tracing)",
       "Edit(/.claude/rules/ci.md)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|mcp__github__add_issue_comment|mcp__github__create_pull_request|mcp__github__update_pull_request",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/tests/static/guidelines.py\" --hook"
+          }
+        ]
+      }
+    ]
   }
 }

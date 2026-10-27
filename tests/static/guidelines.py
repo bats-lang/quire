@@ -15,9 +15,15 @@ them, and nothing refused the text that made them. This checks, without a compil
   and ends with the generated line;
 * `--review FILE`: the above for a review comment: its first line, the head SHA it
   reviewed, and, in the gate's form of bridge, pwa and capacitor-plugins, exactly one
-  line with "Reviewed:" and exactly one with "Verdict:" (bridge#200). A review quotes a
-  phrase it objects to on a line of its own, `Quoted objection: `<phrase>``; a code span
-  anywhere else in a review is linted as text (an exit clause in backticks is refused);
+  line with "Reviewed:" and exactly one with "Verdict:" (bridge#200). A review never
+  reproduces a banned phrase: it paraphrases or points at the place, and a code span in a
+  review is linted as text (an exit clause in backticks is refused);
+* `--hook`: the Claude Code PreToolUse hook (.claude/settings.json, keyword: pre-post lint, quire#943):
+  it reads the tool call as JSON on stdin and, when the call would post a reviewer's comment
+  (`add_issue_comment` whose text is a review, or any comment of the reviewer agent), set a PR's
+  body (`create_pull_request`, `update_pull_request`, or `gh api` on a pull request in Bash), exits 2
+  with the findings on stderr, which the harness gives back to the agent and the call is not made, so
+  nothing is posted; any other comment is informative and is not linted;
 * `--github`: what the text-lint workflow runs, from the event's payload: the PR's body
   against its head, and the newest review comment, set as the commit status `text-lint` on the
   head (a ticket's body, its table rows included, with its code spans as quotations: a
@@ -36,6 +42,8 @@ usage: python3 tests/static/guidelines.py [ROOT]
        python3 tests/static/guidelines.py --pr-body FILE --head SHA
        python3 tests/static/guidelines.py --review FILE [--gate-form]
        python3 tests/static/guidelines.py --brief FILE --ticket FILE
+       python3 tests/static/guidelines.py --hook          (a PreToolUse hook: the tool call as JSON on stdin)
+Any mode takes --phrases FILE, a list in the form of tests/static/guidelines/phrases.tsv, in place of that one.
        python3 tests/static/guidelines.py --github        (in a workflow: GITHUB_EVENT_NAME, GITHUB_EVENT_PATH)
 Exit 0 when clean, 1 with one line for each finding.
 """
@@ -59,8 +67,6 @@ GENERATED = (
 RUNNING_TOOLS = {'bash', 'edit', 'write', 'notebookedit', 'monitor', 'taskstop', 'skill', 'agent'}
 SHA = re.compile(r'\b[0-9a-f]{40}\b')
 FIXES = re.compile(r'\bFixes\s+((?:[\w.-]+/[\w.-]+)?#\d+)', re.IGNORECASE)
-# a reviewer's quotation of a banned phrase: the whole line, the phrase in one code span (reviewer.md, "The comment")
-QUOTED_OBJECTION = re.compile(r'Quoted objection: (`[^`\n]+`)')
 
 
 def load_phrases(path=PHRASES):
@@ -95,7 +101,9 @@ def lint_text(text, name, phrases, guide=False, notes=False):
                 continue
             found = regex.search(line)
             if found:
-                findings.append(f'{name}:{number}: row {row}: "{found.group(0)}": {reason}')
+                # the finding says where (the line and its text), what (the phrase) and why in words, so the writer can fix the text
+                shown = line.strip() if len(line.strip()) <= 120 else line.strip()[:117] + '...'
+                findings.append(f'{name}:{number}: row {row}: the phrase "{found.group(0)}" is refused: {reason} (the line: "{shown}")')
     return findings
 
 
@@ -196,27 +204,6 @@ def status_description(finding):
     return spelled[:140]
 
 
-def quoted_phrase_matches(quoted, phrases):
-    return any(regex.search(quoted) for _scope, _row, regex, _reason, _example in phrases)
-
-
-def review_text(text, phrases):
-    """The review's text for the lint (reviewer.md, "The comment"). A phrase the reviewer objects to is
-    quoted alone on its line, `Quoted objection: `<a phrase of the list>``, and that line is the
-    quotation: it is blanked. Any other code span is the reviewer's own text and is linted, so an exit
-    clause offered in backticks is refused. A line that starts "Quoted objection:" in any other form is refused."""
-    kept, findings = [], []
-    for number, line in enumerate(text.split('\n'), 1):
-        found = QUOTED_OBJECTION.fullmatch(line.strip())
-        if found and quoted_phrase_matches(found.group(1), phrases):
-            kept.append('')
-            continue
-        if line.strip().startswith('Quoted objection:'):
-            findings.append(f'review:{number}: a quoted objection is one line, "Quoted objection: `<a phrase of the list>`" and nothing else on it (reviewer.md, "The comment")')
-        kept.append(line)
-    return findings + lint_text('\n'.join(kept), 'review', phrases)
-
-
 SIGNATURE_CHANGE = re.compile(r'(?i)\b(chang(?:e|es|ed|ing)|replac(?:e|es|ed|ing)|remov(?:e|es|ed|ing))\s+(?:a |an |the )?(?:published|public)\s+signatures?\b')
 OVERLAP_BRIEF = re.compile(r'^\s*Overlap:', re.MULTILINE)
 OVERLAP_REVIEW = re.compile(r'^\s*Overlap check:', re.MULTILINE)
@@ -256,7 +243,7 @@ def lint_worker_lines(text, name):
 
 
 def lint_review(text, phrases, gate_form=False):
-    findings = review_text(text, phrases) + lint_overlap(text, 'review', OVERLAP_REVIEW, 'Overlap check: ...')
+    findings = lint_text(text, 'review', phrases) + lint_overlap(text, 'review', OVERLAP_REVIEW, 'Overlap check: ...')
     lines = [line for line in text.split('\n') if line.strip()]
     first = lines[0].strip() if lines else ''
     if gate_form or first == '## Adversarial review':
@@ -383,6 +370,149 @@ def github(event_name, event, repository, api, phrases, run_url=''):
     return findings
 
 
+# --- the pre-post lint (keyword: pre-post lint, quire#943) ---------------------------------------------
+# Claude Code runs a PreToolUse hook before a tool call and, on exit 2, does not make the call and gives
+# the hook's stderr to the agent (the reviewer agent holds no tool that runs anything, so the harness
+# runs this, not the agent). Only a reviewer's comment and a PR's body are linted; any other comment is informative.
+POSTING_TOOLS = ('mcp__github__add_issue_comment', 'mcp__github__create_pull_request', 'mcp__github__update_pull_request')
+GATED_REPOSITORIES = ('bridge', 'pwa', 'capacitor-plugins')
+REVIEW_WORDS = re.compile(r'independent review|adversarial review', re.IGNORECASE)
+PULL_PATH = re.compile(r'(?:^|/)repos/([\w.-]+)/([\w.-]+)/pulls(?:/(\d+))?$')
+COMMENT_PATH = re.compile(r'(?:^|/)repos/([\w.-]+)/([\w.-]+)/issues/\d+/comments$')
+
+
+def is_review_attempt(text):
+    """A comment is a review when one of its first three non-blank lines says so, however it is spelled."""
+    lines = [line for line in text.split('\n') if line.strip()][:3]
+    return any(REVIEW_WORDS.search(line) for line in lines)
+
+
+def refusal(what, findings):
+    return (f'text-lint refused {what}: it was NOT posted. Rewrite the text so that none of these findings remains '
+            '(paraphrase or point at the place, never reproduce a banned phrase) and post it again:\n'
+            + '\n'.join(f'  {finding}' for finding in findings))
+
+
+def pull_head(api, owner, repo, number=None, branch=None):
+    """The head SHA of the pull request, or of the branch a new one is made from; None when it cannot be read."""
+    try:
+        if number:
+            return api(f'repos/{owner}/{repo}/pulls/{number}')['head']['sha']
+        if branch:
+            return api(f'repos/{owner}/{repo}/commits/{branch.split(":")[-1]}')['sha']
+    except (SystemExit, KeyError, TypeError):
+        return None
+    return None
+
+
+def lint_comment(body, repository, reviewer_agent, phrases):
+    """A reviewer's comment is linted as a review; any other comment is not linted."""
+    if not (reviewer_agent or is_review_attempt(body)):
+        return None
+    return lint_review(body, phrases, repository in GATED_REPOSITORIES)
+
+
+def gh_api_call(command, cwd):
+    """The `gh api` call of a Bash command that sets a PR's body or posts a comment: (kind, repository, number, text, branch), or
+    None for a command that is none of that. A body the lint cannot read (stdin, a shell expansion, a missing file) is a refusal."""
+    import json
+    import shlex
+    if 'gh' not in command or 'api' not in command:
+        return None
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None  # not parsed: the text-lint status of the PR is the check that remains
+    for start in range(len(tokens) - 1):
+        if tokens[start] == 'gh' and tokens[start + 1] == 'api':
+            break
+    else:
+        return None
+    arguments = tokens[start + 2:]
+    for end, token in enumerate(arguments):
+        if token in ('&&', '||', ';', '|'):
+            arguments = arguments[:end]
+            break
+    method, endpoint, fields, input_file = None, None, {}, None
+    index = 0
+    while index < len(arguments):
+        token = arguments[index]
+        following = arguments[index + 1] if index + 1 < len(arguments) else ''
+        if token in ('-X', '--method'):
+            method, index = following.upper(), index + 2
+        elif token in ('-f', '-F', '--field', '--raw-field'):
+            key, _, value = following.partition('=')
+            fields[key] = value
+            index += 2
+        elif token == '--input':
+            input_file, index = following, index + 2
+        elif token.startswith('-'):
+            index += 1
+        else:
+            endpoint = endpoint or token
+            index += 1
+    if endpoint is None:
+        return None
+    pull, comment = PULL_PATH.search(endpoint), COMMENT_PATH.search(endpoint)
+    if not (pull or comment) or (method or ('POST' if fields or input_file else 'GET')) not in ('POST', 'PATCH', 'PUT'):
+        return None
+    found = pull or comment
+    if input_file:
+        try:
+            with open(os.path.join(cwd, input_file), encoding='utf-8') as handle:
+                payload = json.load(handle)
+        except (OSError, ValueError):
+            return ('unreadable', found.group(1), found.group(2), f'--input {input_file} is not a readable JSON file (give an absolute path)', None)
+        fields = {key: value for key, value in payload.items() if isinstance(value, str)}
+    if 'body' not in fields:
+        return None
+    body = fields['body']
+    if body.startswith('@'):
+        if body == '@-':
+            return ('unreadable', found.group(1), found.group(2), 'body=@- reads stdin, which the lint cannot see: write the body to a file and pass body=@FILE', None)
+        try:
+            with open(os.path.join(cwd, body[1:]), encoding='utf-8') as handle:
+                body = handle.read()
+        except OSError:
+            return ('unreadable', found.group(1), found.group(2), f'{body[1:]} is not a readable file (give an absolute path)', None)
+    elif body.startswith('$') or '`' in body:
+        return ('unreadable', found.group(1), found.group(2), 'the body is a shell expansion, which the lint cannot see: write the body to a file and pass body=@FILE', None)
+    return ('pull' if pull else 'comment', found.group(1), found.group(2), body, (found.group(3) if pull else None, fields.get('head')))
+
+
+def hook(event, phrases, api):
+    """(exit status, message) of a PreToolUse event: 2 and the findings when the call would post a text that fails."""
+    tool, given = event.get('tool_name', ''), event.get('tool_input') or {}
+    reviewer_agent = event.get('agent_type') == 'reviewer'
+    try:
+        if tool == 'mcp__github__add_issue_comment':
+            findings = lint_comment(given.get('body') or '', given.get('repo'), reviewer_agent, phrases)
+            return (2, refusal('a reviewer comment', findings)) if findings else (0, '')
+        if tool in ('mcp__github__create_pull_request', 'mcp__github__update_pull_request'):
+            if given.get('body') is None:
+                return 0, ''
+            head = pull_head(api, given.get('owner'), given.get('repo'), given.get('pullNumber'), given.get('head'))
+            findings = lint_pr_body(given['body'], head, phrases)
+            return (2, refusal('a PR body', findings)) if findings else (0, '')
+        if tool == 'Bash':
+            call = gh_api_call(given.get('command') or '', event.get('cwd') or '.')
+            if call is None:
+                return 0, ''
+            kind, owner, repo, text, extra = call
+            if kind == 'unreadable':
+                return 2, refusal('a call that sets a PR body or posts a comment', [text])
+            if kind == 'pull':
+                number, branch = extra
+                findings = lint_pr_body(text, pull_head(api, owner, repo, number, branch), phrases)
+                return (2, refusal('a PR body', findings)) if findings else (0, '')
+            findings = lint_comment(text, repo, reviewer_agent, phrases)
+            return (2, refusal('a reviewer comment', findings)) if findings else (0, '')
+    except Exception as error:  # a lint that cannot run must not let a posting tool through
+        if tool in POSTING_TOOLS:
+            return 2, f'text-lint could not run ({error!r}): nothing was posted; try again'
+    return 0, ''
+
+
 def read(path):
     if path == '-':
         return sys.stdin.read()
@@ -395,7 +525,13 @@ def option(arguments, name):
 
 
 def main(arguments):
-    phrases = load_phrases()
+    phrases = load_phrases(option(arguments, '--phrases') or PHRASES)
+    if '--hook' in arguments:
+        import json
+        status, message = hook(json.load(sys.stdin), phrases, gh_api)
+        if message:
+            print(message, file=sys.stderr)
+        return status
     if '--github' in arguments:
         import json
         with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as handle:

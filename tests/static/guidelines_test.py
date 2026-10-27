@@ -176,10 +176,25 @@ class Review(unittest.TestCase):
     def test_the_gate_form_is_demanded_when_asked(self):
         self.assertTrue(self.findings(GOOD_REVIEW, gate=True))
 
-    def test_a_quoted_objection_alone_on_its_line_passes(self):
-        quoted = 'Quoted objection: `change Fixes #368 to Refs #368`'
-        self.assertEqual(self.findings(GOOD_REVIEW.replace('The Done-when is met.', quoted)), [])
-        self.assertEqual(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Quoted objection: `it passed alone`')), [])
+    def test_a_review_that_quotes_a_banned_phrase_is_refused_with_the_phrase_its_line_and_the_reason(self):
+        # the "Quoted objection" form is gone (quire#943): a phrase is refused whatever label or code span holds it
+        for line in ('Quoted objection: `change Fixes #368 to Refs #368`', 'The body says "change Fixes #368 to Refs #368".'):
+            with self.subTest(line=line):
+                found = self.findings(GOOD_REVIEW.replace('The Done-when is met.', line))
+                self.assertEqual(len(found), 1, found)
+                self.assertTrue(found[0].startswith('review:3: row 2: the phrase "Fixes #368 to Refs"'), found)
+                self.assertIn('Nobody offers a way to ship less than the ticket says', found[0])
+                self.assertIn(f'(the line: "{line}")', found[0])
+
+    def test_the_quoted_objection_form_is_not_in_the_lint_or_the_reviewer_rules(self):
+        self.assertFalse(hasattr(gl, 'QUOTED_OBJECTION'))
+        self.assertFalse(hasattr(gl, 'review_text'))
+        for parts in (('tests', 'static', 'guidelines.py'), ('.claude', 'agents', 'reviewer.md'), ('.claude', 'orchestration.md'), ('.claude', 'agents', 'worker.md')):
+            self.assertNotIn('quoted objection', read_root(*parts).lower(), '/'.join(parts))
+
+    def test_a_paraphrase_that_points_at_the_place_passes(self):
+        text = GOOD_REVIEW.replace('The Done-when is met.', 'The second sentence of the third paragraph of the body offers a way to ship less than the ticket says.')
+        self.assertEqual(self.findings(text), [])
 
     def test_a_phrase_in_a_code_span_outside_the_form_is_read_as_the_reviewers_text(self):
         self.assertTrue(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'The body says `it passed alone`.')))
@@ -191,18 +206,145 @@ class Review(unittest.TestCase):
     def test_an_exit_clause_in_a_review_is_refused(self):
         self.assertTrue(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Use Refs instead of Fixes.')))
 
-    def test_a_quoted_objection_with_an_offer_on_its_line_is_refused(self):
-        found = self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Quoted objection: `change Fixes #368 to Refs #368` and do that.'))
-        self.assertTrue(any('Quoted objection' in line for line in found), found)
-
-    def test_a_quoted_objection_must_quote_a_phrase_of_the_list(self):
-        found = self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Quoted objection: `ls -la`'))
-        self.assertTrue(any('quoted objection is one line' in line for line in found), found)
-
     def test_the_placeholder_and_the_as_and_use_forms_are_refused(self):
         for text in ('change Fixes #N to Refs #N', 'change Fixes #<n> to Refs', 'open it as Refs', 'it goes in as Refs', 'use Refs'):
             self.assertTrue(gl.lint_text(text, 'x', PHRASES), text)
         self.assertEqual(gl.lint_text('Fixes #751 closes it, and the Refs line is for a dependency.', 'x', PHRASES), [])
+
+
+class Hook(unittest.TestCase):
+    """The pre-post lint (quire#943): the PreToolUse hook refuses a reviewer's comment or a PR's body that fails, before it is posted."""
+    BAD_REVIEW = GOOD_REVIEW.replace('The Done-when is met.', 'Use Refs instead of Fixes.')
+
+    def run_hook(self, tool, given, **more):
+        api = FakeApi()
+        status, message = gl.hook(dict({'tool_name': tool, 'tool_input': given}, **more), PHRASES, api)
+        return status, message, api
+
+    def comment(self, body, **more):
+        return self.run_hook('mcp__github__add_issue_comment', {'owner': 'o', 'repo': 'r', 'issue_number': 5, 'body': body}, **more)
+
+    def test_a_review_that_fails_is_refused_with_the_line_the_phrase_and_the_reason_and_nothing_is_read_or_posted(self):
+        status, message, api = self.comment(self.BAD_REVIEW)
+        self.assertEqual(status, 2)
+        self.assertIn('NOT posted', message)
+        self.assertIn('review:3: row 2: the phrase "instead of Fixes" is refused', message)
+        self.assertIn('(the line: "Use Refs instead of Fixes.")', message)
+        self.assertEqual(api.calls, [])
+
+    def test_the_same_review_paraphrased_passes(self):
+        status, message, _api = self.comment(GOOD_REVIEW.replace('The Done-when is met.', 'The body offers a way to ship less than the ticket says in its second paragraph.'))
+        self.assertEqual((status, message), (0, ''))
+
+    def test_a_review_with_a_wrong_first_line_is_refused(self):
+        status, message, _api = self.comment(GOOD_REVIEW.replace('Independent review', 'Review'))
+        self.assertEqual(status, 0)  # not a review by its words: an ordinary comment
+        status, message, _api = self.comment(GOOD_REVIEW.replace('Independent review (a separate reviewer agent, not the author)', 'Independent review'))
+        self.assertEqual(status, 2)
+        self.assertIn('first line', message)
+
+    def test_every_comment_of_the_reviewer_agent_is_a_review(self):
+        status, message, _api = self.comment('Verdict is fine.', agent_type='reviewer')
+        self.assertEqual(status, 2)
+        self.assertIn('first line', message)
+
+    def test_an_ordinary_comment_is_not_linted_whatever_it_says(self):
+        for text in ('Use Refs instead of Fixes.', 'it passed alone, honest', 'Evidence: nothing', ''):
+            status, message, api = self.comment(text, agent_type='worker')
+            self.assertEqual((status, message, api.calls), (0, '', []), text)
+
+    def test_the_gate_form_is_demanded_in_a_gated_repository_only(self):
+        gated = self.run_hook('mcp__github__add_issue_comment', {'owner': 'bats-lang', 'repo': 'bridge', 'issue_number': 5, 'body': GOOD_REVIEW})
+        self.assertEqual(gated[0], 2)
+        self.assertIn('Adversarial review', gated[1])
+        self.assertEqual(self.comment(GOOD_REVIEW)[0], 0)
+
+    def test_a_pr_body_that_fails_is_refused_and_a_good_one_is_set(self):
+        given = {'owner': 'o', 'repo': 'r', 'pullNumber': 5, 'body': GOOD_BODY.replace('Fixes #751', 'Refs #751')}
+        status, message, _api = self.run_hook('mcp__github__update_pull_request', given)
+        self.assertEqual(status, 2)
+        self.assertIn('PR body: the first line is "Fixes #N"', message)
+        self.assertEqual(self.run_hook('mcp__github__update_pull_request', dict(given, body=GOOD_BODY))[0], 0)
+
+    def test_a_pr_body_for_an_older_head_is_refused_by_the_head_the_api_gives(self):
+        given = {'owner': 'o', 'repo': 'r', 'pullNumber': 5, 'body': GOOD_BODY.replace(HEAD, OTHER)}
+        status, message, _api = self.run_hook('mcp__github__update_pull_request', given)
+        self.assertEqual(status, 2)
+        self.assertIn('it describes head', message)
+
+    def test_an_update_that_sets_no_body_is_none_of_its_business(self):
+        self.assertEqual(self.run_hook('mcp__github__update_pull_request', {'owner': 'o', 'repo': 'r', 'pullNumber': 5, 'title': 'x'})[:2], (0, ''))
+
+    def bash(self, command, **more):
+        return self.run_hook('Bash', {'command': command}, **more)
+
+    def test_gh_api_with_a_body_file_is_linted_as_a_pr_body_or_a_review(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            bad, good, review = (os.path.join(tmp, name) for name in ('bad.md', 'good.md', 'review.md'))
+            for path, text in ((bad, GOOD_BODY.replace('Fixes #751', 'Refs #751')), (good, GOOD_BODY), (review, self.BAD_REVIEW)):
+                with open(path, 'w', encoding='utf-8') as handle:
+                    handle.write(text)
+            patch = 'gh api -X PATCH repos/bats-lang/quire/pulls/5 -F body=@'
+            self.assertEqual(self.bash(patch + bad)[0], 2)
+            self.assertEqual(self.bash(patch + good)[:2], (0, ''))
+            self.assertEqual(self.bash(f'cd /x && gh api repos/bats-lang/quire/pulls -f title=t -f head=b -F body=@{good} --jq .number | head')[:2], (0, ''))
+            self.assertEqual(self.bash(f'gh api repos/bats-lang/quire/issues/5/comments -F body=@{review}')[0], 2)
+            self.assertEqual(self.bash(f'gh api repos/bats-lang/quire/issues/5/comments -F body=@{bad}')[:2], (0, ''))
+
+    def test_gh_api_with_a_body_the_lint_cannot_read_is_refused(self):
+        for command in ('gh api -X PATCH repos/o/r/pulls/5 -F body=@-', 'gh api -X PATCH repos/o/r/pulls/5 -F body=@/nonexistent/x.md',
+                        'gh api -X PATCH repos/o/r/pulls/5 -f body="$(cat x.md)"'):
+            with self.subTest(command=command):
+                self.assertEqual(self.bash(command)[0], 2)
+
+    def test_gh_api_that_sets_no_body_or_reads_is_none_of_its_business(self):
+        for command in ('ls -la', 'gh api repos/o/r/pulls/5', 'gh api -X PATCH repos/o/r/pulls/5 -f state=closed', 'gh api repos/o/r/issues/5 -X PATCH -f body=Refs',
+                        'gh api -X PATCH repos/o/r/issues/5 -f body=x', 'git commit -m "gh api"'):
+            with self.subTest(command=command):
+                self.assertEqual(self.bash(command)[:2], (0, ''))
+
+    def test_a_lint_that_cannot_run_blocks_a_posting_tool_only(self):
+        self.assertEqual(gl.hook({'tool_name': 'mcp__github__add_issue_comment', 'tool_input': {'body': FIRST + 'approved', 'repo': 'r'}}, None, FakeApi())[0], 2)
+        self.assertEqual(gl.hook({'tool_name': 'Bash', 'tool_input': {'command': 'gh api repos/o/r/pulls/5 -F body=x'}}, None, FakeApi())[0], 0)
+
+    def test_the_command_line_hook_exits_2_with_the_finding_on_stderr_and_0_for_a_clean_text(self):
+        import json
+        import subprocess
+        script = os.path.join(HERE, 'guidelines.py')
+        def run(body):
+            event = {'tool_name': 'mcp__github__add_issue_comment', 'tool_input': {'owner': 'o', 'repo': 'r', 'issue_number': 5, 'body': body}}
+            return subprocess.run([sys.executable, '-B', '-I', script, '--hook'], input=json.dumps(event), capture_output=True, text=True)
+        refused = run(self.BAD_REVIEW)
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn('(the line: "Use Refs instead of Fixes.")', refused.stderr)
+        self.assertEqual(refused.stdout, '')
+        passed = run(GOOD_REVIEW)
+        self.assertEqual((passed.returncode, passed.stderr), (0, ''))
+
+    def test_another_list_of_phrases_is_read_from_the_option_in_every_mode(self):
+        import json
+        import subprocess
+        script = os.path.join(HERE, 'guidelines.py')
+        stand_in = os.path.join(HERE, 'guidelines', 'stand-in-phrases.tsv')
+        event = {'tool_name': 'mcp__github__add_issue_comment', 'tool_input': {'repo': 'r', 'body': GOOD_REVIEW.replace('The Done-when is met.', 'The zebra crossing is closed.')}}
+        def run(*arguments, stdin=None):
+            return subprocess.run([sys.executable, '-B', '-I', script, *arguments], input=stdin, capture_output=True, text=True)
+        refused = run('--hook', '--phrases', stand_in, stdin=json.dumps(event))
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn('review:3: row 99: the phrase "zebra crossing" is refused: The phrase is a stand-in', refused.stderr)
+        self.assertEqual(run('--hook', stdin=json.dumps(event)).returncode, 0)  # the real list does not hold it
+
+    def test_the_settings_run_the_hook_before_each_posting_tool_and_the_rules_say_so(self):
+        import json
+        settings = json.loads(read_root('.claude', 'settings.json'))
+        entries = settings['hooks']['PreToolUse']
+        self.assertEqual(len(entries), 1)
+        for tool in ('Bash', 'mcp__github__add_issue_comment', 'mcp__github__create_pull_request', 'mcp__github__update_pull_request'):
+            self.assertIn(tool, entries[0]['matcher'].split('|'))
+        self.assertEqual([hook['command'] for hook in entries[0]['hooks']], ['python3 "$CLAUDE_PROJECT_DIR/tests/static/guidelines.py" --hook'])
+        self.assertIn('pre-post lint', read_root('.claude', 'agents', 'reviewer.md'))
+        self.assertIn('pre-post lint', read_root('.claude', 'agents', 'worker.md'))
 
 
 class Brief(unittest.TestCase):
