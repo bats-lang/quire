@@ -138,6 +138,30 @@ errors its entry lists.
   (Thorium), on purpose. What only CSS hid (`display:none`) is shown; the
   `hidden` attribute is kept (`_pass_attrs` gives it the class
   `hidden-by-book`). `e2e/publisher.spec.js`.
+* **The alignment of a table's elements is the one thing kept** (#868, keyword: publisher alignment).
+  The `text-align` and `justify-items` of the book's sheets (`<link>` sheets and `<style>`, the same
+  joined sheet as the sizes, #431) and of a cell's `style` attribute are read for `table`, `thead`,
+  `tbody`, `tfoot`, `tr`, `td`, `th` and MathML's `mtable`, `mtr` and `mtd` only: `left`, `right` and
+  `center`, and `start` and `end` of `justify-items` (a math cell is set left to right), never
+  `!important`. The cascade of `src/css_cascade.bats` picks the winning rule of each element and the element
+  carries `data-align` (`_align_mark` in `src/reader.bats`), which the rules of `style-sizes`
+  (`src/size_rules.bats`) turn into `text-align` and `justify-items`. Why both: Chromium sets a MathML
+  cell `-webkit-center`, and a plain `right` leaves its content where it was while `justify-items: end`
+  moves it (measured on Chromium 149); the book's own sheet writes both for this reason
+  (`e2e/calculus101-mathml-test.epub`, `_static/sphinx-typst-math.css`, Typst's exporter). Selectors
+  may hold `:first-child`, `:last-child` and `:nth-child(odd, even or a number)` (`pseudo_read` in
+  `src/css_size.bats`, used by the sizes too); the cascade needs an element's place among its parent's
+  elements, which the walk counts. What the real sheet leaves dropped: its selector
+  `.typst-math math:is(:not([display])) > mtable.multiline-equation mtd` (`:is()` and the child
+  combinator are not read), and every rule that sets another property (`padding`, `math-depth`,
+  `math-style`, `math-shift`, `font-feature-settings`, `max-width`, `overflow`, `color`), which stays
+  dropped as the rest of the book's CSS. Why this and no other: a table's cells are aligned by their
+  content (numbers right, labels left), so a setting of the reader's has nothing to say about them,
+  where Justify, spacing and Font are the reader's for the text; Readium CSS leaves tables out of its
+  text-align setting for the same reason (readium/css#5: headings, tables and `pre` are not
+  overridden). `e2e/table-alignment.spec.js` plays the real book and `e2e/table-alignment-books.js`
+  (a plain table, the case that is not mathematics); `tests/css-size/run.sh` plays the real book's
+  chapter and sheets through the reader (`css_book_test.bats`) and the cascade.
 * **The print page list** (#415): the Pages tab lists the entries as the book
   gives them (not sorted, duplicates kept); an entry whose chapter the book lacks
   is listed and leads nowhere (the panel stays), one whose fragment is missing

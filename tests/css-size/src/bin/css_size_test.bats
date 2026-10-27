@@ -234,6 +234,16 @@ fn check_selectors (): void = let
   val () = selector("p + span", "combinator", 0)
   val () = selector("p ~ span", "combinator", 0)
   val () = selector("a:hover", "pseudo", 0)
+  val () = selector("p:first-child", "supported", 101)
+  val () = selector("td:last-child", "supported", 101)
+  val () = selector("mtable.aligned mtd:nth-child(odd)", "supported", 202)
+  val () = selector("td:nth-child(even)", "supported", 101)
+  val () = selector("td:nth-child(3)", "supported", 101)
+  val () = selector("td:nth-child(0)", "pseudo", 0)
+  val () = selector("td:nth-child(2n)", "pseudo", 0)
+  val () = selector("td:nth-child(odd", "pseudo", 0)
+  val () = selector("td:nth-child()", "pseudo", 0)
+  val () = selector("td:nth-child", "pseudo", 0)
   val () = selector("p::first-line", "pseudo", 0)
   val () = selector("[x]", "attribute", 0)
   val () = selector("a[href]", "attribute", 0)
@@ -245,6 +255,76 @@ fn check_selectors (): void = let
   val () = selector("a b c d e f g h", "supported", 8)
   val () = selector("a b c d e f g h i", "too deep", 0)
 in () end
+
+
+(* ---------------- text-align ---------------- *)
+
+fn align_word (align: align_value): string =
+  case+ align of
+  | AlignNone() => "none"
+  | AlignLeft() => "left"
+  | AlignRight() => "right"
+  | AlignCenter() => "center"
+
+fn align_of {m:pos | m <= 1048576} (block: string(m), wanted: string): void = let
+  val m = g1u2i(string1_length(block))
+  val array = text_array(block, m)
+  val @(frozen, view) = $A.freeze<byte>(array)
+  val () = expect_text(align_word(declarations_align_read(view, 0, m)), wanted, block)
+  val () = $A.drop<byte>(frozen, view)
+in $A.free<byte>($A.thaw<byte>(frozen)) end
+
+fn check_aligns (): void = let
+  val () = align_of("text-align:right", "right")
+  val () = align_of("text-align: -webkit-center", "none")
+  val () = align_of("justify-items:end", "right")
+  val () = align_of("justify-items: START", "left")
+  val () = align_of("justify-items:center", "center")
+  val () = align_of("justify-items:stretch", "none")
+  val () = align_of("text-align:right;justify-items:start", "left")
+  val () = align_of("justify-items:end;text-align:center", "center")
+  val () = align_of(" TEXT-ALIGN : LEFT ; ", "left")
+  val () = align_of("color:red;text-align:left;text-align:bogus", "left")
+  val () = align_of("text-align:left;text-align:-webkit-right", "left")
+  val () = align_of("text-align:right !important", "none")
+  val () = align_of("text-align:start", "none")
+  val () = align_of("text-align:justify", "none")
+  val () = align_of("font-size:2em", "none")
+  val () = align_of(" ", "none")
+in () end
+
+(* the n-th rule of an alignment sheet: its selector's length and its alignment word *)
+fun align_rule_at {sheet_len:int}{count:nat}{i:nat} .<count>.
+  (rules: !align_rules(sheet_len, count), i: int i): @(int, string) =
+  case+ rules of
+  | AlignRulesNil() => @(~1, "none")
+  | AlignRulesCons(rule, align, rest) =>
+    if i = 0 then @(rule.selector_len, align_word(align)) else align_rule_at(rest, i - 1)
+
+fn check_align_sheets (): void = let
+  val sheet = "mtd:nth-child(odd){text-align:right} p{font-size:2em} td.a, th{text-align:center} @media x{td{text-align:left}} td{text-align:start} a:hover{text-align:left}"
+  val m = g1u2i(string1_length(sheet))
+  val array = text_array(sheet, m)
+  val @(frozen, view) = $A.freeze<byte>(array)
+  val rules = sheet_aligns_read(view, m)
+  val () = expect_int(let
+    fun count {s:int}{c:nat} .<c>. (rules: !align_rules(s, c)): int =
+      case+ rules of
+      | AlignRulesNil() => 0
+      | AlignRulesCons(_, _, rest) => 1 + count(rest)
+  in count(rules) end, 3, "align sheet: three rules")
+  val @(first_len, first) = align_rule_at(rules, 0)
+  val () = expect_int(first_len, 18, "align sheet: first selector")
+  val () = expect_text(first, "right", "align sheet: first")
+  val @(second_len, second) = align_rule_at(rules, 1)
+  val () = expect_int(second_len, 4, "align sheet: second selector")
+  val () = expect_text(second, "center", "align sheet: second")
+  val @(third_len, third) = align_rule_at(rules, 2)
+  val () = expect_int(third_len, 2, "align sheet: third selector")
+  val () = expect_text(third, "center", "align sheet: third")
+  val () = align_rules_free(rules)
+  val () = $A.drop<byte>(frozen, view)
+in $A.free<byte>($A.thaw<byte>(frozen)) end
 
 (* ---------------- style sheets ---------------- *)
 
@@ -429,6 +509,8 @@ implement main0 () = let
   val () = check_blocks()
   val () = check_font_sizes()
   val () = check_selectors()
+  val () = check_aligns()
+  val () = check_align_sheets()
   val () = check_sheets()
   val () = check_sizes()
   val () = check_many()

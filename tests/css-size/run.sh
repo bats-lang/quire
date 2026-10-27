@@ -28,6 +28,8 @@ i = s.rstrip().rfind("\nend")
 open(sys.argv[2], "w").write(s[:i] + "\n")
 PY
 done
+# the real book of quire#868, read by css_book_test.bats from book/ (unzip is the one tool call: bats has no inflate)
+unzip -q "$ROOT/e2e/calculus101-mathml-test.epub" -d "$TMP/book"
 cd "$TMP"
 bats build --repository "$1" > build.log 2>&1 || { cat build.log; exit 1; }
 LIMIT=""
@@ -38,4 +40,4 @@ for BIN in $(find dist -type f -perm -u+x | sort); do
   tail -1 out.log | grep -qx "all ok"
   RAN=$((RAN + 1))
 done
-[ "$RAN" -ge 2 ] || { ls -R dist; exit 1; }
+[ "$RAN" -ge 3 ] || { ls -R dist; exit 1; }
