@@ -604,7 +604,7 @@ fn reader_rules_scrubber {left:nat | left >= 2950} (sheet: sheet(left, false, fa
   val sheet = close(sheet)
   (* scrolled, on the chapter's last screen: at the right, apart from
      Back at the left *)
-  (* the hint on turning pages, in the band above the text; a tap on it takes it away *)
+  (* reader acts: the hint on turning pages, in the band above the text; a tap on it takes it away *)
   val sheet = rule(sheet, ".hint")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Left(), "max(16px,var(--safe-left))")

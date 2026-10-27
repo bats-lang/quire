@@ -79,7 +79,7 @@ fn _in_reader (): bool = case+ !_view of ReaderView() => true | LibraryView() =>
 fn _rtl (): bool = case+ reader_direction() of RightToLeft() => true | LeftToRight() => false
 (* The library book whose menu or info view is open *)
 val _menu_index = ref<Int>(~1)
-(* Whether the reader's bars are shown *)
+(* reader acts: whether the reader's bars are shown *)
 val _chrome = ref<bool>(true)
 (* A wheel turn waiting out its pause; the latest resize's number *)
 val _wheel_busy = ref<bool>(false)
