@@ -18,7 +18,7 @@ permissions:
 jobs:
   relock:
     # main of repository-prototype at 8365e83: has 11f7260, which stages only the tracked npm and Gradle files (a repository with none failed the staging step, #872)
-    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@5bd621eac67f87b2761cf419e80e5416271e8267 # repository-prototype main 5bd621e
+    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@3b0e3a98f734c4d8bab8f86fa67eaf4c1776e5aa # repository-prototype main 3b0e3a9
     secrets: inherit
     with:
       # pwa's e2e-setup has no pwa-ref copy of its pin, so the relock moves it whole (#777).

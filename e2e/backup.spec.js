@@ -4,7 +4,7 @@
 import { test, expect } from './fixtures.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
-  start, epubFile, rawFile, importFiles, card, cards, openBook, readBook, place, toLibrary,
+  showCollection, start, epubFile, rawFile, importFiles, card, cards, openBook, readBook, place, toLibrary,
   selectText, marks, chapters, dialog, menuItem, libraryMenu, bookMenu, importInput, openSettings, chooseInSortMenu, sortMenuChecked,
   selectionButton, selectionPick, colours, bookPage, pagedBook, showChrome, control,
   librarySettings, settingsButton, restoreInput, exportedBackup,
@@ -234,11 +234,10 @@ test('a backup holds the collections, and restoring it puts each book back in it
   await importFiles(page, [one, two], 2);
   await restoreBackup(page, path);
   await restored(page).getByRole('button', { name: 'Done' }).click();
-  const row = page.getByRole('group', { name: 'Collection' });
-  await row.getByRole('button', { name: 'Essays' }).click();
+  await showCollection(page, 'Essays');
   await expect(cards(page)).toHaveCount(1);
   await expect(card(page, 'Grouped Two')).toHaveCount(1);
-  await row.getByRole('button', { name: 'Poetry' }).click();
+  await showCollection(page, 'Poetry');
   await expect(card(page, 'Grouped One')).toHaveCount(1);
   await expect(cards(page)).toHaveCount(1);
 });
