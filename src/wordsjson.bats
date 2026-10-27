@@ -27,7 +27,6 @@ staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 implement $P.dispose<jchunk>(chunk) = jchunk_free(chunk)
 implement $P.dispose<words_read>(read) = words_read_free(read)
 implement $P.dispose<word_saved>(_) = ()
-implement $P.dispose<Int>(_) = ()
 
 (* The bytes a word takes in JSON (keyword: vocabulary) *)
 #define WORD_JSON_MAX 7200
