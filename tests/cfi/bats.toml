@@ -1,0 +1,12 @@
+[package]
+name = "cfi-test"
+kind = "bin"
+unsafe = false
+
+[dependencies]
+"array" = ""
+"arith" = ""
+"file" = ""
+"result" = ""
+"str" = ""
+"xml-tree" = ""
