@@ -5,8 +5,11 @@
 // the search field's left edge, and no group of controls ends a wrapped
 // line in one lone button. The configuration runs this file in every
 // project (the portrait and the landscape of each are played here by
-// turning the window), at the default font scale and, in the android
-// project, where the engine scales text, at 200% (#705).
+// turning the window), at the default font scale and at 200% (#705). The
+// engine scales text by a percentage in a mobile viewport only
+// (font-scale.spec.js), so the 200% tests ask for one (isMobile) in every
+// project, the android project's own included; the test checks that the
+// scale reached the page.
 
 import { test, expect } from './fixtures.js';
 import { start, epubFile, importFiles, bookMenu, menuItem, dialog, cards } from './helpers.js';
@@ -106,31 +109,33 @@ async function windowed(page, landscape) {
 }
 
 for (const percent of [100, 200]) {
-  for (const landscape of [false, true]) {
-    test(`the library's controls are aligned with a collection shown, at ${percent}% in ${landscape ? 'landscape' : 'portrait'}`, async ({ page }, testInfo) => {
-      test.skip(percent > 100 && !testInfo.project.use.isMobile, 'text-size-adjust scales text in a mobile viewport only (the android project)');
-      if (percent > 100) await page.addInitScript(scaledBy(percent));
-      await windowed(page, landscape);
-      const errors = await start(page);
-      await importFiles(page, [
-        epubFile({ title: 'First Book', author: 'A' }),
-        epubFile({ title: 'Second Book', author: 'B' }),
-      ], 2);
-      await makeCollection(page, 'First Book', 'Amber');
-      await makeCollection(page, 'Second Book', 'To read');
-      await makeCollection(page, 'First Book', LONG_NAME);
-      await showCollection(page, LONG_NAME);
-      if (percent > 100) {
-        expect(await page.evaluate(() => parseFloat(getComputedStyle(document.body).fontSize)), 'the scale reached the app').toBeGreaterThan(16 * percent / 100 - 1);
-      }
-      const seen = await page.evaluate(geometry);
-      await testInfo.attach('geometry', { body: JSON.stringify(seen, null, 1), contentType: 'application/json' });
-      expect(seen.broken, JSON.stringify(seen)).toEqual([]);
-      // the filters and the collection are the only buttons under the search: no Rename or Delete beside them
-      await expect(page.locator('#library-view').getByRole('button', { name: /^(Rename|Delete collection)/ })).toHaveCount(0);
-      expect(errors).toEqual([]);
-    });
-  }
+  test.describe(`at ${percent}%`, () => {
+    if (percent > 100) test.use({ isMobile: true });
+    for (const landscape of [false, true]) {
+      test(`the library's controls are aligned with a collection shown, in ${landscape ? 'landscape' : 'portrait'}`, async ({ page }, testInfo) => {
+        if (percent > 100) await page.addInitScript(scaledBy(percent));
+        await windowed(page, landscape);
+        const errors = await start(page);
+        await importFiles(page, [
+          epubFile({ title: 'First Book', author: 'A' }),
+          epubFile({ title: 'Second Book', author: 'B' }),
+        ], 2);
+        await makeCollection(page, 'First Book', 'Amber');
+        await makeCollection(page, 'Second Book', 'To read');
+        await makeCollection(page, 'First Book', LONG_NAME);
+        await showCollection(page, LONG_NAME);
+        if (percent > 100) {
+          expect(await page.evaluate(() => parseFloat(getComputedStyle(document.body).fontSize)), 'the scale reached the app').toBeGreaterThan(16 * percent / 100 - 1);
+        }
+        const seen = await page.evaluate(geometry);
+        await testInfo.attach('geometry', { body: JSON.stringify(seen, null, 1), contentType: 'application/json' });
+        expect(seen.broken, JSON.stringify(seen)).toEqual([]);
+        // the filters and the collection are the only buttons under the search: no Rename or Delete beside them
+        await expect(page.locator('#library-view').getByRole('button', { name: /^(Rename|Delete collection)/ })).toHaveCount(0);
+        expect(errors).toEqual([]);
+      });
+    }
+  });
 }
 
 // The checks above fail when a rule of the layout is broken: each class
