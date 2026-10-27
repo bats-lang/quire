@@ -35,10 +35,18 @@ CFI is stored beside it, as Readium's locator keeps several location types.
 A position is a byte position in the chapter's source: an element is its `name_offset`, a place in
 text is a byte boundary of a character (or of a reference such as `&amp;`) in a text node, or its end.
 `cfi_of` writes the steps from the document element (the first element of the top level: `/4[body01]/...`)
-and `cfi_resolve` reads them back to `@(kind, position)`:
+and `cfi_resolve` reads them back to a `cfi_place`, a linear datatype that every caller matches with
+`case+`:
 
-* kind 1, an element; kind 2, a place in text; kind 3, a place in an element that has no text there
-  (an empty chunk at offset 0, or the step after the last element); kind 0, nothing.
+* `CfiElement(name offset)`; `CfiText(byte position)`; `CfiEmptyText(name offset)`, a place in an
+  element that has no text there (an empty chunk at offset 0, or the step after the last element);
+  `CfiNoPlace`, nothing. (Inside the module a walk adds `WalkLookForId`, an `[id]` to look for in the
+  chapter, which `_settle` answers before anything leaves; no reader returns it.)
+* The other answers are constructors too: `cfi_side` (`CfiSideNone`, `CfiSideBefore`, `CfiSideAfter`,
+  from `cfi_terminal`), `cfi_spine_step` (`CfiSpineItem(n)`, `CfiNotSpine`, from `cfi_spine`), and
+  `cfi_resolve_range` gives the pair of `cfi_place` of the ends. The module is new (#901), so these
+  are its first signatures, not a change of a published one. `tests/static/reject/cfi-*-unmatched`
+  leave one constructor out of a `case+` and are rejected, with `accept/cfi-*-matched` as controls.
 * The text between two elements is one chunk though the parser makes several text nodes of it where
   a comment was; the offset counts the units of all of them. A place at the start of a text that follows
   a comment in a chunk that has text has the steps of the end of the text before it, so it resolves to

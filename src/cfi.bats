@@ -19,6 +19,35 @@
 staload "entity.sats"
 
 (* ============================================================
+   What the readers answer (keyword cfi, #901)
+   ============================================================ *)
+
+(* Where steps point in the chapter: an element (its name offset), a place
+   in text (a byte position), a place in an element that has no text there
+   (the element's name offset: an empty chunk at offset 0, or the step
+   after the last element), or nowhere. Linear: a caller matches every
+   constructor with case+. *)
+#pub datavtype cfi_place =
+  | CfiElement of (Int)
+  | CfiText of (Int)
+  | CfiEmptyText of (Int)
+  | CfiNoPlace
+
+(* Which side of a location a reader prefers ("[;s=b]", "[;s=a]") *)
+#pub datatype cfi_side = CfiSideNone | CfiSideBefore | CfiSideAfter
+
+(* Whether steps begin with the spine item step "/6/N[idref]!": the N, or
+   not a spine step *)
+#pub datavtype cfi_spine_step =
+  | CfiSpineItem of (Int)
+  | CfiNotSpine
+
+(* How far a walk of the steps got, inside this module: the three places
+   and nowhere as cfi_place has them, and an [id] to look for in the whole
+   chapter (see _settle), which no reader answers *)
+datatype walk_kind = WalkElement | WalkText | WalkEmptyText | WalkNothing | WalkLookForId
+
+(* ============================================================
    Characters and UTF-16 units
    ============================================================ *)
 
@@ -308,26 +337,26 @@ fun _same_value {l:agz}{n:pos}{cl:agz}{cn:pos}{offset,value_len:nat | offset + v
   end
 
 (* Position of text: the position after offset units into chunk chunk of
-   the children nodes. kind 2 and the byte position; kind 3 and the
+   the children nodes. WalkText and the byte position; WalkEmptyText and the
    element's name offset when the chunk is empty and the offset 0; else
-   kind 0. elements are those passed, remaining the units still to go. *)
+   WalkNothing. elements are those passed, remaining the units still to go. *)
 fun _in_chunk {l:agz}{n:pos}{size:nat}{chunk,elements:nat} .<size>.
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), chunk: int chunk, elements: int elements,
-   remaining: Nat, self: Int): @(Int, Int) =
+   remaining: Nat, self: Int): @(walk_kind, Int) =
   case+ nodes of
-  | $X.xml_nodes_nil() => if elements = chunk then (if remaining = 0 then @(3, self) else @(0, 0)) else @(0, 0)
+  | $X.xml_nodes_nil() => if elements = chunk then (if remaining = 0 then @(WalkEmptyText(), self) else @(WalkNothing(), 0)) else @(WalkNothing(), 0)
   | $X.xml_nodes_cons(node, rest) =>
     (case+ node of
      | $X.xml_text(offset, text_len) =>
        if elements = chunk then let
          val total = _units(data, offset + text_len, offset + text_len, offset, 0)
        in
-         if remaining <= total then @(2, _position_of_units(data, offset + text_len, offset, 0, remaining))
+         if remaining <= total then @(WalkText(), _position_of_units(data, offset + text_len, offset, 0, remaining))
          else _in_chunk(data, rest, chunk, elements, remaining - total, self)
        end
        else _in_chunk(data, rest, chunk, elements, remaining, self)
      | $X.xml_element(_, _, _, _) =>
-       if elements = chunk then (if remaining = 0 then @(3, self) else @(0, 0))
+       if elements = chunk then (if remaining = 0 then @(WalkEmptyText(), self) else @(WalkNothing(), 0))
        else _in_chunk(data, rest, chunk, elements + 1, remaining, self))
 
 (* The assertion that may start at cfi[at]: for a '[' at at, its value
@@ -342,10 +371,6 @@ fn _assertion_at {cl:agz}{cn:pos}{until:nat | until <= cn}{at:nat | at <= until}
     val value_end = _value_end(cfi, until, at + 1)
   in if value_end <= stop then @(at + 1, value_end, stop) else @(at + 1, stop, stop) end
   else @(at, at, at)
-
-(* The result of a resolve: kind 4 an [id] to look for (see _resolve_list), kind 1 an element (its name offset), kind 2 a
-   text position (a byte position), kind 3 a place in an element with no
-   text there (its name offset), kind 0 nothing *)
 
 (* Whether element attrs has the id the assertion cfi[value_start, value_end) names *)
 fn _has_id {l:agz}{n:pos}{cl:agz}{cn:pos}{size:nat}{until:nat | until <= cn}{value_start,value_end:nat | value_start <= value_end; value_end <= until}
@@ -367,13 +392,13 @@ fn _offset_at {cl:agz}{cn:pos}{until:nat | until <= cn}{at:nat | at <= until}
 
 (* The path cfi[at, until) from the element self, whose children are nodes.
    An [id] that is not the one of the element a step reaches is a result of
-   kind 4 and the assertion's start, for cfi_resolve to look for. A step is "/" and a number, then "[id]" for an element or
+   WalkLookForId and the assertion's start, for cfi_resolve to look for. A step is "/" and a number, then "[id]" for an element or
    ":" and an offset, then "[before,after]" and "[;s=b]" for text, which
    are read and ignored. *)
 fun _resolve_list {l:agz}{n:pos}{cl:agz}{cn:pos}{size:nat}{until:nat | until <= cn}{at:nat | at <= until} .<until - at, 3, size, 0>.
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), self: Int,
-   cfi: !$A.borrow(byte, cl, cn), until: int until, at: int at): @(Int, Int) =
-  if at >= until then @(1, self)
+   cfi: !$A.borrow(byte, cl, cn), until: int until, at: int at): @(walk_kind, Int) =
+  if at >= until then @(WalkElement(), self)
   else let val c = _byte(cfi, at) in
     if c = 47 then let
       val @(step, stop1) = _number(cfi, until, at + 1, 0)
@@ -383,9 +408,9 @@ fun _resolve_list {l:agz}{n:pos}{cl:agz}{cn:pos}{size:nat}{until:nat | until <= 
         _resolve_element(data, nodes, self, ndiv(step, 2), value_start, value_end, stop2, cfi, until, at)
       else _in_chunk(data, nodes, (if step >= 1 then ndiv(step - 1, 2) else 0): Nat, 0, _offset_at(cfi, until, stop2), self)
     end
-    else if c = 33 then @(0, 0)
-    else if c = 58 then @(0, 0)
-    else @(1, self)
+    else if c = 33 then @(WalkNothing(), 0)
+    else if c = 58 then @(WalkNothing(), 0)
+    else @(WalkElement(), self)
   end
 
 (* The element number index (counting from 1) of nodes, and the rest of
@@ -393,9 +418,9 @@ fun _resolve_list {l:agz}{n:pos}{cl:agz}{cn:pos}{size:nat}{until:nat | until <= 
    after it *)
 and _resolve_element {l:agz}{n:pos}{cl:agz}{cn:pos}{size:nat}{until:nat | until <= cn}{at:nat | at < until}{after:int | at < after; after <= until}{index:nat}{value_start,value_end:nat | value_start <= value_end; value_end <= after} .<until - at, 2, size, 0>.
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), self: Int, index: int index,
-   value_start: int value_start, value_end: int value_end, after: int after, cfi: !$A.borrow(byte, cl, cn), until: int until, at: int at): @(Int, Int) =
+   value_start: int value_start, value_end: int value_end, after: int after, cfi: !$A.borrow(byte, cl, cn), until: int until, at: int at): @(walk_kind, Int) =
   case+ nodes of
-  | $X.xml_nodes_nil() => if index = 1 then (if after >= until then @(3, self) else @(0, 0)) else @(0, 0)
+  | $X.xml_nodes_nil() => if index = 1 then (if after >= until then @(WalkEmptyText(), self) else @(WalkNothing(), 0)) else @(WalkNothing(), 0)
   | $X.xml_nodes_cons(node, rest) =>
     (case+ node of
      | $X.xml_text(_, _) => _resolve_element(data, rest, self, index, value_start, value_end, after, cfi, until, at)
@@ -403,34 +428,43 @@ and _resolve_element {l:agz}{n:pos}{cl:agz}{cn:pos}{size:nat}{until:nat | until 
        if index > 1 then _resolve_element(data, rest, self, index - 1, value_start, value_end, after, cfi, until, at)
        else if value_end <= value_start then _resolve_list(data, children, name_offset, cfi, until, after)
        else if _has_id(data, attrs, cfi, until, value_start, value_end) then _resolve_list(data, children, name_offset, cfi, until, after)
-       else @(4, value_start))
+       else @(WalkLookForId(), value_start))
+
+(* Whether a walk found something (a place or an id to look for) *)
+fn _walk_found (kind: walk_kind): bool =
+  case+ kind of
+  | WalkElement() => true
+  | WalkText() => true
+  | WalkEmptyText() => true
+  | WalkLookForId() => true
+  | WalkNothing() => false
 
 (* The first element of nodes, in document order and inside, whose id is
    the assertion cfi[value_start, value_end): the steps from it are
-   cfi[after, until). A result of kind 4 is returned as it is: the steps
+   cfi[after, until). A result of WalkLookForId is returned as it is: the steps
    after the element found have an id of their own to look for. *)
 fun _find_id_list {l:agz}{n:pos}{cl:agz}{cn:pos}{size:nat}{until:nat | until <= cn}{after:nat | after <= until}{value_start,value_end:nat | value_start <= value_end; value_end <= after} .<size, 1>.
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size),
-   cfi: !$A.borrow(byte, cl, cn), until: int until, after: int after, value_start: int value_start, value_end: int value_end): @(Int, Int) =
+   cfi: !$A.borrow(byte, cl, cn), until: int until, after: int after, value_start: int value_start, value_end: int value_end): @(walk_kind, Int) =
   case+ nodes of
-  | $X.xml_nodes_nil() => @(0, 0)
+  | $X.xml_nodes_nil() => @(WalkNothing(), 0)
   | $X.xml_nodes_cons(node, rest) => let
       val found = _find_id_node(data, node, cfi, until, after, value_start, value_end)
     in
-      if found.0 > 0 then found
+      if _walk_found(found.0) then found
       else _find_id_list(data, rest, cfi, until, after, value_start, value_end)
     end
 
 and _find_id_node {l:agz}{n:pos}{cl:agz}{cn:pos}{size:pos}{until:nat | until <= cn}{after:nat | after <= until}{value_start,value_end:nat | value_start <= value_end; value_end <= after} .<size, 0>.
   (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, size),
-   cfi: !$A.borrow(byte, cl, cn), until: int until, after: int after, value_start: int value_start, value_end: int value_end): @(Int, Int) =
+   cfi: !$A.borrow(byte, cl, cn), until: int until, after: int after, value_start: int value_start, value_end: int value_end): @(walk_kind, Int) =
   case+ node of
-  | $X.xml_text(_, _) => @(0, 0)
+  | $X.xml_text(_, _) => @(WalkNothing(), 0)
   | $X.xml_element(name_offset, _, attrs, children) =>
     if _has_id(data, attrs, cfi, until, value_start, value_end) then let
       val here = _resolve_list(data, children, name_offset, cfi, until, after)
     in
-      if here.0 > 0 then here
+      if _walk_found(here.0) then here
       else _find_id_list(data, children, cfi, until, after, value_start, value_end)
     end
     else _find_id_list(data, children, cfi, until, after, value_start, value_end)
@@ -439,40 +473,45 @@ and _find_id_node {l:agz}{n:pos}{cl:agz}{cn:pos}{size:pos}{until:nat | until <= 
    start in it *)
 fun _resolve_root {l:agz}{n:pos}{cl:agz}{cn:pos}{size:nat}{until:nat | until <= cn}{from:nat | from <= until} .<size>.
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size),
-   cfi: !$A.borrow(byte, cl, cn), until: int until, from: int from): @(Int, Int) =
+   cfi: !$A.borrow(byte, cl, cn), until: int until, from: int from): @(walk_kind, Int) =
   case+ nodes of
-  | $X.xml_nodes_nil() => @(0, 0)
+  | $X.xml_nodes_nil() => @(WalkNothing(), 0)
   | $X.xml_nodes_cons(node, rest) =>
     (case+ node of
      | $X.xml_text(_, _) => _resolve_root(data, rest, cfi, until, from)
      | $X.xml_element(name_offset, _, _, children) => _resolve_list(data, children, name_offset, cfi, until, from))
 
-(* A result of kind 4 looks for the id and goes on from there, again for
+(* A result of WalkLookForId looks for the id and goes on from there, again for
    each id that does not match; each time the steps are further on, so
    fuel (the length of the steps) is enough *)
 fun _settle {l:agz}{n:pos}{cl:agz}{cn:pos}{size:nat}{until:nat | until <= cn}{fuel:nat} .<fuel>.
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), cfi: !$A.borrow(byte, cl, cn), until: int until,
-   kind: Int, place: Int, fuel: int fuel): @(Int, Int) =
-  if kind <> 4 then @(kind, place)
-  else if fuel <= 0 then @(0, 0)
-  else if place < 1 then @(0, 0)
-  else if place > until then @(0, 0)
-  else let
-    val @(value_start, value_end, after) = _assertion_at(cfi, until, place - 1)
-    val @(again_kind, again_place) = _find_id_list(data, nodes, cfi, until, after, value_start, value_end)
-  in _settle(data, nodes, cfi, until, again_kind, again_place, fuel - 1) end
+   kind: walk_kind, place: Int, fuel: int fuel): cfi_place =
+  case+ kind of
+  | WalkElement() => CfiElement(place)
+  | WalkText() => CfiText(place)
+  | WalkEmptyText() => CfiEmptyText(place)
+  | WalkNothing() => CfiNoPlace()
+  | WalkLookForId() =>
+    if fuel <= 0 then CfiNoPlace()
+    else if place < 1 then CfiNoPlace()
+    else if place > until then CfiNoPlace()
+    else let
+      val @(value_start, value_end, after) = _assertion_at(cfi, until, place - 1)
+      val @(again_kind, again_place) = _find_id_list(data, nodes, cfi, until, after, value_start, value_end)
+    in _settle(data, nodes, cfi, until, again_kind, again_place, fuel - 1) end
 
 (* The position of the steps cfi[from, until) in the chapter (a "!"
-   before from is the caller's: cfi_split): kind 1 and an element's name
-   offset, kind 2 and a byte position in text, kind 3 and the name offset
-   of the element when the steps point at no text of it, kind 0 and 0 when
+   before from is the caller's: cfi_split): CfiElement and an element's name
+   offset, CfiText and a byte position in text, CfiEmptyText and the name offset
+   of the element when the steps point at no text of it, CfiNoPlace when
    they point at nothing (no such step, an offset past the text, an
    indirection or an offset on an element). An [id] that is not the one of
    the element its step reaches is looked for in the chapter, and the
    steps after it go on from the element found. Text assertions, side
    bias and spatial or temporal offsets are not used to find the place. *)
 #pub fn cfi_resolve {l:agz}{n:pos}{cl:agz}{cn:pos}{size:nat}{until:nat | until <= cn}{from:nat | from <= until}
-  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), cfi: !$A.borrow(byte, cl, cn), until: int until, from: int from): @(Int, Int)
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), cfi: !$A.borrow(byte, cl, cn), until: int until, from: int from): cfi_place
 
 implement cfi_resolve (data, nodes, cfi, until, from) =
   let val @(kind, place) = _resolve_root(data, nodes, cfi, until, from) in _settle(data, nodes, cfi, until, kind, place, until) end
@@ -632,20 +671,20 @@ implement cfi_body (cfi, len) =
 
 (* The spine item step of cfi[start, stop): "/6/N", an assertion and "!"
    give N (the item is N / 2 - 1 of the spine, counting from 0) and the
-   place after the "!"; any other beginning gives -1 and start *)
+   place after the "!"; any other beginning gives CfiNotSpine and start *)
 #pub fn cfi_spine {cl:agz}{cn:pos}{stop:nat | stop <= cn}{start:nat | start <= stop}
-  (cfi: !$A.borrow(byte, cl, cn), start: int start, stop: int stop): [step,after:int | ~1 <= step; start <= after; after <= stop] @(int step, int after)
+  (cfi: !$A.borrow(byte, cl, cn), start: int start, stop: int stop): [after:int | start <= after; after <= stop] @(cfi_spine_step, int after)
 
 implement cfi_spine (cfi, start, stop) =
-  if start + 3 > stop then @(~1, start)
-  else if _byte(cfi, start) <> 47 then @(~1, start)
-  else if _byte(cfi, start + 1) <> 54 then @(~1, start)
-  else if _byte(cfi, start + 2) <> 47 then @(~1, start)
+  if start + 3 > stop then @(CfiNotSpine(), start)
+  else if _byte(cfi, start) <> 47 then @(CfiNotSpine(), start)
+  else if _byte(cfi, start + 1) <> 54 then @(CfiNotSpine(), start)
+  else if _byte(cfi, start + 2) <> 47 then @(CfiNotSpine(), start)
   else let
     val @(step, stop1) = _number(cfi, stop, start + 3, 0)
     val @(_, _, stop2) = _assertion_at(cfi, stop, stop1)
   in
-    if stop2 < stop then (if _byte(cfi, stop2) = 33 then @(step, stop2 + 1) else @(~1, start)) else @(~1, start)
+    if stop2 < stop then (if _byte(cfi, stop2) = 33 then @(CfiSpineItem(step), stop2 + 1) else @(CfiNotSpine(), start)) else @(CfiNotSpine(), start)
   end
 
 (* The two commas of "P,S,E" that are not in an assertion or escaped, as
@@ -670,39 +709,48 @@ fun _copy_into {jl:agz}{jn:pos}{cl:agz}{cn:pos}{until:nat | until <= cn}{at:nat 
 (* The place of the steps of cfi[first_lo, first_hi) and then cfi[second_lo, second_hi) joined *)
 fn _resolve_joined {l:agz}{n:pos}{size:nat}{cl:agz}{cn:pos}{len:pos | len <= cn; len <= 1048576}{first_lo,first_hi,second_lo,second_hi:nat | first_lo <= first_hi; first_hi <= len; second_lo <= second_hi; second_hi <= len}
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), cfi: !$A.borrow(byte, cl, cn), len: int len,
-   first_lo: int first_lo, first_hi: int first_hi, second_lo: int second_lo, second_hi: int second_hi): @(Int, Int) = let
+   first_lo: int first_lo, first_hi: int first_hi, second_lo: int second_lo, second_hi: int second_hi): cfi_place = let
   val joined = $A.alloc<byte>(len)
   val first_end = _copy_into(joined, len, 0, cfi, first_hi, first_lo)
   val joined_len = _copy_into(joined, len, first_end, cfi, second_hi, second_lo)
   val @(joined_frozen, joined_bytes) = $A.freeze<byte>(joined)
-  val @(_, after) = cfi_spine(joined_bytes, 0, joined_len)
+  val @(spine, after) = cfi_spine(joined_bytes, 0, joined_len)
+  val () = (case+ spine of ~CfiSpineItem(_) => () | ~CfiNotSpine() => ())
   val found = cfi_resolve(data, nodes, joined_bytes, joined_len, after)
   val () = $A.drop<byte>(joined_frozen, joined_bytes)
   val () = $A.free<byte>($A.thaw<byte>(joined_frozen))
 in found end
 
+(* A place as both ends of a range *)
+fn _twice (place: cfi_place): @(cfi_place, cfi_place) =
+  case+ place of
+  | ~CfiElement(offset) => @(CfiElement(offset), CfiElement(offset))
+  | ~CfiText(offset) => @(CfiText(offset), CfiText(offset))
+  | ~CfiEmptyText(offset) => @(CfiEmptyText(offset), CfiEmptyText(offset))
+  | ~CfiNoPlace() => @(CfiNoPlace(), CfiNoPlace())
+
 (* The places of a CFI in the chapter its spine step names (the caller
    found the chapter by cfi_spine): the start and the end of a range
-   "P,S,E" as kind and place each (cfi_resolve's), or twice the place of
+   "P,S,E" as a cfi_place each (cfi_resolve's), or twice the place of
    a CFI that is not a range. A CFI over 1048576 bytes is not read. *)
 #pub fn cfi_resolve_range {l:agz}{n:pos}{size:nat}{cl:agz}{cn:pos}{len:pos | len <= cn}
-  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), cfi: !$A.borrow(byte, cl, cn), len: int len): @(Int, Int, Int, Int)
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), cfi: !$A.borrow(byte, cl, cn), len: int len): @(cfi_place, cfi_place)
 
 implement cfi_resolve_range (data, nodes, cfi, len) =
-  if len > 1048576 then @(0, 0, 0, 0)
+  if len > 1048576 then @(CfiNoPlace(), CfiNoPlace())
   else let
     val @(start, stop) = cfi_body(cfi, len)
     val @(first, second) = _commas(cfi, stop, start, ~1)
   in
     if first < start then let
-      val @(after_kind, after_place) = _resolve_joined(data, nodes, cfi, len, start, stop, stop, stop)
-    in @(after_kind, after_place, after_kind, after_place) end
-    else if second <= first then @(0, 0, 0, 0)
-    else if second >= stop then @(0, 0, 0, 0)
+      val only = _resolve_joined(data, nodes, cfi, len, start, stop, stop, stop)
+    in _twice(only) end
+    else if second <= first then @(CfiNoPlace(), CfiNoPlace())
+    else if second >= stop then @(CfiNoPlace(), CfiNoPlace())
     else let
-      val @(start_kind, start_place) = _resolve_joined(data, nodes, cfi, len, start, first, first + 1, second)
-      val @(finish_kind, finish_place) = _resolve_joined(data, nodes, cfi, len, start, first, second + 1, stop)
-    in @(start_kind, start_place, finish_kind, finish_place) end
+      val start_place = _resolve_joined(data, nodes, cfi, len, start, first, first + 1, second)
+      val finish_place = _resolve_joined(data, nodes, cfi, len, start, first, second + 1, stop)
+    in @(start_place, finish_place) end
   end
 
 (* ---------------- the text assertion and the side bias ---------------- *)
@@ -731,21 +779,21 @@ fun _comma_in {cl:agz}{cn:pos}{stop:nat | stop <= cn}{at:nat | at <= stop} .<sto
   end
 
 (* The text assertion and the side bias at the end of cfi[start, stop), such as
-   "[xx,y]" and "[;s=b]" after ":3" (read and kept, never made): side 0 for
-   none, 1 for before ("s=b"), 2 for after ("s=a"), and the text before
+   "[xx,y]" and "[;s=b]" after ":3" (read and kept, never made): the side bias
+   (CfiSideNone, CfiSideBefore for "s=b", CfiSideAfter for "s=a"), and the text before
    and after the location as [before_lo, before_hi) and [after_lo,
    after_hi) of cfi (escapes "^" still in); the spans of what is not
    there are empty, at the start *)
 #pub fn cfi_terminal {cl:agz}{cn:pos}{stop:nat | stop <= cn}{start:nat | start <= stop}
   (cfi: !$A.borrow(byte, cl, cn), start: int start, stop: int stop)
-  : [side,before_lo,before_hi,after_lo,after_hi:int | 0 <= side; side <= 2; start <= before_lo; before_lo <= before_hi; before_hi <= stop; start <= after_lo; after_lo <= after_hi; after_hi <= stop]
-    @(int side, int before_lo, int before_hi, int after_lo, int after_hi)
+  : [before_lo,before_hi,after_lo,after_hi:int | start <= before_lo; before_lo <= before_hi; before_hi <= stop; start <= after_lo; after_lo <= after_hi; after_hi <= stop]
+    @(cfi_side, int before_lo, int before_hi, int after_lo, int after_hi)
 
 implement cfi_terminal (cfi, start, stop) = let
   val open_at = _terminal(cfi, stop, start, false)
 in
-  if open_at < start then @(0, start, start, start, start)
-  else if open_at >= stop then @(0, start, start, start, start)
+  if open_at < start then @(CfiSideNone(), start, start, start, start)
+  else if open_at >= stop then @(CfiSideNone(), start, start, start, start)
   else let
     val value_start = open_at + 1
     val close = _assertion_close(cfi, stop, value_start)
@@ -755,10 +803,10 @@ in
     val side = (if params + 2 < close then
         (if _byte(cfi, params) = 115 then
           (if _byte(cfi, params + 1) = 61 then
-            (if _byte(cfi, params + 2) = 98 then 1 else if _byte(cfi, params + 2) = 97 then 2 else 0)
-           else 0)
-         else 0)
-      else 0): [s:int | 0 <= s; s <= 2] int s
+            (if _byte(cfi, params + 2) = 98 then CfiSideBefore() else if _byte(cfi, params + 2) = 97 then CfiSideAfter() else CfiSideNone())
+           else CfiSideNone())
+         else CfiSideNone())
+      else CfiSideNone()): cfi_side
   in
     if comma >= value_start then @(side, value_start, comma, comma + 1, text_end)
     else @(side, value_start, text_end, start, start)

@@ -23,6 +23,36 @@ in !_failures := !_failures + 1 end
 
 fn expect (ok: bool, what: string): void = if ok then () else fail(what)
 
+(* ---------------- the places cfi_resolve answers ---------------- *)
+
+(* What a check expects of a place; place_parts matches every constructor of
+   cfi_place (case+), so a constructor added to it fails here *)
+datatype place_kind = ElementKind | TextKind | EmptyTextKind | NoPlaceKind
+
+fn place_parts (place: cfi_place): @(place_kind, Int) =
+  case+ place of
+  | ~CfiElement(offset) => @(ElementKind(), offset)
+  | ~CfiText(offset) => @(TextKind(), offset)
+  | ~CfiEmptyText(offset) => @(EmptyTextKind(), offset)
+  | ~CfiNoPlace() => @(NoPlaceKind(), 0)
+
+fn same_kind (found: place_kind, wanted: place_kind): bool =
+  case+ found of
+  | ElementKind() => (case+ wanted of | ElementKind() => true | TextKind() => false | EmptyTextKind() => false | NoPlaceKind() => false)
+  | TextKind() => (case+ wanted of | ElementKind() => false | TextKind() => true | EmptyTextKind() => false | NoPlaceKind() => false)
+  | EmptyTextKind() => (case+ wanted of | ElementKind() => false | TextKind() => false | EmptyTextKind() => true | NoPlaceKind() => false)
+  | NoPlaceKind() => (case+ wanted of | ElementKind() => false | TextKind() => false | EmptyTextKind() => false | NoPlaceKind() => true)
+
+fn is_no_place (kind: place_kind): bool = same_kind(kind, NoPlaceKind())
+fn is_element (kind: place_kind): bool = same_kind(kind, ElementKind())
+fn is_text (kind: place_kind): bool = same_kind(kind, TextKind())
+
+fn same_side (found: cfi_side, wanted: cfi_side): bool =
+  case+ found of
+  | CfiSideNone() => (case+ wanted of | CfiSideNone() => true | CfiSideBefore() => false | CfiSideAfter() => false)
+  | CfiSideBefore() => (case+ wanted of | CfiSideNone() => false | CfiSideBefore() => true | CfiSideAfter() => false)
+  | CfiSideAfter() => (case+ wanted of | CfiSideNone() => false | CfiSideBefore() => false | CfiSideAfter() => true)
+
 (* ---------------- text as bytes ---------------- *)
 
 fun fill_bytes {l:agz}{n:pos}{m:nat | m <= n}{i:nat | i <= m} .<m - i>.
@@ -77,13 +107,13 @@ in end
 
 (* The steps text lead to kind and position *)
 fn check_resolve {l:agz}{n:pos}{size:nat}{m:pos | m <= 255}
-  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), text: string m, m: int m, kind: Int, position: Int, what: string): void = let
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), text: string m, m: int m, kind: place_kind, position: Int, what: string): void = let
   val steps = $A.alloc<byte>(256)
   val () = fill_bytes(steps, text, m, 0)
   val @(steps_frozen, steps_bytes) = $A.freeze<byte>(steps)
-  val @(found_kind, found_position) = cfi_resolve(data, nodes, steps_bytes, m, 0)
-  val () = expect(found_kind = kind, what)
-  val () = (if kind = 0 then () else expect(found_position = position, what))
+  val @(found_kind, found_position) = place_parts(cfi_resolve(data, nodes, steps_bytes, m, 0))
+  val () = expect(same_kind(found_kind, kind), what)
+  val () = (if is_no_place(kind) then () else expect(found_position = position, what))
   val () = $A.drop<byte>(steps_frozen, steps_bytes)
   val () = $A.free<byte>($A.thaw<byte>(steps_frozen))
 in end
@@ -120,14 +150,16 @@ in end
 (* The places of the identifier text, a range or one place *)
 fn check_range {l:agz}{n:pos}{size:nat}{m:pos | m <= 255}
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), text: string m, m: int m,
-   start_kind: Int, start: Int, finish_kind: Int, finish: Int, what: string): void = let
+   start_kind: place_kind, start: Int, finish_kind: place_kind, finish: Int, what: string): void = let
   val steps = $A.alloc<byte>(256)
   val () = fill_bytes(steps, text, m, 0)
   val @(steps_frozen, steps_bytes) = $A.freeze<byte>(steps)
-  val @(found_start_kind, found_start, found_finish_kind, found_finish) = cfi_resolve_range(data, nodes, steps_bytes, m)
-  val () = expect(found_start_kind = start_kind, what)
+  val @(found_start_place, found_finish_place) = cfi_resolve_range(data, nodes, steps_bytes, m)
+  val @(found_start_kind, found_start) = place_parts(found_start_place)
+  val @(found_finish_kind, found_finish) = place_parts(found_finish_place)
+  val () = expect(same_kind(found_start_kind, start_kind), what)
   val () = expect(found_start = start, what)
-  val () = expect(found_finish_kind = finish_kind, what)
+  val () = expect(same_kind(found_finish_kind, finish_kind), what)
   val () = expect(found_finish = finish, what)
   val () = $A.drop<byte>(steps_frozen, steps_bytes)
   val () = $A.free<byte>($A.thaw<byte>(steps_frozen))
@@ -135,7 +167,7 @@ in end
 
 (* cfi_body, cfi_spine and cfi_terminal on text *)
 fn check_parts {m:pos | m <= 255}
-  (text: string m, m: int m, body_start: Int, body_stop: Int, spine_step: Int, side: Int, what: string): void = let
+  (text: string m, m: int m, body_start: Int, body_stop: Int, spine_is_item: bool, spine_item: Int, side: cfi_side, what: string): void = let
   val steps = $A.alloc<byte>(256)
   val () = fill_bytes(steps, text, m, 0)
   val @(steps_frozen, steps_bytes) = $A.freeze<byte>(steps)
@@ -143,9 +175,13 @@ fn check_parts {m:pos | m <= 255}
   val () = expect(start = body_start, what)
   val () = expect(stop = body_stop, what)
   val @(step, _) = cfi_spine(steps_bytes, start, stop)
-  val () = expect(step = spine_step, what)
+  val @(found_is_item, found_item) = (case+ step of
+    | ~CfiSpineItem(item) => @(true, item)
+    | ~CfiNotSpine() => @(false, 0)): @(bool, Int)
+  val () = expect(found_is_item = spine_is_item, what)
+  val () = (if spine_is_item then expect(found_item = spine_item, what) else ())
   val @(found_side, _, _, _, _) = cfi_terminal(steps_bytes, start, stop)
-  val () = expect(found_side = side, what)
+  val () = expect(same_side(found_side, side), what)
   val () = $A.drop<byte>(steps_frozen, steps_bytes)
   val () = $A.free<byte>($A.thaw<byte>(steps_frozen))
 in end
@@ -179,7 +215,7 @@ fun round_trip_all {l:agz}{n:pos}{size:nat}{position:nat | position <= n} .<n - 
     val used = (if length >= 0 then length else 0): [k:nat | k <= 256] int k
     val again = $A.alloc<byte>(256)
     val @(made_frozen, made_bytes) = $A.freeze<byte>(made)
-    val @(kind, found) = cfi_resolve(data, nodes, made_bytes, used, 0)
+    val @(kind, found) = place_parts(cfi_resolve(data, nodes, made_bytes, used, 0))
     val found_nat = (if found >= 0 then found else 0): Nat
     val again_length = cfi_of(data, nodes, found_nat, again, 256)
     val () = $A.drop<byte>(made_frozen, made_bytes)
@@ -187,7 +223,7 @@ fun round_trip_all {l:agz}{n:pos}{size:nat}{position:nat | position <= n} .<n - 
     val identical = same_arrays(made_back, again, used, 0)
     val lead = byte2int0($A.read<byte>(data, position))
     val inside_character = lead >= 128 && lead < 192
-    val () = (if length >= 0 then (expect(kind = 1 || kind = 2, "round trip: the steps resolve to a place");
+    val () = (if length >= 0 then (expect(is_element(kind) || is_text(kind), "round trip: the steps resolve to a place");
                                    expect(inside_character || found = position, "round trip: the place is the position");
                                    expect(again_length = length, "round trip: the same length of steps");
                                    expect(identical, "round trip: the same steps")) else ())
@@ -217,37 +253,37 @@ fn check_spec (): void = let
   val () = check_of(data, nodes, xxx, "/4[body01]/10[para05]/1:0", 25, "spec: just before xxx")
   val () = check_of(data, nodes, yyy, "/4[body01]/10[para05]/2/1:0", 27, "spec: just before yyy")
   val () = check_of(data, nodes, yyy + 3, "/4[body01]/10[para05]/2/1:3", 27, "spec: just after yyy")
-  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/3:10", 26, 2, digits + 10, "spec: resolve the 9")
-  val () = check_resolve(data, nodes, "/4[body01]/16[svgimg]", 21, 1, image, "spec: resolve the image")
-  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/1:0", 25, 2, xxx, "spec: resolve before xxx")
-  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/2/1:0", 27, 2, yyy, "spec: resolve before yyy")
-  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/2/1:3", 27, 2, yyy + 3, "spec: resolve after yyy")
+  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/3:10", 26, TextKind(), digits + 10, "spec: resolve the 9")
+  val () = check_resolve(data, nodes, "/4[body01]/16[svgimg]", 21, ElementKind(), image, "spec: resolve the image")
+  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/1:0", 25, TextKind(), xxx, "spec: resolve before xxx")
+  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/2/1:0", 27, TextKind(), yyy, "spec: resolve before yyy")
+  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/2/1:3", 27, TextKind(), yyy + 3, "spec: resolve after yyy")
   (* the ids correct a path: step 12 is not para05, the id is *)
-  val () = check_resolve(data, nodes, "/4[body01]/12[para05]/3:10", 26, 2, digits + 10, "an id that is not where the step says is looked for")
-  val () = check_resolve(data, nodes, "/4[body01]/12[nowhere]/3:10", 27, 0, 0, "an id that is nowhere is no place")
-  val () = check_resolve(data, nodes, "/4[bogus]/10[para05]/3:10", 25, 0, 0, "an id nowhere in the chapter is a place of another version of it, no place")
+  val () = check_resolve(data, nodes, "/4[body01]/12[para05]/3:10", 26, TextKind(), digits + 10, "an id that is not where the step says is looked for")
+  val () = check_resolve(data, nodes, "/4[body01]/12[nowhere]/3:10", 27, NoPlaceKind(), 0, "an id that is nowhere is no place")
+  val () = check_resolve(data, nodes, "/4[bogus]/10[para05]/3:10", 25, NoPlaceKind(), 0, "an id nowhere in the chapter is a place of another version of it, no place")
   (* a step past the elements, and the chunk of no text *)
-  val () = check_resolve(data, nodes, "/4[body01]/18", 13, 3, body, "the step after the last element is a place in the body")
-  val () = check_resolve(data, nodes, "/4[body01]/20", 13, 0, 0, "two past the last element is nothing")
-  val () = check_resolve(data, nodes, "/4[body01]/1:0", 14, 3, body, "an empty first chunk")
-  val () = check_resolve(data, nodes, "/4[body01]/1:1", 14, 0, 0, "an offset into an empty chunk")
-  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/3:11", 26, 0, 0, "an offset past the end of the text")
-  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/3:0", 25, 2, digits, "the start of a text")
-  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/0", 23, 2, xxx, "the virtual step 0")
-  val () = check_resolve(data, nodes, "/4[body01]/10[para05]!/4", 24, 0, 0, "an indirection inside the chapter")
-  val () = check_resolve(data, nodes, "/4[body01]/10:3", 15, 0, 0, "an offset on an element")
-  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/3:4[012,456;s=a]", 38, 2, digits + 4, "assertions and side bias are not used to find the place")
-  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/2/1:3[;s=b]", 33, 2, yyy + 3, "side bias after an offset")
-  val () = check_resolve(data, nodes, "/4[body01]/16[svgimg]~23.5@97.6", 31, 1, image, "a temporal and spatial offset after an element")
-  val () = check_resolve(data, nodes, "/6/4[chap01ref]!/4", 18, 0, 0, "the spine step is not the chapter's steps")
+  val () = check_resolve(data, nodes, "/4[body01]/18", 13, EmptyTextKind(), body, "the step after the last element is a place in the body")
+  val () = check_resolve(data, nodes, "/4[body01]/20", 13, NoPlaceKind(), 0, "two past the last element is nothing")
+  val () = check_resolve(data, nodes, "/4[body01]/1:0", 14, EmptyTextKind(), body, "an empty first chunk")
+  val () = check_resolve(data, nodes, "/4[body01]/1:1", 14, NoPlaceKind(), 0, "an offset into an empty chunk")
+  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/3:11", 26, NoPlaceKind(), 0, "an offset past the end of the text")
+  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/3:0", 25, TextKind(), digits, "the start of a text")
+  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/0", 23, TextKind(), xxx, "the virtual step 0")
+  val () = check_resolve(data, nodes, "/4[body01]/10[para05]!/4", 24, NoPlaceKind(), 0, "an indirection inside the chapter")
+  val () = check_resolve(data, nodes, "/4[body01]/10:3", 15, NoPlaceKind(), 0, "an offset on an element")
+  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/3:4[012,456;s=a]", 38, TextKind(), digits + 4, "assertions and side bias are not used to find the place")
+  val () = check_resolve(data, nodes, "/4[body01]/10[para05]/2/1:3[;s=b]", 33, TextKind(), yyy + 3, "side bias after an offset")
+  val () = check_resolve(data, nodes, "/4[body01]/16[svgimg]~23.5@97.6", 31, ElementKind(), image, "a temporal and spatial offset after an element")
+  val () = check_resolve(data, nodes, "/6/4[chap01ref]!/4", 18, NoPlaceKind(), 0, "the spine step is not the chapter's steps")
   val () = check_spine(data, nodes, digits, yyy)
-  val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4[body01]/10[para05],/2/1:1,/3:4)", 58, 2, yyy + 1, 2, digits + 4, "the specification's range")
-  val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4[body01]/10[para05]/3:10)", 51, 2, digits + 10, 2, digits + 10, "one place is both ends")
-  val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4[body01]/10[para05]/2,/1:1,/1:2)", 58, 2, yyy + 1, 2, yyy + 2, "a range inside one element")
-  val () = check_parts("epubcfi(/6/4[chap01ref]!/4[body01]/10[para05]/3:10)", 51, 8, 50, 4, 0, "the parts of an identifier")
-  val () = check_parts("/4[body01]/10[para05]/2/1:3[;s=b]", 33, 0, 33, ~1, 1, "side bias before")
-  val () = check_parts("/4[body01]/10[para05]/2/1:3[;s=a]", 33, 0, 33, ~1, 2, "side bias after")
-  val () = check_parts("/4[body01]/10[para05]/3:4[012,456]", 34, 0, 34, ~1, 0, "no side bias")
+  val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4[body01]/10[para05],/2/1:1,/3:4)", 58, TextKind(), yyy + 1, TextKind(), digits + 4, "the specification's range")
+  val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4[body01]/10[para05]/3:10)", 51, TextKind(), digits + 10, TextKind(), digits + 10, "one place is both ends")
+  val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4[body01]/10[para05]/2,/1:1,/1:2)", 58, TextKind(), yyy + 1, TextKind(), yyy + 2, "a range inside one element")
+  val () = check_parts("epubcfi(/6/4[chap01ref]!/4[body01]/10[para05]/3:10)", 51, 8, 50, true, 4, CfiSideNone(), "the parts of an identifier")
+  val () = check_parts("/4[body01]/10[para05]/2/1:3[;s=b]", 33, 0, 33, false, 0, CfiSideBefore(), "side bias before")
+  val () = check_parts("/4[body01]/10[para05]/2/1:3[;s=a]", 33, 0, 33, false, 0, CfiSideAfter(), "side bias after")
+  val () = check_parts("/4[body01]/10[para05]/3:4[012,456]", 34, 0, 34, false, 0, CfiSideNone(), "no side bias")
   val () = check_assertion("/4[body01]/10[para05]/3:4[012,456]", 34, "012", 3, "456", 3, "the text before and after")
   val spec_positions = round_trip_all(data, nodes, 4096, 0, 0)
   val () = expect(spec_positions > 40, "round trip: the specification's chapter has more than forty positions")
@@ -309,15 +345,15 @@ fn check_epubjs (): void = let
   val first_text = first + 15
   val second_text = second + 15
   (* "epubcfi(/6/4[chap01ref]!/4/2/10/2[c001p0004]/1:6)": "But lo|ok! here" *)
-  val () = check_resolve(data, nodes, "/4/2/10/2[c001p0004]/1:6", 24, 2, first_text + 6, "epub.js: a collapsed range")
+  val () = check_resolve(data, nodes, "/4/2/10/2[c001p0004]/1:6", 24, TextKind(), first_text + 6, "epub.js: a collapsed range")
   val () = expect(bytes_are(data, 32768, first_text + 6, "ok! here", 8, 0), "epub.js: the text there is ok! here")
   val () = check_of(data, nodes, first_text + 6, "/4/2/10/2[c001p0004]/1:6", 24, "epub.js: the steps of a position in the span")
   (* fromNode: the element, and its text node (no offset) *)
-  val () = check_resolve(data, nodes, "/4/2/10/2[c001p0004]", 20, 1, first_span + 1, "epub.js: the element")
+  val () = check_resolve(data, nodes, "/4/2/10/2[c001p0004]", 20, ElementKind(), first_span + 1, "epub.js: the element")
   val () = check_of(data, nodes, first_span + 1, "/4/2/10/2[c001p0004]", 20, "epub.js: the steps of the element")
-  val () = check_resolve(data, nodes, "/4/2/10/2[c001p0004]/1", 22, 2, first_text, "epub.js: the text node without an offset")
+  val () = check_resolve(data, nodes, "/4/2/10/2[c001p0004]/1", 22, TextKind(), first_text, "epub.js: the text node without an offset")
   (* the range of #fromRange(): epubcfi(/6/4[chap01ref]!/4/2,/10/2[c001p0004]/1:6,/16/2[c001p0007]/1:27) *)
-  val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4/2,/10/2[c001p0004]/1:6,/16/2[c001p0007]/1:27)", 72, 2, first_text + 6, 2, second_text + 27, "epub.js: a range across two paragraphs")
+  val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4/2,/10/2[c001p0004]/1:6,/16/2[c001p0007]/1:27)", 72, TextKind(), first_text + 6, TextKind(), second_text + 27, "epub.js: a range across two paragraphs")
   val idref = $A.alloc<byte>(16)
   val () = fill_bytes(idref, "chap01ref", 9, 0)
   val @(idref_frozen, idref_bytes) = $A.freeze<byte>(idref)
@@ -332,7 +368,7 @@ fn check_epubjs (): void = let
   val () = $A.drop<byte>(idref_frozen, idref_bytes)
   val () = $A.free<byte>($A.thaw<byte>(idref_frozen))
   (* a range inside one paragraph, as epub.js writes it with offset 0: epubcfi(...10/2[c001p0004],/1:0,/1:1) *)
-  val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4/2/10/2[c001p0004],/1:0,/1:1)", 55, 2, first_text, 2, first_text + 1, "epub.js: a range with offset 0")
+  val () = check_range(data, nodes, "epubcfi(/6/4[chap01ref]!/4/2/10/2[c001p0004],/1:0,/1:1)", 55, TextKind(), first_text, TextKind(), first_text + 1, "epub.js: a range with offset 0")
   val fixture_positions = round_trip_all(data, nodes, 32768, 0, 0)
   val () = expect(fixture_positions > 10000, "epub.js: more than ten thousand positions of the chapter have steps")
   val () = println! ("epub.js's chapter: ", fixture_positions, " positions round trip")
@@ -653,13 +689,13 @@ fn check_koreader (): void = let
   val nodes = xhtml_parse(data, 4096)
   val () = expect(first_f > 0, "KOReader: the chapter was built")
   (* a word: "thy" in a paragraph: P,S,E with S and E in the same text *)
-  val () = check_range(data, nodes, "epubcfi(/6/10!/4/2/2[section_77306]/4/74/2,/3:28,/3:31)", 55, 2, first_b + 28, 2, first_b + 31, "KOReader: a word")
+  val () = check_range(data, nodes, "epubcfi(/6/10!/4/2/2[section_77306]/4/74/2,/3:28,/3:31)", 55, TextKind(), first_b + 28, TextKind(), first_b + 31, "KOReader: a word")
   val () = check_made(data, nodes, first_b + 28, first_b + 31, "epubcfi(/6/10!/4/2/2[section_77306]/4/74/2,/3:28,/3:31)", 55, "KOReader: a word, made")
-  val () = check_range(data, nodes, "epubcfi(/6/10!/4/2/2[section_77306]/4,/74/2/5:25,/76/2/1:7)", 59, 2, first_c + 25, 2, first_d + 7, "KOReader: a text across two blockquotes")
+  val () = check_range(data, nodes, "epubcfi(/6/10!/4/2/2[section_77306]/4,/74/2/5:25,/76/2/1:7)", 59, TextKind(), first_c + 25, TextKind(), first_d + 7, "KOReader: a text across two blockquotes")
   val () = check_made(data, nodes, first_c + 25, first_d + 7, "epubcfi(/6/10!/4/2/2[section_77306]/4,/74/2/5:25,/76/2/1:7)", 59, "KOReader: a text across two blockquotes, made")
-  val () = check_range(data, nodes, "epubcfi(/6/10!/4/2/2[section_77306]/4,/80/2/1:0,/82/2/1:27)", 59, 2, first_e, 2, first_f + 27, "KOReader: a tap")
+  val () = check_range(data, nodes, "epubcfi(/6/10!/4/2/2[section_77306]/4,/80/2/1:0,/82/2/1:27)", 59, TextKind(), first_e, TextKind(), first_f + 27, "KOReader: a tap")
   val () = check_made(data, nodes, first_e, first_f + 27, "epubcfi(/6/10!/4/2/2[section_77306]/4,/80/2/1:0,/82/2/1:27)", 59, "KOReader: a tap, made")
-  val () = check_parts("epubcfi(/6/10!/4/2/2[section_77306]/4,/80/2/1:0,/82/2/1:27)", 59, 8, 58, 10, 0, "KOReader: the spine step")
+  val () = check_parts("epubcfi(/6/10!/4/2/2[section_77306]/4,/80/2/1:0,/82/2/1:27)", 59, 8, 58, true, 10, CfiSideNone(), "KOReader: the spine step")
   val () = $X.free_nodes(nodes)
   val () = $A.drop<byte>(doc_frozen, data)
   val () = $A.free<byte>($A.thaw<byte>(doc_frozen))
@@ -674,12 +710,12 @@ fn check_escapes (): void = let
   val nodes = xhtml_parse(data, 4096)
   val first = find_text(data, 4096, "p id=\"a,b", 9, 0)
   val () = check_of(data, nodes, first, "/2/2[a^,b^[c^]^^d^=e^;f^(g^)]", 29, "escapes: an id is written with ^ before each special character")
-  val () = check_resolve(data, nodes, "/2/2[a^,b^[c^]^^d^=e^;f^(g^)]", 29, 1, first, "escapes: and read back")
+  val () = check_resolve(data, nodes, "/2/2[a^,b^[c^]^^d^=e^;f^(g^)]", 29, ElementKind(), first, "escapes: and read back")
   val x_at = find_text(data, 4096, "x</p>", 5, 0)
   val y_at = find_text(data, 4096, "y</p>", 5, 0)
-  val () = check_resolve(data, nodes, "/2/4[a^,b^[c^]^^d^=e^;f^(g^)]/1:1", 33, 2, x_at + 1, "escapes: the id of the first paragraph on the second step is looked for")
-  val () = check_resolve(data, nodes, "/2/4[b]/1:0", 11, 2, y_at, "escapes: a plain id")
-  val () = check_resolve(data, nodes, "/2/2[b]/1:0", 11, 2, y_at, "escapes: an id that is another element's is looked for")
+  val () = check_resolve(data, nodes, "/2/4[a^,b^[c^]^^d^=e^;f^(g^)]/1:1", 33, TextKind(), x_at + 1, "escapes: the id of the first paragraph on the second step is looked for")
+  val () = check_resolve(data, nodes, "/2/4[b]/1:0", 11, TextKind(), y_at, "escapes: a plain id")
+  val () = check_resolve(data, nodes, "/2/2[b]/1:0", 11, TextKind(), y_at, "escapes: an id that is another element's is looked for")
   val () = $X.free_nodes(nodes)
   val () = $A.drop<byte>(doc_frozen, data)
   val () = $A.free<byte>($A.thaw<byte>(doc_frozen))
@@ -700,10 +736,10 @@ fn check_astral (): void = let
   val () = check_of(data, nodes, after_emoji, "/2/2/1:3", 8, "astral: after the character, which is two units")
   val () = check_of(data, nodes, after_emoji + 1, "/2/2/1:4", 8, "astral: after y")
   val () = check_of(data, nodes, after_emoji + 6, "/2/2/1:5", 8, "astral: after the reference, which is one unit")
-  val () = check_resolve(data, nodes, "/2/2/1:3", 8, 2, after_emoji, "astral: resolve after the character")
-  val () = check_resolve(data, nodes, "/2/2/1:2", 8, 2, emoji, "astral: an offset between the two units is the character's start")
-  val () = check_resolve(data, nodes, "/2/2/1:6", 8, 2, after_emoji + 7, "astral: the end of the text")
-  val () = check_resolve(data, nodes, "/2/2/1:7", 8, 0, 0, "astral: past the end of the text")
+  val () = check_resolve(data, nodes, "/2/2/1:3", 8, TextKind(), after_emoji, "astral: resolve after the character")
+  val () = check_resolve(data, nodes, "/2/2/1:2", 8, TextKind(), emoji, "astral: an offset between the two units is the character's start")
+  val () = check_resolve(data, nodes, "/2/2/1:6", 8, TextKind(), after_emoji + 7, "astral: the end of the text")
+  val () = check_resolve(data, nodes, "/2/2/1:7", 8, NoPlaceKind(), 0, "astral: past the end of the text")
   val () = $X.free_nodes(nodes)
   val () = $A.drop<byte>(doc_frozen, data)
   val () = $A.free<byte>($A.thaw<byte>(doc_frozen))
@@ -745,17 +781,17 @@ fn check_entry {l:agz}{n:pos}{size:nat}{ll:agz}
     else if kind = 1 then expect(produced = length && same, "an element's steps")
     else expect(produced = length && same, "a text position's steps"))
   val @(steps_frozen, steps_bytes) = $A.freeze<byte>(steps)
-  val @(found_kind, found_position) = cfi_resolve(data, nodes, steps_bytes, length, 0)
-  val () = (if kind = 1 then (expect(found_kind = 1, "an element's steps resolve to an element"); expect(found_position = position, "an element's steps resolve to the element")) else ())
-  val () = (if kind = 2 then (expect(found_kind = 2, "a text position's steps resolve to text"); expect(found_position = position, "a text position's steps resolve to it")) else ())
-  val () = (if kind = 3 then expect(found_kind = 2, "a text position after a comment resolves to text") else ())
+  val @(found_kind, found_position) = place_parts(cfi_resolve(data, nodes, steps_bytes, length, 0))
+  val () = (if kind = 1 then (expect(is_element(found_kind), "an element's steps resolve to an element"); expect(found_position = position, "an element's steps resolve to the element")) else ())
+  val () = (if kind = 2 then (expect(is_text(found_kind), "a text position's steps resolve to text"); expect(found_position = position, "a text position's steps resolve to it")) else ())
+  val () = (if kind = 3 then expect(is_text(found_kind), "a text position after a comment resolves to text") else ())
   (* and the position found has the same steps *)
   val again = $A.alloc<byte>(256)
   val found_nat = (if found_position >= 0 then found_position else 0): Nat
   val again_length = cfi_of(data, nodes, found_nat, again, 256)
-  val () = (if kind = 3 then (if found_kind = 2 then expect(again_length = length, "the position found after a comment has the same steps") else ()) else ())
+  val () = (if kind = 3 then (if is_text(found_kind) then expect(again_length = length, "the position found after a comment has the same steps") else ()) else ())
   val again_same = same_as_log(again, log, at + 4, length, 0)
-  val () = (if kind = 3 then (if found_kind = 2 then expect(again_same, "the position found after a comment has the same steps (bytes)") else ()) else ())
+  val () = (if kind = 3 then (if is_text(found_kind) then expect(again_same, "the position found after a comment has the same steps (bytes)") else ()) else ())
   val () = $A.drop<byte>(steps_frozen, steps_bytes)
   val () = $A.free<byte>($A.thaw<byte>(steps_frozen))
   val () = $A.free<byte>(again)
