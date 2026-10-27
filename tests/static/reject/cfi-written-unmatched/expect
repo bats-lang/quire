@@ -1,0 +1,4 @@
+function _static_written_length
+line 4
+pattern match is nonexhaustive:
+CfiNoRoom()

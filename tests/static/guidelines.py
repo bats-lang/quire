@@ -15,9 +15,9 @@ them, and nothing refused the text that made them. This checks, without a compil
   and ends with the generated line;
 * `--review FILE`: the above for a review comment: its first line, the head SHA it
   reviewed, and, in the gate's form of bridge, pwa and capacitor-plugins, exactly one
-  line with "Reviewed:" and exactly one with "Verdict:" (bridge#200). A review quotes a
-  phrase it objects to on a line of its own, `Quoted objection: `<phrase>``; a code span
-  anywhere else in a review is linted as text (an exit clause in backticks is refused);
+  line with "Reviewed:" and exactly one with "Verdict:" (bridge#200). A review never
+  reproduces a banned phrase: it paraphrases or points at the place, and a code span in a
+  review is linted as text (an exit clause in backticks is refused; quire#943);
 * `--github`: what the text-lint workflow runs, from the event's payload: the PR's body
   against its head, and the newest review comment, set as the commit status `text-lint` on the
   head (a ticket's body, its table rows included, with its code spans as quotations: a
@@ -36,6 +36,7 @@ usage: python3 tests/static/guidelines.py [ROOT]
        python3 tests/static/guidelines.py --pr-body FILE --head SHA
        python3 tests/static/guidelines.py --review FILE [--gate-form]
        python3 tests/static/guidelines.py --brief FILE --ticket FILE
+Any mode takes --phrases FILE, a list in the form of tests/static/guidelines/phrases.tsv, in place of that one.
        python3 tests/static/guidelines.py --github        (in a workflow: GITHUB_EVENT_NAME, GITHUB_EVENT_PATH)
 Exit 0 when clean, 1 with one line for each finding.
 """
@@ -59,8 +60,6 @@ GENERATED = (
 RUNNING_TOOLS = {'bash', 'edit', 'write', 'notebookedit', 'monitor', 'taskstop', 'skill', 'agent'}
 SHA = re.compile(r'\b[0-9a-f]{40}\b')
 FIXES = re.compile(r'\bFixes\s+((?:[\w.-]+/[\w.-]+)?#\d+)', re.IGNORECASE)
-# a reviewer's quotation of a banned phrase: the whole line, the phrase in one code span (reviewer.md, "The comment")
-QUOTED_OBJECTION = re.compile(r'Quoted objection: (`[^`\n]+`)')
 
 
 def load_phrases(path=PHRASES):
@@ -95,7 +94,9 @@ def lint_text(text, name, phrases, guide=False, notes=False):
                 continue
             found = regex.search(line)
             if found:
-                findings.append(f'{name}:{number}: row {row}: "{found.group(0)}": {reason}')
+                # the finding says where (the line and its text), what (the phrase) and why in words (quire#943)
+                shown = line.strip() if len(line.strip()) <= 120 else line.strip()[:117] + '...'
+                findings.append(f'{name}:{number}: row {row}: the line "{shown}" holds the phrase "{found.group(0)}", which is refused: {reason}')
     return findings
 
 
@@ -196,27 +197,6 @@ def status_description(finding):
     return spelled[:140]
 
 
-def quoted_phrase_matches(quoted, phrases):
-    return any(regex.search(quoted) for _scope, _row, regex, _reason, _example in phrases)
-
-
-def review_text(text, phrases):
-    """The review's text for the lint (reviewer.md, "The comment"). A phrase the reviewer objects to is
-    quoted alone on its line, `Quoted objection: `<a phrase of the list>``, and that line is the
-    quotation: it is blanked. Any other code span is the reviewer's own text and is linted, so an exit
-    clause offered in backticks is refused. A line that starts "Quoted objection:" in any other form is refused."""
-    kept, findings = [], []
-    for number, line in enumerate(text.split('\n'), 1):
-        found = QUOTED_OBJECTION.fullmatch(line.strip())
-        if found and quoted_phrase_matches(found.group(1), phrases):
-            kept.append('')
-            continue
-        if line.strip().startswith('Quoted objection:'):
-            findings.append(f'review:{number}: a quoted objection is one line, "Quoted objection: `<a phrase of the list>`" and nothing else on it (reviewer.md, "The comment")')
-        kept.append(line)
-    return findings + lint_text('\n'.join(kept), 'review', phrases)
-
-
 SIGNATURE_CHANGE = re.compile(r'(?i)\b(chang(?:e|es|ed|ing)|replac(?:e|es|ed|ing)|remov(?:e|es|ed|ing))\s+(?:a |an |the )?(?:published|public)\s+signatures?\b')
 OVERLAP_BRIEF = re.compile(r'^\s*Overlap:', re.MULTILINE)
 OVERLAP_REVIEW = re.compile(r'^\s*Overlap check:', re.MULTILINE)
@@ -256,7 +236,7 @@ def lint_worker_lines(text, name):
 
 
 def lint_review(text, phrases, gate_form=False):
-    findings = review_text(text, phrases) + lint_overlap(text, 'review', OVERLAP_REVIEW, 'Overlap check: ...')
+    findings = lint_text(text, 'review', phrases) + lint_overlap(text, 'review', OVERLAP_REVIEW, 'Overlap check: ...')
     lines = [line for line in text.split('\n') if line.strip()]
     first = lines[0].strip() if lines else ''
     if gate_form or first == '## Adversarial review':
@@ -303,10 +283,27 @@ def is_review_first_line(line):
     return bool(UNGATED_FIRST.fullmatch(line)) or line == GATED_FIRST
 
 
+GH_API_WAITS = (2, 5, 10)  # gh-retry (#931): seconds before the 1st, 2nd and 3rd retry of a 5xx answer
+GH_API_RETRIES = len(GH_API_WAITS)
+
+
+def _gh_run(command):
+    import subprocess
+    return subprocess.run(command, capture_output=True, text=True)
+
+
+def _gh_sleep(seconds):
+    import time
+    time.sleep(seconds)
+
+
+GH_RUN = _gh_run  # gh-retry (#931): tests replace these two
+GH_SLEEP = _gh_sleep
+
+
 def gh_api(path, method='GET', fields=None):
     """The GitHub REST API through the runner's `gh`; JSON back, None for an empty answer."""
     import json
-    import subprocess
     command = ['gh', 'api', '-X', method, path]
     for key, value in (fields or {}).items():
         command += ['-f', f'{key}={value}']
@@ -314,10 +311,15 @@ def gh_api(path, method='GET', fields=None):
         # a reading run (on a machine whose token may not write): say what would be sent
         print(f'would send: {method} {path} {fields}')
         return None
-    done = subprocess.run(command, capture_output=True, text=True)
-    if done.returncode:
-        raise SystemExit(f'gh api {method} {path} failed: {done.stderr.strip()}')
-    return json.loads(done.stdout) if done.stdout.strip() else None
+    # gh-retry (#931): a 5xx answer is retried, GH_API_RETRIES more times, waiting GH_API_WAITS seconds before each
+    for attempt in range(GH_API_RETRIES + 1):
+        done = GH_RUN(command)
+        if not done.returncode:
+            return json.loads(done.stdout) if done.stdout.strip() else None
+        if attempt == GH_API_RETRIES or not re.search(r'HTTP 5\d\d', done.stderr):
+            break
+        GH_SLEEP(GH_API_WAITS[attempt])
+    raise SystemExit(f'gh api {method} {path} failed: {done.stderr.strip()}')
 
 
 def newest_review(comments):
@@ -395,7 +397,7 @@ def option(arguments, name):
 
 
 def main(arguments):
-    phrases = load_phrases()
+    phrases = load_phrases(option(arguments, '--phrases') or PHRASES)
     if '--github' in arguments:
         import json
         with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as handle:
