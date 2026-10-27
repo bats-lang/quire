@@ -212,6 +212,12 @@ jobs:
       - name: CSS size tests
         run: tests/css-size/run.sh $BATS_REPOSITORY
 
+      # The EPUB CFI module, natively: the specification's examples, epub.js's
+      # and KOReader's CFIs, the steps of every position of generated chapters
+      # (#901)
+      - name: CFI tests
+        run: tests/cfi/run.sh $BATS_REPOSITORY
+
       # The capped layout waits of the e2e helpers, in node with a fake page
       # (tests/layout-cap/check.mjs, #600): node is set up above by e2e-setup
       - name: Layout cap tests
