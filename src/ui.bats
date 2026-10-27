@@ -2309,7 +2309,7 @@ implement words_control_id (control) =
   | WordsShare() => "words-share"
   | WordsScreen() => "words-screen"
 
-(* The control after control, in the order the decoder tries them *)
+(* The control after control, in the decoder's order (keyword: vocabulary) *)
 fn _words_control_after (control: words_control): $R.option(words_control) =
   case+ control of
   | WordsBack() => $R.some(WordsLearning())
@@ -2319,8 +2319,7 @@ fn _words_control_after (control: words_control): $R.option(words_control) =
   | WordsShare() => $R.some(WordsScreen())
   | WordsScreen() => $R.none()
 
-(* The first of control and the controls after it (fuel of them at
-   most) whose id is bytes[at, n) *)
+(* The first of control and those after it whose id is the bytes at the offset (keyword: vocabulary) *)
 fun _words_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: words_control, fuel: int fuel): $R.option(words_control) = let
   val id = words_control_id(control)
 in
@@ -2331,7 +2330,7 @@ in
     | ~$R.none() => $R.none()
 end
 
-(* The control whose id is bytes[at, n), if it is one *)
+(* The control whose id is the bytes at the offset, if it is one (keyword: vocabulary) *)
 #pub fn ui_words_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(words_control)
 implement ui_words_control (bytes, n, at) = _words_control_from(bytes, n, at, WordsBack(), 6)
 
@@ -2352,7 +2351,7 @@ implement review_control_id (control) =
   | ReviewForgot() => "review-forgot"
   | ReviewScreen() => "review-screen"
 
-(* The control after control, in the order the decoder tries them *)
+(* The control after control, in the decoder's order (keyword: vocabulary) *)
 fn _review_control_after (control: review_control): $R.option(review_control) =
   case+ control of
   | ReviewBack() => $R.some(ReviewShow())
@@ -2361,8 +2360,7 @@ fn _review_control_after (control: review_control): $R.option(review_control) =
   | ReviewForgot() => $R.some(ReviewScreen())
   | ReviewScreen() => $R.none()
 
-(* The first of control and the controls after it (fuel of them at
-   most) whose id is bytes[at, n) *)
+(* The first of control and those after it whose id is the bytes at the offset (keyword: vocabulary) *)
 fun _review_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: review_control, fuel: int fuel): $R.option(review_control) = let
   val id = review_control_id(control)
 in
@@ -2373,7 +2371,7 @@ in
     | ~$R.none() => $R.none()
 end
 
-(* The control whose id is bytes[at, n), if it is one *)
+(* The control whose id is the bytes at the offset, if it is one (keyword: vocabulary) *)
 #pub fn ui_review_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(review_control)
 implement ui_review_control (bytes, n, at) = _review_control_from(bytes, n, at, ReviewBack(), 5)
 

@@ -1,5 +1,4 @@
-(* wordsjson -- the words looked up as JSON, in a backup and in sync's file: each word an object with its id and the latest
-   stamp it changed at, a deleted word its tombstone (keyword: vocabulary) *)
+(* wordsjson -- the words looked up as JSON, in a backup and in sync's file, a deleted word as its tombstone (keyword: vocabulary) *)
 
 #target wasm begin
 
@@ -33,9 +32,7 @@ implement $P.dispose<Int>(_) = ()
 (* The bytes a word takes in JSON (keyword: vocabulary) *)
 #define WORD_JSON_MAX 7200
 
-(* ============================================================
-   Writing
-   ============================================================ *)
+(* Writing (keyword: vocabulary) *)
 
 fun _copy_into {source_loc,target_loc:agz}{source_size,target_size:pos}{count:nat | count <= source_size; count <= target_size}{at:nat | at + count <= target_size}{i:nat | i <= count} .<count - i>.
   (source: !$A.arr(byte, source_loc, source_size), target: !$A.arr(byte, target_loc, target_size), count: int count, at: int at, i: int i): void =
@@ -158,9 +155,7 @@ implement words_backup_chunk () =
         val () = stored_words_free(words)
       in $P.ret<jchunk>(chunk) end)
 
-(* ============================================================
-   Reading
-   ============================================================ *)
+(* Reading (keyword: vocabulary) *)
 
 (* A word's numbers as they are read (keyword: vocabulary) *)
 #define VALUES 16
@@ -352,9 +347,7 @@ implement words_parse (buf, n, position) =
     else let val () = stored_words_free(words) in WordsUnreadable() end
   end
 
-(* ============================================================
-   Putting words into the store
-   ============================================================ *)
+(* Putting words into the store (keyword: vocabulary) *)
 
 (* The words of a JSON file's words member: none when it has none, unreadable when it is not a whole array (keyword: vocabulary) *)
 #pub fn words_from_file {l:agz}{owner:addr}{n:nat} (buf: !$A.arrx(byte, l, n, owner), n: int n): words_read
@@ -417,9 +410,7 @@ implement words_restore (read, replace) =
           in _apply(words, true, 0) end)
 
 
-(* ============================================================
-   Sync: the words of two devices, merged
-   ============================================================ *)
+(* Sync: the words of two devices, merged (keyword: vocabulary) *)
 
 datavtype taken =
   | NotTaken of ()

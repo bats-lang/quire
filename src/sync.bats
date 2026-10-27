@@ -3330,8 +3330,7 @@ fn _finish_file (): void =
          val () = _held_free(_held_swap(_written, Held(file_owner, bytes, size, names_at, books, devices)))
        in _write() end)
 
-(* The file's end: its books this device does not have, then the books' closing bracket, the words of both devices
-   merged (keyword: vocabulary) and the closing brace; then it is written *)
+(* The file's end: the books this device lacks, the words of both devices merged, then it is written (keyword: vocabulary) *)
 fn _tail (): void = let
   val written = !_books_written
   val () = (if written then _push(_text_chunk("}")) else ())

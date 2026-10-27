@@ -295,8 +295,7 @@ fn _dictionaries (): void = let
   val () = ui_role("dictionaries-status", RStatus)
 in _hide("dictionaries-panel") end
 
-(* The words looked up: a screen of the ones kept, a tab for those still being learned and for those mastered, the book
-   they were looked up in, and their rows (keyword: vocabulary) *)
+(* The words looked up: a screen of the ones kept, with tabs, a book filter and rows (keyword: vocabulary) *)
 fn _words_screen (): void = let
   val () = ui_el("bats-root", "words-screen", TDiv, "info")
   val () = ui_labelled("words-screen", NDialog, "words-title")

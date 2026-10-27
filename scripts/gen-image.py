@@ -8,7 +8,7 @@ import sys
 import os
 NAME = sys.argv[1]
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from record_tables import tables
+from record_tables import tables, one_line_comments
 GROUPS, KIND = tables(NAME)
 PREFIX = NAME
 CAPITAL = NAME.capitalize()
@@ -228,4 +228,4 @@ in
 end
 """)
 emit("end")
-open(f"src/{PREFIX}image.bats", "w").write("\n".join(lines) + "\n")
+open(f"src/{PREFIX}image.bats", "w").write(one_line_comments("\n".join(lines) + "\n", NAME))

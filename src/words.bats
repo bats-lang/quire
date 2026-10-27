@@ -45,9 +45,7 @@ implement $P.dispose<word_got>(got) = word_got_free(got)
 implement $P.dispose<word_saved>(_) = ()
 implement $P.dispose<settled>(_) = ()
 
-(* ============================================================
-   The word being looked up
-   ============================================================ *)
+(* The word being looked up (keyword: vocabulary) *)
 
 (* The word the selection toolbar offers to look up (keyword: vocabulary) *)
 datavtype candidate =
@@ -91,9 +89,7 @@ implement words_candidate_set (word, word_len, language, language_len) = let
   val () = _copy_into(language, language_copy, language_len, 0)
 in _candidate_free(_candidate_swap(Candidate(word_copy, word_len, language_copy, language_len))) end
 
-(* ============================================================
-   The sentence, in a record's two strings
-   ============================================================ *)
+(* The sentence, in a record's two strings (keyword: vocabulary) *)
 
 fun _copy_part {l,part_loc:agz}{n,size:pos}{from,count:nat | from + count <= n; count < size}{i:nat | i <= count} .<count - i>.
   (sentence: !$A.arr(byte, l, n), part: !$A.arr(byte, part_loc, size), from: int from, count: int count, i: int i): void =
@@ -109,9 +105,7 @@ fn _part {l:agz}{n:pos}{from,count:nat | from + count <= n; count < 256}
   val () = _copy_part(sentence, part, from, count, 0)
 in part end
 
-(* ============================================================
-   A lookup, noted
-   ============================================================ *)
+(* A lookup, noted (keyword: vocabulary) *)
 
 (* The lookup made into a record of the sentence of the selection, sentence[0, count), and stored (keyword: vocabulary) *)
 fn _note_place {word_loc,language_loc,sentence_loc:agz}{word_len:nat | word_len <= 64}{language_len:nat | language_len <= 3}{count:nat | count <= 510}
@@ -177,9 +171,7 @@ implement words_lookup_note () =
          val () = _note_word(word, word_len, language, language_len)
        in _candidate_free(_candidate_swap(Candidate(word, word_len, language, language_len))) end)
 
-(* ============================================================
-   Start: how many words are kept, and the tombstones that are old
-   ============================================================ *)
+(* Start: how many words are kept, and the tombstones that are old (keyword: vocabulary) *)
 
 fun _forget_old {count:nat} .<count>. (words: stored_words(count), now: Int): void =
   case+ words of
@@ -208,9 +200,7 @@ implement words_start () =
       in _forget_old(words, $TM.epoch_minutes()) end)
 
 
-(* ============================================================
-   The words screen: what is shown
-   ============================================================ *)
+(* The words screen: what is shown (keyword: vocabulary) *)
 
 (* Which words the screen lists: those still being learned, or those mastered (keyword: vocabulary) *)
 datatype words_tab = TabLearning | TabMastered
@@ -373,9 +363,7 @@ fun _gather {count,kept:nat} .<count>.
     end
 
 
-(* ============================================================
-   The words screen: a row
-   ============================================================ *)
+(* The words screen: a row (keyword: vocabulary) *)
 
 fun _put_literal_at {l:agz}{n:pos}{text_len:nat}{at:nat | at + text_len <= n}{i:nat | i <= text_len} .<text_len - i>.
   (out: !$A.arr(byte, l, n), at: int at, text: string text_len, text_len: int text_len, i: int i): void =
@@ -678,9 +666,7 @@ implement words_render () =
       in () end)
 
 
-(* ============================================================
-   The words screen: opened, and what its controls do
-   ============================================================ *)
+(* The words screen: opened, and what its controls do (keyword: vocabulary) *)
 
 (* The screen opened over the library, listing the words kept (keyword: vocabulary) *)
 #pub fn words_screen_open (): void
@@ -820,9 +806,7 @@ implement words_row_word (row) = let
 in found end
 
 
-(* ============================================================
-   Review: the words that are due, one at a time
-   ============================================================ *)
+(* Review: the words that are due, one at a time (keyword: vocabulary) *)
 
 (* The word being reviewed: its ids, and the word and its language as the dictionary is asked for them (keyword: vocabulary) *)
 datavtype card =
@@ -1029,9 +1013,7 @@ implement words_review_closed () = let
   val () = _card_free(_card_swap(NoCard()))
 in words_render() end
 
-(* ============================================================
-   The list as a CSV file
-   ============================================================ *)
+(* The list as a CSV file (keyword: vocabulary) *)
 
 (* The most bytes a word takes in the file: each of its four fields at its longest, every byte a quote doubled, in quotes (keyword: vocabulary) *)
 #define CSV_ROW_MAX 2600

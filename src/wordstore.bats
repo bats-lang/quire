@@ -1,5 +1,4 @@
-(* wordstore -- the words looked up, in storage: one checksummed record for each word and language ("words/<id>", the id as
-   14 hex digits), changed only by an update that reads the record in the same transaction (keyword: vocabulary) *)
+(* wordstore -- the words looked up, in storage: a checksummed record for each word and language, changed only by an update that reads it in the same transaction (keyword: vocabulary) *)
 
 #target wasm begin
 
@@ -31,9 +30,7 @@ implement $P.dispose<$IDB.stored>(_) = ()
 (* A record longer than this is not a word's (keyword: vocabulary) *)
 #define WORD_RECORD_MAX 4096
 
-(* ============================================================
-   Ids and keys
-   ============================================================ *)
+(* Ids and keys (keyword: vocabulary) *)
 
 (* A byte lower-cased when it is an ASCII capital (keyword: vocabulary) *)
 fn _lower {code:nat | code < 256} (code: int code): [lowered:nat | lowered < 256] int lowered =
@@ -89,9 +86,7 @@ implement wordstore_key (id_high, id_low) = let
   val () = $A.free<byte>(hex)
 in key end
 
-(* ============================================================
-   Words, read
-   ============================================================ *)
+(* Words, read (keyword: vocabulary) *)
 
 (* A word of the store: its id and what it holds (keyword: vocabulary) *)
 #pub datavtype stored_word =
@@ -257,9 +252,7 @@ in
        | ~ContentUnreadable() => $P.ret<words_read>(WordsUnreadable())))
 end
 
-(* ============================================================
-   Words, changed
-   ============================================================ *)
+(* Words, changed (keyword: vocabulary) *)
 
 (* What an edit of a word's record came to (keyword: vocabulary) *)
 #pub datatype word_saved =

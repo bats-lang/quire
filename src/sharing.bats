@@ -107,8 +107,7 @@ in
     end
 end
 
-(* The CSV file bytes[0, len), named quire-words.csv, shared: as a file (AsFile), or as its text, titled by its name (AsText).
-   The promise says whether it was refused as a file (keyword: vocabulary) *)
+(* The words as a CSV file, shared as a file or as its text; the promise says whether it was refused as a file (keyword: vocabulary) *)
 #pub fn share_csv {l:agz}{len:pos} (bytes: !$A.borrow(byte, l, len), len: int len, way: share_as): $P.promise(share_end, $P.Chained)
 
 implement share_csv (bytes, len, way) = let

@@ -81,3 +81,15 @@ def tables(name):
     if name == "word":
         return WORD_GROUPS, WORD_KIND
     return INDEX_GROUPS, INDEX_KIND
+
+
+# The area keyword each generated module's comments name (the notes in .claude/rules/)
+AREAS = {"book": "library-records", "index": "library-records", "word": "vocabulary"}
+
+
+def one_line_comments(text, name):
+    """Every comment of a generated module is one line and names its area by keyword (CLAUDE.md)."""
+    import re
+    def one(match):
+        return "(* " + " ".join(match.group(1).split()) + " (keyword: " + AREAS[name] + ") *)"
+    return re.sub(r"\(\*(.*?)\*\)", one, text, flags=re.S)
