@@ -3216,38 +3216,32 @@ fn _line_if {line:nat}{text_len:pos | text_len < 256} (on: bool, line: int line,
 fn _group_if {line:nat}{text_len:pos | text_len < 256} (on: bool, line: int line, text: string text_len): [next:nat] int next =
   if on then _a11y_group(line, text) else line
 
-(* The line for the first of first, second that holds, else the last *)
+(* The line for the first of first, second that holds, none when neither *)
 fn _line_of2 {line:nat}{first_len,second_len:pos | first_len < 256; second_len < 256}
-  (first: bool, line: int line, first_text: string first_len, second_text: string second_len): [next:nat] int next =
-  if first then _a11y_line(line, first_text) else _a11y_line(line, second_text)
+  (first: bool, second: bool, line: int line, first_text: string first_len, second_text: string second_len): [next:nat] int next =
+  if first then _a11y_line(line, first_text) else _line_if(second, line, second_text)
 
 fn _line_of3 {line:nat}{first_len,second_len,third_len:pos | first_len < 256; second_len < 256; third_len < 256}
-  (first: bool, second: bool, line: int line,
-   first_text: string first_len, second_text: string second_len, third_text: string third_len): [next:nat] int next =
-  if first then _a11y_line(line, first_text) else _line_of2(second, line, second_text, third_text)
-
-fn _line_of4 {line:nat}{first_len,second_len,third_len,fourth_len:pos | first_len < 256; second_len < 256; third_len < 256; fourth_len < 256}
   (first: bool, second: bool, third: bool, line: int line,
-   first_text: string first_len, second_text: string second_len, third_text: string third_len, fourth_text: string fourth_len)
-  : [next:nat] int next =
-  if first then _a11y_line(line, first_text) else _line_of3(second, third, line, second_text, third_text, fourth_text)
+   first_text: string first_len, second_text: string second_len, third_text: string third_len): [next:nat] int next =
+  if first then _a11y_line(line, first_text) else _line_of2(second, third, line, second_text, third_text)
 
 (* The statements for flags, from line number line *)
 fn _a11y_lines {line:nat} (flags: int, line: int line): [next:nat] int next = let
-  (* Ways of reading and Conformance are shown even with no metadata *)
-  val line = _a11y_group(line, "Ways of reading")
-  val line = _line_of2(a11y_has(flags, Transformable()), line, "Appearance can be modified",
-    "No information about appearance modifiability is available")
+  (* a group with no statement is left out, and so is a "No information" line (a11y-display, quire#459) *)
   val readable = a11y_has(flags, SufficientText()) || (a11y_has(flags, TextualMode()) && ~a11y_has(flags, VisualMode()))
-  val line = _line_of3(readable, a11y_has(flags, VisualMode()), line, "Readable in read aloud or dynamic braille",
-    "Not fully readable in read aloud or dynamic braille", "No information about nonvisual reading is available")
+  val ways = a11y_has(flags, Transformable()) || readable || a11y_has(flags, VisualMode()) || a11y_has(flags, AlternativeText())
+  val line = _group_if(ways, line, "Ways of reading")
+  val line = _line_if(a11y_has(flags, Transformable()), line, "Appearance can be modified")
+  val line = _line_of2(readable, a11y_has(flags, VisualMode()), line, "Readable in read aloud or dynamic braille",
+    "Not fully readable in read aloud or dynamic braille")
   val line = _line_if(a11y_has(flags, AlternativeText()), line, "Has alternative text")
-  val line = _a11y_group(line, "Conformance")
   val level = a11y_level(flags)
-  val line = _line_of4(_is_level(level, LevelAAA()), _is_level(level, LevelAA()), _is_level(level, LevelA()), line,
+  val line = _group_if(~_is_level(level, NoLevel()), line, "Conformance")
+  val line = _line_of3(_is_level(level, LevelAAA()), _is_level(level, LevelAA()), _is_level(level, LevelA()), line,
     "This publication exceeds accepted accessibility standards",
     "This publication meets accepted accessibility standards",
-    "This publication meets minimum accessibility standards", "No information is available")
+    "This publication meets minimum accessibility standards")
   val navigation = a11y_has(flags, TableOfContents()) || a11y_has(flags, TermIndex())
     || a11y_has(flags, StructuralNavigation()) || a11y_has(flags, PageNavigation())
   val line = _group_if(navigation, line, "Navigation")
@@ -3288,7 +3282,7 @@ fun _summary_copy {source_loc,dest_loc:agz}{owner:addr}{source_size:nat}{count:n
    book that says nothing of its accessibility is told so once, not by a
    "No information" line under each heading (quire#386) *)
 fn _a11y_body (flags: int, summary_len: int): [next:nat] int next =
-  if flags = 0 then (if summary_len <= 0 then _a11y_line(0, "This book gives no accessibility information.") else _a11y_lines(flags, 0))
+  if flags = 0 then (if summary_len <= 0 then _a11y_line(0, "This book gives no accessibility information.") else 0)
   else _a11y_lines(flags, 0)
 
 (* Fills Book info's accessibility section for book (id_high, id_low) *)
