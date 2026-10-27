@@ -252,13 +252,33 @@ class Workflow(unittest.TestCase):
                 self.assertNotIn('needs.plan', self.job(name))
                 self.assertNotIn('plan.outputs', self.job(name))
 
+    NOT_DRAFT = "(github.event_name != 'pull_request' || !github.event.pull_request.draft)"
+
     def test_the_build_and_the_android_job_are_never_skipped_by_the_plan(self):
         """Android's required contexts exist only if the job runs, and it needs the
-        build's artifact: neither has an `if` but the build's `destroyed` one."""
+        build's artifact: neither reads the plan, so the plan cannot skip them. The
+        build's `if` is the `destroyed` one and the draft one (#939, keyword: draft:
+        a draft pull request runs no job, which is the owner's rule and not the plan's
+        skip logic); the Android job has none and is skipped only with the build."""
         self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('build')),
-                         ["    if: github.event.action != 'destroyed'"])
+                         [f"    if: github.event.action != 'destroyed' && {self.NOT_DRAFT}"])
         self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('android')), [])
         self.assertIn('needs: build', self.job('android'))
+
+    def test_a_draft_pull_request_runs_no_job_and_nothing_else_is_skipped_for_it(self):
+        """plan, build and check carry the draft condition; static, e2e and android
+        need them and carry none (#939). Only a `pull_request` event has a draft, so
+        push, schedule, workflow_dispatch and merge_group stay as they were."""
+        self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('plan')),
+                         [f"    if: github.event.action != 'destroyed' && {self.NOT_DRAFT}"])
+        self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('check')),
+                         [f"    if: always() && github.event.action != 'destroyed' && {self.NOT_DRAFT}"])
+        for name in ('static', 'e2e'):
+            with self.subTest(name):
+                self.assertNotIn('draft', self.job(name))
+                self.assertIn('plan', re.search(r'(?m)^    needs: .*$', self.job(name)).group(0))
+        self.assertNotIn('draft', self.job('android'))
+        self.assertIn('types: [opened, synchronize, reopened, ready_for_review]', self.TEXT)
 
     def test_a_merge_group_plans_the_whole_check(self):
         scope = self.job('plan')[self.job('plan').index('id: scope'):]
