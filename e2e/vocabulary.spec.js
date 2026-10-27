@@ -534,7 +534,7 @@ const ALERT_TIMEOUT = { timeout: 30000 };
 test('a sentence longer than the list keeps is cut at a character: the word is in it, no character is broken', async ({ page }) => {
   const errors = await start(page);
   await importDictionary(page, english, 'en');
-  const long = `${'café '.repeat(200)}Ephemeral ${'café '.repeat(200)}end.`;
+  const long = `${'😀'.repeat(200)}Ephemeral${'😀'.repeat(200)}`;
   await readBook(page, {
     title: 'Vocabulary Long', author: 'Vocabulary Tests', language: 'en',
     rawChapters: [{ body: `<p>${long}</p>` + '<p>lorem ipsum dolor sit amet</p>'.repeat(10) }],
@@ -555,7 +555,7 @@ test('a sentence longer than the list keeps is cut at a character: the word is i
   expect(kept).toContain('Ephemeral');
   expect(kept).not.toContain('�');
   expect(kept.length).toBeLessThan(long.length);
-  expect(kept.replace(/\s+/g, ' ')).toMatch(/^(café )*(café)?\s?(café )*Ephemeral( café)*/);
+  expect(kept).toMatch(/^(😀)+Ephemeral(😀)+$/u);
   expect(errors).toEqual([]);
 });
 
