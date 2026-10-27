@@ -8,9 +8,10 @@ fn _static_failed (result: sync_result): bool =
   | KeptChanging() => true | ServerError() => true | TooLarge() => true
   | Damaged() => true | NoMemory() => true | NoAddress() => true
   | SignInAgain() => true | NoGoogleAccount() => true | NotSetUp() => true
-  | GoogleRefused() => true | SignInCanceled() => true
+  | GoogleNotRegistered() => true | SignInCanceled() => true
   | DropboxSignInAgain() => true | DropboxNotSetUp() => true
   | DropboxSignInRefused() => true | DropboxSignInCanceled() => true
   | FastmailRefused() => true | GoogleSignInFailed() => true | GoogleAccountNeeded() => true
   | GoogleUnreachable() => true | GoogleConsentShowing() => true | GoogleUnexpected() => true
   | GoogleNoAnswer() => true | GoogleAsking() => false
+  | GoogleNoToken() => true | GoogleScriptNotLoaded() => true | GoogleRequestThrew() => true | GoogleAnswerUnread() => true
