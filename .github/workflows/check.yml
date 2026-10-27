@@ -3,8 +3,15 @@ name: check
 on:
   push:
     branches: [main]
+  # A draft pull request runs no job (#939, keyword: draft): `plan`, `build` and
+  # `check` carry the condition below, the rest need them, and the transition
+  # to ready starts the check on the head, so `ready_for_review` is added to the
+  # default types (GitHub: "By default, a workflow only runs when a
+  # `pull_request` event's activity type is `opened`, `synchronize`, or
+  # `reopened`")
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   # A merge queue runs the check on its own merge group, and says when it
   # destroys one (a rebuilt group, an entry removed): `destroyed` is
   # undocumented by GitHub but delivered (community discussion 137976, and
@@ -43,7 +50,7 @@ jobs:
   # each of them has to run for this change (#619): decided here, once, from
   # the pull request's own diff, so the reason of each skip is in one place
   plan:
-    if: github.event.action != 'destroyed'
+    if: github.event.action != 'destroyed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     outputs:
       e2e: ${{ steps.groups.outputs.e2e }}
@@ -85,7 +92,7 @@ jobs:
   # artifact, and the Android job is never skipped by the plan (below), so a missing or
   # malformed plan entry cannot make it skip (#656)
   build:
-    if: github.event.action != 'destroyed'
+    if: github.event.action != 'destroyed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     outputs:
       play_signing_sha1: ${{ steps.clients.outputs.play_signing_sha1 }}
@@ -526,7 +533,7 @@ jobs:
   # passes as itself, and the plan's selection is printed here, beside the
   # results, with the reason of each path in the plan job's summary
   check:
-    if: always() && github.event.action != 'destroyed'
+    if: always() && github.event.action != 'destroyed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     needs: [plan, build, static, e2e]
     runs-on: ubuntu-24.04
     steps:
