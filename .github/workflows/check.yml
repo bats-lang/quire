@@ -618,7 +618,7 @@ jobs:
   play-internal:
     needs: [check, android]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: bats-lang/pwa/.github/workflows/play-release.yml@34119fbcf644c7a2a2745b70f8263e37db501bd6 # pwa main 34119fb
+    uses: bats-lang/pwa/.github/workflows/play-release.yml@54eca46335b7d3221f70bd16c8f322d41f4b4820 # pwa main 54eca46
     permissions:
       contents: read
       id-token: write
