@@ -285,7 +285,7 @@ each kind selects) and prints each path's reason in its summary. Rules:
   path filter: GitHub leaves a required check "Pending" for ever then.
 * **Fail closed**: a path no rule names, a diff that cannot be read, an empty
   diff, a deletion under `e2e/` select everything. The guideline files (`CLAUDE.md`,
-  `.claude/**`) select the `checkers` group only (`tests/static/guidelines.py` reads them,
+  `.claude/**`, and `text-lint.yml`, which the test of the lint reads) select the `checkers` group only (`tests/static/guidelines.py` reads them,
   #751), and nothing else. A merge queue's group, a push, the nightly run and a dispatch run
   every group; the mutation groups keep their own rule.
 * A new path, spec or fixture kind needs its rule: `tests/static/affected_test.py`
@@ -309,6 +309,15 @@ each kind selects) and prints each path's reason in its summary. Rules:
   `e2e`; only `play-internal` needs `android`), a change of the branch
   protection that is an admin's;
   tested: `Workflow` in `tests/static/affected_test.py`.
+* **A draft PR runs no job (#939, keyword: draft).** `check.yml` has `types: [opened,
+  synchronize, reopened, ready_for_review]` (GitHub's default three plus the transition to ready,
+  so marking ready runs the check on the head) and `plan`, `build` and `check` carry
+  `github.event_name != 'pull_request' || !github.event.pull_request.draft`; `static`, `e2e` and
+  `android` need them and are skipped with them. `check` is skipped, which a required check
+  counts as passed, so it is reported, not missing; the draft cannot merge in any case, and
+  the ready run reports every context (`android / ...` included, which #656 keeps unskipped
+  for a ready PR). Push, `workflow_dispatch`, `schedule` and `merge_group` are unchanged.
+  Libraries: the condition is repository-prototype#525, their callers' types the tickets of #939.
 * **The merge queue's group runs everything, by decision (#656).** Its diff
   (against `HEAD^1`) is one PR's, so a selection by it would be the PR's own
   and would miss what two PRs do together, which is what the queue is for
