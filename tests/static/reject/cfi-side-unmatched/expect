@@ -1,0 +1,4 @@
+function _static_side_said
+line 4
+pattern match is nonexhaustive:
+CfiSideAfter()
