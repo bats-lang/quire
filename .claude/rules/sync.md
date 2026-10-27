@@ -115,6 +115,20 @@ sheet each time and is not used).
   Undo; made final it takes the grant back (`_google_revoke`:
   `google_revoke_access`, or with no account Google's revocation endpoint,
   `drive_grant_revoke`).
+* **Google Drive's sign-in in a browser** (#933, keyword: google-token-answer) asks bridge's
+  `google_token_get_answer` (`token_answer`), and matches every constructor with `case+`:
+  `TokenGiven` is the token, `TokenCanceled` the reader's cancel (`SignInCanceled`), `TokenNotHere`
+  `NotSetUp`, and each of `TokenRefused` (Google answered with no token, `GoogleNoToken`),
+  `TokenLoadFailed` (`GoogleScriptNotLoaded`), `TokenThrown` (`GoogleRequestThrew`) and
+  `TokenAnswerUnread` (`GoogleAnswerUnread`) is a result of its own, said in the banner with the text
+  bridge kept (`TokenFailureKept`: Copy details, `Call: google_token_get_answer`, `Code:` the
+  constructor); `TokenUnexpected` (a code JS never gives) goes through `notice_unexpected`.
+  `GoogleRefused` was renamed `GoogleNotRegistered` (the build's clients not registered; it is
+  Play services' `DEVELOPER_ERROR`, or `UNREGISTERED_ON_API_CONSOLE` in its message), so that no
+  word of quire's is a name bridge's deprecated `google_token` used.
+  `e2e/sync-browser-outcomes.spec.js` plays Google Identity Services to each outcome but the
+  two no platform gives (`TokenNotHere` is the app's, `TokenUnexpected` a code JS never gives);
+  `tests/static/reject/token-answer-unexpected-unmatched` is the match without `TokenUnexpected`.
 * **Google Drive** is the same store in a browser: the token comes from Google
   Identity Services (about an hour, no refresh token), whose window a page may
   open only at a tap, so it is asked for only when the reader acts, a refused

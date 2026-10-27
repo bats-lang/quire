@@ -133,6 +133,19 @@ export const libraryShown = page => page.locator('#library-title');
 export const librarySearch = page => page.getByRole('searchbox', { name: 'Search the library' });
 
 /** A dialog by its name (the modal dialog is named by its title) */
+/** The collection button of the library, named by the collection shown
+    (quire#861: one button, which opens the collection menu) */
+export const collectionButton = page => page.getByRole('button', { name: /^Collection:/ });
+export const collectionMenu = page => page.getByRole('menu', { name: 'Collection' });
+
+/** Shows a collection (or All books), by the collection menu */
+export async function showCollection(page, name) {
+  await collectionButton(page).click();
+  await expect(collectionMenu(page)).toBeVisible();
+  await collectionMenu(page).getByRole('menuitemradio', { name, exact: true }).click();
+  await expect(collectionMenu(page)).toBeHidden();
+}
+
 export const dialog = (page, name) => page.getByRole('dialog', { name });
 
 /** A menu item by its name */

@@ -38,6 +38,7 @@ staload "stats.sats"
 staload "annot.sats"
 staload "chapter_hrefs.sats"
 staload "publisher_size.sats"
+staload "css_size.sats"
 staload "entity.sats"
 staload "mem.sats"
 staload "clock.sats"
@@ -2707,6 +2708,14 @@ fn _size_mark {doc_location:agz}{node:nat} (doc: !$D.document(doc_location), nod
     val () = $A.drop<byte>(frozen, view)
   in $A.free<byte>($A.thaw<byte>(frozen)) end
 
+(* A table element the publisher aligned: data-align says how (keyword: publisher alignment) *)
+fn _align_mark {doc_location:agz}{node:nat} (doc: !$D.document(doc_location), node: int node, align: align_value): void =
+  case+ align of
+  | AlignNone() => ()
+  | AlignLeft() => _node_attr_literal(doc, node, $D.Data("align"), "left")
+  | AlignRight() => _node_attr_literal(doc, node, $D.Data("align"), "right")
+  | AlignCenter() => _node_attr_literal(doc, node, $D.Data("align"), "center")
+
 (* The attributes of an XHTML element that are kept on its content node:
    dir, lang (and xml:lang), title, colspan and rowspan, and hidden (as a
    class the stylesheet hides) *)
@@ -3374,6 +3383,7 @@ and _render_node
       val content_node = _next_content_node()
       val made = _math_add(doc, data, data_len, parent, content_node, name_offset, name_len)
       val () = (if made then _math_attrs(doc, data, data_len, attrs, content_node) else ())
+      val () = (if made then _align_mark(doc, content_node, publisher_aligns_next(name_offset)) else ())
       val saved = !_math_inside
       val () = !_math_inside := (if made then (if _math_token(data, name_offset, name_len) then 2 else 1) else 1)
       val child_parent = (if made then content_node else parent): [child:int | child >= ~1] int child
@@ -3422,6 +3432,7 @@ and _render_node
            else found)
         else found): [new_count:nat] images(n, new_count)
       val () = _size_mark(doc, content_node, publisher_sizes_step(name_offset))
+      val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
       val () = (if _note_text(data, attrs) then _node_attr_literal(doc, content_node, $D.Class, "note-text") else ())
       val () = _break_check(data, attrs, content_node)
       var _tag_ruby = @[char][4]('r', 'u', 'b', 'y')

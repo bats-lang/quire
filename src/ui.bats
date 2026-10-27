@@ -765,6 +765,8 @@ datavtype control =
   | {class_len,name_len:pos | class_len < 256; name_len < 256} CSwatch of (string class_len, string name_len)
   | {label_len:pos | label_len < 256} CMenuItem of (string label_len)
   | {label_len:pos | label_len < 256} CMenuChoice of (string label_len)
+  (* a menu choice named by what is put in it (a collection's name) *)
+  | CMenuChoiceByContent of ()
   | CHarmButton of harm_asked
   | CRemovalItem of removal
   | CRemovalButton of removal
@@ -820,6 +822,10 @@ fn _control {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_
       val () = _document_attr(document, id_bytes, id_len, $D.Role, "menuitemradio")
       val () = _document_attr(document, id_bytes, id_len, $D.Aria("checked"), "false")
     in _document_text(document, id_bytes, id_len, label) end
+  | ~CMenuChoiceByContent() => let
+      val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "mi")
+      val () = _document_attr(document, id_bytes, id_len, $D.Role, "menuitemradio")
+    in _document_attr(document, id_bytes, id_len, $D.Aria("checked"), "false") end
   | ~CHarmButton(the_harm) => let
       val @(_, label) = _harm_item(the_harm)
       val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "btn")
@@ -1204,6 +1210,12 @@ implement ui_menuitem(parent, id, label) = _control_literal(parent, id, CMenuIte
   (parent: string parent_len, id: string id_len, label: string label_len): void
 
 implement ui_menu_choice(parent, id, label) = _control_literal(parent, id, CMenuChoice(label))
+
+(* A numbered menu choice named by what is put in it, checked by ui_attr_n AChecked (library-screen: the collection menu) *)
+#pub fn ui_menu_choice_n {parent_len:pos | parent_len < 256}{id_loc:agz}{id_len:pos | id_len < 256}
+  (parent: string parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len): void
+
+implement ui_menu_choice_n(parent, id, id_len) = _control_n(parent, id, id_len, CMenuChoiceByContent())
 
 (* The menu item that takes a book out of view, set apart from the items
    above it by the stylesheet *)
@@ -1809,15 +1821,13 @@ end
 #pub fn ui_settings_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(settings_control)
 implement ui_settings_control (bytes, n, at) = _settings_control_from(bytes, n, at, SettingsGoalOff(), 12)
 
-(* The library view's filters, layouts and collections' buttons, each by its element's id (library_view_control_id) *)
+(* The library view's status filters and the collection button, each by its element's id (library_view_control_id) *)
 #pub datatype library_view_control =
   | FilterBooksAll
   | FilterUnread
   | FilterReading
   | FilterFinished
-  | CollectionAll
-  | CollectionRename
-  | CollectionDelete
+  | CollectionButton
 
 #pub fn library_view_control_id (control: library_view_control): [id_len:pos | id_len < 256] string id_len
 implement library_view_control_id (control) =
@@ -1826,9 +1836,7 @@ implement library_view_control_id (control) =
   | FilterUnread() => "filter-unread"
   | FilterReading() => "filter-reading"
   | FilterFinished() => "filter-finished"
-  | CollectionAll() => "collection-all"
-  | CollectionRename() => "collection-rename"
-  | CollectionDelete() => "collection-delete"
+  | CollectionButton() => "collection-button"
 
 (* The control after control, in the order the decoder tries them *)
 fn _library_view_control_after (control: library_view_control): $R.option(library_view_control) =
@@ -1836,10 +1844,8 @@ fn _library_view_control_after (control: library_view_control): $R.option(librar
   | FilterBooksAll() => $R.some(FilterUnread())
   | FilterUnread() => $R.some(FilterReading())
   | FilterReading() => $R.some(FilterFinished())
-  | FilterFinished() => $R.some(CollectionAll())
-  | CollectionAll() => $R.some(CollectionRename())
-  | CollectionRename() => $R.some(CollectionDelete())
-  | CollectionDelete() => $R.none()
+  | FilterFinished() => $R.some(CollectionButton())
+  | CollectionButton() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
    most) whose id is bytes[at, n) *)
@@ -1855,7 +1861,49 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_library_view_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(library_view_control)
-implement ui_library_view_control (bytes, n, at) = _library_view_control_from(bytes, n, at, FilterBooksAll(), 9)
+implement ui_library_view_control (bytes, n, at) = _library_view_control_from(bytes, n, at, FilterBooksAll(), 5)
+
+(* The collection menu's choices, its actions, done, and its backdrop, each by its element's id (collection_menu_control_id) *)
+#pub datatype collection_menu_control =
+  | CollectionAll
+  | CollectionRename
+  | CollectionDelete
+  | CollectionMenuDone
+  | CollectionMenu
+
+#pub fn collection_menu_control_id (control: collection_menu_control): [id_len:pos | id_len < 256] string id_len
+implement collection_menu_control_id (control) =
+  case+ control of
+  | CollectionAll() => "collection-all"
+  | CollectionRename() => "collection-rename"
+  | CollectionDelete() => "collection-delete"
+  | CollectionMenuDone() => "collection-menu-done"
+  | CollectionMenu() => "collection-menu"
+
+(* The control after control, in the order the decoder tries them *)
+fn _collection_menu_control_after (control: collection_menu_control): $R.option(collection_menu_control) =
+  case+ control of
+  | CollectionAll() => $R.some(CollectionRename())
+  | CollectionRename() => $R.some(CollectionDelete())
+  | CollectionDelete() => $R.some(CollectionMenuDone())
+  | CollectionMenuDone() => $R.some(CollectionMenu())
+  | CollectionMenu() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _collection_menu_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: collection_menu_control, fuel: int fuel): $R.option(collection_menu_control) = let
+  val id = collection_menu_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _collection_menu_control_after(control) of
+    | ~$R.some(next) => _collection_menu_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_collection_menu_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(collection_menu_control)
+implement ui_collection_menu_control (bytes, n, at) = _collection_menu_control_from(bytes, n, at, CollectionAll(), 5)
 
 (* The button that reads the library again, by its element's id (retry_control_id) *)
 #pub datatype retry_control =

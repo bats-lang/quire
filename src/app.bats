@@ -150,10 +150,14 @@ fn _library (): void = let
   val () = ui_el("library", "library-view", TDiv, "lview")
   val () = ui_el("library-view", "filter-books", TDiv, "seg")
   val () = ui_named("filter-books", NGroup, "Show")
-  val () = ui_text_btn("filter-books", "filter-books-all", "sbtn", "All")
-  val () = ui_text_btn("filter-books", "filter-unread", "sbtn", "Unread")
-  val () = ui_text_btn("filter-books", "filter-reading", "sbtn", "Reading")
-  val () = ui_text_btn("filter-books", "filter-finished", "sbtn", "Finished")
+  (* the four filters wrap two and two, never three and one (library-screen:
+     two kinds of control, aligned) *)
+  val () = ui_el("filter-books", "filter-books-first", TDiv, "segpair")
+  val () = ui_text_btn("filter-books-first", "filter-books-all", "sbtn", "All")
+  val () = ui_text_btn("filter-books-first", "filter-unread", "sbtn", "Unread")
+  val () = ui_el("filter-books", "filter-books-second", TDiv, "segpair")
+  val () = ui_text_btn("filter-books-second", "filter-reading", "sbtn", "Reading")
+  val () = ui_text_btn("filter-books-second", "filter-finished", "sbtn", "Finished")
   (* the Trash's heading: what it holds and how much room, that it is
      kept until emptied, and Empty beside it (quire#385) *)
   val () = ui_el("library-view", "trash-panel", TDiv, "tpanel")
@@ -161,13 +165,14 @@ fn _library (): void = let
   val () = ui_el("trash-head", "trash-summary", TDiv, "tsum")
   val () = ui_el("trash-head", "trash-head-actions", TDiv, "tacts")
   val () = _hide("trash-head")
-  (* the reader's collections: shown once there is one *)
-  val () = ui_el("library-view", "collection-row", TDiv, "crow")
-  val () = ui_el("collection-row", "collection-chips", TDiv, "seg")
-  val () = ui_named("collection-chips", NGroup, "Collection")
-  val () = ui_text_btn("collection-row", "collection-rename", "btn", "Rename")
-  val () = ui_text_btn("collection-row", "collection-delete", "btn", "Delete collection")
-  val () = _hide("collection-row")
+  (* the reader's collections: one button naming the collection shown,
+     once there is one, opening the collection menu (library-screen) *)
+  val () = ui_text_btn("library-view", "collection-button", "btn cpick", "Collection: ")
+  val () = ui_el("collection-button", "collection-current", TSpan, "cval")
+  val () = ui_el("collection-button", "collection-caret", TSpan, "ccaret")
+  val () = ui_text("collection-caret", "\xE2\x96\xBE")
+  val () = ui_attr("collection-caret", AHidden, "true")
+  val () = _hide("collection-button")
   (* the dictionaries in the Trash, under its books (dictionary.bats) *)
   val () = ui_el("trash-panel", "trash-dictionaries", TDiv, "sfields")
   val () = ui_el("trash-dictionaries", "trash-dictionaries-title", TDiv, "a11yg")
@@ -397,6 +402,23 @@ fn _sort_menu (): void = let
   val () = ui_menu_choice("view-as-group", "view-grid", "Grid")
   val () = ui_menuitem("sort-menu-box", "sort-menu-done", "Close")
 in _hide("sort-menu") end
+
+(* The collection menu (the library's Collection button, library-screen):
+   which collection is shown, with the current one checked, and the
+   Rename and Delete of the one shown *)
+fn _collection_menu (): void = let
+  val () = ui_el("bats-root", "collection-menu", TDiv, "ovl")
+  val () = ui_el("collection-menu", "collection-menu-box", TDiv, "menu")
+  val () = ui_named("collection-menu-box", NMenu, "Collection")
+  val () = ui_el("collection-menu-box", "collection-menu-list", TDiv, "mgroup")
+  val () = ui_named("collection-menu-list", NGroup, "Show collection")
+  val () = ui_el("collection-menu-box", "collection-menu-actions", TDiv, "mgroup")
+  val () = ui_el("collection-menu-actions", "collection-menu-divider", TDiv, "msep")
+  val () = ui_role("collection-menu-divider", RSeparator)
+  val () = ui_menuitem("collection-menu-actions", "collection-rename", "Rename collection")
+  val () = ui_menuitem("collection-menu-actions", "collection-delete", "Delete collection")
+  val () = ui_menuitem("collection-menu-box", "collection-menu-done", "Close")
+in _hide("collection-menu") end
 
 (* The Settings screen, opened from the library menu:
    one screen of groups, each complex area a screen of its own opened
@@ -1196,6 +1218,7 @@ implement app_build () = let
   val () = _stats()
   val () = _library_menu()
   val () = _sort_menu()
+  val () = _collection_menu()
   val () = _settings_screen()
   val () = _about_screen()
   val () = _info()
