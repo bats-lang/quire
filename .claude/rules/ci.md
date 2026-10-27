@@ -285,7 +285,7 @@ each kind selects) and prints each path's reason in its summary. Rules:
   path filter: GitHub leaves a required check "Pending" for ever then.
 * **Fail closed**: a path no rule names, a diff that cannot be read, an empty
   diff, a deletion under `e2e/` select everything. The guideline files (`CLAUDE.md`,
-  `.claude/**`) select the `checkers` group only (`tests/static/guidelines.py` reads them,
+  `.claude/**`, and `text-lint.yml`, which the test of the lint reads) select the `checkers` group only (`tests/static/guidelines.py` reads them,
   #751), and nothing else. A merge queue's group, a push, the nightly run and a dispatch run
   every group; the mutation groups keep their own rule.
 * A new path, spec or fixture kind needs its rule: `tests/static/affected_test.py`

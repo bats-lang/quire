@@ -86,7 +86,7 @@ export default defineConfig({
     // specs, which hold in every project: #302)
     {
       name: 'narrow',
-      testMatch: /(layout|smoke|page-turn|icons|relaunch|relaunch-sync)\.spec\.js/,
+      testMatch: /(layout|library-grouping|smoke|page-turn|icons|relaunch|relaunch-sync)\.spec\.js/,
       use: {
         browserName: 'chromium',
         viewport: { width: 320, height: 640 },
@@ -114,7 +114,7 @@ export default defineConfig({
     },
     {
       name: 'mobile-landscape',
-      testMatch: /(layout|smoke|page-turn|relaunch|relaunch-sync)\.spec\.js/,
+      testMatch: /(layout|library-grouping|smoke|page-turn|relaunch|relaunch-sync)\.spec\.js/,
       use: {
         browserName: 'chromium',
         viewport: { width: 667, height: 375 },
@@ -123,7 +123,7 @@ export default defineConfig({
     },
     {
       name: 'tablet',
-      testMatch: /(layout|smoke|page-turn|relaunch|relaunch-sync)\.spec\.js/,
+      testMatch: /(layout|library-grouping|smoke|page-turn|relaunch|relaunch-sync)\.spec\.js/,
       use: {
         browserName: 'chromium',
         viewport: { width: 768, height: 1024 },
@@ -132,7 +132,7 @@ export default defineConfig({
     },
     {
       name: 'wide',
-      testMatch: /(layout|smoke|page-turn|relaunch|relaunch-sync)\.spec\.js/,
+      testMatch: /(layout|library-grouping|smoke|page-turn|relaunch|relaunch-sync)\.spec\.js/,
       use: {
         browserName: 'chromium',
         viewport: { width: 1440, height: 900 },

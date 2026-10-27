@@ -69,6 +69,7 @@
       "dictionary.spec.js",
       "fixed.spec.js",
       "fractional-window.spec.js",
+      "library-grouping.spec.js",
       "library-records.spec.js",
       "library.spec.js",
       "math-layout.spec.js",
@@ -159,6 +160,7 @@
       "reject/text-unit16-two-places"
     ],
     "accepts": [
+      "accept/cfi-spine-matched",
       "accept/crc-complemented",
       "accept/cut-same-cells-same-count",
       "accept/page-height-whole",
@@ -166,6 +168,7 @@
       "reject/aloud-placement-unmatched",
       "reject/back-forged-proof",
       "reject/bytes-from-other-cells",
+      "reject/cfi-written-unmatched",
       "reject/codec-crc-omitted",
       "reject/codec-cut-not-said",
       "reject/codec-group-twice-not-said",
@@ -265,6 +268,7 @@
       "accept/harm-empty-some",
       "accept/page-width-whole",
       "reject/back-other-timeout",
+      "reject/cfi-side-unmatched",
       "reject/codec-absent-then-same-tag",
       "reject/codec-cut-lost-another-cause",
       "reject/codec-drops-unknown-chunk",
@@ -306,10 +310,13 @@
       "reject/text-utf8-scan-bad-is-ascii"
     ],
     "accepts-data": [
+      "accept/cfi-side-matched",
       "accept/codec-roundtrip",
       "accept/cut-found-from-the-cells",
       "accept/nav-row-with-summary",
       "accept/try-again-transient",
+      "reject/cfi-place-unmatched",
+      "reject/cfi-spine-unmatched",
       "reject/clip-past-end",
       "reject/codec-cut-causes-equal",
       "reject/codec-cut-read-as-damaged",
@@ -349,9 +356,12 @@
       "reject/text-textof-single-conv-of-another-length",
       "reject/text-textof-utf16-conv-of-a-table-source",
       "reject/text-unit16-little-as-big",
-      "reject/text-utf8-scan-of-other-cells"
+      "reject/text-utf8-scan-of-other-cells",
+      "reject/text-share-answer-unexpected-unmatched"
     ],
     "rest": [
+      "accept/cfi-place-matched",
+      "accept/cfi-written-matched",
       "accept/codec-absent-added-group",
       "accept/codec-required-group-lost",
       "accept/crc-table-entry-of-the-byte",
@@ -370,6 +380,7 @@
       "reject/page-turn-forged-sheet",
       "reject/pieces-forged-cut",
       "reject/sync-result-unmatched",
+      "reject/backup-write-answer-unexpected-unmatched",
       "reject/text-byteat-inside-is-minus-one",
       "reject/text-declared-label-of-another-start",
       "reject/text-declscan-mark-past-256",

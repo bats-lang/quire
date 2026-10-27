@@ -5,7 +5,7 @@
 
 import { test, expect, onAndroid } from './fixtures.js';
 import {
-  start, epubFile, importFiles, readBook, openBook, showChrome, chapters, cards, importInput, bookPage,
+  collectionButton, start, epubFile, importFiles, readBook, openBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
   readingSettings, openReadingSettings, openShelf, emptyTrashDialog, shelfTitle, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
@@ -198,7 +198,7 @@ test('nothing is cut off in the library, its menus and its screens', async ({ pa
   await expect(collections.getByRole('button', { name: 'Books to read on the long journey home' })).toBeVisible();
   await fits(page, 'the collections panel');
   await collections.getByRole('button', { name: 'Done' }).click();
-  await expect(page.getByRole('group', { name: 'Collection' })).toBeVisible();
+  await expect(collectionButton(page)).toBeVisible();
   await fits(page, 'the library with a collection');
   await chooseInSortMenu(page, 'Grid');
   await fits(page, 'the library as a grid');
