@@ -35,8 +35,10 @@ The pins and the relock are in CLAUDE.md. Specifics:
   `play-release.yml` is in `workflow-pins` and in `pin-copies` beside `android.yml`: both pins are
   pwa's main, so one relock moves them to one commit (before #851 it was called at its own commit,
   and its pwa-ref was `android.yml`'s, so the Play release ran two pwa commits). `e2e-setup` has
-  no `pwa-ref` and is moved whole. The relock's own test of the copies is repository-prototype's
-  `relock-pins-test.yml` (fixtures `tests/relock-pins/copies`).
+  no `pwa-ref` and is moved whole. The relock test that fails when pins of one repository drift is the `skew` job of repository-prototype's
+  `relock-pins-test.yml` (keyword: relock heads, #494; `skew_check` on `tests/relock-pins/skew`: two pins of one
+  repository and a `pwa-ref` copy for both, a stand-in `git` whose `ls-remote` answer differs at every call, one call
+  required for each repository). The fixtures `tests/relock-pins/copies` test the rewrite of one pin's copies.
 
 ### The Android project's lock (keyword: android lock, #735)
 
