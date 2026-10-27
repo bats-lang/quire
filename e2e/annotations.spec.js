@@ -508,3 +508,76 @@ test('in the Android app, the annotations are shared as a file through Share', a
   expect(Buffer.from(written.options.data, 'base64').toString()).toMatch(/^# Marked Up\n## Annotations Tests\n/);
   expect((await calls('Share'))[1].options).toEqual({ title: 'quire-annotations.md', files: ['file:///quire-annotations.md'] });
 });
+
+// A share that ends in a failure is said (sharing.bats, keyword
+// share-text-answer, bridge's share_text_answer): the banner has the
+// outcome as its code in the details; a closed sheet says nothing (#937)
+async function failingShare(page, canShareFile, how) {
+  await page.addInitScript(([source, how]) => {
+    const canShareFile = eval(source);
+    navigator.canShare = d => !!d.files && d.files.every(canShareFile);
+    navigator.share = eval(how);
+  }, [canShareFile.toString(), how]);
+}
+
+async function shareSelection(page) {
+  await start(page);
+  await readBook(page, book);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Share').click();
+}
+
+async function expectShareSaid(page, code, error) {
+  const banner = page.getByRole('alert');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('The text could not be shared.');
+  await page.evaluate(() => navigator.clipboard.writeText(''));
+  await banner.getByRole('button', { name: 'Copy details' }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('Call: share_text_answer');
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toContain(`Code: ${code}`);
+  expect(copied).toContain(error);
+}
+
+for (const [name, how, code, error] of [
+  ['the platform refuses it (NotAllowedError)', "async () => { throw new DOMException('no activation', 'NotAllowedError'); }", 'TextAnswerFailed', 'NotAllowedError'],
+  ['it is rejected with another error', "async () => { throw new RangeError('share broke'); }", 'TextAnswerRejected', 'share broke'],
+  ['the call throws', "() => { throw new Error('share threw'); }", 'TextAnswerThrown', 'share threw'],
+]) {
+  test(`a selection's share is said when ${name}`, async ({ page, context }, testInfo) => {
+    test.skip(onAndroid(testInfo), "a browser's share sheet: the Android app shares through Capacitor's Share");
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await failingShare(page, () => false, how);
+    await shareSelection(page);
+    await expectShareSaid(page, code, error);
+  });
+}
+
+test('the annotations shared as their text are said when the platform refuses them', async ({ page, context }, testInfo) => {
+  test.skip(onAndroid(testInfo), "a browser's share sheet: the Android app shares through Capacitor's Share");
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await failingShare(page, () => false, "async () => { throw new DOMException('no activation', 'NotAllowedError'); }");
+  await start(page);
+  await readBook(page, book);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  await openPanel(page);
+  await panel(page).getByRole('button', { name: 'Share', exact: true }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  // the panel covers the banner's buttons
+  await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+  await expectShareSaid(page, 'TextAnswerFailed', 'NotAllowedError');
+});
+
+test('a share sheet the reader closes says nothing', async ({ page }, testInfo) => {
+  test.skip(onAndroid(testInfo), "a browser's share sheet: the Android app shares through Capacitor's Share");
+  await page.addInitScript(() => {
+    window.attempts = 0;
+    navigator.canShare = d => !!d.files;
+    navigator.share = async () => { window.attempts++; throw new DOMException('closed', 'AbortError'); };
+  });
+  await shareSelection(page);
+  await expect.poll(() => page.evaluate(() => window.attempts)).toBe(1);
+  await expect(page.getByRole('alert')).toBeHidden();
+});

@@ -209,6 +209,11 @@ fn _sort_menu_control (clicked: !target): $R.option(sort_menu_control) =
   | Target(bytes, n, _) => ui_sort_menu_control(bytes, n, 10)
   | NoTarget() => $R.none()
 
+fn _collection_menu_control (clicked: !target): $R.option(collection_menu_control) =
+  case+ clicked of
+  | Target(bytes, n, _) => ui_collection_menu_control(bytes, n, 10)
+  | NoTarget() => $R.none()
+
 fn _card_menu_control (clicked: !target): $R.option(card_menu_control) =
   case+ clicked of
   | Target(bytes, n, _) => ui_card_menu_control(bytes, n, 10)
@@ -1528,6 +1533,21 @@ fn _sort_menu_closed (): void = let
   val () = layer_close(LSortMenu())
 in ui_focus("sort-menu-button") end
 
+(* The collection menu closed, the focus back on its button (or on the
+   filters, when the last collection is gone and the button with it) *)
+fn _collection_focus (): void =
+  if lib_coll_count() > 0 then ui_focus("collection-button") else ui_focus("filter-books-all")
+
+fn _collection_menu_closed (): void = let
+  val () = layer_close(LCollectionMenu())
+in _collection_focus() end
+
+(* A collection chosen in the menu (-1 for all books): its books are
+   shown and the menu closes *)
+fn _collection_shown (collection: int): void = let
+  val () = lib_coll_show(collection)
+in _collection_menu_closed() end
+
 (* The books sorted in order, kept in that order: a save the app makes
    later (a sync as it opens) writes the order it reads back, so it
    changes nothing (#302) *)
@@ -1544,7 +1564,7 @@ fn _viewed (chosen: layout): void = let
   val () = set_save(lib_state_get())
 in _sort_menu_closed() end
 
-fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
+fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 31) = let
   (* import: from the bar, or from the empty library's message *)
   val listeners = RCons(listeners, OnEl("import-button"), "change", llam(_) => let val () = import_picked() in 0 end)
   val listeners = RCons(listeners, OnEl("empty-import"), "change", llam(_) => let val () = import_picked_empty() in 0 end)
@@ -1581,23 +1601,42 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
   (* the view: which books, as a list or a grid; kept with the settings *)
   val listeners = RCons(listeners, OnEl("library-view"), "click", llam(h) => let
       val clicked = _target(h)
-      (* the collections: which is shown, and the one shown renamed or
-         deleted *)
-      val collection = _row_of(clicked, "collection")
       val control = _library_view_control(clicked)
       val () = _target_free(clicked)
       val changed = (case+ control of
-        | ~$R.none() => let
-            val () = (if collection >= 0 then lib_coll_show(collection) else ())
-          in false end
+        | ~$R.none() => false
         | ~$R.some(FilterBooksAll()) => let val () = lib_filter_set(AllBooks()) in true end
         | ~$R.some(FilterUnread()) => let val () = lib_filter_set(Unread()) in true end
         | ~$R.some(FilterReading()) => let val () = lib_filter_set(BeingRead()) in true end
         | ~$R.some(FilterFinished()) => let val () = lib_filter_set(Finished()) in true end
-        | ~$R.some(CollectionAll()) => let val () = lib_coll_show(~1) in false end
-        | ~$R.some(CollectionRename()) => let val () = _collection_rename() in false end
-        | ~$R.some(CollectionDelete()) => let val () = lib_coll_delete(lib_coll_shown()) in false end): bool
+        (* the collection menu, one button naming the collection shown
+           (library-screen: two kinds of control) *)
+        | ~$R.some(CollectionButton()) => let
+            val () = layer_open(LCollectionMenu())
+            val () = ui_focus("collection-all")
+          in false end): bool
     in if changed then let val () = set_save(lib_state_get()) in 0 end else 0 end)
+  (* the collection menu: a collection (or all books) shown, the one
+     shown renamed or deleted *)
+  val listeners = RCons(listeners, OnEl("collection-menu"), "click", llam(h) => let
+      val clicked = _target(h)
+      val collection = _row_of(clicked, "collection")
+      val control = _collection_menu_control(clicked)
+      val () = _target_free(clicked)
+      val () = (case+ control of
+        | ~$R.none() => (if collection >= 0 then _collection_shown(collection) else ())
+        | ~$R.some(CollectionAll()) => _collection_shown(~1)
+        | ~$R.some(CollectionRename()) => let
+            val () = _collection_menu_closed()
+          in _collection_rename() end
+        | ~$R.some(CollectionDelete()) => let
+            val () = layer_close(LCollectionMenu())
+            val () = lib_coll_delete(lib_coll_shown())
+          in _collection_focus() end
+        | ~$R.some(CollectionMenuDone()) => _collection_menu_closed()
+        (* a click outside *)
+        | ~$R.some(CollectionMenu()) => _collection_menu_closed())
+    in 0 end)
   (* the book to continue: opened, and its book menu, as a list card's *)
   val listeners = RCons(listeners, OnEl("continue-list"), "click", llam(h) => let
       val clicked = _target(h)
@@ -2327,6 +2366,10 @@ fn _escape_overlay (): bool =
   (* the review closed: the words follow what was reviewed (keyword: vocabulary) *)
   | ~Escaped(LReview()) => let
       val () = words_review_closed()
+    in true end
+  (* the collection menu: the focus goes back to its button *)
+  | ~Escaped(LCollectionMenu()) => let
+      val () = _collection_focus()
     in true end
   | ~Escaped(_) => true
 

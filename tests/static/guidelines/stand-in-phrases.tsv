@@ -1,0 +1,3 @@
+# A one-phrase list for the tests of --phrases (quire#943): a text that holds the phrase is refused, one that paraphrases it is not.
+# scope	row	regex	example	reason
+text	99	zebra crossing	the zebra crossing is closed	The phrase is a stand-in for a banned one: paraphrase it or point at the place.

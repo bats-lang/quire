@@ -33,6 +33,7 @@ staload "back.sats"
   | LAbout         (* the About screen: the app's name, and links to its pages and source *)
   | LSyncStep      (* a sync service's own sign-in step, over the Sync screen's list (#331) *)
   | LSortMenu      (* the sort and view menu (#377, #404) *)
+  | LCollectionMenu (* the library's collection menu: which collection is shown, and its Rename and Delete *)
   | LShelf         (* a shelf's own screen over the library: Hidden, Archived or Trash (#404) *)
   | LWords         (* the words looked up, kept with their sentence (keyword: vocabulary) *)
   | LReview        (* the words due, one at a time, over the words screen (keyword: vocabulary) *)
@@ -50,6 +51,7 @@ fn _element_id (overlay: layer): [id_len:pos | id_len < 128] string id_len =
   | LSyncStep() => "sync-step"
   | LSortMenu() => "sort-menu"
   | LShelf() => "shelf-header"
+  | LCollectionMenu() => "collection-menu"
   | LWords() => "words-screen"
   | LReview() => "review-screen"
 
@@ -60,8 +62,8 @@ fn _number (overlay: layer): int =
   | LCollections() => 9 | LStats() => 10 | LDictionaries() => 11 | LDictionary() => 12
   | LCatalogues() => 13 | LCatalogue() => 14
   | LSync() => 15 | LSettings() => 16 | LAbout() => 17
-  | LSyncStep() => 18 | LSortMenu() => 19 | LShelf() => 20
-  | LWords() => 21 | LReview() => 22
+  | LSyncStep() => 18 | LSortMenu() => 19 | LShelf() => 20 | LCollectionMenu() => 21
+  | LWords() => 22 | LReview() => 23
 
 (* The reader's panels, which are modal (Material 3's modal bottom
    sheet, WAI-ARIA's modal dialog): while one is open, a scrim covers the
@@ -78,7 +80,7 @@ fn _over_reader (overlay: layer): bool =
   | LCollections() => false | LStats() => false | LDictionaries() => false
   | LCatalogues() => false | LCatalogue() => false | LSync() => false
   | LSettings() => false | LAbout() => false
-  | LSyncStep() => false | LSortMenu() => false | LShelf() => false
+  | LSyncStep() => false | LSortMenu() => false | LShelf() => false | LCollectionMenu() => false
   | LWords() => false | LReview() => false
 
 (* Whether a reader panel dims the reader behind it. A panel that explains
@@ -98,7 +100,7 @@ fn _scrim_of (overlay: layer): scrim =
   | LCollections() => Veils() | LStats() => Veils() | LDictionaries() => Veils()
   | LCatalogues() => Veils() | LCatalogue() => Veils() | LSync() => Veils()
   | LSettings() => Veils() | LAbout() => Veils()
-  | LSyncStep() => Veils() | LSortMenu() => Veils() | LShelf() => Veils()
+  | LSyncStep() => Veils() | LSortMenu() => Veils() | LShelf() => Veils() | LCollectionMenu() => Veils()
   | LWords() => Veils() | LReview() => Veils()
 
 (* The open overlays, the last opened first, each with where the focus

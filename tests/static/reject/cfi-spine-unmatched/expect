@@ -1,0 +1,4 @@
+function _static_spine_item
+line 4
+pattern match is nonexhaustive:
+CfiNotSpine()

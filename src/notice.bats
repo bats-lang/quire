@@ -385,6 +385,20 @@ implement notice_rotation_refused (error) = let
   val at = _put_text(said, 512, 0, "The device refused to lock the rotation, so Lock rotation is no longer offered. Copy the details and post them in a report.")
 in _failure_said(said, at, "locking the rotation", "orientation_lock_current", $R.none(), $R.some("LockRefused"), answer) end
 
+(* A text's share came back as a failure the share sheet does not show
+   (keyword: share-text-answer): said with the call and which outcome it was
+   as the code, and what the platform wrote, kept in the details (none when
+   it could not be written down) *)
+#pub fn notice_share_failed {code_len:pos | code_len < 64} (code: string code_len, error: $R.option([n:nat] $BD.dblob(n))): void
+
+implement notice_share_failed (code, error) = let
+  val answer = (case+ error of
+    | ~$R.some(blob) => _plugin_error_shown(blob)
+    | ~$R.none() => NoAnswer()): answer_shown
+  val said = $A.alloc<byte>(512)
+  val at = _put_text(said, 512, 0, "The text could not be shared. Copy the details and post them in a report.")
+in _failure_said(said, at, "sharing text", "share_text_answer", $R.none(), $R.some(code), answer) end
+
 (* A hex digit's character for 0 to 15 *)
 fn _hex_char (digit: int): int =
   if digit < 10 then 48 + digit else 87 + digit

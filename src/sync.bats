@@ -156,6 +156,7 @@ val _last_status = ref<Int>(0)
    recognised (GoogleUnexpected, said in the banner with its details) *)
 datatype sync_result =
   | NotSyncedYet | Synced | Unreachable | WrongCredentials | FolderNotFound | KeptChanging | ServerError
+  | BackupUnavailable | BackupRejected | BackupThrown | BackupUnexpected
   | TooLarge | Damaged | NoMemory | Blocked | Syncing | NoAddress
   | SignInAgain | NoGoogleAccount | NotSetUp | GoogleRefused | SignInCanceled
   | DropboxSignInAgain | DropboxNotSetUp | DropboxSignInRefused | DropboxSignInCanceled
@@ -165,7 +166,7 @@ datatype sync_result =
 
 (* A result as "sync-state" stores it, and back: decoded once, as it is
    read (an unknown number is not synced yet) *)
-fn _result_code (result: sync_result): [code:nat | code <= 29] int code =
+fn _result_code (result: sync_result): [code:nat | code <= 37] int code =
   case+ result of
   | NotSyncedYet() => 0
   | Synced() => 1
@@ -177,6 +178,10 @@ fn _result_code (result: sync_result): [code:nat | code <= 29] int code =
   | TooLarge() => 7
   | Damaged() => 8
   | NoMemory() => 9
+  | BackupUnavailable() => 34
+  | BackupRejected() => 35
+  | BackupThrown() => 36
+  | BackupUnexpected() => 37
   | Blocked() => 10
   | Syncing() => 11
   | NoAddress() => 12
@@ -208,6 +213,10 @@ fn _result_of_code (code: int): sync_result =
   else if code = 7 then TooLarge()
   else if code = 8 then Damaged()
   else if code = 9 then NoMemory()
+  else if code = 34 then BackupUnavailable()
+  else if code = 35 then BackupRejected()
+  else if code = 36 then BackupThrown()
+  else if code = 37 then BackupUnexpected()
   else if code = 10 then Blocked()
   else if code = 11 then Syncing()
   else if code = 12 then NoAddress()
@@ -601,6 +610,10 @@ fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte
   | TooLarge() => _put_literal(out, position, "The sync file is over 16 MB.")
   | Damaged() => _put_literal(out, position, "The sync file isn't one Quire can read.")
   | NoMemory() => _put_literal(out, position, "There isn't enough memory to sync.")
+  | BackupUnavailable() => _put_literal(out, position, "This build of Quire can't keep the backup file Android restores after a reinstall.")
+  | BackupRejected() => _put_literal(out, position, "Android refused to write the backup file Quire keeps for a reinstall. Free some space on the device, then try again.")
+  | BackupThrown() => _put_literal(out, position, "Writing the backup file Quire keeps for a reinstall failed. Try again.")
+  | BackupUnexpected() => _put_literal(out, position, "The backup file Quire keeps for a reinstall gave an answer Quire does not know.")
   | NoAddress() => _put_literal(out, position, "Enter the folder's address, starting with https://.")
   | SignInAgain() => _put_literal(out, position, "Sync paused: tap Sync now to sign in to Google again. What changes here meanwhile is kept.")
   | NoGoogleAccount() => _put_literal(out, position, "Android sync needs a Google account on this device.")
@@ -663,6 +676,10 @@ in _put_literal(out, after, ".)") end
    not turn it on *)
 fn _said_when_off (result: sync_result): bool =
   case+ result of
+  | BackupUnavailable() => true
+  | BackupRejected() => true
+  | BackupThrown() => true
+  | BackupUnexpected() => true
   | NoGoogleAccount() => true
   | NotSetUp() => true
   | GoogleRefused() => true
@@ -686,6 +703,10 @@ fn _said_when_off (result: sync_result): bool =
 
 fn _google_refusal (result: sync_result): bool =
   case+ result of
+  | BackupUnavailable() => false
+  | BackupRejected() => false
+  | BackupThrown() => false
+  | BackupUnexpected() => false
   | NoGoogleAccount() => true
   | NotSetUp() => true
   | GoogleRefused() => true
@@ -705,6 +726,10 @@ fn _google_refusal (result: sync_result): bool =
 
 fn _told_in_banner (result: sync_result): bool =
   case+ result of
+  | BackupUnavailable() => true
+  | BackupRejected() => true
+  | BackupThrown() => true
+  | BackupUnexpected() => false
   | Synced() => false
   | NotSyncedYet() => false
   | Syncing() => false
@@ -793,6 +818,10 @@ in
     | TooLarge() => _tried(out, result)
     | Damaged() => _tried(out, result)
     | NoMemory() => _tried(out, result)
+    | BackupUnavailable() => _tried(out, result)
+    | BackupRejected() => _tried(out, result)
+    | BackupThrown() => _tried(out, result)
+    | BackupUnexpected() => _tried(out, result)
     | SignInAgain() => _tried(out, result)
     | NoGoogleAccount() => _tried(out, result)
     | NotSetUp() => _tried(out, result)
@@ -825,6 +854,10 @@ fn _result_short {l:agz}{position:nat | position + 64 <= 512} (out: !$A.arr(byte
   | TooLarge() => _put_literal(out, position, "The sync file is over 16 MB")
   | Damaged() => _put_literal(out, position, "The sync file can't be read")
   | NoMemory() => _put_literal(out, position, "Not enough memory")
+  | BackupUnavailable() => _put_literal(out, position, "No backup file here")
+  | BackupRejected() => _put_literal(out, position, "Backup file refused")
+  | BackupThrown() => _put_literal(out, position, "Backup file failed")
+  | BackupUnexpected() => _put_literal(out, position, "Backup file: unknown answer")
   | NoAddress() => _put_literal(out, position, "No folder address")
   | SignInAgain() => _put_literal(out, position, "paused, tap Sync now")
   | GoogleRefused() => _put_literal(out, position, "Google sign-in failed")
@@ -896,6 +929,10 @@ in
     | TooLarge() => _result_short(out, 0, result, !_last_status)
     | Damaged() => _result_short(out, 0, result, !_last_status)
     | NoMemory() => _result_short(out, 0, result, !_last_status)
+    | BackupUnavailable() => _result_short(out, 0, result, !_last_status)
+    | BackupRejected() => _result_short(out, 0, result, !_last_status)
+    | BackupThrown() => _result_short(out, 0, result, !_last_status)
+    | BackupUnexpected() => _result_short(out, 0, result, !_last_status)
     | NoAddress() => _result_short(out, 0, result, !_last_status)
     (* paused, not failed: said after the store's name *)
     | SignInAgain() => _result_short(out, after, result, !_last_status)
@@ -1047,6 +1084,10 @@ fn _row_show (service: sync_service): void =
       | NoMemory() => ui_text(_row_state_id(service), "Not syncing")
       | Blocked() => ui_text(_row_state_id(service), "Not syncing")
       | NoAddress() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupUnavailable() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupRejected() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupThrown() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupUnexpected() => ui_text(_row_state_id(service), "Not syncing")
       | NoGoogleAccount() => ui_text(_row_state_id(service), "Not syncing")
       | NotSetUp() => ui_text(_row_state_id(service), "Not syncing")
       | GoogleRefused() => ui_text(_row_state_id(service), "Not syncing")
@@ -2219,17 +2260,32 @@ in
       end)
 end
 
+(* The text bridge kept of a refused or thrown backup write is not shown: the banner names the outcome (keyword: backup-write-answer) *)
+fn _backup_text_free (text: $R.option([n:nat] $BD.dblob(n))): void =
+  case+ text of
+  | ~$R.some(blob) => $BD.blob_free(blob)
+  | ~$R.none() => ()
+
 (* body[0, body_size) as the backed-up file *)
 fn _backup_write {body_loc:agz}{body_size:pos}
   (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) = let
   val @(name_frozen, name_bytes) = $A.freeze<byte>(_backup_name())
-  val pending = $BACKUP.backup_file_write(name_bytes, 15, body, body_size)
+  val pending = $BACKUP.backup_file_write_answer(name_bytes, 15, body, body_size)
   val () = release_bytes(name_frozen, name_bytes)
 in
-  $P.and_then<$BACKUP.backup_written><write_answer>(pending, llam(written) =>
+  $P.and_then<$BACKUP.backup_write_answer><write_answer>(pending, llam(written) =>
     case+ written of
-    | $BACKUP.BackupWritten() => $P.ret<write_answer>(Written())
-    | $BACKUP.BackupNotWritten() => $P.ret<write_answer>(WriteFailed(NoMemory(), 0)))
+    | ~$BACKUP.BackupWriteDone() => $P.ret<write_answer>(Written())
+    | ~$BACKUP.BackupWriteNotHere() => $P.ret<write_answer>(WriteFailed(BackupUnavailable(), 0))
+    | ~$BACKUP.BackupWriteRejected(text) => let
+        val () = _backup_text_free(text)
+      in $P.ret<write_answer>(WriteFailed(BackupRejected(), 0)) end
+    | ~$BACKUP.BackupWriteThrown(text) => let
+        val () = _backup_text_free(text)
+      in $P.ret<write_answer>(WriteFailed(BackupThrown(), 0)) end
+    | ~$BACKUP.BackupWriteUnexpected(code) => let
+        val () = notice_unexpected("keeping the backup file", "backup_file_write_answer", CaseNumbered("BackupWriteUnexpected", code), NoAnswer())
+      in $P.ret<write_answer>(WriteFailed(BackupUnexpected(), 0)) end)
 end
 
 (* The Dropbox store: an access token, kept, or got anew with the
@@ -3414,6 +3470,7 @@ fn _paused (): bool =
   else if _authorize_present() then false
   else case+ !_last_result of
     | SignInAgain() => true
+    | BackupUnavailable() => false | BackupRejected() => false | BackupThrown() => false | BackupUnexpected() => false
     | NotSyncedYet() => false | Synced() => false | Unreachable() => false | WrongCredentials() => false
     | FolderNotFound() => false | KeptChanging() => false | ServerError() => false | TooLarge() => false
     | Damaged() => false | NoMemory() => false | Blocked() => false | Syncing() => false | NoAddress() => false
