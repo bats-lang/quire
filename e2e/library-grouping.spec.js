@@ -12,7 +12,7 @@
 // scale reached the page.
 
 import { test, expect } from './fixtures.js';
-import { start, epubFile, importFiles, bookMenu, menuItem, dialog, cards } from './helpers.js';
+import { start, epubFile, importFiles, bookMenu, menuItem, dialog, cards, collectionButton, collectionMenu, showCollection } from './helpers.js';
 
 // forty bytes, the longest a collection's name can be (COLL_NAME)
 const LONG_NAME = 'A long name is cut with an ellipsis, not';
@@ -34,18 +34,6 @@ async function makeCollection(page, book, name) {
   await field.press('Enter');
   await panel.getByRole('button', { name: 'Done' }).click();
   await expect(panel).toBeHidden();
-}
-
-/** The collection button, named by the collection it shows */
-const collectionButton = page => page.getByRole('button', { name: /^Collection:/ });
-const collectionMenu = page => page.getByRole('menu', { name: 'Collection' });
-
-/** Shows a collection, by the collection menu */
-async function showCollection(page, name) {
-  await collectionButton(page).click();
-  await expect(collectionMenu(page)).toBeVisible();
-  await collectionMenu(page).getByRole('menuitemradio', { name, exact: true }).click();
-  await expect(collectionMenu(page)).toBeHidden();
 }
 
 /** The library with three collections, the long one shown */
