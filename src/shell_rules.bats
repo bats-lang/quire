@@ -244,7 +244,7 @@ fn shell_rules_fields_and_banners {left:nat | left >= 2241} (sheet: sheet(left, 
 in sheet end
 
 (* The import and book lists, from .banner span on *)
-fn shell_rules_import_and_book_lists {left:nat | left >= 1730} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1730] sheet(after, false, false) = let
+fn shell_rules_import_and_book_lists {left:nat | left >= 1770} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1770] sheet(after, false, false) = let
   (* the message takes the row and the buttons wrap under it on a narrow
      window, rather than Report being squeezed until its text is cut *)
   val sheet = rule(sheet, ".banner span")
@@ -351,6 +351,7 @@ fn shell_rules_import_and_book_lists {left:nat | left >= 1730} (sheet: sheet(lef
   val sheet = lay(sheet, TextAlign(), "left")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".cval")
+  val sheet = lay(sheet, PointerEvents(), "none")
   val sheet = lay(sheet, Flex(), "1 1 auto")
   val sheet = lay(sheet, MinWidth(), "0")
   val sheet = lay(sheet, FontWeight(), "600")
@@ -358,6 +359,7 @@ fn shell_rules_import_and_book_lists {left:nat | left >= 1730} (sheet: sheet(lef
   val sheet = lay(sheet, TextOverflow(), "ellipsis")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ccaret")
+  val sheet = lay(sheet, PointerEvents(), "none")
   val sheet = lay(sheet, Flex(), "none")
   val sheet = close(sheet)
 in sheet end
