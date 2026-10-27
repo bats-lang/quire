@@ -70,6 +70,8 @@ it (bats-lang/bats#243).
   On | Off nor a lone pressed button (quire#363); a segmented group is for three
   or more choices, or two that are not on and off. `onOffPairs` fails a screen
   that has one.
+  A switch shows its label alone; its description is read out only (#592,
+  keyword switch-note, `.claude/rules/reader-layout.md`).
 * **A sign-in field is named by a visible label** (quire#361, WCAG 3.3.2):
   `ui_form_field` makes a `<label for>`; `ui_field` has no such kinds, so a
   password field without a label does not type-check

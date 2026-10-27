@@ -1,0 +1,3 @@
+line 7
+function claim
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eapp(S2Ecst(cube_fraction_gt); S2Eintinf(1), S2Eintinf(17034), S2Eintinf(12183), S2Eintinf(2)))

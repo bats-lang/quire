@@ -1,0 +1,16 @@
+function _static_utf16_conv_table
+line 3
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(DETECT); S2Evar(cells(_)), S2Eapp(S2Ecst(SrcUtf16); S2Eapp(S2Ecst(LittleEndian); )), S2Evar(mark(_)))].
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(SrcTable); S2Eapp(S2Ecst(Cp1252); ))
+The needed term is: S2Eapp(S2Ecst(SrcUtf16); S2Eapp(S2Ecst(LittleEndian); ))
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(DETECT); S2Evar(cells(_)), S2Eapp(S2Ecst(SrcTable); S2Eapp(S2Ecst(Cp1252); )), S2Evar(mark(_)))
+The needed term is: S2Eapp(S2Ecst(DETECT); S2Evar(cells(_)), S2Eapp(S2Ecst(SrcUtf16); S2Eapp(S2Ecst(LittleEndian); )), S2Evar(mark(_)))
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(CONV); S2Evar(cells(_)), S2Eapp(S2Ecst(SrcTable); S2Eapp(S2Ecst(Cp1252); )), S2Evar(mark(_)), S2Evar(n(_)), S2Evar(total(_)))].
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(SrcUtf16); S2Eapp(S2Ecst(LittleEndian); ))
+The needed term is: S2Eapp(S2Ecst(SrcTable); S2Eapp(S2Ecst(Cp1252); ))
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(CONV); S2Evar(cells(_)), S2Eapp(S2Ecst(SrcUtf16); S2Eapp(S2Ecst(LittleEndian); )), S2Evar(mark(_)), S2Evar(n(_)), S2Evar(total(_)))
+The needed term is: S2Eapp(S2Ecst(CONV); S2Evar(cells(_)), S2Eapp(S2Ecst(SrcTable); S2Eapp(S2Ecst(Cp1252); )), S2Evar(mark(_)), S2Evar(n(_)), S2Evar(total(_)))

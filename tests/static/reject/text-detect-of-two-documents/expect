@@ -1,0 +1,3 @@
+function _static_two_documents
+line 2
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Evar(second_cells(_)); S2Evar(first_cells(_))))

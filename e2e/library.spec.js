@@ -362,12 +362,15 @@ test('a book moved to the Trash can be undone, and restored from it', async ({ p
 });
 
 test('emptying the Trash asks, and deletes only what is in it', async ({ page }) => {
+  // each book is imported in a minute of its own on the page's fake clock (#657, #899): the
+  // library lists the later import first, and the wall clock decides nothing
+  await page.clock.install({ time: new Date('2026-06-01T12:00:00Z') });
   await start(page);
-  await importFiles(page, [
-    epubFile({ title: 'Trash One', author: 'A' }),
-    epubFile({ title: 'Trash Two', author: 'B' }),
-    epubFile({ title: 'Stays', author: 'C' }),
-  ], 3);
+  await importFiles(page, [epubFile({ title: 'Trash One', author: 'A' })], 1);
+  await page.clock.fastForward(60000);
+  await importFiles(page, [epubFile({ title: 'Trash Two', author: 'B' })], 2);
+  await page.clock.fastForward(60000);
+  await importFiles(page, [epubFile({ title: 'Stays', author: 'C' })], 3);
   for (const t of ['Trash One', 'Trash Two']) {
     await bookMenu(page, t);
     await menuItem(page, 'Move to Trash').click();
@@ -391,7 +394,8 @@ test('emptying the Trash asks, and deletes only what is in it', async ({ page })
   const ask = emptyTrashDialog(page);
   // the question counts what goes and names it
   await expect(ask).toHaveAccessibleName('Delete 2 books forever?');
-  await expect(ask).toContainText("'Trash One' and 'Trash Two' will be deleted for good");
+  // the library lists the later import first, and the question names the books in that order
+  await expect(ask).toContainText("'Trash Two' and 'Trash One' will be deleted for good");
   expect(await colour(ask.getByRole('button', { name: 'Delete forever' }))).toBe(red);
   expect(await colour(ask.getByRole('button', { name: 'Cancel' }))).not.toBe(red);
   await ask.getByRole('button', { name: 'Cancel' }).click();
@@ -799,6 +803,22 @@ test('Book info reads EPUB 2\'s accessibility metadata too, and says when there 
   a11y = await infoOf(page, 'Bare');
   // a book that says nothing is told so once, not by a "No information" under each heading (quire#386)
   await expect(a11y.locator('div div')).toHaveText(['This book gives no accessibility information.']);
+});
+
+// quire#459: a book that says something is shown that, and no "No information" line or empty heading
+test('Book info leaves out a group the book says nothing of', async ({ page }) => {
+  await start(page);
+  const hazardOnly = '    <meta property="schema:accessibilityHazard">none</meta>\n';
+  const summaryOnly = '    <meta property="schema:accessibilitySummary">Read it with care.</meta>\n';
+  await importFiles(page, [
+    epubFile({ title: 'Hazard Only', author: 'A', metadata: hazardOnly, rawChapters: chapters(1) }),
+    epubFile({ title: 'Summary Only', author: 'B', metadata: summaryOnly, rawChapters: chapters(1) }),
+  ], 2);
+  let a11y = await infoOf(page, 'Hazard Only');
+  await expect(a11y.locator('div div')).toHaveText(['Hazards', 'No hazards']);
+  await dialog(page, 'Book info').getByRole('button', { name: /Library/ }).click();
+  a11y = await infoOf(page, 'Summary Only');
+  await expect(a11y.locator('div div')).toHaveText(['Accessibility summary', 'Read it with care.']);
 });
 
 // quire#386 (Material 3: a menu's items are grouped by a divider or a small

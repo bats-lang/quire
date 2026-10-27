@@ -34,6 +34,17 @@ fn hint_class (band: hint_band): [class_len:pos | class_len < 256] string class_
 
 fn _hide {id_len:pos | id_len < 256} (id: string id_len): void = ui_show(id, false)
 
+(* Whether the line that describes a switch is drawn (quire#592, keyword
+   switch-note): a row is the label alone and its description is read out
+   only, unless the row says NoteFooter, so a visible line is a decision
+   made at the row and a case a reviewer sees *)
+datatype switch_note = NoteHidden | NoteFooter
+
+fn switch_note_class (note: switch_note): [class_len:pos | class_len < 256] string class_len =
+  case+ note of
+  | NoteHidden() => "sabout readout"
+  | NoteFooter() => "sabout"
+
 (* Each element made again to reset it is made only here, so each id is
    made at one place (tests/static/ids.py) *)
 
@@ -801,19 +812,22 @@ in _hide("contents-panel") end
 (* A switch, a row of its own (in parent): a button named by its label
    alone (a toggle, aria-pressed off at first), holding a drawn track and
    its knob (decorative, hidden from assistive technology; the stylesheet
-   moves the knob and fills the track when it is pressed), and a line
-   under it saying what it does, which describes it (quire#300) *)
+   moves the knob and fills the track when it is pressed), and the text
+   that describes it (quire#300), which the button points to and which
+   is drawn only when the row's note says NoteFooter (quire#592, keyword
+   switch-note) *)
 fn _switch_row {parent_len,row_len,button_len,track_len,knob_len,about_len:pos | parent_len < 256; row_len < 256; button_len < 256; track_len < 256; knob_len < 256; about_len < 256}
   {label_len,text_len:pos | label_len < 256; text_len < 256}
   (parent: string parent_len, row: string row_len, button: string button_len, track: string track_len,
-   knob: string knob_len, about: string about_len, label: string label_len, text: string text_len): void = let
+   knob: string knob_len, about: string about_len, label: string label_len, text: string text_len,
+   note: switch_note): void = let
   val () = ui_el(parent, row, TDiv, "srow stack")
   val () = ui_text_btn(row, button, "sbtn switch", label)
   val () = ui_attr(button, APressed, "false")
   val () = ui_el(button, track, TSpan, "track")
   val () = ui_attr(track, AHidden, "true")
   val () = ui_el(track, knob, TSpan, "knob")
-  val () = ui_el(row, about, TSpan, "sabout")
+  val () = ui_el(row, about, TSpan, switch_note_class(note))
   val () = ui_text(about, text)
 in ui_attr(button, ADescribedBy, about) end
 
@@ -923,11 +937,11 @@ fn _settings (): void = let
   val () = _hide("ruby-row")
   (* a book's images dimmed in the dark themes *)
   val () = _switch_row("typography-look", "dim-row", "dim-images-switch", "dim-images-track",
-    "dim-images-knob", "dim-images-about", "Dim images in the dark themes", "Softens a book's pictures in the dark themes")
+    "dim-images-knob", "dim-images-about", "Dim images in the dark themes", "Softens a book's pictures in the dark themes", NoteHidden())
   (* a book's sizes in proportion to the text size, or as its publisher set them (quire#431) *)
   val () = _switch_row("typography-look", "publisher-sizes-row", "publisher-sizes-switch", "publisher-sizes-track",
     "publisher-sizes-knob", "publisher-sizes-about", "Respect the publisher's sizes",
-    "Off, your text size is the book's text size and its other sizes follow in proportion. On, the book keeps the sizes its publisher chose")
+    "Off, your text size is the book's text size and its other sizes follow in proportion. On, the book keeps the sizes its publisher chose", NoteHidden())
   (* Page: pages turned across, or the chapter scrolled down *)
   val () = ui_el("typography-page", "layout-row", TDiv, "srow")
   val () = ui_el("layout-row", "layout-label", TSpan, "slabel")
@@ -950,9 +964,9 @@ fn _settings (): void = let
      and hyphenation, each a named group, so its buttons are announced
      with what they set *)
   val () = _switch_row("typography-page", "align-row", "justify-switch", "justify-track",
-    "justify-knob", "justify-about", "Justify text", "Lines end evenly at both edges")
+    "justify-knob", "justify-about", "Justify text", "Lines end evenly at both edges", NoteHidden())
   val () = _switch_row("typography-page", "hyphens-row", "hyphenation-switch", "hyphenation-track",
-    "hyphenation-knob", "hyphenation-about", "Hyphenation", "Breaks long words at the end of a line")
+    "hyphenation-knob", "hyphenation-about", "Hyphenation", "Breaks long words at the end of a line", NoteHidden())
   (* the screen (quire#300): full screen, the rotation locked (as
      Kindle's Layout tab locks the orientation), and (in the Android
      app) the brightness, each a row of its own, shown only where it can
@@ -962,9 +976,9 @@ fn _settings (): void = let
      slider and a switch *)
   val () = ui_el("typography-page", "screen-row", TDiv, "sgroup")
   val () = _switch_row("screen-row", "screen-fullscreen-row", "screen-fullscreen", "screen-fullscreen-track",
-    "screen-fullscreen-knob", "screen-fullscreen-about", "Full screen", "Hides the status and navigation bars")
+    "screen-fullscreen-knob", "screen-fullscreen-about", "Full screen while reading", "Hides the status and navigation bars while you read; the menus and the library show them", NoteHidden())
   val () = _switch_row("screen-row", "screen-lock-row", "screen-lock", "screen-lock-track",
-    "screen-lock-knob", "screen-lock-about", "Lock rotation", "Keeps the page in its current orientation when the device turns")
+    "screen-lock-knob", "screen-lock-about", "Lock rotation", "Keeps the page in its current orientation when the device turns", NoteHidden())
   (* a slider that dims or brightens the screen as it moves (quire#392:
      a select of percentages could not be seen before it was chosen), and
      a switch for the device's own, as Kindle's "Use system brightness"
@@ -976,7 +990,7 @@ fn _settings (): void = let
   val () = ui_el("screen-brightness-row", "screen-brightness-about", TSpan, "sabout")
   val () = ui_text("screen-brightness-about", "Changes the screen only while Quire is open")
   val () = _switch_row("screen-row", "screen-brightness-system-row", "screen-brightness-system", "screen-brightness-system-track",
-    "screen-brightness-system-knob", "screen-brightness-system-about", "Same as device", "Uses the brightness the device is set to")
+    "screen-brightness-system-knob", "screen-brightness-system-about", "Same as device", "Uses the brightness the device is set to", NoteHidden())
   val () = _hide("screen-row")
   (* Turning: by taps where (each zone drawn, mirrored for a book read
      right to left), and by the volume keys, where the app has them
@@ -995,7 +1009,7 @@ fn _settings (): void = let
   val () = ui_el("typography-turning", "pictures-about", TSpan, "sabout")
   val () = ui_text("pictures-about", "Double-tap a picture, or press and hold it, to see it full screen.")
   val () = _switch_row("typography-turning", "volume-row", "volume-keys-turn", "volume-keys-track",
-    "volume-keys-knob", "volume-keys-about", "Turn pages with volume keys", "The volume buttons turn the page, not the volume")
+    "volume-keys-knob", "volume-keys-about", "Turn pages with volume keys", "The volume buttons turn the page, not the volume", NoteHidden())
   val () = _hide("volume-row")
   (* Read aloud: its speed and voice (the voices of the book's
      language), offered and kept by read_aloud.bats, where the platform

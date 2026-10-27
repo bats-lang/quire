@@ -130,7 +130,7 @@ for (const kept of ['on', 'off']) {
     test.skip(!onAndroid(testInfo), 'full screen is kept by the Android app only: a browser enters it only at a click (#313)');
     await launch(context, page);
     await midChapter(page);
-    const full = page => readingSettings(page).getByRole('button', { name: 'Full screen', exact: true });
+    const full = page => readingSettings(page).getByRole('button', { name: 'Full screen while reading', exact: true });
     await openReadingSettings(page, 'Page');
     await full(page).click();
     await expect(full(page)).toHaveAttribute('aria-pressed', 'true');

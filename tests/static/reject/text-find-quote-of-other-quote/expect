@@ -1,0 +1,3 @@
+function _static_find_other_quote
+line 2
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Evar(quote(_)); S2Evar(other(_))))

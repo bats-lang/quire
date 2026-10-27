@@ -1,0 +1,9 @@
+function _static_convert_branch_is_refused
+line 8
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(TEXTOF); S2Evar(cells(_)), S2Eapp(S2Ecst(PlanRefused); ), S2Evar(out(_)))].
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(PlanConvert); )
+The needed term is: S2Eapp(S2Ecst(PlanRefused); )
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(TEXTOF); S2Evar(cells(_)), S2Eapp(S2Ecst(PlanConvert); ), S2Evar(out(_)))
+The needed term is: S2Eapp(S2Ecst(TEXTOF); S2Evar(cells(_)), S2Eapp(S2Ecst(PlanRefused); ), S2Evar(out(_)))

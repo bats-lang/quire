@@ -279,14 +279,14 @@ in
     if _utf8_scan(data, n, 0, 1) > 0 then @(PlanAsIs(), source, mark) else @(PlanConvert(), source, mark)
 end
 
-(* What the document at data[0, n) needs *)
+(* What the document at data[0, n) needs. Deprecated: text-encoding relation, text_plan_proved is its proved form, removed by quire#865 *)
 #pub fn text_plan_of {l:agz}{n:pos} (data: !$A.borrow(byte, l, n), n: int n): text_plan
 
 implement text_plan_of (data, n) = let
   val @(plan, _, _) = _decide(data, n)
 in plan end
 
-(* The size of the document made into UTF-8 (when text_plan_of says PlanConvert) *)
+(* The size of the document made into UTF-8 (when text_plan_of says PlanConvert). Deprecated: text-encoding relation, text_convert_size is its proved form, removed by quire#865 *)
 #pub fn text_converted_size {l:agz}{n:pos} (data: !$A.borrow(byte, l, n), n: int n): [m:nat] int m
 
 implement text_converted_size (data, n) = let
@@ -297,7 +297,7 @@ implement text_converted_size (data, n) = let
   val m = g1ofg0(size)
 in if m >= 0 then m else 0 end
 
-(* The document made into UTF-8, in out[0, m): m is text_converted_size *)
+(* The document made into UTF-8, in out[0, m): m is text_converted_size. Deprecated: text-encoding relation, text_convert_fill is its proved form, removed by quire#865 *)
 #pub fn text_convert_into {l:agz}{n:pos}{lo:agz}{o:addr}{m:nat}
   (data: !$A.borrow(byte, l, n), n: int n, out: !$A.arrx(byte, lo, m, o), m: int m): void
 

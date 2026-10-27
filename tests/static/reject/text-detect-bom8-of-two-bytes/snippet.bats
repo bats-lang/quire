@@ -1,0 +1,1 @@
+prfn _static_bom8_two_bytes {cells:$A.cells} (first: $A.NTH(cells, 0, 239), second: $A.NTH(cells, 1, 187), third: $A.NTH(cells, 2, 191)): DETECT(cells, SrcUtf8(), 2) = DETECT_bom8(first, second, third)
