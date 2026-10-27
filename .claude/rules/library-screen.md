@@ -77,6 +77,22 @@ Decided by research (what comparable library apps do) in #375, #376, #377, #404:
   fails if the two views differ.
 * **One word for a book's state** (`reading_state`: `StateUnread | StateReading |
   StateFinished`): the filter and the card use it.
+* **Two kinds of control, aligned** (#861; research: quire#861, comment 6392265973). The
+  status filter (All, Unread, Reading, Finished; derived, `reading_state`) is one
+  segmented row of two pairs (`segpair`), so a narrow line holds two and two, never three and
+  one. The collection is one button (`collection-button`, "Collection: <name>", shown once
+  there is a collection) that opens the collection menu (`LCollectionMenu`,
+  `collection-menu`, `menuitemradio`s: All books and each collection, the shown one
+  checked); Rename collection and Delete collection are in that menu, for the shown one only
+  (Kobo and Play Books keep a collection's actions on the collection's own place). Rule: every
+  chip and button is 48 px tall (the base rule), one 8 px gap (Material's) between neighbours and
+  between lines, every line starts at the search field's left edge, labels never wrap (the
+  collection's name ends in an ellipsis). The collections stay flat, a book in several (a bit
+  each); series and author grouping would be a feature of its own. `e2e/library-grouping.spec.js`
+  measures this in every project, at 100% and at 200% (a mobile viewport in each project, since the engine scales text by a percentage there only), and injects each class.
+  The Trash panel (`trash-panel`, `.tpanel`) is `display: none` while nothing in it is shown
+  (`:has(>:not([data-hide='1']))`): empty it was a zero-height flex item that, at 200% where the
+  filters fill the line, took a line and a second 8 px gap (16 px) between the filters and the collection.
 * `e2e/library.spec.js` plays each of these; `e2e/walk.js` walks the sort and view
   menu and the shelf screens, so the layout, safe area, target size and Back
   specs cover them.
