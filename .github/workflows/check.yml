@@ -147,6 +147,12 @@ jobs:
       - name: Put the committed lock beside the Android project
         run: cp scripts/android/pnpm-lock.yaml dist/android/pnpm-lock.yaml
 
+      # android.yml (pwa#136, pwa#254) reads Node's and Java's versions from
+      # the project's own .nvmrc and .java-version; the locked pwa package does
+      # not write them yet, so they are committed beside the lock (keyword: version-file)
+      - name: Put the version files beside the Android project
+        run: cp scripts/android/.nvmrc scripts/android/.java-version dist/android/
+
       # The same commit always gives the same version, whatever the clock
       # or time zone, and the Android project carries it (#219)
       - name: Check the version
@@ -178,6 +184,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: quire-android
+          # the project's .nvmrc and .java-version are dotfiles, skipped by default (keyword: version-file)
+          include-hidden-files: true
           path: |
             dist/android
             dist/pwa
