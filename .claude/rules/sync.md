@@ -117,12 +117,15 @@ sheet each time and is not used).
   `drive_grant_revoke`).
 * **The Auto Backup file's read** (#935, keyword: backup-read-answer) asks bridge's
   `backup_file_read_answer` (`backup_read_answer`) and matches every constructor with `case+`:
-  `BackupReadFound` is the file, `BackupReadNone` and `BackupReadEmpty` are nothing to merge (as an empty
-  WebDAV body is), and `BackupReadNotHere` (`BackupReadUnavailable`), `BackupReadRejected` and
+  `BackupReadFound` is the file, `BackupReadNone` (no file) and `BackupReadEmpty` (a file holding nothing) are
+  each an answer of their own (`ReadBackupNone`, `ReadBackupEmpty` of `read_answer`, matched in `_read`, both
+  merging an empty file today but visibly and apart from `ReadNothing`, which a store's read of nothing stays),
+  and `BackupReadNotHere` (`BackupReadUnavailable`), `BackupReadRejected` and
   `BackupReadThrown` are results of their own, said in the banner (bridge's text of the last two is freed,
   not shown); `BackupReadUnexpected` (a code JS never gives) goes through `notice_unexpected`.
-  `tests/static/reject/backup-read-answer-unexpected-unmatched` is the match without it. Independent of
-  #933 and #934 (the write): each adds its own constructors to `sync_result`.
+  `tests/static/reject/backup-read-answer-<outcome>-unmatched` (none, empty, not-here, rejected, thrown,
+  unexpected) are the match without that constructor, and `accept/backup-read-answer-matched` is the whole
+  match. Independent of #933 and #934 (the write): each adds its own constructors to `sync_result`.
 * **Google Drive** is the same store in a browser: the token comes from Google
   Identity Services (about an hour, no refresh token), whose window a page may
   open only at a tap, so it is asked for only when the reader acts, a refused

@@ -1387,6 +1387,8 @@ in cross end
 datavtype read_answer =
   | {owner,l:agz}{n:pos | n <= 268435456} ReadFile of (piece_owner(n, owner), $A.arrx(byte, l, n, owner), int n)
   | ReadNothing of ()
+  | ReadBackupNone of ()   (* the backup file is not there (bridge's BackupReadNone) *)
+  | ReadBackupEmpty of ()  (* the backup file is there and holds nothing (bridge's BackupReadEmpty) *)
   | ReadFailed of (sync_result, Int)
 
 (* What a write gives: written, a conflict (another device wrote the
@@ -1398,6 +1400,8 @@ implement $P.dispose<read_answer>(answer) =
   case+ answer of
   | ~ReadFile(owner, file, _) => piece_free(owner, file)
   | ~ReadNothing() => ()
+  | ~ReadBackupNone() => ()
+  | ~ReadBackupEmpty() => ()
   | ~ReadFailed(_, _) => ()
 
 (* a Dropbox read, made in this module when no token is held *)
@@ -2258,8 +2262,8 @@ fn _backup_read (): $P.promise(read_answer, $P.Chained) = let
 in
   $P.and_then<$BACKUP.backup_read_answer><read_answer>(pending, llam(found) =>
     case+ found of
-    | ~$BACKUP.BackupReadNone() => $P.ret<read_answer>(ReadNothing())
-    | ~$BACKUP.BackupReadEmpty() => $P.ret<read_answer>(ReadNothing())
+    | ~$BACKUP.BackupReadNone() => $P.ret<read_answer>(ReadBackupNone())
+    | ~$BACKUP.BackupReadEmpty() => $P.ret<read_answer>(ReadBackupEmpty())
     | ~$BACKUP.BackupReadNotHere() => $P.ret<read_answer>(ReadFailed(BackupReadUnavailable(), 0))
     | ~$BACKUP.BackupReadRejected(text) => let
         val () = _backup_read_text_free(text)
@@ -3387,6 +3391,8 @@ fn _merge_held (file: held): void =
 fn _read (): void = $P.finish<read_answer>(store_read(), llam(answer) =>
   case+ answer of
   | ~ReadNothing() => _merge_held(_empty())
+  | ~ReadBackupNone() => _merge_held(_empty())
+  | ~ReadBackupEmpty() => _merge_held(_empty())
   | ~ReadFailed(kind, status) => _fail(kind, status)
   | ~ReadFile(owner, file, size) =>
     (case+ _hold(owner, file, size) of
