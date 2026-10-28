@@ -314,15 +314,24 @@ each kind selects) and prints each path's reason in its summary. Rules:
   `e2e`; only `play-internal` needs `android`), a change of the branch
   protection that is an admin's;
   tested: `Workflow` in `tests/static/affected_test.py`.
-* **A draft PR runs no job (#939, keyword: draft).** `check.yml` has `types: [opened,
+* **A draft PR runs `plan` and `build` only (#939, #978, keyword: draft).** `check.yml` has `types: [opened,
   synchronize, reopened, ready_for_review]` (GitHub's default three plus the transition to ready,
-  so marking ready runs the check on the head) and `plan`, `build` and `check` carry
-  `github.event_name != 'pull_request' || !github.event.pull_request.draft`; `static`, `e2e` and
-  `android` need them and are skipped with them. `check` is skipped, which a required check
-  counts as passed, so it is reported, not missing; the draft cannot merge in any case, and
-  the ready run reports every context (`android / ...` included, which #656 keeps unskipped
-  for a ready PR). Push, `workflow_dispatch`, `schedule` and `merge_group` are unchanged.
-  Libraries: the condition is repository-prototype#525, their callers' types the tickets of #939.
+  so marking ready runs the whole check on the head). `plan` (the grouping check) and `build` (`bats
+  check` of the app and the PWA, under 15 minutes) run on every push to a draft; `static`, `e2e` and
+  `android` carry `github.event_name != 'pull_request' || !github.event.pull_request.draft` and are
+  skipped. `check` runs on a draft too and asks for `plan` and `build` only (the step "Plan and
+  build passed", with a summary that says the rest was not run), so a draft head has a completed `check`
+  run. Research for the choice: a skipped job counts as passed for a required check (GitHub's
+  troubleshooting page), so a skipped `check` would read the same as a green one while reporting nothing;
+  a `check` that ran and passed two jobs says what it did, and a draft cannot merge in any case. The
+  draft and the ready runs of one head do not cancel each other (the concurrency group names a draft
+  run), so a ready head's newest `check` run is the whole check. A draft's green `check` is enough for the
+  Plan to be reviewed and never for a code review: the reviewer starts a code review on a PR that
+  left draft, with every check finished and green (reviewer.md, "When you start"; `qsweep` prints
+  `WAIT-FOR-CI` for a head with no completed green `check`). `guidelines.py --github` (the `text-lint`
+  status) refuses a review that approves a head whose newest `check` run is missing, unfinished or
+  not green. Push, `workflow_dispatch`, `schedule` and `merge_group` are unchanged. Libraries: the
+  condition is repository-prototype#525, their callers' types the tickets of #939.
 * **The merge queue's group runs everything, by decision (#656).** Its diff
   (against `HEAD^1`) is one PR's, so a selection by it would be the PR's own
   and would miss what two PRs do together, which is what the queue is for

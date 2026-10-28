@@ -22,6 +22,7 @@ them, and nothing refused the text that made them. This checks, without a compil
   against its head, and the newest review comment, set as the commit status `text-lint` on the
   head (a ticket's body, its table rows included, with its code spans as quotations: a
   comment on the ticket, since a ticket has no head); a bot's PR and a relock branch are exempt;
+  an approval of the head needs the newest `check` run of that head completed and green (quire#978);
 * `--brief FILE --ticket FILE`: the text rules, and that every line of the ticket's
   Done-when is in the brief word for word (a brief never restates it).
 
@@ -334,6 +335,47 @@ def newest_review(comments):
     return found
 
 
+def approved_head(text):
+    """The head SHA a review approves (either first-line form), else None."""
+    lines = [line.strip() for line in (text or '').split('\n') if line.strip()]
+    if not lines:
+        return None
+    found = UNGATED_FIRST.fullmatch(lines[0])
+    if found:
+        return found.group(1) if found.group(2) == 'approved' else None
+    if lines[0] == GATED_FIRST and 'Verdict: approved' in lines:
+        reviewed = [line[len('Reviewed: '):] for line in lines if re.fullmatch(r'Reviewed: [0-9a-f]{40}', line)]
+        return reviewed[0] if len(reviewed) == 1 else None
+    return None
+
+
+def lint_review_checks(text, head, runs):
+    """quire#978 (keyword: draft): a review that approves the head needs the newest `check` run of that head completed and green."""
+    if approved_head(text) != head:
+        return []
+    named = sorted((run for run in runs if run.get('name') == 'check'), key=lambda run: run.get('id', 0))
+    if not named:
+        state = 'no `check` run'
+    elif named[-1].get('status') != 'completed':
+        state = f'a `check` run that is {named[-1].get("status")}'
+    elif named[-1].get('conclusion') != 'success':
+        state = f'a `check` run that ended {named[-1].get("conclusion")}'
+    else:
+        return []
+    return [f'review: it approves head {head[:12]} that has {state}; a head with no completed green `check` run is not approved: the review says "waiting for CI at this head" (reviewer.md, "When you start"; quire#978)']
+
+
+def check_runs(api, repository, head):
+    """Every check run of a head (all pages)."""
+    found, page = [], 1
+    while True:
+        part = (api(f'repos/{repository}/commits/{head}/check-runs?per_page=100&page={page}') or {}).get('check_runs') or []
+        found += part
+        if len(part) < 100:
+            return found
+        page += 1
+
+
 def all_pages(api, path):
     found, page = [], 1
     while True:
@@ -378,6 +420,8 @@ def github(event_name, event, repository, api, phrases, run_url=''):
         review = newest_review(all_pages(api, f'repos/{repository}/issues/{number}/comments'))
         if review:
             findings += [f'{finding} (the review comment {review["html_url"]})' for finding in lint_review(review['body'], phrases)]
+            if approved_head(review['body']) == head:
+                findings += [f'{finding} (the review comment {review["html_url"]})' for finding in lint_review_checks(review['body'], head, check_runs(api, repository, head))]
         description = status_description(findings[0] if findings else 'the PR body and the newest review are in form')
     api(f'repos/{repository}/statuses/{head}', 'POST', {
         'state': 'failure' if findings else 'success', 'context': 'text-lint',

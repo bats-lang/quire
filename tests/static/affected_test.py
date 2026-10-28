@@ -242,7 +242,7 @@ class Workflow(unittest.TestCase):
 
     def job(self, name):
         """The text of one job of check.yml (its block under `jobs:`)."""
-        found = re.search(rf'(?ms)^  {re.escape(name)}:\n(.*?)(?=^  [a-z-]+:\n|\Z)', self.TEXT)
+        found = re.search(rf'(?ms)^  {re.escape(name)}:\n(.*?)(?=^  [a-z0-9-]+:\n|\Z)', self.TEXT)
         self.assertIsNotNone(found, name)
         return found.group(1)
 
@@ -257,27 +257,32 @@ class Workflow(unittest.TestCase):
     def test_the_build_and_the_android_job_are_never_skipped_by_the_plan(self):
         """Android's required contexts exist only if the job runs, and it needs the
         build's artifact: neither reads the plan, so the plan cannot skip them. The
-        build's `if` is the `destroyed` one and the draft one (#939, keyword: draft:
-        a draft pull request runs no job, which is the owner's rule and not the plan's
-        skip logic); the Android job has none and is skipped only with the build."""
+        build's `if` is the `destroyed` one alone (a draft runs it, #978, keyword:
+        draft); the Android job carries the draft condition, which is the owner's rule
+        and not the plan's skip logic, so a ready pull request reports its contexts."""
         self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('build')),
+                         ["    if: github.event.action != 'destroyed'"])
+        self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('android')),
                          [f"    if: github.event.action != 'destroyed' && {self.NOT_DRAFT}"])
-        self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('android')), [])
         self.assertIn('needs: build', self.job('android'))
 
-    def test_a_draft_pull_request_runs_no_job_and_nothing_else_is_skipped_for_it(self):
-        """plan, build and check carry the draft condition; static, e2e and android
-        need them and carry none (#939). Only a `pull_request` event has a draft, so
-        push, schedule, workflow_dispatch and merge_group stay as they were."""
+    def test_a_draft_pull_request_runs_plan_build_and_check_and_skips_the_rest(self):
+        """plan and build carry no draft condition; static, e2e and android carry it
+        and `check` asks for plan and build only on a draft (#978). Only a
+        `pull_request` event has a draft, so push, schedule, workflow_dispatch and
+        merge_group stay as they were."""
         self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('plan')),
-                         [f"    if: github.event.action != 'destroyed' && {self.NOT_DRAFT}"])
+                         ["    if: github.event.action != 'destroyed'"])
         self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('check')),
-                         [f"    if: always() && github.event.action != 'destroyed' && {self.NOT_DRAFT}"])
+                         ["    if: always() && github.event.action != 'destroyed'"])
+        self.assertIn("jobs: plan build\n", self.job('check'))
+        for name in ('static', 'e2e', 'android'):
+            with self.subTest(name):
+                self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job(name)),
+                                 [f"    if: github.event.action != 'destroyed' && {self.NOT_DRAFT}"])
         for name in ('static', 'e2e'):
             with self.subTest(name):
-                self.assertNotIn('draft', self.job(name))
                 self.assertIn('plan', re.search(r'(?m)^    needs: .*$', self.job(name)).group(0))
-        self.assertNotIn('draft', self.job('android'))
         self.assertIn('types: [opened, synchronize, reopened, ready_for_review]', self.TEXT)
 
     def test_a_merge_group_plans_the_whole_check(self):

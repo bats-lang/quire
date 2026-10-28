@@ -185,7 +185,8 @@ found: `it passed again`, `it passes alone` and `contention` are not causes. A c
 failure a change says it covers has a case that fails when the class occurs, shown by
 injecting it. The author owns CI until it is green (push, report the head, finish; never
 wait on a run); any author may take over a red, or a merge conflict. A reviewer runs
-nothing and starts only when every required check is finished and green on the exact head.
+nothing and starts only when every required check is finished and green on the exact head. A head with no completed `check` run is never approved
+(a draft runs `plan` and `build` only, `.claude/rules/ci.md`, keyword: draft).
 The rules for the agents are in `.claude/agents/worker.md`, `.claude/agents/reviewer.md` and
 `.claude/orchestration.md`, and `tests/static/guidelines.py` (the `checkers` group) refuses
 the phrases that made these mistakes come back (quire#751).

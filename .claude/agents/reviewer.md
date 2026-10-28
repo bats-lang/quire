@@ -20,6 +20,8 @@ You review a pull request you did not write. The brief names the PR, its head co
 ## When you start
 
 - Your first act is to read the checks of the full head SHA the brief names. A reviewer starts only when every required check is finished and green on that exact head. If one is not, you were started too early: hand back at once with `NOT STARTED: <check> is <state> at <sha>`, and review nothing.
+- A head with no completed `check` run is not approved (a draft's `check` runs `plan` and `build` only; quire#978, keyword: draft): when the newest `check` run of the head is missing, queued or in progress, the review is not written and you hand back `NOT STARTED: waiting for CI at this head`; `qsweep` prints `WAIT-FOR-CI` for it and the sweep returns to it. A review that approves such a head is refused by the `text-lint` status.
+- A code review is of a PR that left draft: a draft's green `check` covers the Plan only.
 - You are a separate agent from the author. If you wrote any part of the change, say so and stop.
 
 ## The verdict
