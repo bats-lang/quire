@@ -345,12 +345,57 @@ class WorkerLines(unittest.TestCase):
 
     def test_a_brief_with_every_line_passes(self):
         brief, ticket, _ = self.fixture()
-        brief += 'Design check: first.\nPush: after every commit.\nExpects: blessed.\nSample: seeded.\n'
+        brief += 'Design check: first.\nPush: after every commit.\nExpects: blessed.\nSample: seeded.\nNo split: whole.\nCompiler: /home/user/bats-pinned/bin/bats.\n'
         self.assertEqual(gl.lint_brief(brief, ticket, PHRASES), [])
 
     def test_orchestration_md_carries_the_lines(self):
         for line_form, line_name, _ in gl.WORKER_LINES:
             self.assertIn('`' + line_name.split(' ')[0], read_root('.claude', 'orchestration.md'), line_name)
+
+
+class Rulings(unittest.TestCase):
+    """quire#995: the rules say the owner's latest rulings, with the line and time of the message."""
+
+    def test_the_order_of_work_is_workers_then_open_prs_then_p0_p1_p2(self):
+        text = read_root('CLAUDE.md')
+        self.assertIn('"Worker in progress first", "Open pr second"', text)
+        self.assertNotIn('whether or not a worker has the p0', text + read_root('.claude', 'orchestration.md'))
+
+    def test_a_ticket_is_split_only_for_a_reason_that_is_not_size(self):
+        for parts in (('.claude', 'orchestration.md'), ('.claude', 'agents', 'worker.md')):
+            text = read_root(*parts)
+            self.assertIn("STOP SPLITTING TICKETS WITHOUT A GOOD REASON", text, parts)
+            self.assertNotRegex(text, r'(?i)broken up BEFORE work starts', parts)
+        self.assertIn('minimum amount of pieces', read_root('.claude', 'orchestration.md'))
+
+    def test_a_brief_without_the_no_split_line_or_without_the_compiler_line_is_named(self):
+        brief = 'Follow the worker.md rules.\nDesign check: a.\nPush: b.\nExpects: c.\nSample: d.\nThe tests pass.\n'
+        ticket = '## Done when\n\nThe tests pass.\n'
+        both = '\n'.join(gl.lint_brief(brief, ticket, PHRASES))
+        self.assertIn('no line "No split: ..."', both)
+        self.assertIn('no line "Compiler: ..."', both)
+        only_compiler = '\n'.join(gl.lint_brief(brief + 'No split: whole.\n', ticket, PHRASES))
+        self.assertNotIn('No split', only_compiler)
+        self.assertIn('no line "Compiler: ..."', only_compiler)
+        only_split = '\n'.join(gl.lint_brief(brief + 'Compiler: /bats.\n', ticket, PHRASES))
+        self.assertIn('no line "No split: ..."', only_split)
+        self.assertNotIn('Compiler', only_split)
+
+    def test_the_owners_rulings_of_the_audit_are_in_the_files_that_carry_them(self):
+        for parts, needle in ((('.claude', 'orchestration.md'), 'Always have a bats in flight is also a rule'),
+                              (('.claude', 'orchestration.md'), 'paused-owner'),
+                              (('.claude', 'orchestration.md'), 'start an opus worker with the request to predict'),
+                              (('.claude', 'orchestration.md'), 'we fix it with a script'),
+                              (('.claude', 'agents', 'reviewer.md'), 'Reviewers have no right to object'),
+                              (('.claude', 'agents', 'worker.md'), 'Runner pressure should cause hand back'),
+                              (('CLAUDE.md',), 'Stale is correctness')):
+            self.assertIn(needle, read_root(*parts), parts)
+
+    def test_the_words_the_owner_banned_are_refused_in_a_text(self):
+        for text in ("I haven't looked yet", "I didn't check the PR", "I've not verified it", 'done in part', 'the part that is left', 'two parts are done'):
+            self.assertTrue(gl.lint_text(text, 'text', PHRASES), text)
+        for text in ('I looked at it and it passes', 'the particular case'):
+            self.assertEqual(gl.lint_text(text, 'text', PHRASES), [], text)
 
 
 class FakeApi:
