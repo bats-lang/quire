@@ -58,7 +58,9 @@ QLB6 opens at its stored place (`e2e/legacy-library.js`).
   the layout is counted anew while opening (`_settle`'s count change, `_relayout`: the
   insets and the window arrive right after the first show), and showing the page alone
   is the screenful's start; scrolled, it is shown with the node the place is kept by
-  (`_opening_anchor`). `e2e/stability.spec.js`, "a hand scroll within one screenful is the
+  (`_opening_anchor`) and kept again (`_show_kept`: showing a page clears `_anchor_kept`, so a
+  second count, as a face arriving after the first, would otherwise show the screenful's start,
+  #560). `e2e/stability.spec.js`, "a hand scroll within one screenful is the
   place the app opens at again after it is killed" and "...quit".
 * Keys: the arrows, Page Up and Down, Space (Shift for back), the volume keys
   when the reader chooses (the app's), MediaTrackNext and MediaTrackPrevious (a

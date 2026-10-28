@@ -31,16 +31,20 @@ staload "file_version.sats"
 staload "mem.sats"
 staload "stats.sats"
 staload "dictionary.sats"
+staload "words_rules.sats"
+staload "words.sats"
 staload "clock.sats"
 staload "sync.sats"
 staload "catalogue.sats"
 staload "catalogues.sats"
 staload "platform.sats"
 staload "screen_controls.sats"
+staload "reading_ruler.sats"
 staload "sharing.sats"
 staload "read_aloud.sats"
 staload "narration.sats"
 staload "back.sats"
+staload "reader_act.sats"
 staload "image_viewer.sats"
 staload "overlay_rules.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
@@ -78,9 +82,8 @@ fn _in_reader (): bool = case+ !_view of ReaderView() => true | LibraryView() =>
 fn _rtl (): bool = case+ reader_direction() of RightToLeft() => true | LeftToRight() => false
 (* The library book whose menu or info view is open *)
 val _menu_index = ref<Int>(~1)
-(* Whether the reader's bars are shown, and the latest hide timer's *)
+(* reader acts: whether the reader's bars are shown *)
 val _chrome = ref<bool>(true)
-val _chrome_generation = ref<int>(0)
 (* A wheel turn waiting out its pause; the latest resize's number *)
 val _wheel_busy = ref<bool>(false)
 val _resize_generation = ref<int>(0)
@@ -246,6 +249,16 @@ fn _stats_control (clicked: !target): $R.option(stats_control) =
 fn _dictionaries_control (clicked: !target): $R.option(dictionaries_control) =
   case+ clicked of
   | Target(bytes, n, _) => ui_dictionaries_control(bytes, n, 10)
+  | NoTarget() => $R.none()
+
+fn _words_control (clicked: !target): $R.option(words_control) =
+  case+ clicked of
+  | Target(bytes, n, _) => ui_words_control(bytes, n, 10)
+  | NoTarget() => $R.none()
+
+fn _review_control (clicked: !target): $R.option(review_control) =
+  case+ clicked of
+  | Target(bytes, n, _) => ui_review_control(bytes, n, 10)
   | NoTarget() => $R.none()
 
 fn _sync_screen_control (clicked: !target): $R.option(sync_screen_control) =
@@ -585,33 +598,36 @@ in lib_render() end
 
 fn _show_library (): void = _library_shown(true)
 
-(* The reader's bars: shown, and hidden again after 5 seconds, unless a
-   reader panel is open then: the bars stay under its scrim, so the
-   button that opened it is there to have the focus back when it
-   closes (they go with the next turn or tap) *)
-fn _chrome_set_off (): void = let
+(* reader acts: the bars come up on a tap and go on a reader's act, never on a timer *)
+fn _chrome_show (): void = let
+  (* reader acts: showing the bars puts the jump's back button away *)
+  val () = (if ~(!_chrome) then reader_back_rest() else ())
+  val () = !_chrome := true
+  val () = ui_attr("reader", AClass, "rv")
+  val () = (if _in_reader() then banner_place_set(BannerUnderBars()) else ())
+in
+  (* reader acts: the system bars come with them *)
+  screen_immersive_set(false)
+end
+
+fn _chrome_hide (act: reader_act): void = let
   val () = !_chrome := false
   val () = ui_attr("reader", AClass, "rv chrome-off")
   val () = (if _in_reader() then banner_place_set(BannerAtTop()) else ())
-in screen_immersive_set(_in_reader()) end
-
-fn _chrome_set (shown: bool): void = let
-  (* bringing the bars up leaves the place a jump landed on: the back
-     button goes *)
-  val () = (if shown && ~(!_chrome) then reader_back_rest() else ())
-  val () = !_chrome := shown
-  val () = (if shown then ui_attr("reader", AClass, "rv") else ui_attr("reader", AClass, "rv chrome-off"))
-  val () = (if _in_reader() then banner_place_set(if shown then BannerUnderBars() else BannerAtTop()) else ())
-  val () = !_chrome_generation := !_chrome_generation + 1
-  val generation = !_chrome_generation
-  (* the system bars follow: away with the reader's own bars (the
-     immersive reading screen, quire#348), there with them *)
-  val () = screen_immersive_set(~shown && _in_reader())
 in
-  if shown then $P.finish<Int>($P.vow($TM.timer_set(5000)), llam(_) =>
-      if !_chrome_generation = generation then (if layer_reader_blocked() then () else _chrome_set_off()) else ())
-  else ()
+  (* reader acts: the immersive reading screen goes with the bars *)
+  screen_immersive_set(_in_reader())
 end
+
+(* reader acts: a jump of any kind takes the bars down *)
+fn _bars_down_for_jump (): void = if !_chrome then _chrome_hide(ActJump()) else ()
+
+fn _jumped (): void = let
+  val () = _bars_down_for_jump()
+in ui_focus("page") end
+
+(* reader acts: the tap in the middle, or the t key *)
+fn _chrome_toggle (): void = if !_chrome then _chrome_hide(ActMiddleTap()) else _chrome_show()
 
 (* The hint on turning pages, shown once, on the first book opened
    (a brief tip in context, not a tour): whether it has been shown,
@@ -638,10 +654,7 @@ in
   in () end)
 end
 
-fn _hint_hide (): void = ui_show("turn-hint", false)
-
-(* Shows the hint, the first time a book is opened: it goes at the first
-   turn, or after 8 seconds *)
+(* reader acts: the first book's hint opens with the bars down and stays until a turn or a tap *)
 fn _hint_offer (): void =
   if !_hint_seen then ()
   else let
@@ -656,9 +669,7 @@ fn _hint_offer (): void =
     val () = release_bytes(value_frozen, value_bytes)
     val () = ui_show("turn-hint", true)
   in
-    (* the bars are up for the first 5 s, over the hint; it is seen for 8 s
-       after they hide *)
-    $P.finish<Int>($P.vow($TM.timer_set(13000)), llam(_) => _hint_hide())
+    (if !_chrome then _chrome_hide(ActFirstOpen()) else ())
   end
 
 (* What opened a book: the reader (a card, a key), whose focus goes to
@@ -686,7 +697,7 @@ fn _show_reader (cause: opening_cause): void = let
   val () = $WN.keep_awake(true)
   (* Back leaves the reader (back.bats) *)
   val () = back_view_set(InReader())
-  val () = _chrome_set(true)
+  val () = _chrome_show()
 in
   case+ cause of
   | ReaderChose() => ui_focus("page")
@@ -733,11 +744,22 @@ implement $P.dispose<import_outcome>(outcome) = import_outcome_free(outcome)
 fn _opened_of (outcome: load_outcome): opened =
   if load_shown(outcome) then OpenedShown() else OpenedNotShown()
 
+(* Where the words screen's Go to takes the reader once the book it opens is shown (keyword: vocabulary) *)
+val _pending_chapter = ref<Int>(~1)
+val _pending_node = ref<Int>(~1)
+
+fn _pending_jump (): void = let
+  val chapter = !_pending_chapter
+  val node = !_pending_node
+  val () = !_pending_chapter := ~1
+in if chapter >= 0 then reader_jump_to(chapter, 0, node) else () end
+
 fn _opened_checked (result: opened): void =
   case+ result of
-  | OpenedShown() => ()
+  | OpenedShown() => _pending_jump()
   | OpenedInLibrary() => ()
   | OpenedNotShown() => let
+    val () = !_pending_chapter := ~1
     val () = (if _in_reader() then _show_library() else ())
   in notice_say_part(reader_chapter_asked()) end
 
@@ -1119,6 +1141,7 @@ fn _settings_apply (): void = let
   val () = _settings_changed()
   (* the book's sizes, given to the page as its chapter is loaded, may be others now *)
   val () = (if _in_reader() then reader_sizes_reload() else ())
+  val () = (if _in_reader() then ruler_apply() else ())
   val () = screen_controls_apply()
 in aloud_choices_show() end
 
@@ -1299,6 +1322,7 @@ fun _lookup_update {again:nat} .<again>. (again: int again): void =
                 else if _in_reader() then _lookup_update(again - 1)
                 else ())
             in false end): bool
+        val () = words_candidate_set(word, word_len, language, language_len)
         val () = $A.free<byte>(language)
         val () = $A.free<byte>(word)
         val () = ui_show("selection-define", found)
@@ -1347,7 +1371,7 @@ fn _share_annotations (way: share_as): void =
 (* Goes to annotation, remembering where the reader was *)
 fn _annotation_go (annotation: int): void = let
   val @(chapter, page, node) = annot_dest(annotation)
-in if chapter >= 0 then reader_jump_to(chapter, page, node) else () end
+in if chapter >= 0 then let val () = reader_jump_to(chapter, page, node) in _jumped() end else () end
 
 (* A factory reset: every book moves to the Trash (where it can still be
    restored until the Trash is emptied) and the settings go back to
@@ -1464,6 +1488,12 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
           val @(code, code_len) = reader_lang_code()
           val () = dict_panel_open(code, code_len)
         in $A.free<byte>(code) end
+        | ~$R.some(SettingsWordsKeep()) => let
+          val () = (case+ set_words_get() of
+            | WordsKept() => set_words_set(WordsNotKept())
+            | WordsNotKept() => set_words_set(WordsKept()))
+          val () = set_save(lib_state_get())
+        in set_show() end
         | ~$R.some(SettingsExportBackup()) => backup_export()
         | ~$R.some(SettingsSetAside()) => lib_aside_run()
         | ~$R.some(SettingsResetSettings()) => _settings_reset()
@@ -1782,6 +1812,9 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 31) = let
           val () = stats_show()
           val () = layer_open(LStats())
         in ui_focus("stats-done") end
+        | ~$R.some(MenuWords()) => let
+          val () = layer_close(LLibraryMenu())
+        in words_screen_open() end
         | ~$R.some(MenuCatalogues()) => let
           val () = layer_close(LLibraryMenu())
         in catalogue_panel_open() end
@@ -1872,7 +1905,7 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
         | ~$R.none() => ()
         | ~$R.some(SyncGo()) => let
           val @(chapter, page, anchor) = sync_further_take()
-        in if chapter >= 0 then (if _in_reader() then reader_jump_to(chapter, page, anchor) else ()) else () end
+        in if chapter >= 0 then (if _in_reader() then let val () = reader_jump_to(chapter, page, anchor) in _bars_down_for_jump() end else ()) else () end
         | ~$R.some(SyncOfferClose()) => sync_further_dismiss())
     in 0 end)
   val listeners = RCons(listeners, OnDocument(), "visibilitychange", llam(_) => let
@@ -1996,6 +2029,11 @@ fn _sheet_open (): void = let
   val () = _sheet_tab_choose(LookTab())
 in ui_focus("typography-close") end
 
+(* The ruler drawn as the settings now say, once they are saved (the reader is not always open) *)
+fn _ruler_apply (): bool = let
+  val () = (if _in_reader() then ruler_apply() else ())
+in true end
+
 (* A reading settings' control clicked: whether a setting changed *)
 fn _typography_chosen (control: typography_control): bool =
   case+ control of
@@ -2028,6 +2066,15 @@ fn _typography_chosen (control: typography_control): bool =
     in true end
   | RubyShow() => let val () = set_ruby_set(RubyShown()) in true end
   | RubyHide() => let val () = set_ruby_set(RubyHidden()) in true end
+  (* the reading ruler (quire#566): drawn at once, on the line it was or the page's first *)
+  | RulerChoiceOff() => let val () = set_ruler_set(RulerOff()) in _ruler_apply() end
+  | RulerChoiceUnderline() => let val () = set_ruler_set(RulerUnderline()) in _ruler_apply() end
+  | RulerChoiceGreyBar() => let val () = set_ruler_set(RulerGreyBar()) in _ruler_apply() end
+  | RulerChoiceShade() => let val () = set_ruler_set(RulerShade()) in _ruler_apply() end
+  | RulerChoiceLightbox() => let val () = set_ruler_set(RulerLightbox()) in _ruler_apply() end
+  | RulerLinesOne() => let val () = set_ruler_lines_set(RulerOneLine()) in _ruler_apply() end
+  | RulerLinesThree() => let val () = set_ruler_lines_set(RulerThreeLines()) in _ruler_apply() end
+  | RulerLinesFive() => let val () = set_ruler_lines_set(RulerFiveLines()) in _ruler_apply() end
   | DimImagesSwitch() => let
       val () = (case+ set_dim_get() of
         | ImagesDimmed() => set_dim_set(ImagesAsTheyAre())
@@ -2202,15 +2249,13 @@ fn _search_selection (): void =
 (* Closes the reader's panels; whether one was open *)
 fn _panels_close (): bool = layer_close_all()
 
-(* A page turn: the bars hide *)
+(* reader acts: a page turn hides the bars *)
 fn _next (): void = let
-  val () = _hint_hide()
-  val () = (if !_chrome then _chrome_set(false) else ())
+  val () = (if !_chrome then _chrome_hide(ActPageTurn()) else ())
 in page_next() end
 
 fn _previous (): void = let
-  val () = _hint_hide()
-  val () = (if !_chrome then _chrome_set(false) else ())
+  val () = (if !_chrome then _chrome_hide(ActPageTurn()) else ())
 in page_prev() end
 
 (* The page to the left and to the right: back and on, or the other way
@@ -2247,20 +2292,20 @@ in
   if page_width <= 0 then ()
   else case+ set_taps_get() of
   | ForwardZones() =>
-    (if (if page_height > 0 then y < page_y + page_height / 8 else false) then _chrome_set(~(!_chrome))
+    (if (if page_height > 0 then y < page_y + page_height / 8 else false) then _chrome_toggle()
      (* back at the edge the book starts from: the left, or the right
         read right to left; anywhere else forward *)
      else if (if _rtl() then x > page_x + page_width - page_width / 4 else x < page_x + page_width / 4) then _previous()
      else _next())
   | OneHandZones() =>
-    (if page_height <= 0 then _chrome_set(~(!_chrome))
+    (if page_height <= 0 then _chrome_toggle()
      else if y < page_y + page_height / 3 then _previous()
      else if y > page_y + page_height - page_height / 3 then _next()
-     else _chrome_set(~(!_chrome)))
+     else _chrome_toggle())
   | SideZones() =>
     (if x < page_x + page_width / 4 then _left()
      else if x > page_x + page_width - page_width / 4 then _right()
-     else _chrome_set(~(!_chrome)))
+     else _chrome_toggle())
 end
 
 (* Whether the volume keys turn the page *)
@@ -2292,7 +2337,7 @@ fn _reader_key (pressed: key, held: modifiers): void =
   | HomeKey() => let val () = $EV.prevent_default() in reader_page(0) end
   | EndKey() => let val () = $EV.prevent_default() in reader_page(1000000) end
   | LetterB() => annot_bookmark_toggle(reader_anchor())
-  | LetterT() => _chrome_set(~(!_chrome))
+  | LetterT() => _chrome_toggle()
   | Slash() => let
       val () = $EV.prevent_default()
     in _search_open() end
@@ -2307,7 +2352,7 @@ fn _reader_key (pressed: key, held: modifiers): void =
   | EscapeKey() =>
     (if _panels_close() then ui_focus("page")
      else if _shown("search-nav") then _search_end()
-     else if !_chrome then _chrome_set(false) else _show_library())
+     else if !_chrome then _chrome_hide(ActEscape()) else _show_library())
   | OtherKey() => ()
 
 (* Escape: the dialog is answered with its first button, or else the
@@ -2330,6 +2375,10 @@ fn _escape_overlay (): bool =
   (* a shelf's screen: the library is shown again *)
   | ~Escaped(LShelf()) => let
       val () = _shelf_left()
+    in true end
+  (* the review closed: the words follow what was reviewed (keyword: vocabulary) *)
+  | ~Escaped(LReview()) => let
+      val () = words_review_closed()
     in true end
   (* the collection menu: the focus goes back to its button *)
   | ~Escaped(LCollectionMenu()) => let
@@ -2518,6 +2567,8 @@ fn _gesture_record (h: $EV.event_payload): void =
   | ~NoBlobBytes() => ()
   | ~BlobBytes(record, record_len) =>
     if record_len < 48 then $A.free<byte>(record)
+    (* reading ruler: a finger on its band drags it *)
+    else if ruler_pointer(ruler_record_of_code(_int32_at(record, 0)), _int32_at(record, 4), _int32_at(record, 8), _int32_at(record, 12), ruler_device_of_code(_int32_at(record, 20))) then $A.free<byte>(record)
     else (case+ _gestures_take() of
       | ~GSome(state, source) => let
           val @(events, asked) = $GS.gestures_raw(source, state, record, 0)
@@ -2625,12 +2676,12 @@ fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
         | ~$R.none() =>
         if print_page >= 0 then
           (* a row that leads nowhere keeps the panel up: nothing moved *)
-          (if reader_goto_page(print_page) then layer_close(LContents()) else ())
+          (if reader_goto_page(print_page) then let val () = layer_close(LContents()) in _jumped() end else ())
         else if bookmark_go >= 0 then let val () = layer_close(LContents()) in _annotation_go(bookmark_go) end
         else if bookmark_delete >= 0 then annot_delete_bookmark(bookmark_delete)
         else if bookmark_note >= 0 then annot_ask_note(bookmark_note, false)
         else if contents_row >= 0 then
-          (if reader_goto_entry(contents_row) then layer_close(LContents()) else ())
+          (if reader_goto_entry(contents_row) then let val () = layer_close(LContents()) in _jumped() end else ())
         else ())
     in 0 end)
   val listeners = RCons(listeners, OnEl("jump-back"), "click", llam(_) => let val () = reader_back() in 0 end)
@@ -2646,12 +2697,12 @@ fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
   val listeners = RCons(listeners, OnEl("scrubber-track"), "pointerdown", llam(h) => let
       val x = _event_x(h)
       val () = !_scrubbing := true
-      val () = _chrome_set(true)
+      val () = _chrome_show()
     in let val () = reader_scrub_preview(x) in 0 end end)
   val listeners = RCons(listeners, OnDocument(), "pointermove", llam(h) =>
       if !_scrubbing then let
         val x = _event_x(h)
-        val () = _chrome_set(true)
+        val () = _chrome_show()
       in let val () = reader_scrub_preview(x) in 0 end end
       else 0)
   val listeners = RCons(listeners, OnDocument(), "pointerup", llam(h) =>
@@ -2749,8 +2800,11 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
           in false end
         | ~$R.some(SelectionCopy()) => let val () = _copy_selection() in false end
         | ~$R.some(SelectionSearch()) => let val () = _search_selection() in false end
-        | ~$R.some(SelectionDefine()) => let val () = dict_show() in false end
-        | ~$R.some(SelectionLookup()) => false
+        | ~$R.some(SelectionDefine()) => let
+            val () = dict_show()
+            val () = words_lookup_note()
+          in false end
+        | ~$R.some(SelectionLookup()) => let val () = words_lookup_note() in false end
         | ~$R.some(SelectionRead()) => let val () = aloud_from_selection() in false end
         | ~$R.some(SelectionShare()) => let val () = _share_selection() in false end): bool
       val () = (if keep then () else _selection_view_put(ShowingPrimary()))
@@ -2806,7 +2860,7 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
         | ~$R.some(FootnoteGo()) => let
           val () = layer_close(LNote())
           val () = reader_note_go()
-        in ui_focus("page") end
+        in _jumped() end
         (* the link opens in its own tab; the question is answered *)
         | ~$R.some(FootnoteOpen()) => layer_close(LNote())
         (* the focus goes back where it was (layer.bats) *)
@@ -2852,13 +2906,15 @@ fn _highlight_tapped (node: Int, x: Int, y: Int): bool =
   | ~$R.none() => false
   | ~$R.some(offset) => annot_tap_select(node, offset)
 
-fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 21) = let
+fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 22) = let
   val listeners = RCons(listeners, OnEl("back-to-library"), "click", llam(_) => let val () = _show_library() in 0 end)
-  val listeners = RCons(listeners, OnEl("previous-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
-  val listeners = RCons(listeners, OnEl("next-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_next() in 0 end end)
+  val listeners = RCons(listeners, OnEl("previous-page"), "click", llam(_) => let val () = page_prev() in 0 end)
+  (* reader acts: a tap on the hint takes it away *)
+  val listeners = RCons(listeners, OnEl("turn-hint"), "click", llam(_) => let val () = hint_hide(ActHintTap()) in 0 end)
+  val listeners = RCons(listeners, OnEl("next-page"), "click", llam(_) => let val () = page_next() in 0 end)
   (* a chapter at a time: no further than the first or the last *)
-  val listeners = RCons(listeners, OnEl("chapter-previous"), "click", llam(_) => let val () = _hint_hide() in let val () = reader_chapter_step(~1) in 0 end end)
-  val listeners = RCons(listeners, OnEl("chapter-next"), "click", llam(_) => let val () = _hint_hide() in let val () = reader_chapter_step(1) in 0 end end)
+  val listeners = RCons(listeners, OnEl("chapter-previous"), "click", llam(_) => let val () = reader_chapter_step(~1) in 0 end)
+  val listeners = RCons(listeners, OnEl("chapter-next"), "click", llam(_) => let val () = reader_chapter_step(1) in 0 end)
   (* what is selected as a pointer goes down: the press clears it *)
   val listeners = RCons(listeners, OnEl("page"), "pointerdown", llam(_) => let
       val () = !_press_selected := _has_selection()
@@ -2882,6 +2938,9 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 21) = let
       (* a single tap on an image is a tap on the page: the sides turn
          it, the middle brings up the bars; the image is shown full
          screen by a double tap or a long press (quire#365) *)
+      (* a tap between the sides' zones on another line moves the reading ruler there (the single-pointer
+         way to move it, WCAG 2.5.7); on its own line it brings up the bars as ever *)
+      else if (if x >= 0 then (if _in_middle(x) then ruler_tap(x, y) else false) else false) then 0
       else if x >= 0 then let
         (* a tap on text the narration reads, between the sides' zones,
            plays on from there; the bars come up or go as ever *)
@@ -3104,6 +3163,156 @@ in
     | $BW.WatchEnded() => ())
 end
 
+(* The Wiktionary search of the word in the language, as the dictionary panel's link to look it up online (keyword: vocabulary) *)
+fn _word_online {word_loc,code_loc:agz}{word_len:nat | word_len <= 64}{code_len:nat | code_len <= 3}
+  (word: !$A.arr(byte, word_loc, 65), word_len: int word_len, code: !$A.arr(byte, code_loc, 3), code_len: int code_len): void =
+  if code_len <= 0 then () else let
+  val out = $A.alloc<byte>(256)
+  val at = _put_literal(out, 0, "https://")
+  val at = _put_array(out, at, code, code_len)
+  val at = _put_literal(out, at, ".wiktionary.org/wiki/Special:Search?search=")
+  val url_len = _percent_encode(word, word_len, 0, out, at)
+  val () = _online_href(out, url_len)
+in $A.free<byte>(out) end
+
+(* The word looked up in the dictionary of its language, and the link to look it up online made (keyword: vocabulary) *)
+fn _word_prepare {word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
+  (word: !$A.arr(byte, word_loc, word_len + 1), word_len: int word_len, language: !$A.arr(byte, language_loc, language_len + 1), language_len: int language_len): dict_found =
+  if word_len <= 0 then DictMissing()
+  else if word_len > 64 then DictMissing()
+  else let
+    val code_len = (if language_len > 3 then 3 else language_len): [code_len:nat | code_len <= 3; code_len <= language_len] int code_len
+    val link_code = $A.alloc<byte>(3)
+    val () = _copy_from_to(language, code_len, link_code, 0, 0)
+    val link_word = $A.alloc<byte>(65)
+    val () = _copy_from_to(word, word_len, link_word, 0, 0)
+    val () = _word_online(link_word, word_len, link_code, code_len)
+    val () = $A.free<byte>(link_word)
+    val () = $A.free<byte>(link_code)
+    val code = $A.alloc<byte>(3)
+    val () = _copy_from_to(language, code_len, code, 0, 0)
+    val short = $A.alloc<byte>(65)
+    val () = _copy_from_to(word, word_len, short, 0, 0)
+    val found = dict_find(code, code_len, short, word_len)
+    val () = $A.free<byte>(short)
+    val () = $A.free<byte>(code)
+  in found end
+
+(* What the lookup found, shown in the panel; a dictionary whose files are still being read is, this time, as none (keyword: vocabulary) *)
+fn _word_shown {word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
+  (found: dict_found, word: $A.arr(byte, word_loc, word_len + 1), word_len: int word_len, language: $A.arr(byte, language_loc, language_len + 1), language_len: int language_len): void =
+  case+ found of
+  | ~DictFound() => let
+      val () = dict_show_listed()
+      val () = $A.free<byte>(word)
+    in $A.free<byte>(language) end
+  | ~DictMissing() => let
+      val () = dict_show_none(word, word_len)
+      val () = $A.free<byte>(word)
+    in $A.free<byte>(language) end
+  | ~DictReading(reading) => let
+      val () = $P.finish<bool>(reading, llam(_) => ())
+      (* ignored: the files were not read, which the panel says as it says a word no dictionary has (keyword: vocabulary) *)
+      val () = dict_show_none(word, word_len)
+      val () = $A.free<byte>(word)
+    in $A.free<byte>(language) end
+
+(* The dictionary's files were read, or could not be: the word looked up once more, or shown as none (keyword: vocabulary) *)
+fn _word_read {word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
+  (opened: bool, word: $A.arr(byte, word_loc, word_len + 1), word_len: int word_len, language: $A.arr(byte, language_loc, language_len + 1), language_len: int language_len): void =
+  if opened then let
+    val found = _word_prepare(word, word_len, language, language_len)
+  in _word_shown(found, word, word_len, language, language_len) end
+  else _word_shown(DictMissing(), word, word_len, language, language_len)
+
+(* A word chosen from a list: its dictionary entry in the panel (keyword: vocabulary) *)
+fn _word_define_with {word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
+  (word: $A.arr(byte, word_loc, word_len + 1), word_len: int word_len, language: $A.arr(byte, language_loc, language_len + 1), language_len: int language_len): void =
+  case+ _word_prepare(word, word_len, language, language_len) of
+  | ~DictReading(reading) =>
+    $P.finish<bool>(reading, llam(opened) => _word_read(opened, word, word_len, language, language_len))
+  | ~DictFound() => _word_shown(DictFound(), word, word_len, language, language_len)
+  | ~DictMissing() => _word_shown(DictMissing(), word, word_len, language, language_len)
+
+(* The row's word looked up in the dictionary panel (keyword: vocabulary) *)
+fn _define_row (row: int): void = let
+  val @(word, word_len, language, language_len) = words_row_word(row)
+in _word_define_with(word, word_len, language, language_len) end
+
+(* The review card's word looked up in the dictionary panel (keyword: vocabulary) *)
+fn _define_card (): void = let
+  val @(word, word_len, language, language_len) = words_review_word()
+in _word_define_with(word, word_len, language, language_len) end
+
+(* The words as a CSV file shared, as a file where the platform shares them, else as text (keyword: vocabulary) *)
+fn _share_words (way: share_as): void =
+  $P.finish<share_end>(words_share(way), llam(ended) =>
+    case+ ended of
+    | ShareOver() => ()
+    | RefusedAsFile() => $P.finish<share_end>(words_share(AsText()), llam(_) => ()))
+
+(* The book of the row opened at the place of its lookup (keyword: vocabulary) *)
+fn _words_go (row: int): void = let
+  val @(book_high, book_low, chapter, node) = words_row_place(row)
+  val index = lib_index_of_id(book_high, book_low)
+in
+  if book_high < 0 then ()
+  else if index < 0 then let
+    val () = modal_inform("Book not found")
+  in modal_text_lit("This word was looked up in a book that is no longer in your library.") end
+  else let
+    val () = layer_close(LWords())
+    val () = !_pending_chapter := chapter
+    val () = !_pending_node := node
+  in _open_book(index, ReaderChose()) end
+end
+
+(* The words screen, its book choice and the review (keyword: vocabulary) *)
+fn _wire_words {count:nat} (listeners: regs(count)): regs(count + 3) = let
+  val listeners = RCons(listeners, OnEl("words-screen"), "click", llam(h) => let
+      val clicked = _target(h)
+      val define_row = _row_of(clicked, "word-go")
+      val go_row = _row_of(clicked, "word-goto")
+      val master_row = _row_of(clicked, "word-master")
+      val delete_row = _row_of(clicked, "word-delete")
+      val control = _words_control(clicked)
+      val () = _target_free(clicked)
+      val () = (case+ control of
+        | ~$R.some(WordsBack()) => let
+            val () = layer_close(LWords())
+          in ui_focus("library-menu-button") end
+        | ~$R.some(WordsLearning()) => words_tab_set(TabLearning())
+        | ~$R.some(WordsMastered()) => words_tab_set(TabMastered())
+        | ~$R.some(WordsReview()) => words_review_open()
+        | ~$R.some(WordsShare()) => _share_words(share_as_now())
+        | ~$R.some(WordsScreen()) => ()
+        | ~$R.none() =>
+          if define_row >= 0 then _define_row(define_row)
+          else if go_row >= 0 then _words_go(go_row)
+          else if master_row >= 0 then words_row_master(master_row)
+          else if delete_row >= 0 then words_row_delete(delete_row)
+          else ())
+    in 0 end)
+  val listeners = RCons(listeners, OnEl("words-book"), "change", llam(_) => let val () = words_book_changed() in 0 end)
+  val listeners = RCons(listeners, OnEl("review-screen"), "click", llam(h) => let
+      val clicked = _target(h)
+      val control = _review_control(clicked)
+      val () = _target_free(clicked)
+      val () = (case+ control of
+        | ~$R.some(ReviewBack()) => let
+            val () = layer_close(LReview())
+            val () = words_review_closed()
+          in ui_focus("words-review") end
+        | ~$R.some(ReviewShow()) => let
+            val () = words_review_revealed()
+          in _define_card() end
+        | ~$R.some(ReviewKnown()) => words_review_answer(GotIt())
+        | ~$R.some(ReviewForgot()) => words_review_answer(Forgot())
+        | ~$R.some(ReviewScreen()) => ()
+        | ~$R.none() => ())
+    in 0 end)
+in listeners end
+
 (* The offer of a new version: Reload, or Dismiss *)
 fn _wire_update {count:nat} (listeners: regs(count)): regs(count + 1) =
   RCons(listeners, OnEl("update-toast"), "click", llam(h) => let
@@ -3272,6 +3481,7 @@ implement main0 () = let
   (* every listener, in one table: each one's id is its place in it *)
   val listeners = _wire_platform(_wire_settings_screen(_wire_sync(_wire_catalogues(_wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil()))))))))))))
   val listeners = _wire_update(listeners)
+  val listeners = _wire_words(listeners)
   val listeners = _wire_retry(listeners)
   (* the narration's controls and its audio's events *)
   val listeners = narration_listen(listeners)
@@ -3289,6 +3499,7 @@ implement main0 () = let
   val () = lib_install_hint_load()
   val () = stats_load()
   val () = stamp_load()
+  val () = words_start()
   val () = $P.finish<int>(dict_load(), llam(_) => _trash_dictionaries())
   val () = $P.finish<int>(catalogue_load(), llam(_) => ())
   (* nothing is shown until the view kept by the last run is known: a

@@ -76,9 +76,11 @@
       "math-layout.spec.js",
       "old-library.spec.js",
       "publisher-sizes.spec.js",
+      "reading-ruler.spec.js",
       "search.spec.js",
       "titles-redraw.spec.js",
-      "vertical.spec.js"
+      "vertical.spec.js",
+      "vocabulary.spec.js"
     ],
     "relaunch": [
       "drm.spec.js",
@@ -102,7 +104,8 @@
       "font-scale.spec.js",
       "settings-screen.spec.js",
       "raw-mouse.spec.js",
-      "evidence.spec.js"
+      "evidence.spec.js",
+      "stability-ruler.spec.js"
     ],
     "perf": [
       "pathological.spec.js",
@@ -114,10 +117,16 @@
       "check",
       "checkers",
       "accept/back-offer",
+      "accept/chrome-hidden-with-act",
       "accept/codec-cut-is-a-loss",
       "accept/crc-shift-8",
       "accept/fixed-box-fits",
       "accept/page-turn-fresh-copy",
+      "accept/ruler-device-matched",
+      "accept/ruler-drag-matched",
+      "accept/ruler-node-matched",
+      "accept/ruler-record-matched",
+      "accept/ruler-rules-use",
       "reject/back-nothing-to-offer",
       "reject/codec-absent-opt-group",
       "reject/codec-cut-dropped-from-join",
@@ -129,6 +138,13 @@
       "reject/lay-writes-gap",
       "reject/library-view-unmatched",
       "reject/page-turn-copy-marked",
+      "reject/ruler-band-other-pair",
+      "reject/ruler-device-unmatched",
+      "reject/ruler-drag-unmatched",
+      "reject/ruler-node-unmatched",
+      "reject/ruler-record-unmatched",
+      "reject/ruler-veil-other-theme",
+      "reject/ruler-veil-unproven-strength",
       "reject/picture-box-zoom-zero",
       "reject/shelf-unmatched",
       "reject/undo-offer-brief",
@@ -270,6 +286,7 @@
       "accept/page-width-whole",
       "reject/back-other-timeout",
       "reject/cfi-side-unmatched",
+      "reject/chrome-hidden-without-act",
       "reject/codec-absent-then-same-tag",
       "reject/codec-cut-lost-another-cause",
       "reject/codec-drops-unknown-chunk",
@@ -428,7 +445,8 @@
     "mutation-bytes-records": [
       "mutation/bytes-part2of2",
       "mutation/bookrec",
-      "mutation/indexrec"
+      "mutation/indexrec",
+      "mutation/wordrec"
     ],
     "mutation-schema-1": [
       "mutation/schema-part1of2"

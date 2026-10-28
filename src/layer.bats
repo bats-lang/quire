@@ -7,6 +7,7 @@
 
 staload "ui.sats"
 staload "back.sats"
+staload "reading_ruler.sats"
 
 (* The overlays. Each is one element, whose id only this module knows,
    so an overlay is shown or hidden only here, and the stack below is
@@ -35,6 +36,8 @@ staload "back.sats"
   | LSortMenu      (* the sort and view menu (#377, #404) *)
   | LCollectionMenu (* the library's collection menu: which collection is shown, and its Rename and Delete *)
   | LShelf         (* a shelf's own screen over the library: Hidden, Archived or Trash (#404) *)
+  | LWords         (* the words looked up, kept with their sentence (keyword: vocabulary) *)
+  | LReview        (* the words due, one at a time, over the words screen (keyword: vocabulary) *)
 
 fn _element_id (overlay: layer): [id_len:pos | id_len < 128] string id_len =
   case+ overlay of
@@ -50,6 +53,8 @@ fn _element_id (overlay: layer): [id_len:pos | id_len < 128] string id_len =
   | LSortMenu() => "sort-menu"
   | LShelf() => "shelf-header"
   | LCollectionMenu() => "collection-menu"
+  | LWords() => "words-screen"
+  | LReview() => "review-screen"
 
 fn _number (overlay: layer): int =
   case+ overlay of
@@ -59,6 +64,7 @@ fn _number (overlay: layer): int =
   | LCatalogues() => 13 | LCatalogue() => 14
   | LSync() => 15 | LSettings() => 16 | LAbout() => 17
   | LSyncStep() => 18 | LSortMenu() => 19 | LShelf() => 20 | LCollectionMenu() => 21
+  | LWords() => 22 | LReview() => 23
 
 (* The reader's panels, which are modal (Material 3's modal bottom
    sheet, WAI-ARIA's modal dialog): while one is open, a scrim covers the
@@ -76,6 +82,7 @@ fn _over_reader (overlay: layer): bool =
   | LCatalogues() => false | LCatalogue() => false | LSync() => false
   | LSettings() => false | LAbout() => false
   | LSyncStep() => false | LSortMenu() => false | LShelf() => false | LCollectionMenu() => false
+  | LWords() => false | LReview() => false
 
 (* Whether a reader panel dims the reader behind it. A panel that explains
    a place in the text (a note, a word looked up) does not: the scrim
@@ -95,6 +102,7 @@ fn _scrim_of (overlay: layer): scrim =
   | LCatalogues() => Veils() | LCatalogue() => Veils() | LSync() => Veils()
   | LSettings() => Veils() | LAbout() => Veils()
   | LSyncStep() => Veils() | LSortMenu() => Veils() | LShelf() => Veils() | LCollectionMenu() => Veils()
+  | LWords() => Veils() | LReview() => Veils()
 
 (* The open overlays, the last opened first, each with where the focus
    goes back to when it closes *)
@@ -158,6 +166,7 @@ fun _screen_open {count:nat} .<count>. (overlays: !layers(count)): bool =
   | LCons(first, _, rest) =>
     (case+ first of
      | LSettings() => true | LSync() => true | LAbout() => true | LDictionaries() => true
+     | LWords() => true | LReview() => true
      | _ => _screen_open(rest))
 
 (* Whether a menu opened from the library is among the open overlays *)
@@ -179,6 +188,8 @@ fn _open_set {count:nat} (overlays: layers(count)): void = let
   val () = ui_undo_under_menu(menu)
   val any = (case+ overlays of LNil() => NotShown() | LCons(_, _, _) => Shown()): shown
   val () = _open_put(overlays)
+  (* a reading ruler that could not be placed under a panel is placed once it has gone *)
+  val () = ruler_retry()
 in back_overlays_set(any) end
 
 (* overlays without overlay, and where the focus went back to from it *)

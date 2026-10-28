@@ -18,7 +18,7 @@ staload "declarations.sats"
 
 implement image_zoom_axes () = $GT.AxNone()
 
-#pub fn overlay_rules {left:nat | left >= 8397} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8397] sheet(after, false, false)
+#pub fn overlay_rules {left:nat | left >= 8477} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8477] sheet(after, false, false)
 
 (* The image viewer and toasts, from .imview on *)
 fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2706} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2706] sheet(after, false, false) = let
@@ -142,7 +142,7 @@ fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2706} (sheet: sheet
 in sheet end
 
 (* The menus, from .ovl on *)
-fn overlay_rules_menus {left:nat | left >= 2315} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2315] sheet(after, false, false) = let
+fn overlay_rules_menus {left:nat | left >= 2395} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2395] sheet(after, false, false) = let
   val sheet = rule(sheet, ".ovl")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Inset(), "0")
@@ -166,6 +166,9 @@ fn overlay_rules_menus {left:nat | left >= 2315} (sheet: sheet(left, false, fals
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = lay(sheet, BoxShadow(), "0 4px 24px rgba(0,0,0,.3)")
+  (* a menu or dialog taller than the window scrolls inside it (keyword: menu-scroll) *)
+  val sheet = capped(sheet, CapWindow())
+  val sheet = scrolling(sheet)
   val sheet = close(sheet)
   val sheet = rule(sheet, ".mi")
   val sheet = lay(sheet, TextAlign(), "left")
