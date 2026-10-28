@@ -3,28 +3,31 @@
 # calls the GitHub REST API, reads a worktree's git state and prints one sweep. The move into bats is bats-lang/bats#435 (filed for it).
 # quire#573 (p3) keeps the script in the repository as a skill; its comments name pitboss, a Python package in dev-skill-up/pitboss, as the replacement.
 # Install on a machine: install -m 755 qsweep slots /usr/local/bin/ (the copy that runs is a copy of these files).
-# Ledger of the two worker slots (one sonnet, one haiku; down from three on 2026-10-17, owner, 2026-10-17T20:07:29Z: "go down to one sonnet, one haiku until I say otherwise"), kept by hand:
+# Ledger of the worker slots, kept by hand: the rows of the ledger file are the agents that run, so no text here names how many (only an explicit owner instruction changes the rows) (quire#897, orchestration.md, Agents and slots):
 #   slots                      print the ledger and a loud line for each EMPTY slot
-#   slots set SLOT AGENT TASK  a worker took the slot (SLOT: sonnet1, haiku1)
+#   slots set SLOT AGENT TASK  a worker took the slot (SLOT: the name in the first column; a new name adds a row)
 #   slots free SLOT            the worker finished, or was stopped: the slot is empty
-#   slots check N              N = agents running now (count them with ListAgents): warns TOO MANY AGENTS above 2
-# At most TWO agents run at any time, REVIEWERS INCLUDED (orchestrator, 2026-10-18, from the owner's slot count; orchestration.md, Agents and slots, step 4): a review takes a slot like any work.
+#   slots check N              N = agents running now (count them with ListAgents): warns TOO MANY AGENTS above the number of rows
+# The rows are the agents that run, REVIEWERS INCLUDED (orchestrator, 2026-10-18, from the owner's slot ledger; orchestration.md, Agents and slots, step 4): a review takes a slot like any work.
 # Update it at every spawn and at every final hand-back or completion notice. It is never the answer to "what is running" or "is a slot free": that is ListAgents (quire#751, row 14).
-f=/tmp/claude-0/slots.tsv
-[ -f "$f" ] || printf 'sonnet1\t-\t-\nhaiku1\t-\t-\n' > "$f"
+f=${SLOTS_FILE:-/tmp/claude-0/slots.tsv}
+[ -f "$f" ] || : > "$f"
 case "$1" in
   set)  [ $# -ge 4 ] || { echo "usage: slots set SLOT AGENT TASK" >&2; exit 2; }
         s=$2; a=$3; shift 3; t="$*"
         cur=$(awk -F'\t' -v s="$s" '$1==s{print $2}' "$f")
-        if [ -n "$cur" ] && [ "$cur" != "-" ]; then echo "TOO MANY AGENTS? slot $s is still held by $cur: free it first (at most two agents run at once, reviewers included); overwriting" >&2; fi
-        awk -F'\t' -v OFS='\t' -v s="$s" -v a="$a" -v t="$t" '$1==s{$2=a;$3=t}1' "$f" > "$f.new" && mv "$f.new" "$f" ;;
+        if [ -n "$cur" ] && [ "$cur" != "-" ]; then echo "TOO MANY AGENTS? slot $s is still held by $cur: free it first (reviewers included); overwriting" >&2; fi
+        if [ -z "$cur" ] && ! awk -F'\t' -v s="$s" '$1==s{found=1} END{exit !found}' "$f"; then printf '%s\t%s\t%s\n' "$s" "$a" "$t" >> "$f"
+        else awk -F'\t' -v OFS='\t' -v s="$s" -v a="$a" -v t="$t" '$1==s{$2=a;$3=t}1' "$f" > "$f.new" && mv "$f.new" "$f"; fi ;;
   free) [ $# -eq 2 ] || { echo "usage: slots free SLOT" >&2; exit 2; }
         awk -F'\t' -v OFS='\t' -v s="$2" '$1==s{$2="-";$3="-"}1' "$f" > "$f.new" && mv "$f.new" "$f" ;;
   check) [ $# -eq 2 ] || { echo "usage: slots check N" >&2; exit 2; }
-        if [ "$2" -gt 2 ]; then echo "TOO MANY AGENTS: $2 running, the limit is 2 (reviewers included): do not start another; wait for a hand-back" >&2; exit 1; fi
-        echo "agents running: $2 (limit 2)"; exit 0 ;;
+        case "$2" in ''|*[!0-9]*) echo "usage: slots check N (N a whole number)" >&2; exit 2 ;; esac
+        rows=$(awk 'NF{n++} END{print n+0}' "$f")
+        if [ "$2" -gt "$rows" ]; then echo "TOO MANY AGENTS: $2 running, the ledger $f has $rows rows (reviewers included): do not start another; wait for a hand-back" >&2; exit 1; fi
+        echo "agents running: $2 (ledger rows: $rows)"; exit 0 ;;
   ""|show) ;;
   *) echo "usage: slots [show|set SLOT AGENT TASK|free SLOT|check N]" >&2; exit 2 ;;
 esac
-awk -F'\t' '{ if ($2 == "-") { print "LEDGER SHOWS EMPTY: " $1 " -- after ListAgents confirms it, fill it NOW, in the order of orchestration.md (Agents and slots): (1) a fix, by an author (any author, not necessarily the one who wrote the PR), for a review that asked for changes, a red CI, or a merge conflict; (2) a review of a PR green on its exact head; (3) the oldest ticket of the highest priority (CLAUDE.md, Priorities); never hold it"; e++ } else print "ledger: slot " $1 " was set to: " $3 " (" $2 ") -- not evidence that it runs" } END { print "slots: this ledger is a note kept by hand, not the state of the agents (limit: two agents at once, reviewers included); only ListAgents says what runs" }' "$f"
+awk -F'\t' '{ if ($2 == "-") { print "LEDGER SHOWS EMPTY: " $1 " -- after ListAgents confirms it, fill it NOW, in the order of orchestration.md (Agents and slots): (1) a fix, by an author (any author, not necessarily the one who wrote the PR), for a review that asked for changes, a red CI, or a merge conflict; (2) a review of a PR green on its exact head; (3) the oldest ticket of the highest priority (CLAUDE.md, Priorities); never hold it"; e++ } else print "ledger: slot " $1 " was set to: " $3 " (" $2 ") -- not evidence that it runs" } END { print "slots: this ledger is a note kept by hand, not the state of the agents (its rows are the agents that run, reviewers included); only ListAgents says what runs" }' "$f"
 echo "CHECK BEFORE YOU ANSWER: this ledger is kept by hand and goes stale. Run ListAgents now and correlate each running agent with a slot above (a dead agent still shows here; a live one may be missing). Fix the ledger with slots free/set, then act or answer." >&2
