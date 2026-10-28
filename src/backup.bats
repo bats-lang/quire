@@ -26,6 +26,8 @@ staload "mem.sats"
 staload "stats.sats"
 staload "app.sats"
 staload "dictionary.sats"
+staload "wordsjson.sats"
+staload "wordstore.sats"
 staload "clock.sats"
 staload "undo.sats"
 staload "catalogues.sats"
@@ -87,6 +89,13 @@ fn _fullscreen_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
   | FullscreenOn() => jw_lit(out, position, "true")
   | FullscreenOff() => jw_lit(out, position, "false")
 
+(* Whether the words looked up are kept: true or false (keyword: vocabulary) *)
+fn _words_kept_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
+  (out: !$A.arrx(byte, l, n, owner), position: int position): [stop:nat | stop <= position + 5] int stop =
+  case+ set_words_get() of
+  | WordsKept() => jw_lit(out, position, "true")
+  | WordsNotKept() => jw_lit(out, position, "false")
+
 fn _rotation_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
   (out: !$A.arrx(byte, l, n, owner), position: int position): [stop:nat | stop <= position + 5] int stop =
   case+ set_rotation_get() of
@@ -98,7 +107,7 @@ fn _rotation_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
    among them), and
    the books' opening bracket *)
 fn _settings_chunk (): jchunk =
-  case+ piece_new(576 + 64 + 100 + 24866 + 96 + 24 + 32) of
+  case+ piece_new(576 + 64 + 100 + 24866 + 96 + 24 + 32 + 24 + 48) of
   | ~NoPiece() => JNone()
   | ~Piece(owner, out) => let
       (* the version of Quire that wrote it (#219) *)
@@ -145,6 +154,10 @@ fn _settings_chunk (): jchunk =
       val next = jw_int(out, next, ruby_code(set_ruby_get()))
       val next = jw_lit(out, next, ",\"publisherSizes\":")
       val next = jw_int(out, next, sizes_code(set_sizes_get()))
+      val next = jw_lit(out, next, ",\"readingRuler\":")
+      val next = jw_int(out, next, ruler_code(set_ruler_get()))
+      val next = jw_lit(out, next, ",\"readingRulerLines\":")
+      val next = jw_int(out, next, ruler_lines_code(set_ruler_lines_get()))
       val next = jw_lit(out, next, ",\"readingSpeed\":")
       val next = jw_int(out, next, speech_rate_hundredths(set_speech_rate_get()))
       (* a level in percent, or the system's own *)
@@ -154,6 +167,8 @@ fn _settings_chunk (): jchunk =
       val next = _rotation_json(out, next)
       val next = jw_lit(out, next, ",\"fullScreen\":")
       val next = _fullscreen_json(out, next)
+      val next = jw_lit(out, next, ",\"wordsKept\":")
+      val next = _words_kept_json(out, next)
       val next = jw_lit(out, next, ",\"voices\":")
       val next = set_voices_json(out, next)
       (* the narration's speed, in hundredths (50 to 200) *)
@@ -574,6 +589,7 @@ datatype export_outcome =
   | ExportNotShared
   | ExportNoMemory
   | ExportNotesUnread
+  | ExportWordsUnread
   | ExportBusy
 
 implement $P.dispose<export_outcome>(_) = ()
@@ -710,8 +726,18 @@ fn _export_run (sink: export_sink): void =
     val () = _push(_log_chunk())
     val () = _push(dict_backup_json())
     val () = _push(catalogue_backup_json())
-    val () = _push(_collections_chunk())
-  in _export_books(0, lib_count(), true, sink) end
+  in
+    (* the words kept (keyword: vocabulary): a backup that looks whole but lost them is worse than none *)
+    $P.finish<jchunk>(words_backup_chunk(), llam(words) =>
+      case+ words of
+      | ~JNone() => let
+          val () = _file_put(jfile_new{BACKUP_MAX_BYTES}())
+        in _export_ended(sink, ExportWordsUnread()) end
+      | ~JChunk(words_owner, words_bytes, words_len) => let
+          val () = _push(JChunk(words_owner, words_bytes, words_len))
+          val () = _push(_collections_chunk())
+        in _export_books(0, lib_count(), true, sink) end)
+  end
 
 (* What the reader is told of how making the backup ended *)
 fn _export_said (outcome: export_outcome): void =
@@ -726,6 +752,7 @@ fn _export_said (outcome: export_outcome): void =
   | ExportNotShared() => _say("The backup could not be shared, so it was not saved. Try again.")
   | ExportNoMemory() => _say("The backup could not be made: there is not enough memory.")
   | ExportNotesUnread() => _say("The backup could not be made: a book's notes could not be read. Try again.")
+  | ExportWordsUnread() => _say("The backup could not be made: your words could not be read. Try again.")
   | ExportBusy() => _say("A backup is already being made. Wait for it, then try again.")
 
 (* Makes the backup, quire-backup.json: downloaded, or shared in the
@@ -1336,6 +1363,11 @@ in
            val () = (if is_bool then set_narration_notes_set(if reads then NotesRead() else NotesSkipped()) else ())
            val next = (if is_bool then after else jr_skip(buf, n, value_start)): [next:int | position < next; next <= n] int next
          in _settings_members(buf, n, next, key, sort) end
+         else if jr_key_is(key, key_len, "wordsKept") then let
+           val @(is_bool, kept, after) = jr_bool(buf, n, value_start)
+           val () = (if is_bool then set_words_set(if kept then WordsKept() else WordsNotKept()) else ())
+           val next = (if is_bool then after else jr_skip(buf, n, value_start)): [next:int | position < next; next <= n] int next
+         in _settings_members(buf, n, next, key, sort) end
          else if jr_key_is(key, key_len, "fullScreen") then let
            val @(is_bool, full, after) = jr_bool(buf, n, value_start)
            val () = (if is_bool then set_fullscreen_set(if full then FullscreenOn() else FullscreenOff()) else ())
@@ -1407,6 +1439,12 @@ in
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "publisherSizes") then let
         val () = (if value >= 0 then (if value <= 1 then set_sizes_set(sizes_of_code(value)) else ()) else ())
+      in _settings_members(buf, n, stop, key, sort) end
+      else if jr_key_is(key, key_len, "readingRuler") then let
+        val () = (if value >= 0 then (if value <= 4 then set_ruler_set(ruler_of_code(value)) else ()) else ())
+      in _settings_members(buf, n, stop, key, sort) end
+      else if jr_key_is(key, key_len, "readingRulerLines") then let
+        val () = (if value >= 0 then (if value <= 2 then set_ruler_lines_set(ruler_lines_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "ruby") then let
         val () = (if value >= 0 then (if value <= 1 then set_ruby_set(ruby_of_code(value)) else ()) else ())
@@ -1511,6 +1549,15 @@ in
          val @(closed, stop) = _log_at(buf, n, value_start + 1)
          val () = stats_restored()
        in if closed then _top_members(buf, n, stop, key, numbers, map, quire, books, sort) else @(false, books, sort) end
+       else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, map, quire, books, sort))
+    else if jr_key_is(key, key_len, "words") then
+      (if jr_is(buf, n, value_start, 91) then let
+         val read = words_parse(buf, n, value_start)
+         val stop = jr_skip(buf, n, value_start)
+         val mode = (case+ !_mode of PutBack() => WordsReplace() | FromFile() => WordsMerge())
+         (* ignored: the words are put into the store as the restore goes on; one that is not stays as it was (keyword: vocabulary) *)
+         val () = $P.finish<Int>(words_restore(read, mode), llam(_) => ())
+       in _top_members(buf, n, stop, key, numbers, map, quire, books, sort) end
        else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, map, quire, books, sort))
     else if jr_key_is(key, key_len, "collections") then
       (if jr_is(buf, n, value_start, 91) then let
@@ -1646,6 +1693,7 @@ in
         in (case+ why of
           | ExportNoMemory() => _say("The backup was not restored: there is not enough memory to keep what you have, so that the restore can be undone.")
           | ExportNotesUnread() => _say("The backup was not restored: a book's notes could not be read, so what you have could not be kept for an Undo. Try again.")
+          | ExportWordsUnread() => _say("The backup was not restored: your words could not be read, so what you have could not be kept for an Undo. Try again.")
           | ExportBusy() => _say("A backup is being made. Wait for it, then restore.")
           | ExportedByDownload() => _say("The backup was not restored.")
           | ExportedByShare() => _say("The backup was not restored.")

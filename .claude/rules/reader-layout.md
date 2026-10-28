@@ -1,6 +1,9 @@
 ---
 paths:
   - src/reader*.bats
+  - src/reading_ruler.bats
+  - src/ruler_rules.bats
+  - e2e/reading-ruler*
   - src/settings.bats
   - src/image_viewer.bats
   - src/page_size.bats
@@ -102,10 +105,43 @@ paths:
   later timeout. Contents shows "Back to <chapter> · page N" (`contents-back`)
   while a position is kept. Opening or closing a book forgets them
   (`reader_stack_clear`). The first-book hint says both gestures
-  (`gesture_hint`), lies in the band the text keeps clear of (`hint_band`) and is
-  up for 8 s after the bars first hide. `tests/static` holds code that must not
+  (`gesture_hint`) and lies in the band the text keeps clear of (`hint_band`); how
+  it and the bars go is "The bars and the hint go when the reader acts" below. `tests/static` holds code that must not
   type-check (a forged `TIMED`, another timeout's proof) and code that must
   (`_back_offer`).
+
+## The bars and the hint go when the reader acts (#560)
+
+No timer hides the reader's bars or the first-book hint (keyword: reader acts). Hiding either
+takes a `reader_act` (`src/reader_act.bats`: `ActMiddleTap`, `ActPageTurn`, `ActJump`, `ActEscape`,
+`ActHintTap`, `ActFirstOpen`), so a call that names no act is refused
+(`tests/static/reject/chrome-hidden-without-act`; the accept fixture passes an act). The act
+constructors are public: a timer that builds one type-checks, and only the e2e specs "the reader's
+bars stay up 30 s" and "the hint waits for the first turn" catch it (their injections are in #888).
+
+* **Bars.** They come up on a tap in the middle (or the `t` key), a scrubber touch, or a book
+  opening, and go on a tap in the middle, a page turn (`_next`, `_previous`), Escape, a jump from
+  Contents, the page list or a bookmark (`_jumped`, which gives the page the focus), and the
+  first book's opening. A panel open leaves them under its scrim. The back button's own 10 s
+  (`TIMED`) is unchanged.
+* **Hint.** `hint_hide` takes the act and goes at `ActPageTurn` (the funnels of every turn in
+  `reader.bats`: `page_next`, `page_prev`, `reader_chapter_step`, and `reader_turn_on`, which
+  reading aloud uses) and `ActHintTap` (the hint takes pointer events and is a click target of
+  its own); every other act leaves it. It still shows once.
+* **They do not hide each other.** The first book opens with the bars down (`ActFirstOpen`,
+  `_hint_offer`). The alternative, the hint where the bars do not cover it, was measured
+  (`layout.spec.js`, "on a first open no bar covers the hint", 320, 412 and the other widths):
+  with the bars up the top bar covers the hint at every width, and the band the text keeps clear
+  of is the bar's height, so a hint below the bar would lie over the text.
+* **Research** (the ticket's, kept). Kobo, Readest, Google Play Books and Apple Books show the
+  controls on a tap in the middle and document no timer; Android's immersive guidance gives none,
+  and hiding after a few seconds is a video player's convention; WCAG 2.2.1 (Timing Adjustable)
+  counts a time limit the content sets; Adobe Spectrum's coach mark goes when the user does the
+  thing; NN/g: one tip per interaction. Kindle and KOReader were not checked on a device.
+* **Tests.** `reader.spec.js` ("the reader's bars stay up 30 s", "the hint goes at the first turn:
+  <route>", the hint staying 30 s). `openBook` taps the middle after a first open so that other
+  specs see the bars as every other book has them (`asOpened: true` leaves them as the app
+  opened them); `bareReader` takes bars and hint down by the reader's acts.
 
 ## The picture viewer (#382)
 
@@ -246,3 +282,55 @@ text is optional) is in #592.
   `WithPrevious`). The facing page is rendered into `facing-box` (`_facing_open`),
   its content nodes going on from the page's, and cannot be selected (`.facing`),
   so what is marked or read aloud is the page's. A turn moves a spread at a time.
+
+## The reading ruler (keyword: reading ruler, #566)
+
+A band over the text that holds the eye to one line, for readers who lose their place; offered as a
+preference (Off to begin with), not as a claim: the evidence is for reading speed, and weaker for
+comprehension (Niklaus, Cai, Bylinskii and Wallace, *Digital Reading Rulers*, CHI 2023: 177 readers, 91 with
+dyslexia; Grey Bar, Shade and Underline raised the speed of readers with dyslexia by about 10 to 20 words a
+minute, readers with dyslexia preferred Lightbox, no style was preferred by all, so the paper recommends
+offering several). Comparable software: Kindle's Reading Ruler (colour, opacity, style and size; on Android
+it asks for continuous scrolling), Immersive Reader's Line focus (1, 3 or 5 lines, the rest dimmed, arrow keys
+move it) and Moon+ Reader (6 styles); KOReader, Thorium, Apple Books and Play Books have none (searched).
+
+* **Styles** (`reading_ruler`: `RulerOff | RulerUnderline | RulerGreyBar | RulerShade | RulerLightbox`, a
+  segmented group in the Look tab) and, for the grey bar and the lightbox, the lines held (`ruler_lines`: one,
+  three, five, as Immersive Reader). A device setting like the brightness: byte "R" and two bytes at the end
+  of the "S2" record, `readingRuler` and `readingRulerLines` in the backup, reset with the settings and put
+  back by Undo (`set_reset_undoable`).
+* **Colours are the theme's, proven** (`src/ruler_rules.bats`, a style element of its own,
+  `style-ruler-rules`, since the main sheet's budget is full). The underline is the text's own colour,
+  `underline(E_fg_bg | ...)` (`EDGEP`, the participants' ask). The grey bar is the role `RULER` (a ground under
+  the text, in `PAL` and `HARMONY`), written only by `band(R_ruler | ...)`: `RULED` proves the body's text and a
+  link on it in every theme at the levels `HARMONY` and `SURF` ask. Shade and Lightbox are the page's ground as
+  a veil over the lines, `dim_rule(D_<theme>_<strength> | ...)`: `DIMMED` proves, per theme and strength, that
+  the dimmed text, a link and the text on a highlight stay readable (`BLEND` is the rounding of the blend,
+  `DIMS` the pair). The page turn's black shade (`VEILED`) was not reused: its proven strengths in the dark
+  themes are 8% and none at night, which dims nothing there; a veil of the ground dims text toward the page in
+  every theme and is proven the same way. Dimmed, not hidden: the reader may glance back.
+  `scripts/gen-harmony.py` writes the proofs; `tests/static/solver/gen_blend.py` the fixtures of `BLEND`.
+* **Where it sits** (`src/reading_ruler.bats`): over the text area (`#ruler`, inside the page's paddings, so
+  the footer is never dimmed), on a line found from a point by the caret the browser gives there and the place
+  of that character (`caret_position_from_point`, `measure_text_offset`); the band is the line's height around
+  the glyph box. The reader tells the module its view (`ruler_view`: paged across, paged right to left, scrolled,
+  a column set vertically from the right or from the left, none for a fixed layout) at every page it shows
+  (`_place_shown`, `reader_scrolled`). A page turn puts it on the page's first line; scrolled it keeps its height
+  and snaps to the whole line there (a line the margin cuts is not one); a spread holds the column the line is
+  in; a vertical book's ruler lies along the column (`ruler-down`). The band is as many lines as the setting,
+  from the line it is on in the way the book is read. Taken as a limit: a line with a larger font than the text
+  (a heading) is held at the text's line height.
+* **Moving it.** A tap between the sides' zones on another line moves it there (the single-pointer way, WCAG
+  2.5.7); a tap on its own line brings up the bars as before, so the bars are summoned by a tap on the ruler's
+  line while it is on. A finger or pen that goes down on the band drags it from line to line
+  (`ruler_pointer`, before the gestures see the record, so the page does not turn); a mouse's drag selects text,
+  and a scrolled page's drag scrolls the text under the ruler (Kindle's way). Reading aloud and a narrated book's
+  clips put it on the line of the sentence or clip (`ruler_follow`). No new keys (the arrows are page keys). It is
+  `aria-hidden` and takes no focus: a screen reader has its own.
+* **Under a panel.** A point under the reading settings' sheet hits the sheet, so a ruler that could not be
+  placed there is placed a moment after the panel closes (`ruler_retry`, from `_open_set` in `layer.bats`).
+* **Not** in a fixed-layout page (its lines are the publisher's art) or the image viewer.
+* Tests: `e2e/reading-ruler.spec.js` (each style on the line it should be at 1, 3 and 5 lines, the first line
+  after a turn, tap, drag, read aloud, scrolled and vertical, the contrasts as the browser computes them in the
+  five themes, the setting kept, in the backup, reset and Undone, the paragraph kept with the ruler on);
+  `tests/static/reject/ruler-*` (a colour pair without its proof does not type-check).

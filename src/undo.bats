@@ -51,6 +51,7 @@ implement $P.dispose<settled>(_) = ()
   | BookHidden(UntilDismissed) of ()
   | BookUnhidden(UntilDismissed) of ()
   | BackupRestored(UntilDismissed) of ()
+  | WordDeleted(UntilDismissed) of ()
   | PlainMessage(Brief) of ()
 
 (* "'" title "' moved to Trash", the title cut when it is long *)
@@ -86,6 +87,7 @@ fn _offered_show {life:offer_life} (what: offered(life)): void =
   | ~BookHidden() => ui_text("undo-text", "Book hidden")
   | ~BookUnhidden() => ui_text("undo-text", "Book unhidden")
   | ~BackupRestored() => ui_text("undo-text", "Backup restored")
+  | ~WordDeleted() => ui_text("undo-text", "Word deleted")
   | ~PlainMessage() => ui_text("undo-text", "Done")
 
 (* The offer shown: the resolver of the promise undo_offer returned. An action that can be undone is done at once

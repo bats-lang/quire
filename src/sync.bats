@@ -26,6 +26,8 @@ staload "book.sats"
 staload "library.sats"
 staload "stored_key.sats"
 staload "annot.sats"
+staload "wordsjson.sats"
+staload "wordstore.sats"
 staload "stats.sats"
 staload "backup.sats"
 staload "jsonio.sats"
@@ -3149,6 +3151,18 @@ fn _content_free (content: content_bytes): void =
   | ~NoContentBytes() => ()
   | ~ContentBytes(owner, stored, _) => piece_free(owner, stored)
 
+(* The words of the file written, merged into those stored here (keyword: vocabulary), and then the sync is over *)
+fn _words_take (): void =
+  case+ _held_swap(_written, NoHeld()) of
+  | ~NoHeld() => _done()
+  | ~Held(owner, file, n, names_at, books, devices) => let
+      val parsed = words_from_file(file, n)
+      val () = _held_free(_held_swap(_written, Held(owner, file, n, names_at, books, devices)))
+    in
+      (* ignored: how many words were put; one that was not stays as it was, and is merged by the next sync (keyword: vocabulary) *)
+      $P.finish<Int>(words_restore(parsed, WordsMerge()), llam(_) => _done())
+    end
+
 (* The file's books' annotations from the k-th on, each merged with
    those stored here (read from storage) *)
 fun _annotations_take {left:nat} .<left>. (k: int, left: int left): void =
@@ -3158,8 +3172,8 @@ fun _annotations_take {left:nat} .<left>. (k: int, left: int left): void =
       val @(id_high, id_low, start) = _span_at(books, k)
       val () = _held_free(_held_swap(_written, Held(owner, file, n, names_at, books, devices)))
     in
-      if start < 0 then _done()
-      else if left <= 0 then _done()
+      if start < 0 then _words_take()
+      else if left <= 0 then _words_take()
       else let
         val @(key_frozen, key_bytes) = $A.freeze<byte>(lib_key(97, id_high, id_low))
         val pending = $IDB.idb_get(key_bytes, 15)
@@ -3417,20 +3431,8 @@ fun _remote_books {l:agz}{owner:addr}{n:nat | n <= 268435456}{count:nat} .<count
       val () = _push(jchunk_copy(file, start, stop))
     in _remote_books(file, rest, false) end
 
-(* The file's end: its books this device does not have, then the
-   closing brackets; then it is written *)
-fn _tail (): void = let
-  val written = !_books_written
-  val () = (if written then _push(_text_chunk("}")) else ())
-  val () = (case+ _held_swap(_remote, NoHeld()) of
-    | ~NoHeld() => ()
-    | ~Held(owner, file, n, names_at, books, devices) => let
-        val in_order = _reversed(books, SpansNil())
-        val () = _remote_books(file, in_order, ~written)
-        val () = _spans_free(in_order)
-      in _held_free(Held(owner, file, n, names_at, books, devices)) end)
-  val () = _push(_text_chunk("]}"))
-in
+(* The file joined, held and written (keyword: vocabulary) *)
+fn _finish_file (): void =
   case+ jfile_join(_out_take()) of
   | ~JNoWhole() => _fail(NoMemory(), 0)
   | ~JWhole(owner, file, n) =>
@@ -3439,6 +3441,26 @@ in
      | ~Held(file_owner, bytes, size, names_at, books, devices) => let
          val () = _held_free(_held_swap(_written, Held(file_owner, bytes, size, names_at, books, devices)))
        in _write() end)
+
+(* The file's end: the books this device lacks, the words of both devices merged, then it is written (keyword: vocabulary) *)
+fn _tail (): void = let
+  val written = !_books_written
+  val () = (if written then _push(_text_chunk("}")) else ())
+  val remote_words = (case+ _held_swap(_remote, NoHeld()) of
+    | ~NoHeld() => WordsRead(StoredWordsNone(), 0)
+    | ~Held(owner, file, n, names_at, books, devices) => let
+        val in_order = _reversed(books, SpansNil())
+        val () = _remote_books(file, in_order, ~written)
+        val () = _spans_free(in_order)
+        val parsed = words_from_file(file, n)
+        val () = _held_free(Held(owner, file, n, names_at, books, devices))
+      in parsed end): words_read
+  val () = _push(_text_chunk("]"))
+in
+  $P.finish<jchunk>(words_sync_chunk(remote_words), llam(words) => let
+    val () = _push(words)
+    val () = _push(_text_chunk("}"))
+  in _finish_file() end)
 end
 
 (* This device's books from book_index on, each merged with the file's

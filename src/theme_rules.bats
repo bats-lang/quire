@@ -30,17 +30,17 @@ in sheet end
 
 (* .th-<name>{--role:#rrggbb;...} for a theme: each colour is the one
    PAL gives, so the proofs above are about these *)
-#pub fn theme_rule {theme_number:palette}{left:nat | left >= 740}
+#pub fn theme_rule {theme_number:palette}{left:nat | left >= 770}
   {bg_colour,fg_colour,muted_colour,card_colour,line_colour,
    edge_colour,bar_colour,barfg_colour,accent_colour,accentfg_colour,
    hl_colour,barhi_colour,banner_colour,bannerfg_colour,mark_colour,
-   markfg_colour,danger_colour,hl2_colour:nat |
+   markfg_colour,danger_colour,hl2_colour,ruler_colour:nat |
    bg_colour < 16777216; fg_colour < 16777216; muted_colour < 16777216;
    card_colour < 16777216; line_colour < 16777216; edge_colour < 16777216;
    bar_colour < 16777216; barfg_colour < 16777216; accent_colour < 16777216;
    accentfg_colour < 16777216; hl_colour < 16777216; barhi_colour < 16777216;
    banner_colour < 16777216; bannerfg_colour < 16777216; mark_colour < 16777216;
-   markfg_colour < 16777216; danger_colour < 16777216; hl2_colour < 16777216}
+   markfg_colour < 16777216; danger_colour < 16777216; hl2_colour < 16777216; ruler_colour < 16777216}
   (bg_from_pal: PAL(theme_number, BG, bg_colour), fg_from_pal: PAL(theme_number, FG, fg_colour),
    muted_from_pal: PAL(theme_number, MUTED, muted_colour), card_from_pal: PAL(theme_number, CARD, card_colour),
    line_from_pal: PAL(theme_number, LINE, line_colour), edge_from_pal: PAL(theme_number, EDGE, edge_colour),
@@ -50,6 +50,7 @@ in sheet end
    banner_from_pal: PAL(theme_number, BANNER, banner_colour), bannerfg_from_pal: PAL(theme_number, BANNERFG, bannerfg_colour),
    mark_from_pal: PAL(theme_number, MARK, mark_colour), markfg_from_pal: PAL(theme_number, MARKFG, markfg_colour),
    danger_from_pal: PAL(theme_number, DANGER, danger_colour), hl2_from_pal: PAL(theme_number, HL2, hl2_colour),
+   ruler_from_pal: PAL(theme_number, RULER, ruler_colour),
    harmony: HARMONY(theme_number) |
    sheet: sheet(left, false, false), which: palette_theme(theme_number),
    bg_colour: int bg_colour, fg_colour: int fg_colour, muted_colour: int muted_colour,
@@ -57,9 +58,9 @@ in sheet end
    bar_colour: int bar_colour, barfg_colour: int barfg_colour, accent_colour: int accent_colour,
    accentfg_colour: int accentfg_colour, hl_colour: int hl_colour, barhi_colour: int barhi_colour,
    banner_colour: int banner_colour, bannerfg_colour: int bannerfg_colour, mark_colour: int mark_colour,
-   markfg_colour: int markfg_colour, danger_colour: int danger_colour, hl2_colour: int hl2_colour): [after:nat | after >= left - 740] sheet(after, false, false)
+   markfg_colour: int markfg_colour, danger_colour: int danger_colour, hl2_colour: int hl2_colour, ruler_colour: int ruler_colour): [after:nat | after >= left - 770] sheet(after, false, false)
 
-implement theme_rule (bg_from_pal, fg_from_pal, muted_from_pal, card_from_pal, line_from_pal, edge_from_pal, bar_from_pal, barfg_from_pal, accent_from_pal, accentfg_from_pal, hl_from_pal, barhi_from_pal, banner_from_pal, bannerfg_from_pal, mark_from_pal, markfg_from_pal, danger_from_pal, hl2_from_pal, harmony | sheet, which, bg_colour, fg_colour, muted_colour, card_colour, line_colour, edge_colour, bar_colour, barfg_colour, accent_colour, accentfg_colour, hl_colour, barhi_colour, banner_colour, bannerfg_colour, mark_colour, markfg_colour, danger_colour, hl2_colour) = let
+implement theme_rule (bg_from_pal, fg_from_pal, muted_from_pal, card_from_pal, line_from_pal, edge_from_pal, bar_from_pal, barfg_from_pal, accent_from_pal, accentfg_from_pal, hl_from_pal, barhi_from_pal, banner_from_pal, bannerfg_from_pal, mark_from_pal, markfg_from_pal, danger_from_pal, hl2_from_pal, ruler_from_pal, harmony | sheet, which, bg_colour, fg_colour, muted_colour, card_colour, line_colour, edge_colour, bar_colour, barfg_colour, accent_colour, accentfg_colour, hl_colour, barhi_colour, banner_colour, bannerfg_colour, mark_colour, markfg_colour, danger_colour, hl2_colour, ruler_colour) = let
   val sheet = rule(sheet, theme_selector(which))
   val sheet = declare_role(sheet, RoleGround(), bg_colour)
   val sheet = declare_role(sheet, RoleText(), fg_colour)
@@ -79,6 +80,7 @@ implement theme_rule (bg_from_pal, fg_from_pal, muted_from_pal, card_from_pal, l
   val sheet = declare_role(sheet, RoleMarkText(), markfg_colour)
   val sheet = declare_role(sheet, RoleDanger(), danger_colour)
   val sheet = declare_role(sheet, RoleSecondHighlight(), hl2_colour)
+  val sheet = declare_role(sheet, RoleRuler(), ruler_colour)
 in close(sheet) end
 
 (* The rules the guarantees rest on; the only !important in the sheet *)
