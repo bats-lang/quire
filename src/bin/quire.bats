@@ -37,6 +37,7 @@ staload "catalogue.sats"
 staload "catalogues.sats"
 staload "platform.sats"
 staload "screen_controls.sats"
+staload "reading_ruler.sats"
 staload "sharing.sats"
 staload "read_aloud.sats"
 staload "narration.sats"
@@ -1119,6 +1120,7 @@ fn _settings_apply (): void = let
   val () = _settings_changed()
   (* the book's sizes, given to the page as its chapter is loaded, may be others now *)
   val () = (if _in_reader() then reader_sizes_reload() else ())
+  val () = (if _in_reader() then ruler_apply() else ())
   val () = screen_controls_apply()
 in aloud_choices_show() end
 
@@ -1996,6 +1998,11 @@ fn _sheet_open (): void = let
   val () = _sheet_tab_choose(LookTab())
 in ui_focus("typography-close") end
 
+(* The ruler drawn as the settings now say, once they are saved (the reader is not always open) *)
+fn _ruler_apply (): bool = let
+  val () = (if _in_reader() then ruler_apply() else ())
+in true end
+
 (* A reading settings' control clicked: whether a setting changed *)
 fn _typography_chosen (control: typography_control): bool =
   case+ control of
@@ -2028,6 +2035,15 @@ fn _typography_chosen (control: typography_control): bool =
     in true end
   | RubyShow() => let val () = set_ruby_set(RubyShown()) in true end
   | RubyHide() => let val () = set_ruby_set(RubyHidden()) in true end
+  (* the reading ruler (quire#566): drawn at once, on the line it was or the page's first *)
+  | RulerChoiceOff() => let val () = set_ruler_set(RulerOff()) in _ruler_apply() end
+  | RulerChoiceUnderline() => let val () = set_ruler_set(RulerUnderline()) in _ruler_apply() end
+  | RulerChoiceGreyBar() => let val () = set_ruler_set(RulerGreyBar()) in _ruler_apply() end
+  | RulerChoiceShade() => let val () = set_ruler_set(RulerShade()) in _ruler_apply() end
+  | RulerChoiceLightbox() => let val () = set_ruler_set(RulerLightbox()) in _ruler_apply() end
+  | RulerLinesOne() => let val () = set_ruler_lines_set(RulerOneLine()) in _ruler_apply() end
+  | RulerLinesThree() => let val () = set_ruler_lines_set(RulerThreeLines()) in _ruler_apply() end
+  | RulerLinesFive() => let val () = set_ruler_lines_set(RulerFiveLines()) in _ruler_apply() end
   | DimImagesSwitch() => let
       val () = (case+ set_dim_get() of
         | ImagesDimmed() => set_dim_set(ImagesAsTheyAre())
@@ -2518,6 +2534,8 @@ fn _gesture_record (h: $EV.event_payload): void =
   | ~NoBlobBytes() => ()
   | ~BlobBytes(record, record_len) =>
     if record_len < 48 then $A.free<byte>(record)
+    (* reading ruler: a finger on its band drags it *)
+    else if ruler_pointer(ruler_record_of_code(_int32_at(record, 0)), _int32_at(record, 4), _int32_at(record, 8), _int32_at(record, 12), ruler_device_of_code(_int32_at(record, 20))) then $A.free<byte>(record)
     else (case+ _gestures_take() of
       | ~GSome(state, source) => let
           val @(events, asked) = $GS.gestures_raw(source, state, record, 0)
@@ -2882,6 +2900,9 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 21) = let
       (* a single tap on an image is a tap on the page: the sides turn
          it, the middle brings up the bars; the image is shown full
          screen by a double tap or a long press (quire#365) *)
+      (* a tap between the sides' zones on another line moves the reading ruler there (the single-pointer
+         way to move it, WCAG 2.5.7); on its own line it brings up the bars as ever *)
+      else if (if x >= 0 then (if _in_middle(x) then ruler_tap(x, y) else false) else false) then 0
       else if x >= 0 then let
         (* a tap on text the narration reads, between the sides' zones,
            plays on from there; the bars come up or go as ever *)

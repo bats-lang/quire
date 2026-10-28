@@ -7,3 +7,4 @@ fn _static_role_name {role:colour_role} (role: role_value(role)): string =
   | RoleAccent() => "accent" | RoleAccentText() => "accentfg" | RoleHighlight() => "hl"
   | RoleBarHigh() => "barhi" | RoleBanner() => "banner" | RoleBannerText() => "bannerfg"
   | RoleMark() => "mark" | RoleMarkText() => "markfg" | RoleDanger() => "danger"
+  | RoleRuler() => "ruler"
