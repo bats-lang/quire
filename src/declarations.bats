@@ -131,4 +131,25 @@ implement centre_x (sheet) =
 implement invisible (sheet) =
   let val () = raw(sheet, "opacity:0;") in sheet end
 
+(* A ground under the book's text, the reading ruler's grey bar, with the proof that text and links stay legible on it (RULED) *)
+#pub fn band {left:nat | left >= 50}{media:bool}{ground:colour_role}
+  (readable: RULED(ground) | sheet: sheet(left, media, true), ground: role_value(ground)): [after:nat | after >= left - 50] sheet(after, media, true)
+
+implement band (readable | sheet, ground) = let
+  val () = raw(sheet, "background-color:")
+  val () = role_variable(sheet, ground)
+  val () = raw(sheet, ";font-size:0;")
+in sheet end
+
+(* A line in role edge on ground along the right edge of a box, for a column of vertical text, as
+   underline is along the foot of a box for a line of horizontal text (keyword: reading ruler) *)
+#pub fn underline_right {left:nat | left >= 48}{media:bool}{edge,ground:colour_role}
+  (visible: EDGEP(edge, ground) | sheet: sheet(left, media, true), edge: role_value(edge), ground: role_value(ground)): [after:nat | after >= left - 48] sheet(after, media, true)
+
+implement underline_right (visible | sheet, edge, ground) = let
+  val () = raw(sheet, "box-shadow:inset -3px 0 0 ")
+  val () = role_variable(sheet, edge)
+  val () = raw(sheet, ";")
+in sheet end
+
 end

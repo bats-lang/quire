@@ -76,6 +76,10 @@ prval L_444444 = $CT.LUMc($CT.LIN_44(), $CT.LIN_44(), $CT.LIN_44())
 prval L_4f4f4f = $CT.LUMc($CT.LIN_4f(), $CT.LIN_4f(), $CT.LIN_4f())
 prval L_999999 = $CT.LUMc($CT.LIN_99(), $CT.LIN_99(), $CT.LIN_99())
 prval L_8fd0a8 = $CT.LUMc($CT.LIN_8f(), $CT.LIN_d0(), $CT.LIN_a8())
+prval L_e6e1d9 = $CT.LUMc($CT.LIN_e6(), $CT.LIN_e1(), $CT.LIN_d9())
+prval L_dccfb8 = $CT.LUMc($CT.LIN_dc(), $CT.LIN_cf(), $CT.LIN_b8())
+prval L_45403a = $CT.LUMc($CT.LIN_45(), $CT.LIN_40(), $CT.LIN_3a())
+prval L_0b0805 = $CT.LUMc($CT.LIN_0b(), $CT.LIN_08(), $CT.LIN_05())
 
 (* BEGIN proofs: written by scripts/gen-harmony.py *)
 
@@ -330,10 +334,19 @@ primplement E_barfg_bar = EDGEc(
   PAL3_barfg(), PAL3_bar(), $CT.CONTRAST_lighter_first(L_c2b296, L_15110c),
   PAL4_barfg(), PAL4_bar(), $CT.CONTRAST_lighter_first(L_e2e2e2, L_2a2a2a))
 
+#pub prval E_fg_bg: EDGEP(FG, BG)
+
+primplement E_fg_bg = EDGEc(
+  PAL0_fg(), PAL0_bg(), $CT.CONTRAST_lighter_second(L_2a2a2a, L_faf8f5),
+  PAL1_fg(), PAL1_bg(), $CT.CONTRAST_lighter_second(L_3b2f22, L_f0e6d2),
+  PAL2_fg(), PAL2_bg(), $CT.CONTRAST_lighter_first(L_e2e2e2, L_1e1e1e),
+  PAL3_fg(), PAL3_bg(), $CT.CONTRAST_lighter_first(L_c2b296, L_1f1a14),
+  PAL4_fg(), PAL4_bg(), $CT.CONTRAST_lighter_first(L_e2e2e2, L_3a3a3a))
+
 #pub prval H_light: HARMONY(PaletteLight)
 
 primplement H_light = HARMONYc(
-  PAL0_bg(), PAL0_fg(), PAL0_muted(), PAL0_card(), PAL0_line(), PAL0_edge(), PAL0_bar(), PAL0_barfg(), PAL0_accent(), PAL0_accentfg(), PAL0_hl(), PAL0_barhi(), PAL0_banner(), PAL0_bannerfg(), PAL0_mark(), PAL0_markfg(), PAL0_danger(), PAL0_hl2(),
+  PAL0_bg(), PAL0_fg(), PAL0_muted(), PAL0_card(), PAL0_line(), PAL0_edge(), PAL0_bar(), PAL0_barfg(), PAL0_accent(), PAL0_accentfg(), PAL0_hl(), PAL0_barhi(), PAL0_banner(), PAL0_bannerfg(), PAL0_mark(), PAL0_markfg(), PAL0_danger(), PAL0_hl2(), PAL0_ruler(),
   FAM_light($H.FAMILIESc()),
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xfa,0xf8,0xf5}())), $H.HUE_r_g_b{0xfaf8f5,0xfa,0xf8,0xf5,25,50}($H.RGBc{0xfa,0xf8,0xf5}())),
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x2a,0x2a,0x2a}()))),
@@ -344,6 +357,7 @@ primplement H_light = HARMONYc(
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x33,0x33,0x33}()))),
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xff,0xff,0xff}()))),
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x4a,0x4a,0x4a}()))),
+  $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xe6,0xe1,0xd9}())), $H.HUE_r_g_b{0xe6e1d9,0xe6,0xe1,0xd9,25,50}($H.RGBc{0xe6,0xe1,0xd9}())),
   $H.IN3_2($H.FAMILIESc(), $H.HUE_g_b_r{0x2f6f4f,0x2f,0x6f,0x4f,135,165}($H.RGBc{0x2f,0x6f,0x4f}())),
   $H.IN3_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xff,0xff,0xff}()))),
   $H.IN3_1($H.FAMILIESc(), $H.HUE_r_g_b{0xfde59a,0xfd,0xe5,0x9a,25,50}($H.RGBc{0xfd,0xe5,0x9a}())),
@@ -367,7 +381,7 @@ primplement H_light = HARMONYc(
 #pub prval H_sepia: HARMONY(PaletteSepia)
 
 primplement H_sepia = HARMONYc(
-  PAL1_bg(), PAL1_fg(), PAL1_muted(), PAL1_card(), PAL1_line(), PAL1_edge(), PAL1_bar(), PAL1_barfg(), PAL1_accent(), PAL1_accentfg(), PAL1_hl(), PAL1_barhi(), PAL1_banner(), PAL1_bannerfg(), PAL1_mark(), PAL1_markfg(), PAL1_danger(), PAL1_hl2(),
+  PAL1_bg(), PAL1_fg(), PAL1_muted(), PAL1_card(), PAL1_line(), PAL1_edge(), PAL1_bar(), PAL1_barfg(), PAL1_accent(), PAL1_accentfg(), PAL1_hl(), PAL1_barhi(), PAL1_banner(), PAL1_bannerfg(), PAL1_mark(), PAL1_markfg(), PAL1_danger(), PAL1_hl2(), PAL1_ruler(),
   FAM_sepia($H.FAMILIESc()),
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xf0,0xe6,0xd2}())), $H.HUE_r_g_b{0xf0e6d2,0xf0,0xe6,0xd2,25,50}($H.RGBc{0xf0,0xe6,0xd2}())),
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x3b,0x2f,0x22}())), $H.HUE_r_g_b{0x3b2f22,0x3b,0x2f,0x22,25,50}($H.RGBc{0x3b,0x2f,0x22}())),
@@ -378,6 +392,7 @@ primplement H_sepia = HARMONYc(
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x4a,0x3b,0x2a}())), $H.HUE_r_g_b{0x4a3b2a,0x4a,0x3b,0x2a,25,50}($H.RGBc{0x4a,0x3b,0x2a}())),
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xf7,0xef,0xdf}())), $H.HUE_r_g_b{0xf7efdf,0xf7,0xef,0xdf,25,50}($H.RGBc{0xf7,0xef,0xdf}())),
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x5e,0x4c,0x38}())), $H.HUE_r_g_b{0x5e4c38,0x5e,0x4c,0x38,25,50}($H.RGBc{0x5e,0x4c,0x38}())),
+  $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xdc,0xcf,0xb8}())), $H.HUE_r_g_b{0xdccfb8,0xdc,0xcf,0xb8,25,50}($H.RGBc{0xdc,0xcf,0xb8}())),
   $H.IN3_1($H.FAMILIESc(), $H.HUE_r_g_b{0x7a4f1d,0x7a,0x4f,0x1d,25,50}($H.RGBc{0x7a,0x4f,0x1d}())),
   $H.IN3_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xff,0xff,0xff}()))),
   $H.IN3_1($H.FAMILIESc(), $H.HUE_r_g_b{0xe6cf8a,0xe6,0xcf,0x8a,25,50}($H.RGBc{0xe6,0xcf,0x8a}())),
@@ -401,7 +416,7 @@ primplement H_sepia = HARMONYc(
 #pub prval H_dark: HARMONY(PaletteDark)
 
 primplement H_dark = HARMONYc(
-  PAL2_bg(), PAL2_fg(), PAL2_muted(), PAL2_card(), PAL2_line(), PAL2_edge(), PAL2_bar(), PAL2_barfg(), PAL2_accent(), PAL2_accentfg(), PAL2_hl(), PAL2_barhi(), PAL2_banner(), PAL2_bannerfg(), PAL2_mark(), PAL2_markfg(), PAL2_danger(), PAL2_hl2(),
+  PAL2_bg(), PAL2_fg(), PAL2_muted(), PAL2_card(), PAL2_line(), PAL2_edge(), PAL2_bar(), PAL2_barfg(), PAL2_accent(), PAL2_accentfg(), PAL2_hl(), PAL2_barhi(), PAL2_banner(), PAL2_bannerfg(), PAL2_mark(), PAL2_markfg(), PAL2_danger(), PAL2_hl2(), PAL2_ruler(),
   FAM_dark($H.FAMILIESc()),
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x1e,0x1e,0x1e}()))),
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xe2,0xe2,0xe2}()))),
@@ -412,6 +427,7 @@ primplement H_dark = HARMONYc(
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x11,0x11,0x11}()))),
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xe2,0xe2,0xe2}()))),
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x2e,0x2e,0x2e}()))),
+  $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x45,0x40,0x3a}())), $H.HUE_r_g_b{0x45403a,0x45,0x40,0x3a,25,50}($H.RGBc{0x45,0x40,0x3a}())),
   $H.IN3_2($H.FAMILIESc(), $H.HUE_g_b_r{0x7fc49b,0x7f,0xc4,0x9b,130,160}($H.RGBc{0x7f,0xc4,0x9b}())),
   $H.IN3_2($H.FAMILIESc(), $H.HUE_g_b_r{0x10231a,0x10,0x23,0x1a,130,160}($H.RGBc{0x10,0x23,0x1a}())),
   $H.IN3_1($H.FAMILIESc(), $H.HUE_r_g_b{0x6d5e2f,0x6d,0x5e,0x2f,25,50}($H.RGBc{0x6d,0x5e,0x2f}())),
@@ -437,7 +453,7 @@ primplement H_dark = HARMONYc(
 #pub prval H_night: HARMONY(PaletteNight)
 
 primplement H_night = HARMONYc(
-  PAL3_bg(), PAL3_fg(), PAL3_muted(), PAL3_card(), PAL3_line(), PAL3_edge(), PAL3_bar(), PAL3_barfg(), PAL3_accent(), PAL3_accentfg(), PAL3_hl(), PAL3_barhi(), PAL3_banner(), PAL3_bannerfg(), PAL3_mark(), PAL3_markfg(), PAL3_danger(), PAL3_hl2(),
+  PAL3_bg(), PAL3_fg(), PAL3_muted(), PAL3_card(), PAL3_line(), PAL3_edge(), PAL3_bar(), PAL3_barfg(), PAL3_accent(), PAL3_accentfg(), PAL3_hl(), PAL3_barhi(), PAL3_banner(), PAL3_bannerfg(), PAL3_mark(), PAL3_markfg(), PAL3_danger(), PAL3_hl2(), PAL3_ruler(),
   FAM_night($H.FAMILIESc()),
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x1f,0x1a,0x14}())), $H.HUE_r_g_b{0x1f1a14,0x1f,0x1a,0x14,25,50}($H.RGBc{0x1f,0x1a,0x14}())),
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xc2,0xb2,0x96}())), $H.HUE_r_g_b{0xc2b296,0xc2,0xb2,0x96,25,50}($H.RGBc{0xc2,0xb2,0x96}())),
@@ -448,6 +464,7 @@ primplement H_night = HARMONYc(
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x15,0x11,0x0c}())), $H.HUE_r_g_b{0x15110c,0x15,0x11,0x0c,25,50}($H.RGBc{0x15,0x11,0x0c}())),
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xc2,0xb2,0x96}())), $H.HUE_r_g_b{0xc2b296,0xc2,0xb2,0x96,25,50}($H.RGBc{0xc2,0xb2,0x96}())),
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x34,0x2b,0x21}())), $H.HUE_r_g_b{0x342b21,0x34,0x2b,0x21,25,50}($H.RGBc{0x34,0x2b,0x21}())),
+  $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x0b,0x08,0x05}())), $H.HUE_r_g_b{0x0b0805,0x0b,0x08,0x05,25,50}($H.RGBc{0x0b,0x08,0x05}())),
   $H.IN3_1($H.FAMILIESc(), $H.HUE_r_g_b{0xc9a36b,0xc9,0xa3,0x6b,25,50}($H.RGBc{0xc9,0xa3,0x6b}())),
   $H.IN3_1($H.FAMILIESc(), $H.HUE_r_g_b{0x1f1a14,0x1f,0x1a,0x14,25,50}($H.RGBc{0x1f,0x1a,0x14}())),
   $H.IN3_1($H.FAMILIESc(), $H.HUE_r_g_b{0x4f4318,0x4f,0x43,0x18,25,50}($H.RGBc{0x4f,0x43,0x18}())),
@@ -473,7 +490,7 @@ primplement H_night = HARMONYc(
 #pub prval H_grey: HARMONY(PaletteGrey)
 
 primplement H_grey = HARMONYc(
-  PAL4_bg(), PAL4_fg(), PAL4_muted(), PAL4_card(), PAL4_line(), PAL4_edge(), PAL4_bar(), PAL4_barfg(), PAL4_accent(), PAL4_accentfg(), PAL4_hl(), PAL4_barhi(), PAL4_banner(), PAL4_bannerfg(), PAL4_mark(), PAL4_markfg(), PAL4_danger(), PAL4_hl2(),
+  PAL4_bg(), PAL4_fg(), PAL4_muted(), PAL4_card(), PAL4_line(), PAL4_edge(), PAL4_bar(), PAL4_barfg(), PAL4_accent(), PAL4_accentfg(), PAL4_hl(), PAL4_barhi(), PAL4_banner(), PAL4_bannerfg(), PAL4_mark(), PAL4_markfg(), PAL4_danger(), PAL4_hl2(), PAL4_ruler(),
   FAM_grey($H.FAMILIESc()),
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x3a,0x3a,0x3a}()))),
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xe2,0xe2,0xe2}()))),
@@ -484,6 +501,7 @@ primplement H_grey = HARMONYc(
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x2a,0x2a,0x2a}()))),
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xe2,0xe2,0xe2}()))),
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x3d,0x3d,0x3d}()))),
+  $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x11,0x11,0x11}()))),
   $H.IN3_2($H.FAMILIESc(), $H.HUE_g_b_r{0x8fd0a8,0x8f,0xd0,0xa8,130,160}($H.RGBc{0x8f,0xd0,0xa8}())),
   $H.IN3_2($H.FAMILIESc(), $H.HUE_g_b_r{0x10231a,0x10,0x23,0x1a,130,160}($H.RGBc{0x10,0x23,0x1a}())),
   $H.IN3_1($H.FAMILIESc(), $H.HUE_r_g_b{0x6d5e2f,0x6d,0x5e,0x2f,25,50}($H.RGBc{0x6d,0x5e,0x2f}())),
@@ -913,6 +931,100 @@ primplement V_grey_8 = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_eb(), $CT.LIN_a5(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_eb(), $CT.LIN_a5(), $CT.LIN_00()))))
+
+#pub prval R_ruler: RULED(RULER)
+
+primplement R_ruler = RULEDc(
+  PAL0_fg(), PAL0_accent(), PAL0_ruler(), $CT.CONTRAST_lighter_second(L_2a2a2a, L_e6e1d9),
+    $H.NOVIB_text($H.CALMc($H.MXMN_rgb($H.RGBc{0x2a,0x2a,0x2a}()))), $CT.CONTRAST_lighter_second(L_2f6f4f, L_e6e1d9),
+  PAL1_fg(), PAL1_accent(), PAL1_ruler(), $CT.CONTRAST_lighter_second(L_3b2f22, L_dccfb8),
+    $H.NOVIB_text($H.CALMc($H.MXMN_rgb($H.RGBc{0x3b,0x2f,0x22}()))), $CT.CONTRAST_lighter_second(L_7a4f1d, L_dccfb8),
+  PAL2_fg(), PAL2_accent(), PAL2_ruler(), $CT.CONTRAST_lighter_first(L_e2e2e2, L_45403a),
+    $H.NOVIB_text($H.CALMc($H.MXMN_rgb($H.RGBc{0xe2,0xe2,0xe2}()))), $CT.CONTRAST_lighter_first(L_7fc49b, L_45403a),
+  PAL3_fg(), PAL3_accent(), PAL3_ruler(), $CT.CONTRAST_lighter_first(L_c2b296, L_0b0805),
+    $H.NOVIB_text($H.CALMc($H.MXMN_rgb($H.RGBc{0xc2,0xb2,0x96}()))), $CT.CONTRAST_lighter_first(L_c9a36b, L_0b0805),
+  PAL4_fg(), PAL4_accent(), PAL4_ruler(), $CT.CONTRAST_lighter_first(L_e2e2e2, L_111111),
+    $H.NOVIB_text($H.CALMc($H.MXMN_rgb($H.RGBc{0xe2,0xe2,0xe2}()))), $CT.CONTRAST_lighter_first(L_8fd0a8, L_111111))
+
+#pub prval D_light_25: DIMMED(PaletteLight, 25)
+
+primplement D_light_25 = DIMMEDc(
+  DIMSc(PAL0_fg(), PAL0_bg(), PAL0_bg(),
+    BLENDc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_5e(), $CT.LIN_5e(), $CT.LIN_5d()),
+    BLENDc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_5e(), $CT.LIN_5e(), $CT.LIN_5d()), $CT.LUMc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5()))),
+  DIMSc(PAL0_accent(), PAL0_bg(), PAL0_bg(),
+    BLENDc($CT.LIN_2f(), $CT.LIN_6f(), $CT.LIN_4f(), $CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_62(), $CT.LIN_91(), $CT.LIN_79()),
+    BLENDc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_62(), $CT.LIN_91(), $CT.LIN_79()), $CT.LUMc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5()))),
+  DIMSc(PAL0_fg(), PAL0_hl(), PAL0_bg(),
+    BLENDc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_5e(), $CT.LIN_5e(), $CT.LIN_5d()),
+    BLENDc($CT.LIN_fd(), $CT.LIN_e5(), $CT.LIN_9a(), $CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_fc(), $CT.LIN_ea(), $CT.LIN_b1()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_5e(), $CT.LIN_5e(), $CT.LIN_5d()), $CT.LUMc($CT.LIN_fc(), $CT.LIN_ea(), $CT.LIN_b1()))))
+
+#pub prval D_sepia_25: DIMMED(PaletteSepia, 25)
+
+primplement D_sepia_25 = DIMMEDc(
+  DIMSc(PAL1_fg(), PAL1_bg(), PAL1_bg(),
+    BLENDc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_68(), $CT.LIN_5d(), $CT.LIN_4e()),
+    BLENDc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_68(), $CT.LIN_5d(), $CT.LIN_4e()), $CT.LUMc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2()))),
+  DIMSc(PAL1_accent(), PAL1_bg(), PAL1_bg(),
+    BLENDc($CT.LIN_7a(), $CT.LIN_4f(), $CT.LIN_1d(), $CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_98(), $CT.LIN_75(), $CT.LIN_4a()),
+    BLENDc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_98(), $CT.LIN_75(), $CT.LIN_4a()), $CT.LUMc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2()))),
+  DIMSc(PAL1_fg(), PAL1_hl(), PAL1_bg(),
+    BLENDc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_68(), $CT.LIN_5d(), $CT.LIN_4e()),
+    BLENDc($CT.LIN_e6(), $CT.LIN_cf(), $CT.LIN_8a(), $CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_e9(), $CT.LIN_d5(), $CT.LIN_9c()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_68(), $CT.LIN_5d(), $CT.LIN_4e()), $CT.LUMc($CT.LIN_e9(), $CT.LIN_d5(), $CT.LIN_9c()))))
+
+#pub prval D_dark_40: DIMMED(PaletteDark, 40)
+
+primplement D_dark_40 = DIMMEDc(
+  DIMSc(PAL2_fg(), PAL2_bg(), PAL2_bg(),
+    BLENDc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_94(), $CT.LIN_94(), $CT.LIN_94()),
+    BLENDc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_94(), $CT.LIN_94(), $CT.LIN_94()), $CT.LUMc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e()))),
+  DIMSc(PAL2_accent(), PAL2_bg(), PAL2_bg(),
+    BLENDc($CT.LIN_7f(), $CT.LIN_c4(), $CT.LIN_9b(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_58(), $CT.LIN_82(), $CT.LIN_69()),
+    BLENDc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_58(), $CT.LIN_82(), $CT.LIN_69()), $CT.LUMc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e()))),
+  DIMSc(PAL2_fg(), PAL2_hl(), PAL2_bg(),
+    BLENDc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_94(), $CT.LIN_94(), $CT.LIN_94()),
+    BLENDc($CT.LIN_6d(), $CT.LIN_5e(), $CT.LIN_2f(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_4d(), $CT.LIN_44(), $CT.LIN_28()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_94(), $CT.LIN_94(), $CT.LIN_94()), $CT.LUMc($CT.LIN_4d(), $CT.LIN_44(), $CT.LIN_28()))))
+
+#pub prval D_night_25: DIMMED(PaletteNight, 25)
+
+primplement D_night_25 = DIMMEDc(
+  DIMSc(PAL3_fg(), PAL3_bg(), PAL3_bg(),
+    BLENDc($CT.LIN_c2(), $CT.LIN_b2(), $CT.LIN_96(), $CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14(), $CT.LIN_99(), $CT.LIN_8c(), $CT.LIN_76()),
+    BLENDc($CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14(), $CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14(), $CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_99(), $CT.LIN_8c(), $CT.LIN_76()), $CT.LUMc($CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14()))),
+  DIMSc(PAL3_accent(), PAL3_bg(), PAL3_bg(),
+    BLENDc($CT.LIN_c9(), $CT.LIN_a3(), $CT.LIN_6b(), $CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14(), $CT.LIN_9f(), $CT.LIN_81(), $CT.LIN_55()),
+    BLENDc($CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14(), $CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14(), $CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_9f(), $CT.LIN_81(), $CT.LIN_55()), $CT.LUMc($CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14()))),
+  DIMSc(PAL3_fg(), PAL3_hl(), PAL3_bg(),
+    BLENDc($CT.LIN_c2(), $CT.LIN_b2(), $CT.LIN_96(), $CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14(), $CT.LIN_99(), $CT.LIN_8c(), $CT.LIN_76()),
+    BLENDc($CT.LIN_4f(), $CT.LIN_43(), $CT.LIN_18(), $CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14(), $CT.LIN_43(), $CT.LIN_39(), $CT.LIN_17()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_99(), $CT.LIN_8c(), $CT.LIN_76()), $CT.LUMc($CT.LIN_43(), $CT.LIN_39(), $CT.LIN_17()))))
+
+#pub prval D_grey_30: DIMMED(PaletteGrey, 30)
+
+primplement D_grey_30 = DIMMEDc(
+  DIMSc(PAL4_fg(), PAL4_bg(), PAL4_bg(),
+    BLENDc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_b0(), $CT.LIN_b0(), $CT.LIN_b0()),
+    BLENDc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_b0(), $CT.LIN_b0(), $CT.LIN_b0()), $CT.LUMc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a()))),
+  DIMSc(PAL4_accent(), PAL4_bg(), PAL4_bg(),
+    BLENDc($CT.LIN_8f(), $CT.LIN_d0(), $CT.LIN_a8(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_76(), $CT.LIN_a3(), $CT.LIN_87()),
+    BLENDc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_76(), $CT.LIN_a3(), $CT.LIN_87()), $CT.LUMc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a()))),
+  DIMSc(PAL4_fg(), PAL4_hl(), PAL4_bg(),
+    BLENDc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_b0(), $CT.LIN_b0(), $CT.LIN_b0()),
+    BLENDc($CT.LIN_6d(), $CT.LIN_5e(), $CT.LIN_2f(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_5e(), $CT.LIN_53(), $CT.LIN_32()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_b0(), $CT.LIN_b0(), $CT.LIN_b0()), $CT.LUMc($CT.LIN_5e(), $CT.LIN_53(), $CT.LIN_32()))))
 (* END proofs *)
 
 end

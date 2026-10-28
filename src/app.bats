@@ -8,6 +8,7 @@
 staload "ui.sats"
 staload "style.sats"
 staload "size_rules.sats"
+staload "ruler_rules.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload "version.sats"
 
@@ -753,6 +754,12 @@ fn _reader (): void = let
   (* a bookmarked page's mark in the page's top-right corner, which
      shows while the bars are hidden (annot_star, #388): drawn, not read
      out (the star in the top bar says it) *)
+  (* the reading ruler (keyword: reading ruler): drawn, never read out, taking no tap *)
+  val () = ui_el("reader", "ruler", TDiv, "ruler")
+  val () = ui_attr("ruler", AHidden, "true")
+  val () = ui_el("ruler", "ruler-before", TDiv, "ruler-veil ruler-before")
+  val () = ui_el("ruler", "ruler-band", TDiv, "ruler-band")
+  val () = ui_el("ruler", "ruler-after", TDiv, "ruler-veil ruler-after")
   val () = ui_el("reader", "bookmark-mark", TDiv, "bmk")
   val () = ui_attr("bookmark-mark", AHidden, "true")
   val () = ui_el("reader", "footer", TDiv, "foot")
@@ -1015,6 +1022,26 @@ fn _settings (): void = let
   val () = _switch_row("typography-look", "publisher-sizes-row", "publisher-sizes-switch", "publisher-sizes-track",
     "publisher-sizes-knob", "publisher-sizes-about", "Respect the publisher's sizes",
     "Off, your text size is the book's text size and its other sizes follow in proportion. On, the book keeps the sizes its publisher chose", NoteHidden())
+  (* the reading ruler's style, and its height where the style has one (keyword: reading ruler, #566) *)
+  val () = ui_el("typography-look", "ruler-row", TDiv, "srow")
+  val () = ui_el("ruler-row", "ruler-label", TSpan, "slabel")
+  val () = ui_text("ruler-label", "Reading ruler")
+  val () = ui_el("ruler-row", "ruler-choice", TDiv, "seg")
+  val () = ui_named("ruler-choice", NGroup, "Reading ruler")
+  val () = ui_text_btn("ruler-choice", "ruler-off", "sbtn", "Off")
+  val () = ui_text_btn("ruler-choice", "ruler-underline", "sbtn", "Underline")
+  val () = ui_text_btn("ruler-choice", "ruler-grey-bar", "sbtn", "Grey bar")
+  val () = ui_text_btn("ruler-choice", "ruler-shade", "sbtn", "Shade")
+  val () = ui_text_btn("ruler-choice", "ruler-lightbox", "sbtn", "Lightbox")
+  val () = ui_el("typography-look", "ruler-lines-row", TDiv, "srow")
+  val () = ui_el("ruler-lines-row", "ruler-lines-label", TSpan, "slabel")
+  val () = ui_text("ruler-lines-label", "Ruler height")
+  val () = ui_el("ruler-lines-row", "ruler-lines-choice", TDiv, "seg")
+  val () = ui_named("ruler-lines-choice", NGroup, "Ruler height")
+  val () = ui_text_btn("ruler-lines-choice", "ruler-lines-one", "sbtn", "1 line")
+  val () = ui_text_btn("ruler-lines-choice", "ruler-lines-three", "sbtn", "3 lines")
+  val () = ui_text_btn("ruler-lines-choice", "ruler-lines-five", "sbtn", "5 lines")
+  val () = _hide("ruler-lines-row")
   (* Page: pages turned across, or the chapter scrolled down *)
   val () = ui_el("typography-page", "layout-row", TDiv, "srow")
   val () = ui_el("layout-row", "layout-label", TSpan, "slabel")
@@ -1226,7 +1253,12 @@ implement app_build () = let
   val () = ui_add("bats-root", "style-sizes", TStyle)
   val @(sizes_css, sizes_css_len) = size_style()
   val () = ui_text_buf("style-sizes", sizes_css, sizes_css_len)
+  val () = ui_add("bats-root", "style-ruler-rules", TStyle)
+  val @(ruler_css, ruler_css_len) = ruler_style()
+  val () = ui_text_buf("style-ruler-rules", ruler_css, ruler_css_len)
   val () = ui_add("bats-root", "style-type", TStyle)
+  (* where the reading ruler lies, written by reading_ruler.bats *)
+  val () = ui_add("bats-root", "style-ruler", TStyle)
   val () = ui_add("bats-root", "style-fonts", TStyle)
   (* for a moment, as fonts arrive: reader.bats's _tcy_refit *)
   val () = ui_add("bats-root", "style-tcy", TStyle)

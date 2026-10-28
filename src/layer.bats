@@ -7,6 +7,7 @@
 
 staload "ui.sats"
 staload "back.sats"
+staload "reading_ruler.sats"
 
 (* The overlays. Each is one element, whose id only this module knows,
    so an overlay is shown or hidden only here, and the stack below is
@@ -187,6 +188,8 @@ fn _open_set {count:nat} (overlays: layers(count)): void = let
   val () = ui_undo_under_menu(menu)
   val any = (case+ overlays of LNil() => NotShown() | LCons(_, _, _) => Shown()): shown
   val () = _open_put(overlays)
+  (* a reading ruler that could not be placed under a panel is placed once it has gone *)
+  val () = ruler_retry()
 in back_overlays_set(any) end
 
 (* overlays without overlay, and where the focus went back to from it *)

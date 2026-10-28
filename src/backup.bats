@@ -107,7 +107,7 @@ fn _rotation_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
    among them), and
    the books' opening bracket *)
 fn _settings_chunk (): jchunk =
-  case+ piece_new(576 + 64 + 100 + 24866 + 96 + 24 + 32 + 24) of
+  case+ piece_new(576 + 64 + 100 + 24866 + 96 + 24 + 32 + 24 + 48) of
   | ~NoPiece() => JNone()
   | ~Piece(owner, out) => let
       (* the version of Quire that wrote it (#219) *)
@@ -154,6 +154,10 @@ fn _settings_chunk (): jchunk =
       val next = jw_int(out, next, ruby_code(set_ruby_get()))
       val next = jw_lit(out, next, ",\"publisherSizes\":")
       val next = jw_int(out, next, sizes_code(set_sizes_get()))
+      val next = jw_lit(out, next, ",\"readingRuler\":")
+      val next = jw_int(out, next, ruler_code(set_ruler_get()))
+      val next = jw_lit(out, next, ",\"readingRulerLines\":")
+      val next = jw_int(out, next, ruler_lines_code(set_ruler_lines_get()))
       val next = jw_lit(out, next, ",\"readingSpeed\":")
       val next = jw_int(out, next, speech_rate_hundredths(set_speech_rate_get()))
       (* a level in percent, or the system's own *)
@@ -1435,6 +1439,12 @@ in
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "publisherSizes") then let
         val () = (if value >= 0 then (if value <= 1 then set_sizes_set(sizes_of_code(value)) else ()) else ())
+      in _settings_members(buf, n, stop, key, sort) end
+      else if jr_key_is(key, key_len, "readingRuler") then let
+        val () = (if value >= 0 then (if value <= 4 then set_ruler_set(ruler_of_code(value)) else ()) else ())
+      in _settings_members(buf, n, stop, key, sort) end
+      else if jr_key_is(key, key_len, "readingRulerLines") then let
+        val () = (if value >= 0 then (if value <= 2 then set_ruler_lines_set(ruler_lines_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "ruby") then let
         val () = (if value >= 0 then (if value <= 1 then set_ruby_set(ruby_of_code(value)) else ()) else ())
