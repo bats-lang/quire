@@ -349,3 +349,7 @@ only for a red. The design, with the research and what each means cannot find, i
   Chrome's trace, and the module and offset of each frame to resolve against a build that has symbols if one appears (`QUIRE_SYMBOLS_DIR`).
 * **A stopgap**: the recorder, the watchdog, the evidence check, the sanitizer step and the gdb install are what a second Playwright app would copy; they belong in pwa's
   `e2e-setup` and `gen-pwa test` (bats-lang/pwa#132 for the evidence, #109 for the tools), and this is quire's until they move.
+
+## Ring reach: what a watchdog report's ring holds (quire#993)
+
+Keyword: ring reach. A watchdog report keeps the whole ring (`LINES_KEPT`), not its tail: 600000 lines were 1.24 s of the ring under four busy Playwright workers (484203 events a second, run 40705566021), so the futex wait of a thread held for 4 s or 10 s was not in the file and `lastWait` was null. The analysis says where the ring begins (`ringStart`) and the report how long the thread was held (`heldMs`); `ringReaches` is the rule (a ring that begins no later than the hold's start holds the wait). Even the whole ring holds about 10 s at that rate, so a hold longer than the ring is said by `ringStart`, and the spec asserts a null `lastWait` only then.

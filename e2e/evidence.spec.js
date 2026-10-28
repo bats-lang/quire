@@ -21,9 +21,9 @@ import { arm, capture, CAPTURE_MOST_MS, NATIVE_MOST_MS, stallWatch as makeWatch 
 import { capabilities, diskEvidence, missingEvidence, pageState, parseBlocked, symbolEvidence } from './evidence.js';
 import { pixelDiff } from './relaunch.js';
 import { missingFields } from './evidence-check.js';
-import { futexAnalysis, ringContent } from './flight-recorder.js';
+import { futexAnalysis, ringContent, ringReaches } from './flight-recorder.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
-import { Watchdog } from './flight-watchdog.js';
+import { RING_LINES, Watchdog } from './flight-watchdog.js';
 import { LOCK_NAME, LOCK_UNREADABLE_MS, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
 
 function desktopOnly(testInfo) {
@@ -382,7 +382,11 @@ test('the watchdog, outside every worker and browser, sees a renderer frozen in 
     expect(report.threads.length).toBeGreaterThan(1);
     expect(report.threads.some((thread) => /\b202 0x[0-9a-f]+ 0x189\b/.test(thread.syscall))).toBe(true);
     expect(report.kernelRing.file, JSON.stringify(report.kernelRing)).toBeTruthy();
-    expect(report.futex.ring.waiter.lastWait.untimed).toBe(true);
+    // the wait is in the ring when the ring reaches back to where the hold began; a ring that does not says so by where it begins (quire#993)
+    const ring = report.futex.ring;
+    expect(ring.error, JSON.stringify(ring)).toBeUndefined();
+    if (ringReaches({ ringStart: ring.ringStart, ringEnd: ring.ringEnd, heldMs: report.heldMs })) expect(ring.waiter.lastWait.untimed, JSON.stringify(ring)).toBe(true);
+    else expect(ring.waiter.lastWait, `the ring begins ${ring.ringEnd - ring.ringStart} s before its end and the hold was ${report.heldMs} ms`).toBeNull();
     expect(report.processes.some((each) => /--type=renderer/.test(each.cmdline))).toBe(true);
     // the stall watch sees the same freeze (its capture begins about 5 s into the hang, in the Playwright worker) and is not cut short by this
     // test ending: the hang is held until that capture has read the renderer, as the test above does (a loaded run ended the test under it, quire#575)
@@ -1155,4 +1159,24 @@ test('what the runner can do that bears on the classes the record cannot see is 
   expect(reading.counters).toHaveProperty('available');
   expect(reading.rr, 'the preflight asked rr itself').toHaveProperty('installed');
   expect(reading.rr.record, 'and said what its recording did').toHaveProperty('works');
+});
+
+test('a futex wait older than the tail of the ring a watchdog report keeps is lost by the tail and found in the whole ring (quire#993, ring reach)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const { gzipSync } = await import('node:zlib');
+  // 484203 events a second, as the outer watchdog's report of run 40705566021 had it: a wait 4 s before the end, then the noise of four busy workers
+  const rate = 484203;
+  const wait = '  chrome-headless-3289    [003] .....   100.000000: sys_futex(uaddr: 0x7ffe33dd6610, op: 0x189, val: 0, utime: 0, uaddr2: 0, val3: 0xffffffff)';
+  const lines = [wait];
+  const total = 4 * rate;
+  for (let i = 1; i <= total; i++) lines.push(`  libuv-worker-4372    [001] .....   ${(100 + i / rate).toFixed(6)}: sys_futex -> 0x0`);
+  const write = (name, kept) => { const file = testInfo.outputPath(name); writeFileSync(file, gzipSync(['# entries-in-buffer/entries-written: x/x   #P:4', ...kept].join('\n'))); return file; };
+  const tail = await futexAnalysis(write('tail.txt.gz', lines.slice(-600000)), { address: '7ffe33dd6610', tid: 3289 });
+  const whole = await futexAnalysis(write('whole.txt.gz', lines), { address: '7ffe33dd6610', tid: 3289 });
+  expect(tail.waiter.lastWait, 'the old tail of 600000 lines loses the wait').toBeNull();
+  expect(ringReaches({ ringStart: tail.ringStart, ringEnd: tail.ringEnd, heldMs: 4000 }), 'and says it does not reach').toBe(false);
+  expect(whole.waiter.lastWait, 'the whole ring has it').toMatchObject({ untimed: true, kind: 'wait' });
+  expect(ringReaches({ ringStart: whole.ringStart, ringEnd: whole.ringEnd, heldMs: 4000 })).toBe(true);
+  expect(ringReaches({ ringStart: null, ringEnd: 0, heldMs: 0 }), 'a ring of no events reaches nothing').toBe(false);
+  expect(RING_LINES, 'a watchdog report keeps the whole ring').toBeGreaterThanOrEqual(4903415);
 });

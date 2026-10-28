@@ -202,6 +202,14 @@ const RING_LINE = /^\s*(.+)-(\d+)\s+\[\d+\]\s+\S+\s+(\d+\.\d+):\s+(.*)$/;
 const FUTEX_CALL = /sys_futex\(uaddr: (?:0x)?([0-9a-f]+), op: (?:0x)?([0-9a-f]+), val: (\S+), utime: (\S+?),/;
 
 /**
+ * Whether a ring that begins at `ringStart` and ends at `ringEnd` (seconds, the ring's clock) reaches back to the start of a hold of `heldMs`: a wait
+ * that began with the hold is in the ring only then (keyword: ring reach, quire#993). A ring of no events reaches nothing.
+ */
+export function ringReaches({ ringStart, ringEnd, heldMs }) {
+  return ringStart !== null && ringStart !== undefined && ringStart <= ringEnd - heldMs / 1000;
+}
+
+/**
  * What the kernel ring says of one futex word and the thread that waits on it (#575): the waiter's last wait
  * (its op and whether it has a timeout), every wait and wake on the address, who woke the waiter last and when, and
  * how long the ring has been silent about it. `address` is hex (no 0x), `tid` the waiter's. Streams the gzipped
@@ -212,7 +220,7 @@ export async function futexAnalysis(ringFile, { address, tid }) {
   const wanted = address.toLowerCase().replace(/^0x/, '').replace(/^0+/, '');
   const last = [];
   const wakers = new Map();
-  let lastWait = null, wokenLast = null, switchedOut = null, ringEnd = 0, lines = 0, onAddress = 0;
+  let lastWait = null, wokenLast = null, switchedOut = null, ringStart = null, ringEnd = 0, lines = 0, onAddress = 0;
   const reader = createInterface({ input: createReadStream(ringFile).pipe(createGunzip()), crlfDelay: Infinity });
   for await (const line of reader) {
     if (line.startsWith('#')) continue;
@@ -221,6 +229,7 @@ export async function futexAnalysis(ringFile, { address, tid }) {
     lines += 1;
     const [, task, thread, stamp, text] = parts;
     const at = Number(stamp);
+    if (ringStart === null) ringStart = at;
     ringEnd = at;
     const call = FUTEX_CALL.exec(text);
     if (call) {
@@ -243,7 +252,7 @@ export async function futexAnalysis(ringFile, { address, tid }) {
     if (switched && Number(switched[1]) === tid) switchedOut = { at, state: switched[2] };
   }
   return {
-    address: `0x${wanted}`, waiterTid: tid, ringLines: lines, ringEnd,
+    address: `0x${wanted}`, waiterTid: tid, ringLines: lines, ringStart, ringEnd,
     waiter: {
       lastWait, switchedOut, wokenLast,
       silentMs: wokenLast ? Math.round((ringEnd - wokenLast.at) * 1000) : null,

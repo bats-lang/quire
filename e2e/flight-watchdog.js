@@ -27,7 +27,7 @@ export const CLOCK_JUMP_MS = 500;
 export const HEARTBEAT_STALE_MS = 6000;
 const STACK_MS = 15000;
 const RINGS_MOST = 3;       // reports that keep the ring (each is up to tens of MB); later ones keep the rest
-const RING_LINES = 600000;  // the last of the ring a watchdog report keeps
+export const RING_LINES = tracefs.LINES_KEPT; // a report keeps the whole ring, not its tail: 600000 lines were 1.2 s under load and lost the wait (quire#993, keyword: ring reach)
 
 const text = (path) => { try { return readFileSync(path, 'utf8'); } catch (error) { return ''; } };
 
@@ -250,6 +250,7 @@ export class Watchdog {
     })();
     const futex = parseFutexSyscall(syscall);
     const body = {
+      heldMs,
       reason: `process ${pid}: the main thread has been in an untimed wait (${blocked.name}) with no CPU used for ${heldMs} ms (seen by the watchdog, outside the run)`,
       at: new Date().toISOString(), blocked,
       target: blocked.fd === null ? null : fdTarget(pid, blocked.fd, this.proc),
