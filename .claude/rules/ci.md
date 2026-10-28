@@ -112,9 +112,18 @@ bats's judgement, by the mechanisms below.
   Every group that needs the compiler downloads it to the same place, on every event: a push to
   main and the nightly run restore no cache, so `build` made it from nothing. The artifact is a
   locator as the cache is: the group's own `bats fixtures` (and its `check` member) judge it by
-  bats's stamp and memo and check what differs. A module that fails `bats check` therefore fails
-  `build` (about a minute into it) and the groups do not start, where each of them used to fail on
-  the same line. `check` and `build` never share a `build/` (check is mode 2 and 3,
+  bats's stamp and memo and check what differs. A module that fails `bats check` therefore stops
+  `build` at that step (about a minute into it) and the groups do not start, where each of them
+  used to fail on the same line. **Exactly one failed job** (the ticket's test): the step has
+  `continue-on-error`, every later step of `build` is skipped, `build` ends as a success with the
+  output `app` (the step's outcome), `static`, `e2e` and `android` run only when it is `success`,
+  and `check` (the required status) is the one job that fails, by a step naming the check. Research:
+  a skipped required check passes (GitHub: "if a job is skipped due to a conditional ... it will report
+  its status as 'Success'"; docs on skipped and required checks), so the aggregate cannot simply be
+  skipped while `build` fails unless `build` is itself a required status of the ruleset (an admin's
+  change, in #974); a job's `needs` result is `skipped` for its dependents when it fails, and `if:
+  always()` is what makes an aggregate run. Hence one red job needs the failing step not to fail its
+  job, as here. `check` and `build` never share a `build/` (check is mode 2 and 3,
   build 0 and 1).
 * **Who restores**: a pull request and the merge queue's group (#586: restoring main's cache
   keeps its build job near 3 minutes, where cold it took 13 of a 60-minute window). Main's push,
