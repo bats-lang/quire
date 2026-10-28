@@ -70,6 +70,8 @@ it (bats-lang/bats#243).
   On | Off nor a lone pressed button (quire#363); a segmented group is for three
   or more choices, or two that are not on and off. `onOffPairs` fails a screen
   that has one.
+  A switch shows its label alone; its description is read out only (#592,
+  keyword switch-note, `.claude/rules/reader-layout.md`).
 * **A sign-in field is named by a visible label** (quire#361, WCAG 3.3.2):
   `ui_form_field` makes a `<label for>`; `ui_field` has no such kinds, so a
   password field without a label does not type-check
@@ -82,7 +84,7 @@ it (bats-lang/bats#243).
   48px square (quire#403; `targetsShort`), text fields use a 16px font (iOS does
   not zoom), and focus shows a 2px ring in the text's own colour.
 * **The sheet's size is in its type** (`sheet(r, media, open)`), so it fits the
-  64 KiB text it is put in (the budget is 64500 bytes, raised from 64000 by #412: the costs the forms
+  64 KiB text it is put in (the budget is 65000 bytes, raised from 64000 by #412 and from 64500 by #861: the costs the forms
   declare are upper bounds), and a rule is opened only outside another and
   closed only once.
 

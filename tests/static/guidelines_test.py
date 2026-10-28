@@ -198,10 +198,40 @@ class Review(unittest.TestCase):
     def test_the_gate_form_is_demanded_when_asked(self):
         self.assertTrue(self.findings(GOOD_REVIEW, gate=True))
 
-    def test_a_quoted_objection_alone_on_its_line_passes(self):
-        quoted = 'Quoted objection: `change Fixes #368 to Refs #368`'
-        self.assertEqual(self.findings(GOOD_REVIEW.replace('The Done-when is met.', quoted)), [])
-        self.assertEqual(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Quoted objection: `it passed alone`')), [])
+    def test_a_review_that_quotes_a_banned_phrase_is_refused_with_the_line_its_text_the_phrase_and_the_reason(self):
+        # the "Quoted objection" form is gone (quire#943): a phrase is refused whatever label or code span holds it
+        for line in ('Objection: `change Fixes #368 to Refs #368`', 'The body says "change Fixes #368 to Refs #368".'):
+            with self.subTest(line=line):
+                found = self.findings(GOOD_REVIEW.replace('The Done-when is met.', line))
+                self.assertEqual(len(found), 1, found)
+                self.assertTrue(found[0].startswith('review:3: row 2: the line "'), found)
+                self.assertIn(f'the line "{line}" holds the phrase "Fixes #368 to Refs", which is refused: ', found[0])
+                self.assertIn('Nobody offers a way to ship less than the ticket says', found[0])
+
+    def test_a_long_line_is_shown_cut_and_the_phrase_is_still_named(self):
+        found = self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'x' * 200 + ' use Refs'))
+        self.assertTrue(found and '..." holds the phrase "use Refs"' in found[0], found)
+
+    def test_the_quoted_objection_form_is_not_in_the_lint_or_the_rules(self):
+        self.assertFalse(hasattr(gl, 'QUOTED_OBJECTION'))
+        self.assertFalse(hasattr(gl, 'review_text'))
+        for parts in (('tests', 'static', 'guidelines.py'), ('.claude', 'agents', 'reviewer.md'), ('.claude', 'orchestration.md'), ('.claude', 'agents', 'worker.md')):
+            self.assertNotIn('quoted objection', read_root(*parts).lower(), '/'.join(parts))
+
+    def test_another_list_of_phrases_is_read_from_the_option(self):
+        import subprocess
+        stand_in = os.path.join(HERE, 'guidelines', 'stand-in-phrases.tsv')
+        def run(text):
+            return subprocess.run([sys.executable, '-B', '-I', os.path.join(HERE, 'guidelines.py'), '--review', '-', '--phrases', stand_in],
+                                  input=text, capture_output=True, text=True)
+        refused = run(GOOD_REVIEW.replace('The Done-when is met.', 'The zebra crossing is closed.'))
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn('review:3: row 99: the line "The zebra crossing is closed." holds the phrase "zebra crossing", which is refused: ', refused.stdout + refused.stderr)
+        self.assertEqual(run(GOOD_REVIEW.replace('The Done-when is met.', 'The crossing for zebras is closed.')).returncode, 0)
+
+    def test_a_paraphrase_that_points_at_the_place_passes(self):
+        text = GOOD_REVIEW.replace('The Done-when is met.', 'The second sentence of the third paragraph of the body offers a way to ship less than the ticket says.')
+        self.assertEqual(self.findings(text), [])
 
     def test_a_phrase_in_a_code_span_outside_the_form_is_read_as_the_reviewers_text(self):
         self.assertTrue(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'The body says `it passed alone`.')))
@@ -212,14 +242,6 @@ class Review(unittest.TestCase):
 
     def test_an_exit_clause_in_a_review_is_refused(self):
         self.assertTrue(self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Use Refs instead of Fixes.')))
-
-    def test_a_quoted_objection_with_an_offer_on_its_line_is_refused(self):
-        found = self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Quoted objection: `change Fixes #368 to Refs #368` and do that.'))
-        self.assertTrue(any('Quoted objection' in line for line in found), found)
-
-    def test_a_quoted_objection_must_quote_a_phrase_of_the_list(self):
-        found = self.findings(GOOD_REVIEW.replace('The Done-when is met.', 'Quoted objection: `ls -la`'))
-        self.assertTrue(any('quoted objection is one line' in line for line in found), found)
 
     def test_the_placeholder_and_the_as_and_use_forms_are_refused(self):
         for text in ('change Fixes #N to Refs #N', 'change Fixes #<n> to Refs', 'open it as Refs', 'it goes in as Refs', 'use Refs'):
@@ -413,6 +435,30 @@ class GitHub(unittest.TestCase):
         self.assertIn('generated-by line', description)
         self.assertTrue(findings)
 
+    def test_a_draft_pull_request_gets_a_red_status_for_a_failing_body_and_for_a_failing_review(self):
+        # text-lint runs on a draft too (quire#943): a draft is read like any pull request
+        draft = dict(PULL, draft=True)
+        api = FakeApi()
+        self.assertTrue(self.run_event('pull_request_target', {'pull_request': dict(draft, body=GOOD_BODY.replace('Fixes #751', 'Refs #751'))}, api))
+        self.assertEqual(self.status(api)['state'], 'failure')
+        bad = {'author_association': 'OWNER', 'body': FIRST + 'approved\n\nUse Refs instead of Fixes.', 'html_url': 'u'}
+        api = FakeApi([bad])
+        self.assertTrue(self.run_event('pull_request_target', {'pull_request': draft}, api))
+        self.assertEqual(self.status(api)['state'], 'failure')
+        self.assertEqual(self.run_event('pull_request_target', {'pull_request': draft}, FakeApi()), [])
+
+    def test_the_workflow_has_no_condition_that_skips_a_draft(self):
+        text = read_root('.github', 'workflows', 'text-lint.yml')
+        code = '\n'.join(line for line in text.split('\n') if not line.lstrip().startswith('#'))
+        self.assertNotIn('draft', code.lower())
+        self.assertIn('pull_request_target', code)
+
+    def test_an_ordinary_comment_is_not_linted(self):
+        ordinary = {'author_association': 'OWNER', 'body': 'Use Refs instead of Fixes. It passed alone.', 'html_url': 'u'}
+        api = FakeApi([ordinary])
+        self.assertEqual(self.run_event('pull_request_target', {'pull_request': PULL}, api), [])
+        self.assertEqual(self.status(api)['state'], 'success')
+
     def test_a_bot_and_a_relock_branch_are_exempt(self):
         for pull in (dict(PULL, user={'login': 'dependabot[bot]'}, body=''), dict(PULL, head={'sha': HEAD, 'ref': 'relock/2026-10-21'}, body='')):
             api = FakeApi()
@@ -530,6 +576,53 @@ def shell_code_of(line):
             code.append(char)
         index += 1
     return ''.join(code)
+
+
+class GhRetry(unittest.TestCase):
+    """gh-retry (#931): a 5xx answer of `gh api` is retried; a persistent one fails naming the call."""
+
+    class Done:
+        def __init__(self, code, out='', err=''):
+            self.returncode, self.stdout, self.stderr = code, out, err
+
+    def run_with(self, answers):
+        calls, waits = [], []
+        saved = gl.GH_RUN, gl.GH_SLEEP
+
+        def fake(command):
+            calls.append(command)
+            return answers(len(calls))
+        gl.GH_RUN, gl.GH_SLEEP = fake, waits.append
+        try:
+            return gl.gh_api('repos/o/r/issues/1/comments?per_page=100&page=1'), calls, waits
+        finally:
+            gl.GH_RUN, gl.GH_SLEEP = saved
+
+    def test_a_502_then_success_passes(self):
+        answer, calls, waits = self.run_with(lambda n: self.Done(1, '', 'gh: Server Error (HTTP 502)') if n == 1 else self.Done(0, '[1]'))
+        self.assertEqual((answer, len(calls), waits), ([1], 2, [gl.GH_API_WAITS[0]]))
+
+    def test_a_502_on_every_call_fails_naming_the_call(self):
+        with self.assertRaises(SystemExit) as caught:
+            self.run_with(lambda n: self.Done(1, '', 'gh: Server Error (HTTP 502)'))
+        self.assertIn('gh api GET repos/o/r/issues/1/comments?per_page=100&page=1 failed', str(caught.exception))
+
+    def test_a_502_on_every_call_is_tried_four_times_with_the_stated_waits(self):
+        calls, waits = [], []
+        saved = gl.GH_RUN, gl.GH_SLEEP
+        gl.GH_RUN, gl.GH_SLEEP = (lambda c: (calls.append(c), self.Done(1, '', 'gh: Server Error (HTTP 502)'))[1]), waits.append
+        try:
+            with self.assertRaises(SystemExit):
+                gl.gh_api('repos/o/r/issues/1')
+        finally:
+            gl.GH_RUN, gl.GH_SLEEP = saved
+        self.assertEqual((len(calls), waits), (gl.GH_API_RETRIES + 1, list(gl.GH_API_WAITS)))
+
+    def test_a_404_is_not_retried(self):
+        calls = []
+        with self.assertRaises(SystemExit):
+            self.run_with(lambda n: (calls.append(n), self.Done(1, '', 'gh: Not Found (HTTP 404)'))[1])
+        self.assertEqual(len(calls), 1)
 
 
 class FreeSlotOrder(unittest.TestCase):

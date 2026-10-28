@@ -3,7 +3,7 @@
 
 import { test, expect, onAndroid } from './fixtures.js';
 import {
-  expectBannerSaysWhatToDo, start, epubFile, rawFile, importFiles, importInput, importEnded, card, cards, titles, openBook, toLibrary,
+  collectionButton, showCollection, expectBannerSaysWhatToDo, start, epubFile, rawFile, importFiles, importInput, importEnded, card, cards, titles, openBook, toLibrary,
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
   openSettings, colours, reload, place, pageShown,
   librarySettings, settingsButton, settingsScreen, continueReading,
@@ -805,6 +805,22 @@ test('Book info reads EPUB 2\'s accessibility metadata too, and says when there 
   await expect(a11y.locator('div div')).toHaveText(['This book gives no accessibility information.']);
 });
 
+// quire#459: a book that says something is shown that, and no "No information" line or empty heading
+test('Book info leaves out a group the book says nothing of', async ({ page }) => {
+  await start(page);
+  const hazardOnly = '    <meta property="schema:accessibilityHazard">none</meta>\n';
+  const summaryOnly = '    <meta property="schema:accessibilitySummary">Read it with care.</meta>\n';
+  await importFiles(page, [
+    epubFile({ title: 'Hazard Only', author: 'A', metadata: hazardOnly, rawChapters: chapters(1) }),
+    epubFile({ title: 'Summary Only', author: 'B', metadata: summaryOnly, rawChapters: chapters(1) }),
+  ], 2);
+  let a11y = await infoOf(page, 'Hazard Only');
+  await expect(a11y.locator('div div')).toHaveText(['Hazards', 'No hazards']);
+  await dialog(page, 'Book info').getByRole('button', { name: /Library/ }).click();
+  a11y = await infoOf(page, 'Summary Only');
+  await expect(a11y.locator('div div')).toHaveText(['Accessibility summary', 'Read it with care.']);
+});
+
 // quire#386 (Material 3: a menu's items are grouped by a divider or a small
 // gap): reading first, filing apart from taking out of view, and Read or
 // Continue in Book info, whose author is on the page's own ground
@@ -992,7 +1008,6 @@ test('books of a series are shown with their number, and sorted by series togeth
 
 // Collections: a book's menu puts it in any of them, the library shows
 // one, and one is renamed or deleted (with Undo)
-const collectionRow = page => page.getByRole('group', { name: 'Collection' });
 const collectionsPanel = page => dialog(page, 'Collections');
 
 test('a collection is made from a book\'s menu, shows its books, and is renamed or deleted', async ({ page }) => {
@@ -1002,7 +1017,7 @@ test('a collection is made from a book\'s menu, shows its books, and is renamed 
     epubFile({ title: 'Kept Two', author: 'B' }),
     epubFile({ title: 'Left Out', author: 'C' }),
   ], 3);
-  await expect(collectionRow(page)).toBeHidden();
+  await expect(collectionButton(page)).toBeHidden();
   // made from the first book's menu, the book in it
   await bookMenu(page, 'Kept One');
   await menuItem(page, 'Collections').click();
@@ -1026,29 +1041,31 @@ test('a collection is made from a book\'s menu, shows its books, and is renamed 
   await page.keyboard.press('Escape');
   await expect(collectionsPanel(page)).toBeHidden();
   // the library shows the collection's books only
-  await collectionRow(page).getByRole('button', { name: 'To read' }).click();
+  await showCollection(page, 'To read');
   await expect(cards(page)).toHaveCount(2);
   await expect(card(page, 'Left Out')).toHaveCount(0);
-  await collectionRow(page).getByRole('button', { name: 'All books' }).click();
+  await showCollection(page, 'All books');
   await expect(cards(page)).toHaveCount(3);
   // kept
   await reload(page);
-  await collectionRow(page).getByRole('button', { name: 'To read' }).click();
+  await showCollection(page, 'To read');
   await expect(cards(page)).toHaveCount(2);
   // renamed, the dialog holding its name
-  await page.getByRole('button', { name: 'Rename' }).click();
+  await collectionButton(page).click();
+  await page.getByRole('menuitem', { name: 'Rename collection' }).click();
   const rename = dialog(page, 'Rename collection').getByRole('textbox', { name: 'Name' });
   await expect(rename).toHaveValue('To read');
   await rename.fill('Favourites');
   await dialog(page, 'Rename collection').getByRole('button', { name: 'Rename' }).click();
-  await expect(collectionRow(page).getByRole('button', { name: 'Favourites' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(collectionButton(page)).toHaveText(/Favourites/);
   await expect(cards(page)).toHaveCount(2);
   // deleted: every book shown, none lost; Undo puts it back with its books
-  await page.getByRole('button', { name: 'Delete collection' }).click();
-  await expect(collectionRow(page)).toBeHidden();
+  await collectionButton(page).click();
+  await page.getByRole('menuitem', { name: 'Delete collection' }).click();
+  await expect(collectionButton(page)).toBeHidden();
   await expect(cards(page)).toHaveCount(3);
   await page.getByRole('button', { name: 'Undo' }).click();
-  await collectionRow(page).getByRole('button', { name: 'Favourites' }).click();
+  await showCollection(page, 'Favourites');
   await expect(cards(page)).toHaveCount(2);
   await expect(card(page, 'Left Out')).toHaveCount(0);
   expect(errors).toEqual([]);

@@ -4,7 +4,7 @@
 import { test, expect } from './fixtures.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
-  start, epubFile, rawFile, importFiles, card, cards, openBook, readBook, place, toLibrary,
+  showCollection, start, epubFile, rawFile, importFiles, card, cards, openBook, readBook, place, toLibrary,
   selectText, marks, chapters, dialog, menuItem, libraryMenu, bookMenu, importInput, openSettings, chooseInSortMenu, sortMenuChecked,
   selectionButton, selectionPick, colours, bookPage, pagedBook, showChrome, control,
   librarySettings, settingsButton, restoreInput, exportedBackup,
@@ -234,11 +234,10 @@ test('a backup holds the collections, and restoring it puts each book back in it
   await importFiles(page, [one, two], 2);
   await restoreBackup(page, path);
   await restored(page).getByRole('button', { name: 'Done' }).click();
-  const row = page.getByRole('group', { name: 'Collection' });
-  await row.getByRole('button', { name: 'Essays' }).click();
+  await showCollection(page, 'Essays');
   await expect(cards(page)).toHaveCount(1);
   await expect(card(page, 'Grouped Two')).toHaveCount(1);
-  await row.getByRole('button', { name: 'Poetry' }).click();
+  await showCollection(page, 'Poetry');
   await expect(card(page, 'Grouped One')).toHaveCount(1);
   await expect(cards(page)).toHaveCount(1);
 });
@@ -283,8 +282,8 @@ test('a backup holds reading aloud\'s speed and voices, the brightness, the rota
   await sheet.getByRole('button', { name: 'Lock rotation', exact: true }).click();
   await expect(sheet.getByRole('button', { name: 'Lock rotation', exact: true })).toHaveAttribute('aria-pressed', 'true');
   // full screen, kept by the app (#313)
-  await sheet.getByRole('button', { name: 'Full screen', exact: true }).click();
-  await expect(sheet.getByRole('button', { name: 'Full screen', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await sheet.getByRole('button', { name: 'Full screen while reading', exact: true }).click();
+  await expect(sheet.getByRole('button', { name: 'Full screen while reading', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('Escape');
   await toLibrary(page);
   const json = await exportBackup(page);
@@ -322,7 +321,7 @@ test('a backup holds reading aloud\'s speed and voices, the brightness, the rota
   await expect(sheet.getByRole('slider', { name: 'Brightness while reading' })).toHaveValue('37');
   await expect(sheet.getByRole('button', { name: 'Same as device', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await expect(sheet.getByRole('button', { name: 'Lock rotation', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(sheet.getByRole('button', { name: 'Full screen', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(sheet.getByRole('button', { name: 'Full screen while reading', exact: true })).toHaveAttribute('aria-pressed', 'true');
   // the restored setting hides the bars when the book is read with its own away
   await page.keyboard.press('Escape');
   await page.keyboard.press('t');

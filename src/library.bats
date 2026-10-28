@@ -1816,40 +1816,44 @@ implement lib_coll_show (collection) = let
   val () = !_coll_shown := (if collection >= 0 then (if collection < lib_coll_count() then collection else ~1) else ~1)
 in lib_render() end
 
-(* The library's collection chips: each collection, pressed when it is
-   the one shown *)
+(* The collection menu's choices: each collection, checked when it is
+   the one shown (library-screen: two kinds of control) *)
 fun _chips {count:nat}{j:nat} .<count>. (collections: !colls(count), j: int j, shown: int): void =
   case+ collections of
   | colls_nil() => ()
   | @colls_cons(name, name_len, rest) => let
       val number = j
       val @(chip_id, chip_id_len) = nid_make("collection", number)
-      val () = ui_btn_n("collection-chips", chip_id, chip_id_len, "sbtn")
+      val () = ui_menu_choice_n("collection-menu-list", chip_id, chip_id_len)
       val text = $A.alloc<byte>(name_len + 1)
       val () = _copy(name, name_len, text, 0, 0)
       val @(chip_id, chip_id_len) = nid_make("collection", number)
       val () = ui_text_n_buf(chip_id, chip_id_len, text, name_len)
       val @(chip_id, chip_id_len) = nid_make("collection", number)
-      val () = (if j = shown then ui_attr_n(chip_id, chip_id_len, APressed, "true") else ui_attr_n(chip_id, chip_id_len, APressed, "false"))
+      val () = (if j = shown then ui_attr_n(chip_id, chip_id_len, AChecked, "true") else ui_attr_n(chip_id, chip_id_len, AChecked, "false"))
       val () = _chips(rest, j + 1, shown)
       prval () = fold@(collections)
     in end
 
-(* The collection row: shown when there is a collection, with every
-   book's chip and each collection's; renaming and deleting are offered
-   for the one shown *)
+(* The collection button, shown when there is a collection, naming the
+   one shown; the menu it opens holds every book's choice and each
+   collection's, and Rename and Delete for the one shown *)
 fn _coll_row (): void = let
-  val () = ui_clear("collection-chips")
+  val () = ui_clear("collection-menu-list")
   val cell = colls_take()
   val+ @CollCell(collections, collection_count) = cell
   val shown = !_coll_shown
-  val () = ui_text_btn("collection-chips", "collection-all", "sbtn", "All books")
-  val () = (if shown < 0 then ui_attr("collection-all", APressed, "true") else ui_attr("collection-all", APressed, "false"))
+  val () = ui_menu_choice("collection-menu-list", "collection-all", "All books")
+  val () = (if shown < 0 then ui_attr("collection-all", AChecked, "true") else ui_attr("collection-all", AChecked, "false"))
   val () = _chips(collections, 0, shown)
   val count = collection_count
   prval () = fold@(cell)
   val () = colls_put(cell)
-  val () = ui_show("collection-row", (if count > 0 then same_shelf(!_shelf, OnShelf()) else false))
+  val () = (if shown < 0 then ui_text("collection-current", "All books") else let
+      val @(name, name_len) = lib_coll_name_copy(shown)
+    in ui_text_buf("collection-current", name, name_len) end)
+  val () = ui_show("collection-button", (if count > 0 then same_shelf(!_shelf, OnShelf()) else false))
+  val () = ui_show("collection-menu-actions", shown >= 0)
   val () = ui_show("collection-rename", shown >= 0)
 in ui_show("collection-delete", shown >= 0) end
 
@@ -3216,38 +3220,32 @@ fn _line_if {line:nat}{text_len:pos | text_len < 256} (on: bool, line: int line,
 fn _group_if {line:nat}{text_len:pos | text_len < 256} (on: bool, line: int line, text: string text_len): [next:nat] int next =
   if on then _a11y_group(line, text) else line
 
-(* The line for the first of first, second that holds, else the last *)
+(* The line for the first of first, second that holds, none when neither *)
 fn _line_of2 {line:nat}{first_len,second_len:pos | first_len < 256; second_len < 256}
-  (first: bool, line: int line, first_text: string first_len, second_text: string second_len): [next:nat] int next =
-  if first then _a11y_line(line, first_text) else _a11y_line(line, second_text)
+  (first: bool, second: bool, line: int line, first_text: string first_len, second_text: string second_len): [next:nat] int next =
+  if first then _a11y_line(line, first_text) else _line_if(second, line, second_text)
 
 fn _line_of3 {line:nat}{first_len,second_len,third_len:pos | first_len < 256; second_len < 256; third_len < 256}
-  (first: bool, second: bool, line: int line,
-   first_text: string first_len, second_text: string second_len, third_text: string third_len): [next:nat] int next =
-  if first then _a11y_line(line, first_text) else _line_of2(second, line, second_text, third_text)
-
-fn _line_of4 {line:nat}{first_len,second_len,third_len,fourth_len:pos | first_len < 256; second_len < 256; third_len < 256; fourth_len < 256}
   (first: bool, second: bool, third: bool, line: int line,
-   first_text: string first_len, second_text: string second_len, third_text: string third_len, fourth_text: string fourth_len)
-  : [next:nat] int next =
-  if first then _a11y_line(line, first_text) else _line_of3(second, third, line, second_text, third_text, fourth_text)
+   first_text: string first_len, second_text: string second_len, third_text: string third_len): [next:nat] int next =
+  if first then _a11y_line(line, first_text) else _line_of2(second, third, line, second_text, third_text)
 
 (* The statements for flags, from line number line *)
 fn _a11y_lines {line:nat} (flags: int, line: int line): [next:nat] int next = let
-  (* Ways of reading and Conformance are shown even with no metadata *)
-  val line = _a11y_group(line, "Ways of reading")
-  val line = _line_of2(a11y_has(flags, Transformable()), line, "Appearance can be modified",
-    "No information about appearance modifiability is available")
+  (* a group with no statement is left out, and so is a "No information" line (a11y-display, quire#459) *)
   val readable = a11y_has(flags, SufficientText()) || (a11y_has(flags, TextualMode()) && ~a11y_has(flags, VisualMode()))
-  val line = _line_of3(readable, a11y_has(flags, VisualMode()), line, "Readable in read aloud or dynamic braille",
-    "Not fully readable in read aloud or dynamic braille", "No information about nonvisual reading is available")
+  val ways = a11y_has(flags, Transformable()) || readable || a11y_has(flags, VisualMode()) || a11y_has(flags, AlternativeText())
+  val line = _group_if(ways, line, "Ways of reading")
+  val line = _line_if(a11y_has(flags, Transformable()), line, "Appearance can be modified")
+  val line = _line_of2(readable, a11y_has(flags, VisualMode()), line, "Readable in read aloud or dynamic braille",
+    "Not fully readable in read aloud or dynamic braille")
   val line = _line_if(a11y_has(flags, AlternativeText()), line, "Has alternative text")
-  val line = _a11y_group(line, "Conformance")
   val level = a11y_level(flags)
-  val line = _line_of4(_is_level(level, LevelAAA()), _is_level(level, LevelAA()), _is_level(level, LevelA()), line,
+  val line = _group_if(~_is_level(level, NoLevel()), line, "Conformance")
+  val line = _line_of3(_is_level(level, LevelAAA()), _is_level(level, LevelAA()), _is_level(level, LevelA()), line,
     "This publication exceeds accepted accessibility standards",
     "This publication meets accepted accessibility standards",
-    "This publication meets minimum accessibility standards", "No information is available")
+    "This publication meets minimum accessibility standards")
   val navigation = a11y_has(flags, TableOfContents()) || a11y_has(flags, TermIndex())
     || a11y_has(flags, StructuralNavigation()) || a11y_has(flags, PageNavigation())
   val line = _group_if(navigation, line, "Navigation")
@@ -3288,7 +3286,7 @@ fun _summary_copy {source_loc,dest_loc:agz}{owner:addr}{source_size:nat}{count:n
    book that says nothing of its accessibility is told so once, not by a
    "No information" line under each heading (quire#386) *)
 fn _a11y_body (flags: int, summary_len: int): [next:nat] int next =
-  if flags = 0 then (if summary_len <= 0 then _a11y_line(0, "This book gives no accessibility information.") else _a11y_lines(flags, 0))
+  if flags = 0 then (if summary_len <= 0 then _a11y_line(0, "This book gives no accessibility information.") else 0)
   else _a11y_lines(flags, 0)
 
 (* Fills Book info's accessibility section for book (id_high, id_low) *)

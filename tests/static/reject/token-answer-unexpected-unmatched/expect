@@ -1,0 +1,5 @@
+function _static_answer
+line 4
+pattern match is nonexhaustive:
+TokenUnexpected(_)
+
