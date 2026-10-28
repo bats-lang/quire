@@ -403,7 +403,6 @@ jobs:
           stall-tools: "true"
           # A font with Japanese characters, from pwa's cache: the vertical book's
           # shots are empty boxes without one (quire#359, #932; vertical.spec.js checks it)
-          japanese-font: "true"
 
       # Each spec of the group, and only those: the filters must name
       # exactly as many files as the group lists
