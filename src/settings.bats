@@ -357,6 +357,51 @@ implement sizes_code (choice) = _sizes_code(choice)
 #pub fn sizes_of_code (code: int): publisher_sizes
 implement sizes_of_code (code) = _sizes_of_code(code)
 
+(* The reading ruler's style, a band that holds the eye to one line: off to begin with, the device's own (keyword: reading ruler, #566) *)
+#pub datatype reading_ruler = RulerOff | RulerUnderline | RulerGreyBar | RulerShade | RulerLightbox
+
+(* The lines the grey bar and the lightbox hold bright (keyword: reading ruler) *)
+#pub datatype ruler_lines = RulerOneLine | RulerThreeLines | RulerFiveLines
+
+fn _ruler_code (choice: reading_ruler): [code:nat | code <= 4] int code =
+  case+ choice of
+  | RulerOff() => 0 | RulerUnderline() => 1 | RulerGreyBar() => 2 | RulerShade() => 3 | RulerLightbox() => 4
+
+fn _ruler_of_code (code: int): reading_ruler =
+  if code = 1 then RulerUnderline() else if code = 2 then RulerGreyBar()
+  else if code = 3 then RulerShade() else if code = 4 then RulerLightbox() else RulerOff()
+
+fn _ruler_lines_code (choice: ruler_lines): [code:nat | code <= 2] int code =
+  case+ choice of RulerOneLine() => 0 | RulerThreeLines() => 1 | RulerFiveLines() => 2
+
+fn _ruler_lines_of_code (code: int): ruler_lines =
+  if code = 1 then RulerThreeLines() else if code = 2 then RulerFiveLines() else RulerOneLine()
+
+val _ruler = ref<reading_ruler>(RulerOff())
+val _ruler_lines = ref<ruler_lines>(RulerOneLine())
+
+#pub fn set_ruler_get (): reading_ruler
+implement set_ruler_get () = !_ruler
+#pub fn set_ruler_set (choice: reading_ruler): void
+implement set_ruler_set (choice) = !_ruler := choice
+#pub fn ruler_code (choice: reading_ruler): [code:nat | code <= 4] int code
+implement ruler_code (choice) = _ruler_code(choice)
+#pub fn ruler_of_code (code: int): reading_ruler
+implement ruler_of_code (code) = _ruler_of_code(code)
+#pub fn set_ruler_lines_get (): ruler_lines
+implement set_ruler_lines_get () = !_ruler_lines
+#pub fn set_ruler_lines_set (choice: ruler_lines): void
+implement set_ruler_lines_set (choice) = !_ruler_lines := choice
+#pub fn ruler_lines_code (choice: ruler_lines): [code:nat | code <= 2] int code
+implement ruler_lines_code (choice) = _ruler_lines_code(choice)
+#pub fn ruler_lines_of_code (code: int): ruler_lines
+implement ruler_lines_of_code (code) = _ruler_lines_of_code(code)
+
+(* How many lines the band holds: one, three or five *)
+#pub fn ruler_line_count (choice: ruler_lines): [count:pos | count <= 5] int count
+implement ruler_line_count (choice) =
+  case+ choice of RulerOneLine() => 1 | RulerThreeLines() => 3 | RulerFiveLines() => 5
+
 val _speech_rate = ref<speech_rate>(RateNormal())
 val _brightness = ref<brightness_choice>(BrightnessSystem())
 val _brightness_level = ref<int>(50)
@@ -707,6 +752,26 @@ fn _sizes_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at
   else if byte2int0($A.get<byte>(record, at)) <> 80 then !_sizes := SizesInProportion()
   else !_sizes := _sizes_of_code(byte2int0($A.get<byte>(record, at + 1)))
 
+(* "R" and the ruler's style and lines, a byte each, at record[at, at + 3) *)
+fn _ruler_write {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 3 > n then ()
+  else let
+    val () = $A.write_byte(record, at, 82)
+    val () = $A.write_byte(record, at + 1, _ruler_code(!_ruler))
+  in $A.write_byte(record, at + 2, _ruler_lines_code(!_ruler_lines)) end
+
+(* The ruler's bytes after "R" at record[at]: off, one line, when there are none (a record written before it) *)
+fn _ruler_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 3 > n then let
+    val () = !_ruler := RulerOff()
+  in !_ruler_lines := RulerOneLine() end
+  else if byte2int0($A.get<byte>(record, at)) <> 82 then let
+    val () = !_ruler := RulerOff()
+  in !_ruler_lines := RulerOneLine() end
+  else let
+    val () = !_ruler := _ruler_of_code(byte2int0($A.get<byte>(record, at + 1)))
+  in !_ruler_lines := _ruler_lines_of_code(byte2int0($A.get<byte>(record, at + 2))) end
+
 (* ============================================================
    Applying
    ============================================================ *)
@@ -977,6 +1042,18 @@ fn _show_controls (): void = let
   val () = _pressed("volume-keys-turn", vol_code(current.volume_keys) = vol_code(KeysTurnPages()))
   val () = _pressed("ruby-show", ruby_code(set_ruby_get()) = ruby_code(RubyShown()))
   val () = _pressed("ruby-hide", ruby_code(set_ruby_get()) = ruby_code(RubyHidden()))
+  val ruler = _ruler_code(!_ruler)
+  val () = _pressed("ruler-off", ruler = 0)
+  val () = _pressed("ruler-underline", ruler = 1)
+  val () = _pressed("ruler-grey-bar", ruler = 2)
+  val () = _pressed("ruler-shade", ruler = 3)
+  val () = _pressed("ruler-lightbox", ruler = 4)
+  val ruler_lines = _ruler_lines_code(!_ruler_lines)
+  val () = _pressed("ruler-lines-one", ruler_lines = 0)
+  val () = _pressed("ruler-lines-three", ruler_lines = 1)
+  val () = _pressed("ruler-lines-five", ruler_lines = 2)
+  (* the band's height is the grey bar's and the lightbox's: the other styles hold one line *)
+  val () = ui_show("ruler-lines-row", ruler = 2 || ruler = 4)
   val () = (case+ set_narration_notes_get() of
     | NotesSkipped() => let val () = _pressed("narration-skip", true) in _pressed("narration-read", false) end
     | NotesRead() => let val () = _pressed("narration-skip", false) in _pressed("narration-read", true) end)
@@ -1006,7 +1083,8 @@ in ui_text_buf("word-value", buf, next) end
    (their count, then each one's code and name, each after its length),
    then "N" (78) and a book narration's speed and skipping, a byte each,
    then "F" (70) and full screen's byte, then "P" (80) and the byte of
-   whether a book's sizes are the publisher's (quire#431).
+   whether a book's sizes are the publisher's (quire#431), then "R" (82)
+   and the reading ruler's style and lines, a byte each (quire#566).
    ("S1" was the first 8; a record of "S2" without the last bytes has
    their defaults.) *)
 fn _save (sort: int): void = let
@@ -1014,13 +1092,14 @@ fn _save (sort: int): void = let
   val voices = _voices_take()
   val+ @VoicesCell(choices, voice_count) = voices
   val voices_size = _voices_size(choices)
-  val record_size = 24 + voices_size + 3 + 2 + 2
+  val record_size = 24 + voices_size + 3 + 2 + 2 + 3
   val record = $A.alloc<byte>(record_size)
   val () = _voices_write(choices, record, record_size, 24)
   val () = $A.write_byte(record, 23, voice_count)
   val () = _narration_write(record, record_size, 24 + voices_size)
   val () = _fullscreen_write(record, record_size, 24 + voices_size + 3)
   val () = _sizes_write(record, record_size, 24 + voices_size + 5)
+  val () = _ruler_write(record, record_size, 24 + voices_size + 7)
   prval () = fold@(voices)
   val () = _voices_put(voices)
   val () = $A.write_byte(record, 20, _rate_code(!_speech_rate))
@@ -1274,6 +1353,8 @@ fn _reset (): void = let
   val () = !_rotation := RotationFree()
   val () = !_fullscreen := FullscreenOff()
   val () = !_sizes := SizesInProportion()
+  val () = !_ruler := RulerOff()
+  val () = !_ruler_lines := RulerOneLine()
   val () = !_narration_speed := 4
   val () = !_narration_notes := NotesSkipped()
   var aside: voices_cell = _voices_take()
@@ -1296,6 +1377,8 @@ implement set_reset_undoable (how) = let
   val rotation_before = !_rotation
   val fullscreen_before = !_fullscreen
   val sizes_before = !_sizes
+  val ruler_before = !_ruler
+  val ruler_lines_before = !_ruler_lines
   val speed_before = !_narration_speed
   val notes_before = !_narration_notes
   val () = _reset()
@@ -1312,6 +1395,8 @@ in
         val () = !_rotation := rotation_before
         val () = !_fullscreen := fullscreen_before
         val () = !_sizes := sizes_before
+        val () = !_ruler := ruler_before
+        val () = !_ruler_lines := ruler_lines_before
         val () = !_narration_speed := speed_before
         val () = !_narration_notes := notes_before
         var aside: voices_cell = VoicesCell(VoiceChoicesEnd(), 0)
@@ -1433,6 +1518,7 @@ in
         val () = _narration_read(record, n, voices_end)
         val () = _fullscreen_read(record, n, voices_end + 3)
         val () = _sizes_read(record, n, voices_end + 5)
+        val () = _ruler_read(record, n, voices_end + 7)
         val () = _voices_put(VoicesCell(voices_read, voices_read_count))
         val () = $A.free<byte>(record)
         val () = !_set := @{ size = size, line_height = line_height, margin = margin, font = font,

@@ -21,7 +21,7 @@ staload H = "css/src/harmony.sats"
 
 (* A role is a custom property, --<name>, set per theme *)
 #pub datasort colour_role =
-  | BG | FG | MUTED | CARD | LINE | EDGE | BAR | BARFG | ACCENT | ACCENTFG | HL | BARHI | BANNER | BANNERFG | MARK | MARKFG | DANGER | HL2
+  | BG | FG | MUTED | CARD | LINE | EDGE | BAR | BARFG | ACCENT | ACCENTFG | HL | BARHI | BANNER | BANNERFG | MARK | MARKFG | DANGER | HL2 | RULER
 
 (* A role as a value, indexed by the role it is *)
 #pub datatype role_value(colour_role) =
@@ -43,6 +43,7 @@ staload H = "css/src/harmony.sats"
   | RoleMarkText(MARKFG) of ()
   | RoleDanger(DANGER) of ()
   | RoleSecondHighlight(HL2) of ()
+  | RoleRuler(RULER) of ()
 
 (* Themes: light, sepia, dark, night (warm, low in blue, for reading in
    the dark) and grey, each indexed by its number in the palette (PAL's
@@ -80,6 +81,7 @@ implement role_name (role) =
   | RoleMarkText() => "markfg"
   | RoleDanger() => "danger"
   | RoleSecondHighlight() => "hl2"
+  | RoleRuler() => "ruler"
 
 (* PAL(t, r, c): in theme t, role r is the colour 0xc *)
 #pub dataprop PAL(palette, colour_role, int) =
@@ -103,6 +105,8 @@ implement role_name (role) =
   | PAL0_danger(PaletteLight, DANGER, 0xb3261e) | PAL1_danger(PaletteSepia, DANGER, 0x9c2a1c) | PAL2_danger(PaletteDark, DANGER, 0xffb4ab) | PAL3_danger(PaletteNight, DANGER, 0xe8a598) | PAL4_danger(PaletteGrey, DANGER, 0xffb4ab)
   (* a second highlight, orange: the yellows' family, apart in hue *)
   | PAL0_hl2(PaletteLight, HL2, 0xfbc58a) | PAL1_hl2(PaletteSepia, HL2, 0xe8b880) | PAL2_hl2(PaletteDark, HL2, 0x7b5831) | PAL3_hl2(PaletteNight, HL2, 0x5c3f1f) | PAL4_hl2(PaletteGrey, HL2, 0x7b5831)
+  (* the grey bar of the reading ruler, under the text (keyword: reading ruler, #566) *)
+  | PAL0_ruler(PaletteLight, RULER, 0xe6e1d9) | PAL1_ruler(PaletteSepia, RULER, 0xdccfb8) | PAL2_ruler(PaletteDark, RULER, 0x45403a) | PAL3_ruler(PaletteNight, RULER, 0x0b0805) | PAL4_ruler(PaletteGrey, RULER, 0x111111)
 
 (* SURF(text, ground): text in role text on role ground is at least
    4.5:1 in every theme, and does not vibrate on it (one of them is
@@ -184,20 +188,20 @@ implement role_name (role) =
 #pub dataprop HARMONY(palette) =
   | {theme_number:palette}{first_low,first_high,second_low,second_high,third_low,third_high:int}
     {ground,text,muted,card,line,edge,bar,bar_text,accent,accent_text,
-     highlight,bar_high,banner,banner_text,mark,mark_text,danger,second_highlight:int}
+     highlight,bar_high,banner,banner_text,mark,mark_text,danger,second_highlight,ruler:int}
     HARMONYc(theme_number) of (
       PAL(theme_number, BG, ground), PAL(theme_number, FG, text), PAL(theme_number, MUTED, muted),
       PAL(theme_number, CARD, card), PAL(theme_number, LINE, line), PAL(theme_number, EDGE, edge),
       PAL(theme_number, BAR, bar), PAL(theme_number, BARFG, bar_text), PAL(theme_number, ACCENT, accent),
       PAL(theme_number, ACCENTFG, accent_text), PAL(theme_number, HL, highlight), PAL(theme_number, BARHI, bar_high),
       PAL(theme_number, BANNER, banner), PAL(theme_number, BANNERFG, banner_text), PAL(theme_number, MARK, mark),
-      PAL(theme_number, MARKFG, mark_text), PAL(theme_number, DANGER, danger), PAL(theme_number, HL2, second_highlight),
+      PAL(theme_number, MARKFG, mark_text), PAL(theme_number, DANGER, danger), PAL(theme_number, HL2, second_highlight), PAL(theme_number, RULER, ruler),
       FAM(theme_number, first_low, first_high, second_low, second_high, third_low, third_high),
       $H.NEUTRAL(ground, 48, first_low, first_high), $H.NEUTRAL(text, 48, first_low, first_high),
       $H.NEUTRAL(muted, 48, first_low, first_high), $H.NEUTRAL(card, 48, first_low, first_high),
       $H.NEUTRAL(line, 48, first_low, first_high), $H.NEUTRAL(edge, 48, first_low, first_high),
       $H.NEUTRAL(bar, 48, first_low, first_high), $H.NEUTRAL(bar_text, 48, first_low, first_high),
-      $H.NEUTRAL(bar_high, 48, first_low, first_high),
+      $H.NEUTRAL(bar_high, 48, first_low, first_high), $H.NEUTRAL(ruler, 48, first_low, first_high),
       $H.IN3(accent, first_low, first_high, second_low, second_high, third_low, third_high),
       $H.IN3(accent_text, first_low, first_high, second_low, second_high, third_low, third_high),
       $H.IN3(highlight, first_low, first_high, second_low, second_high, third_low, third_high),
@@ -251,5 +255,50 @@ implement role_name (role) =
       SHADED(t, FG, BG, strength, 70), SHADED(t, ACCENT, BG, strength, 45),
       SHADED(t, FG, HL, strength, 45), SHADED(t, FG, HL2, strength, 45),
       SHADED(t, MARKFG, MARK, strength, 45))
+
+(* RULED(ground): a ground under the book's text, the grey bar of the reading ruler, leaves the body's text at 7:1 (HARMONY's at rest) and a link at 4.5:1 (SURF's), not vibrating, in every theme (keyword: reading ruler) *)
+#pub dataprop RULED(colour_role) =
+  | {ground:colour_role}
+    {text_light,link_light,ground_light,
+     text_sepia,link_sepia,ground_sepia,
+     text_dark,link_dark,ground_dark,
+     text_night,link_night,ground_night,
+     text_grey,link_grey,ground_grey:int}
+    RULEDc(ground) of (
+       PAL(PaletteLight, FG, text_light), PAL(PaletteLight, ACCENT, link_light), PAL(PaletteLight, ground, ground_light),
+       $CT.CONTRAST(text_light, ground_light, 70), $H.NOVIB(text_light, ground_light), $CT.CONTRAST(link_light, ground_light, 45),
+       PAL(PaletteSepia, FG, text_sepia), PAL(PaletteSepia, ACCENT, link_sepia), PAL(PaletteSepia, ground, ground_sepia),
+       $CT.CONTRAST(text_sepia, ground_sepia, 70), $H.NOVIB(text_sepia, ground_sepia), $CT.CONTRAST(link_sepia, ground_sepia, 45),
+       PAL(PaletteDark, FG, text_dark), PAL(PaletteDark, ACCENT, link_dark), PAL(PaletteDark, ground, ground_dark),
+       $CT.CONTRAST(text_dark, ground_dark, 70), $H.NOVIB(text_dark, ground_dark), $CT.CONTRAST(link_dark, ground_dark, 45),
+       PAL(PaletteNight, FG, text_night), PAL(PaletteNight, ACCENT, link_night), PAL(PaletteNight, ground, ground_night),
+       $CT.CONTRAST(text_night, ground_night, 70), $H.NOVIB(text_night, ground_night), $CT.CONTRAST(link_night, ground_night, 45),
+       PAL(PaletteGrey, FG, text_grey), PAL(PaletteGrey, ACCENT, link_grey), PAL(PaletteGrey, ground, ground_grey),
+       $CT.CONTRAST(text_grey, ground_grey, 70), $H.NOVIB(text_grey, ground_grey), $CT.CONTRAST(link_grey, ground_grey, 45))
+
+(* BLEND(c, v, strength, s): colour c under a veil of colour v at strength percent is s, each channel rounded (the page turn's SHADE is the veil black); DIMS(t, text, ground, strength, k): in theme t, text and ground both under a veil of the page's ground at that strength still reach k / 10 *)
+#pub dataprop BLEND(int, int, int, int) =
+  | {r,g,b,vr,vg,vb,blended_r,blended_g,blended_b:nat | r < 256; g < 256; b < 256; vr < 256; vg < 256; vb < 256}{strength:nat | strength <= 100}
+    {rl,rh,gl,gh,bl,bh,vrl,vrh,vgl,vgh,vbl,vbh,srl,srh,sgl,sgh,sbl,sbh:int |
+     100 * blended_r <= r * (100 - strength) + vr * strength + 50; r * (100 - strength) + vr * strength + 50 < 100 * blended_r + 100;
+     100 * blended_g <= g * (100 - strength) + vg * strength + 50; g * (100 - strength) + vg * strength + 50 < 100 * blended_g + 100;
+     100 * blended_b <= b * (100 - strength) + vb * strength + 50; b * (100 - strength) + vb * strength + 50 < 100 * blended_b + 100}
+    BLENDc(r * 65536 + g * 256 + b, vr * 65536 + vg * 256 + vb, strength, blended_r * 65536 + blended_g * 256 + blended_b) of
+      ($CT.LIN(r, rl, rh), $CT.LIN(g, gl, gh), $CT.LIN(b, bl, bh),
+       $CT.LIN(vr, vrl, vrh), $CT.LIN(vg, vgl, vgh), $CT.LIN(vb, vbl, vbh),
+       $CT.LIN(blended_r, srl, srh), $CT.LIN(blended_g, sgl, sgh), $CT.LIN(blended_b, sbl, sbh))
+
+#pub dataprop DIMS(palette, colour_role, colour_role, int, int) =
+  | {t:palette}{text,ground:colour_role}{strength,k:int}{text_colour,ground_colour,page_colour,text_dimmed,ground_dimmed:int}
+    DIMSc(t, text, ground, strength, k) of (
+      PAL(t, text, text_colour), PAL(t, ground, ground_colour), PAL(t, BG, page_colour),
+      BLEND(text_colour, page_colour, strength, text_dimmed), BLEND(ground_colour, page_colour, strength, ground_dimmed),
+      $CT.CONTRAST(text_dimmed, ground_dimmed, k))
+
+(* DIMMED(t, strength): the lines the reading ruler's Shade and Lightbox dim, under a veil of the page's ground at strength percent, stay legible in theme t: the text at 4.5:1 on the page, a link at 3:1 and the text on a highlight at 3:1; a veil is written only at a strength so proven (keyword: reading ruler) *)
+#pub dataprop DIMMED(palette, int) =
+  | {t:palette}{strength:int}
+    DIMMEDc(t, strength) of (
+      DIMS(t, FG, BG, strength, 45), DIMS(t, ACCENT, BG, strength, 30), DIMS(t, FG, HL, strength, 30))
 
 end

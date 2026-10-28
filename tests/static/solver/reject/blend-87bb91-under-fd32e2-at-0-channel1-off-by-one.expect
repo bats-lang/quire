@@ -1,0 +1,3 @@
+line 272
+function _
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eapp(S2Ecst(<=); S2Eapp(S2Ecst(*); S2Eintinf(100), S2EVar(_->S2Eintinf(188))), S2Eapp(S2Ecst(+); S2Eapp(S2Ecst(+); S2Eapp(S2Ecst(*); S2EVar(_->S2Eintinf(187)), S2Eapp(S2Ecst(-); S2Eintinf(100), S2EVar(_->S2Eintinf(0)))), S2Eapp(S2Ecst(*); S2EVar(_->S2Eintinf(50)), S2EVar(_->S2Eintinf(0)))), S2Eintinf(50))))

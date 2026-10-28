@@ -37,6 +37,7 @@ staload "book.sats"
 staload "mem.sats"
 staload "reader.sats"
 staload "settings.sats"
+staload "reading_ruler.sats"
 staload "library.sats"
 staload SP = "wasm.bats-packages.dev/bridge/src/speech.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
@@ -231,7 +232,8 @@ in
     val @(end_frozen, end_bytes) = $A.freeze<byte>(end_id)
     val () = $BDOM.mark_range(MARK_SPOKEN, start_bytes, start_id_len, start_offset, end_bytes, end_id_len, end_offset)
     val () = release_bytes(end_frozen, end_bytes)
-  in release_bytes(start_frozen, start_bytes) end
+    val () = release_bytes(start_frozen, start_bytes)
+  in ruler_follow(start_node, start_offset) end
 end
 
 (* The first language subtag of tag[0, tag_len), at most 3 bytes: the code the voices are kept by; "en" for none *)
