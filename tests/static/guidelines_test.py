@@ -54,6 +54,28 @@ class Phrases(unittest.TestCase):
         self.assertEqual(gl.lint_text('No sed.', 'x', PHRASES), [])
         self.assertTrue(gl.lint_text('No sed.', 'x', PHRASES, guide=True))
 
+    def test_the_sweep_files_name_no_agent_count_or_model(self):
+        """quire#897: the ledger file's rows are the agents that run; the sweep skill and its two scripts name no count."""
+        sweep = os.path.join(gl.ROOT, '.claude', 'skills', 'sweep')
+        for name in ('SKILL.md', 'qsweep', 'slots'):
+            with open(os.path.join(sweep, name), encoding='utf-8') as handle:
+                text = handle.read()
+            with self.subTest(name=name):
+                self.assertEqual([line for line in gl.lint_text(text, name, PHRASES, guide=True) if ': row 14: ' in line], [])
+
+    def test_slots_check_compares_the_number_with_the_rows_of_the_ledger_file(self):
+        """quire#897: the limit is the ledger file's rows, not a number in the script."""
+        import subprocess
+        import tempfile
+        script = os.path.join(gl.ROOT, '.claude', 'skills', 'sweep', 'slots')
+        with tempfile.TemporaryDirectory() as directory:
+            for rows, number, status in ((3, 3, 0), (3, 4, 1), (1, 1, 0), (1, 2, 1), (1, 0, 0)):
+                ledger = os.path.join(directory, 'slots.tsv')
+                with open(ledger, 'w', encoding='utf-8') as handle:
+                    handle.write(''.join(f'agent{i}\t-\t-\n' for i in range(rows)))
+                done = subprocess.run(['sh', script, 'check', str(number)], env={**os.environ, 'SLOTS_FILE': ledger}, capture_output=True, text=True)
+                self.assertEqual((rows, number, done.returncode), (rows, number, status), done.stderr)
+
     def test_a_guideline_quotes_a_phrase_in_a_code_span_or_a_block(self):
         self.assertEqual(gl.lint_text('Never write `it passed alone`.', 'x', PHRASES, guide=True), [])
         self.assertEqual(gl.lint_text('```\nit passed alone\n```\n', 'x', PHRASES, guide=True), [])

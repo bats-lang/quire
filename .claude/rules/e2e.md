@@ -31,8 +31,7 @@ it does not hang on the machine's fonts.
   still fails a turn that costs twice as much; a flaky budget is not relaxed
   until it catches nothing.
 * **A bar's control is clicked with `clickControl`**, which shows the bars and
-  clicks together until the click lands (the bars' 5 s timeout can hide them
-  on a loaded machine).
+  clicks together until the click lands (a turn or a jump takes the bars down; no timer does, #560).
 * **Every raw pointer event goes through `rawMouse` (`e2e/helpers.js`)**, which
   calls `releaseClick` first before a click, double click or move made with no
   button held (quire#630: a timed-out locator click can leave Playwright's
@@ -43,7 +42,7 @@ it does not hang on the machine's fonts.
   that moves the pointer to the viewport's centre, so never call it between a
   move and the press, wheel or release that depend on the pointer's place.
 * **A test never waits in real time for a moment of the app's own** (#657: the
-  bars' 5 s, the back button's 10 s, a toast's 2 s, the Nextcloud poll). It
+  back button's 10 s, a toast's 2 s, the Nextcloud poll). It
   installs the fake clock before the page opens (`page.clock.install()`) and
   runs it to the moment: `expectMoment` (`e2e/helpers.js`) asserts the thing is
   there 1.5 s before the moment's end and gone 1.5 s after, `runUntil` runs the

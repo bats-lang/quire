@@ -192,7 +192,7 @@ restores main's build cache; the long pole is the slowest static group. A
 change that would make its own group longer than about 45 minutes is sharded
 first (the mutation check is, below).
 
-* **At most two entries in the queue at a time**; the next goes in when one has
+* **No more than two entries in the queue at a time**; the next goes in when one has
   merged or been removed (five at once wanted more runners than the pool has,
   and nothing merged for 3.5 hours).
 * **Superseded runs are cancelled**: GitHub rebuilds the groups behind a
@@ -402,6 +402,11 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   a spec or a static fixture runs that group too where the machine can (`tests/static/run.sh`,
   `gen-pwa test -- <spec>`); the rest of the population is CI's. Playwright
   1.58 or later is required (`.claude/rules/e2e.md`).
+  **The tight loop** (keyword: e2e loop): to edit, build and test again, gen-pwa is not rebuilt (it
+  changes only with `src/bin/gen-pwa.bats` or the way the pwa is assembled): `bats build --only debug
+  --only wasm`, then `cp dist/debug/quire.wasm dist/pwa/app.wasm` (the two are byte-identical), then
+  `./dist/debug/gen-pwa test -- <spec>`. The full build, gen-pwa and `scripts/sync-clients.sh` are for
+  the final evidence, when the Done-when names it.
 
 ## Running the e2e flight recorder on a local machine: tracefs and a non-root user (quire#765)
 
@@ -432,11 +437,21 @@ reports `the kernel ring did not start (no tracefs, or sudo refused: see the run
   A setup script must therefore mount only when the line is missing. Its line, tested here
   on the already-mounted path (exit 0 and no second mount), is
   `grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing`.
-* **Does the mount survive a container restart.** The ticket's reading is that it does not:
-  `/proc/mounts` is per boot, and nothing writes the mount to disk. This session did not restart
-  its container, so that is the ticket's reading, not a restart test. The mount is set again at
-  the start of each session by the environment's setup script, which is not in the repo: the
-  script holds the line above (the owner's confirmation with a screenshot, quire#785).
+* **Does the mount survive a container restart (quire#958).** It does not: tracefs is a mount, and
+  `/proc/mounts` is per boot. Observed after the restart of 2026-10-27/28: the boot was at
+  2026-10-27 23:56:40 UTC (`uptime -s`), `grep tracefs /proc/mounts` printed nothing until the
+  orchestrator ran the allowed command by hand, and the preflight failed with `PREFLIGHT FAILED:
+  kernel ring: no tracefs instances directory`. Why it was unmounted (the environment's setup script
+  did not run at the restart, or ran and failed) is not established, and an agent in the container
+  cannot establish it: the container's logs hold nothing after the boot that the script would leave
+  (no apt or dpkg entry since 2026-10-21, no shell history, and the mount line leaves no trace when
+  it runs). It is quire#965, for the owner. The rule does not depend on the answer: a worker on a
+  container that was restarted, or whose preflight prints that message, runs once, as root, the
+  allowed command `grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing`
+  (the compound form `.claude/settings.json` allows on line 9; it does nothing where tracefs is
+  mounted), checks `grep tracefs /proc/mounts`, and runs the spec again. The preflight's message
+  (`e2e/flight-tracefs.js`), `worker.md` and the worker brief (`.claude/orchestration.md`, "Briefs
+  and the machine") carry the same command. No other `mount` is run.
 * **Who runs the specs.** As uid 0, the specs run without any `sudo`. A run as another user
   (comment 6329897260 ran as user `quireci`, `sudo -u quireci -H env CI=true ...`) needs a user
   and a `sudo -n` grant. The ticket records no `useradd` and no `sudoers.d` command for that user,
