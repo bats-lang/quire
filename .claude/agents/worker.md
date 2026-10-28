@@ -34,7 +34,9 @@ You are a worker on bats-lang/quire. The brief names the ticket, the files and d
 - Post the evidence for every claim, and for every item of the Done-when, in the PR body under a heading `Evidence`: the command (a line that starts `$ `) and its raw output in a fenced block, copied from the terminal. A number in the body (a count of tests, jobs, lines) is copied from that output, not recalled.
 - A class of failure the change says it covers has a case that fails when the class occurs: show it by injecting the failure and posting the failing output. A class with no means to see it (a red in a test with no record) is not covered.
 - A test that went red is root-caused: the line, the state, the sequence that makes it fail, shown by a run that fails before the fix and passes after it, or the test is made robust against the cause. `it passed again`, `it passes alone`, `contention` and `nothing touches it` are not causes. A fix that stops one symptom while the cause stays in the code is not a fix. Every failure after the first one in a run is explained too.
-- Data read into one value (a string, a buffer, an array) has a size that value can hold; say the bound or stream it.
+- Data read into one value (a string, a buffer, an array) has a size that value can hold; say the bound or stream it.- A test failure that gets a p0 ticket is quarantined in the commit that files it: `test.fixme('#N ...')` on every project (`.claude/rules/e2e.md`, "Quarantine and repeat"). The fix removes the mark, and the PR body lists it in a line `Quarantine: ...`.
+- A fix for a race (a failure that depends on the runner's speed, a fixed wait or an order of events) is evidenced by the CI `repeat` job with `--repeat-each 20` on every project, passed every time: the body shows the command, the run URL and the result, in a line `Repeat: ...` and in Evidence. One green run is no evidence. No new `waitForTimeout` or sleep in `e2e/`: wait for an event.
+
 
 ## Pushing, CI and hand-back
 

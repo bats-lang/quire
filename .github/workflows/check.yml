@@ -21,7 +21,21 @@ on:
     types: [checks_requested, destroyed]
   # The relock workflow starts it on its relock/<date> branch: a pull
   # request opened with GITHUB_TOKEN starts no workflow by itself
+  # The relock workflow starts it with no input. With `spec` it also runs the
+  # `repeat` job (#976, keyword: repeat-each): that spec, every project, each
+  # test repeated `repeat-each` times, the evidence for a fix of a race
   workflow_dispatch:
+    inputs:
+      spec:
+        description: 'repeat job: the e2e spec to repeat (e2e/<name>.spec.js); empty runs no repeat job'
+        required: false
+        type: string
+        default: ''
+      repeat-each:
+        description: 'repeat job: how many times each test runs on each project (a race fix needs 20)'
+        required: false
+        type: string
+        default: '20'
   # A check of main from nothing every night: the pull requests' and the
   # queue's runs restore the compiler's cache, and a push to main builds cold,
   # so this is the check that does not depend on any cache, with the toolchain
@@ -540,6 +554,57 @@ jobs:
             test-results-sanitizer/
             !test-results/**/stall-core-*
           retention-days: 14
+
+  # A race fix is shown by this job (#976, keyword: repeat-each, .claude/rules/e2e.md,
+  # "Quarantine and repeat"): one spec, every project of playwright.config.js, each test run
+  # `repeat-each` times; a repeat that fails fails the job. Started by hand with
+  # `gh workflow run check.yml --ref <branch> -f spec=e2e/<name>.spec.js -f repeat-each=20`;
+  # it is not in `check`'s needs, so no pull request waits on it
+  repeat:
+    needs: [build]
+    if: github.event_name == 'workflow_dispatch' && inputs.spec != ''
+    runs-on: ubuntu-24.04
+    env:
+      REPEAT_SPEC: ${{ inputs.spec }}
+      REPEAT_EACH: ${{ inputs.repeat-each }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Download the PWA
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: quire-android
+          path: dist
+
+      - name: Download the PWA generator
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: quire-gen-pwa
+          path: dist/debug
+
+      - name: Make the generator runnable
+        run: chmod +x dist/debug/gen-pwa
+
+      - name: Add the home page
+        run: cp -R homepage dist/pwa/homepage
+
+      - name: Set up Node.js and Playwright
+        uses: bats-lang/pwa/.github/actions/e2e-setup@d5a5685a569df5a6ce126d9aac667c31aa28f866 # pwa main d5a5685
+        with:
+          playwright-minimum: "1.58"
+          stall-tools: "true"
+
+      - name: Install a CJK font
+        run: sudo apt-get install -y -q fonts-noto-cjk
+
+      # The spec and the count come from inputs, through the environment and
+      # quoted: a value is an argument, never shell text
+      - name: Repeat the spec on every project
+        run: |
+          mkdir -p "$RUNNER_TEMP/repeat-timings"
+          ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/repeat-timings" -- --reporter=list --repeat-each "$REPEAT_EACH" "$REPEAT_SPEC"
+        env:
+          PLAYWRIGHT_HTML_OPEN: never
 
   # The one check main's branch protection requires: every group passed
   # (a group skipped or cancelled is not a pass). A group the plan showed

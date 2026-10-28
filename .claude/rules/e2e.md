@@ -62,6 +62,40 @@ it does not hang on the machine's fonts.
   `chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell` links to
   the installed `headless_shell`; it does not downgrade Playwright.
 
+## Quarantine and repeat (#976, keywords: quarantine, repeat-each, fixed-wait)
+
+Nine reds from three known-bad tests (the gdb teardown, the ring lock, Escape after a click)
+each blocked an unrelated PR while their p0 tickets were open. Three rules:
+
+* **A test failure that gets a p0 ticket is quarantined in the commit that files the ticket**
+  (or the fix worker's first commit): the test becomes `test.fixme('#N what fails', ...)`, or
+  `test.fixme(true, '#N ...')` as the first line of its body, with no condition but `true`, so it
+  holds on every project (desktop, mobile-portrait and the rest of `playwright.config.js`).
+  `tests/static/e2e_waits.py` refuses a `.fixme(` that names no ticket or holds a project
+  condition. The ticket's close requires the mark's removal: the fix PR deletes the mark, and
+  `guidelines.py --pr-body` (the text-lint workflow reads the PR's files) refuses a body that says
+  `Fixes #N` while a mark citing #N is left. The fix PR's body has a line `Quarantine: ...` listing
+  each quarantined test (spec, test title, ticket) and saying the mark is removed in the PR.
+  A brief, a body or a review that names a failing test and lacks its `Quarantine:` line
+  (`Quarantine check:` in a review) is refused.
+* **A fix for a race merges only after CI ran the test with `--repeat-each 20` on every project
+  and it passed every time.** A race is any test whose failure depends on the runner's speed, a
+  fixed wait or an order of events. One green run is no evidence (b09ad8b merged on a green run
+  and the test failed on the push to main 90 minutes later). The run is the `repeat` job of
+  `check.yml`: `gh workflow run check.yml --ref <branch> -f spec=e2e/<name>.spec.js -f repeat-each=20`
+  (every project). The PR body shows the command and the run's URL; the
+  lint refuses a body, brief or review that names a race and lacks the `Repeat:` line
+  (`Repeat check:` in a review), and a body whose Evidence has no `--repeat-each` of 20 or more
+  and no run URL.
+* **No fixed wait for a step whose duration depends on the runner** (`45 s for gdb`). A wait is for
+  an event (the capture's native step ended), with a limit that is the test's budget, not its
+  expectation. `e2e_waits.py` refuses `waitForTimeout` and a sleep (`setTimeout(resolve, ms)`)
+  in `e2e/`. The 125 that existed when the lint was added are listed in
+  `tests/static/e2e_waits_allowed.tsv`, each line citing the ticket that migrates them (#985);
+  the count of a line is exact, so a new wait fails and a migrated one lowers the count.
+  A helper that wraps a sleep (`const wait = (t) => new Promise((r) => setTimeout(r, t))`) is
+  counted where it is defined, and its calls are the migration's to find.
+
 ## A worker's machine matches CI (#713)
 
 "This machine lacks X" is never a reason for a spec to be skipped or to pass

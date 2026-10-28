@@ -14,6 +14,7 @@ usage: python3 tests/static/guidelines_test.py
 import os
 import re
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -351,6 +352,91 @@ class WorkerLines(unittest.TestCase):
     def test_orchestration_md_carries_the_lines(self):
         for line_form, line_name, _ in gl.WORKER_LINES:
             self.assertIn('`' + line_name.split(' ')[0], read_root('.claude', 'orchestration.md'), line_name)
+
+
+class QuarantineAndRepeat(unittest.TestCase):
+    """quire#976: a failing test is quarantined with its ticket, a race fix is repeated under CI; each class has a case that fails when it occurs."""
+    TICKET = Brief.TICKET
+    BRIEF = 'Every row has its line.\nThe tests pass.\n'
+    RUN = 'https://github.com/bats-lang/quire/actions/runs/123456789'
+
+    def test_a_brief_about_a_failing_test_without_the_line_is_refused(self):
+        found = gl.lint_brief(self.BRIEF + 'The gdb teardown test fails on the runner.\n', self.TICKET, PHRASES)
+        self.assertTrue(any('Quarantine: ...' in line for line in found), found)
+
+    def test_a_brief_about_a_failing_test_with_the_line_passes(self):
+        brief = self.BRIEF + 'The gdb teardown test fails on the runner.\nQuarantine: stall-capture.spec.js test.fixme(#807) on every project, removed by the fix.\n'
+        self.assertEqual(gl.lint_brief(brief, self.TICKET, PHRASES), [])
+
+    def test_a_brief_about_a_race_without_the_line_is_refused(self):
+        found = gl.lint_brief(self.BRIEF + 'Fix the race in the ring lock.\n', self.TICKET, PHRASES)
+        self.assertTrue(any('Repeat: ...' in line for line in found), found)
+        ok = self.BRIEF + 'Fix the race in the ring lock.\nRepeat: CI runs it with --repeat-each 20 on every project.\n'
+        self.assertEqual(gl.lint_brief(ok, self.TICKET, PHRASES), [])
+
+    def test_a_review_of_either_without_its_check_is_refused(self):
+        found = gl.lint_review(GOOD_REVIEW + '\nThe flaky test is fixed.\n', PHRASES)
+        self.assertTrue(any('Quarantine check: ...' in line for line in found), found)
+        self.assertTrue(any('Repeat check: ...' in line for line in found), found)
+        ok = GOOD_REVIEW + '\nThe flaky test is fixed.\nQuarantine check: listed in the body.\nRepeat check: the run shows 20 repeats on every project.\n'
+        self.assertEqual(gl.lint_review(ok, PHRASES), [])
+
+    def test_a_quote_in_a_code_span_is_not_a_trigger(self):
+        self.assertEqual(gl.lint_brief(self.BRIEF + 'The phrase `the race` is quoted.\n', self.TICKET, PHRASES), [])
+
+    def body(self, extra, evidence=''):
+        return GOOD_BODY.replace('ok: 33 phrases\n```', 'ok: 33 phrases\n```\n' + evidence).replace('Head:', extra + '\n\nHead:')
+
+    def test_a_race_fix_body_without_the_repeat_run_is_refused(self):
+        found = gl.lint_pr_body(self.body('Quarantine: none listed.\nRepeat: see Evidence.\nThe race in the ring lock is fixed.'), HEAD, PHRASES)
+        self.assertTrue(any('--repeat-each 20' in line for line in found), found)
+        self.assertTrue(any('URL of the CI run' in line for line in found), found)
+
+    def test_a_race_fix_body_with_one_repeat_of_five_is_refused(self):
+        evidence = f'\n```\n$ gh workflow run check.yml -f repeat-each=5\n{self.RUN}\n```\n'
+        found = gl.lint_pr_body(self.body('Repeat: see Evidence.\nThe race in the ring lock is fixed.', evidence), HEAD, PHRASES)
+        self.assertTrue(any('--repeat-each 20' in line for line in found), found)
+
+    def test_a_race_fix_body_with_the_repeat_run_passes(self):
+        evidence = f'\n```\n$ gh workflow run check.yml -f spec=e2e/x.spec.js -f repeat-each=20\n{self.RUN}\n```\n'
+        body = self.body('Repeat: see Evidence.\nThe race in the ring lock is fixed.', evidence)
+        self.assertEqual(gl.lint_pr_body(body, HEAD, PHRASES), [])
+
+    def mark_tree(self, mark):
+        root = tempfile.mkdtemp()
+        os.makedirs(os.path.join(root, 'e2e'))
+        with open(os.path.join(root, 'e2e', 'a.spec.js'), 'w') as handle:
+            handle.write(mark)
+        return root
+
+    def test_a_fix_that_leaves_the_mark_is_refused(self):
+        root = self.mark_tree("test.fixme('#807 the gdb teardown', async () => {});\n")
+        self.assertEqual(gl.marks_left(root), {'807': 1})
+        found = gl.lint_pr_body(GOOD_BODY.replace('Fixes #751', 'Fixes #807'), HEAD, PHRASES, gl.marks_left(root))
+        self.assertTrue(any('still holds 1 test.fixme' in line for line in found), found)
+
+    def test_a_fix_that_removes_the_mark_passes(self):
+        root = self.mark_tree('// the mark is gone\n')
+        self.assertEqual(gl.lint_pr_body(GOOD_BODY.replace('Fixes #751', 'Fixes #807'), HEAD, PHRASES, gl.marks_left(root)), [])
+
+    def test_the_marks_after_a_pull_request_are_the_base_plus_added_minus_removed(self):
+        root = self.mark_tree("test.fixme('#807 the gdb teardown', async () => {});\n")
+        removed = {'patch': "@@\n-test.fixme('#807 the gdb teardown', async () => {});\n+test('the gdb teardown', async () => {});"}
+        kept = {'patch': "@@\n+test.fixme('#891 the ring lock', async () => {});"}
+
+        def api(files):
+            return lambda path, method='GET', fields=None: files if 'page=1' in path else []
+        self.assertEqual(gl.marks_after(api([removed]), 'o/r', 5, root), {'807': 0})
+        self.assertEqual(gl.marks_after(api([kept]), 'o/r', 5, root), {'807': 1, '891': 1})
+
+    def test_the_rules_are_written_where_the_agents_read_them(self):
+        for parts, needle in (
+                (('.claude', 'rules', 'e2e.md'), 'Quarantine and repeat'),
+                (('.claude', 'orchestration.md'), '`Quarantine: '),
+                (('.claude', 'orchestration.md'), '`Repeat: '),
+                (('.claude', 'agents', 'reviewer.md'), 'Repeat check:'),
+                (('.claude', 'agents', 'worker.md'), 'test.fixme')):
+            self.assertIn(needle, read_root(*parts), parts)
 
 
 class FakeApi:

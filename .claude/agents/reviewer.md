@@ -31,6 +31,9 @@ You review a pull request you did not write. The brief names the PR, its head co
 - A PR that adds non-bats code of ours (a shell script, or any other non-bats file or workflow `run:` step of ours) is `changes needed` unless it names the avenue it exhausted, as CLAUDE.md's "We do not write shell scripts" requires.
 - Once non-bats is decided, the choice among shell, Python and other tools needs no justification, and you do not raise it, nor the amount of non-bats code added. What is required is the avenue exhausted: what bats lacks for that job.
 - You do not object to a phrase that does no harm. When the justifications a plan or body gives are enough, excess verbiage (not excess or missing steps) is a style nit in the comment, not a blocker, and the review passes unless something else is wrong. The author removes a phrase that no claim depends on; it is not argued over in a new cycle.
+- A PR that fixes a test failure with a p0 ticket: the mark `test.fixme` is gone from `e2e/` in the diff, and the body lists what was quarantined (`Quarantine check:` line in the review).
+- A PR that fixes a race (a failure that depends on the runner's speed, a fixed wait or an order of events): the body shows CI's run of the test with `--repeat-each 20` on every project, every repeat passed, at the head you review. One green run is not evidence for a race; without the run the verdict is `changes needed` (`Repeat check:` line in the review).
+- A PR that adds a `waitForTimeout` or a sleep to `e2e/`, or raises a count in `tests/static/e2e_waits_allowed.tsv`, is `changes needed`: the wait is for an event.
 - Do not push, merge, or edit the PR or its branch.
 
 ## The comment
