@@ -33,6 +33,7 @@ staload "paths.sats"
 staload "overlay.sats"
 staload "reader.sats"
 staload "settings.sats"
+staload "reading_ruler.sats"
 staload "mem.sats"
 staload "notice.sats"
 staload AU = "wasm.bats-packages.dev/bridge/src/audio.sats"
@@ -345,13 +346,12 @@ fn _clip_shown {count:pos}{clip:nat | clip < count} (table: !clip_table(count), 
   val () = (case+ clip_nodes(table, clip) of
     | ~$R.some(@(first_node, end_node)) => let
         val () = _mark(first_node, end_node)
-      in
-        if _off_page(reader_node_place(first_node)) then let
-          val () = !_turning := true
-          val () = reader_show_node(first_node)
-        in !_turning := false end
-        else ()
-      end
+        val () = (if _off_page(reader_node_place(first_node)) then let
+            val () = !_turning := true
+            val () = reader_show_node(first_node)
+          in !_turning := false end
+          else ())
+      in ruler_follow(first_node, 0) end
     | ~$R.none() => $BDOM.clear_marks(MARK_KIND))
   val () = !_narration_page := _page_now()
 in _leave_show(clip_escape(table, clip)) end

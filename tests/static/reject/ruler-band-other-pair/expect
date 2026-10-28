@@ -1,0 +1,6 @@
+function _static_ruler_band_other_pair
+line 3
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(RULED); S2EVar(_))].
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(SURF); S2Eapp(S2Ecst(FG); ), S2Eapp(S2Ecst(BG); ))
+The needed term is: S2Eapp(S2Ecst(RULED); S2EVar(_))

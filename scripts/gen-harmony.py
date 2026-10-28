@@ -26,7 +26,7 @@ SURFS = [("fg", "bg"), ("fg", "card"), ("fg", "line"), ("fg", "hl"), ("fg", "hl2
          ("muted", "card"), ("accent", "bg"), ("accent", "card"), ("accentfg", "accent"),
          ("barfg", "bar"), ("barfg", "barhi"), ("bannerfg", "banner"), ("markfg", "mark"),
          ("danger", "card"), ("danger", "line")]
-EDGES = [("edge", "card"), ("accent", "card"), ("barfg", "bar")]
+EDGES = [("edge", "card"), ("accent", "card"), ("barfg", "bar"), ("fg", "bg")]
 
 # Each theme's hue families: the first is its neutrals' tint
 FAM = {0: ((25, 50), (135, 165), (-15, 15)),
@@ -34,10 +34,10 @@ FAM = {0: ((25, 50), (135, 165), (-15, 15)),
        2: ((25, 50), (130, 160), (-15, 15)),
        3: ((25, 50), (25, 50), (-15, 15)),
        4: ((25, 50), (130, 160), (-15, 15))}
-NEUTRALS = ["bg", "fg", "muted", "card", "line", "edge", "bar", "barfg", "barhi"]
+NEUTRALS = ["bg", "fg", "muted", "card", "line", "edge", "bar", "barfg", "barhi", "ruler"]
 OTHERS = ["accent", "accentfg", "hl", "banner", "bannerfg", "mark", "markfg", "danger", "hl2"]
 ROLES = ["bg", "fg", "muted", "card", "line", "edge", "bar", "barfg", "accent", "accentfg",
-         "hl", "barhi", "banner", "bannerfg", "mark", "markfg", "danger", "hl2"]
+         "hl", "barhi", "banner", "bannerfg", "mark", "markfg", "danger", "hl2", "ruler"]
 
 def ch(c): return (c >> 16) & 255, (c >> 8) & 255, c & 255
 def chroma(c): v = ch(c); return max(v) - min(v)
@@ -151,6 +151,32 @@ for t in THEMES:
             parts.append(f"SHADEDc(PAL{t}_{f}(), PAL{t}_{b}(),\n    {shade_proof(pal[(t, f)], strength)},\n    "
                          f"{shade_proof(pal[(t, b)], strength)},\n    $CT.CONTRAST_lighter_{side}({lum_of(fs)}, {lum_of(bs)}))")
         out.append(f"#pub prval V_{NAMES[t]}_{strength}: VEILED({PALETTES[t]}, {strength})\n\nprimplement V_{NAMES[t]}_{strength} = VEILEDc(\n  " + ",\n  ".join(parts) + ")")
+
+# The reading ruler (keyword: reading ruler, quire#566). RULED: the grey bar's ground keeps the body's text at
+# 7:1 and a link at 4.5:1 in every theme. DIMMED: under a veil of the page's ground at each theme's strength
+# the dimmed lines stay legible (text 4.5:1 on the page, a link 3:1, text on a highlight 3:1)
+parts = []
+for t in THEMES:
+    parts.append(f"PAL{t}_fg(), PAL{t}_accent(), PAL{t}_ruler(), {contrast(pal[(t, 'fg')], pal[(t, 'ruler')])},\n    "
+                 f"{novib(pal[(t, 'fg')], pal[(t, 'ruler')])}, {contrast(pal[(t, 'accent')], pal[(t, 'ruler')])}")
+out.append("#pub prval R_ruler: RULED(RULER)\n\nprimplement R_ruler = RULEDc(\n  " + ",\n  ".join(parts) + ")")
+
+DIMS = {0: (25,), 1: (25,), 2: (40,), 3: (25,), 4: (30,)}
+DIMMED = [("fg", "bg", 45), ("accent", "bg", 30), ("fg", "hl", 30)]
+def blended(c, v, strength):
+    return sum(((x * (100 - strength) + y * strength + 50) // 100) << s for x, y, s in zip(ch(c), ch(v), (16, 8, 0)))
+def blend_proof(c, v, strength):
+    return "BLENDc(" + ", ".join(lin_of(x) for x in ch(c) + ch(v) + ch(blended(c, v, strength))) + ")"
+for t in THEMES:
+    for strength in DIMS[t]:
+        parts = []
+        for f, b, k in DIMMED:
+            page = pal[(t, "bg")]
+            fs, bs = blended(pal[(t, f)], page, strength), blended(pal[(t, b)], page, strength)
+            side = "first" if lum(fs) > lum(bs) else "second"
+            parts.append(f"DIMSc(PAL{t}_{f}(), PAL{t}_{b}(), PAL{t}_bg(),\n    {blend_proof(pal[(t, f)], page, strength)},\n    "
+                         f"{blend_proof(pal[(t, b)], page, strength)},\n    $CT.CONTRAST_lighter_{side}({lum_of(fs)}, {lum_of(bs)}))")
+        out.append(f"#pub prval D_{NAMES[t]}_{strength}: DIMMED({PALETTES[t]}, {strength})\n\nprimplement D_{NAMES[t]}_{strength} = DIMMEDc(\n  " + ",\n  ".join(parts) + ")")
 
 begin = "(* BEGIN proofs: written by scripts/gen-harmony.py *)"
 end = "(* END proofs *)"
