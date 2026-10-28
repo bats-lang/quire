@@ -110,7 +110,9 @@ bats's judgement, by the mechanisms below.
 * **Who restores**: a pull request and the merge queue's group (#586: restoring main's cache
   keeps its build job near 3 minutes, where cold it took 13 of a 60-minute window). Main's push,
   the nightly run and a dispatched relock restore nothing (the static jobs pass `--cold`), so
-  every state of main is checked from nothing and is the base the pull requests' caches
+  every state of main is checked from nothing, except a push whose commit the merge queue's
+  run passed (queue-passed, #882): its static groups and e2e end after their first step, `build`
+  still builds cold, and the nightly run checks the state from nothing; that state is the base the pull requests' caches
   start from (GitHub gives a pull request and a merge group its base branch's caches; a pull
   request's own are readable only by it). A bug of bats's incremental logic that passes a PR
   therefore shows on main or in the nightly run at the latest. A cache is saved only by a job
