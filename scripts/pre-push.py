@@ -18,17 +18,16 @@ each ref that is not a deletion, in this order, and stopping at the first failur
 A failure prints `pre-push: check <n> (<name>) failed: <what>` and `fix: <the fix>`, and
 exits 1. `git push --no-verify` skips the hook; the sweep reports a transcript that has it.
 
-Why not bats, for each check (quire#982; the move of all four is quire#988, a stopgap):
- 1. groups    scripts/ci-groups.py is the python CI itself runs; porting it is not this hook's job.
-              The hook only exports the pushed tree and calls it.
- 2. locks     bats can spawn git (the process package, as tools/pin-audit does), but no bats
-              subcommand checks a lock's sha256 against a repository without building the app:
-              `bats lock --dry-run --repository <pin checkout>` and `bats tree` both accept a lock
-              whose sha256 is wrong (measured: exit 0, "no changes"), and `bats check`, which does
-              fetch and compare, takes minutes. A bats program for it would be a new program.
- 3. compiler  it is about the compiler, so no program that the compiler builds can vet it first.
- 4. memory    a variable of the pushing shell; the one reason for non-bats is that the hook has
-              to be a program that runs before any worker has built a bats program in a new checkout.
+STOPGAP for bats-lang/bats#575 (keyword: pre-push, quire#646): checks 2 to 4 are non-bats code of ours,
+kept only because waiting costs more than the move. Cost of waiting (quire#973): seven of the fifty
+runs of the week were rejected by these classes, each costing a second full run and 1.5 to 12.6
+hours. The move is `bats check-push` (one bats subcommand: locks against the pinned repository, the
+compiler against its pin, the patsopt memory variable), a src-touching bats PR behind bats#573 and
+bats#574 and then the move of quire's compiler pin through the reviewed relock: days. This file is
+deleted when `bats check-push` lands and quire's pin moves to it; the hook then calls
+`bats check-push` and `scripts/ci-groups.py matrix` (check 1, existing code of ours, not new).
+Until then check 3 needs a `bats.pin` beside the binary, since a bats binary does not yet carry its
+own commit; bats#575 gives it one.
 """
 import hashlib
 import os

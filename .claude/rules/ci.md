@@ -356,9 +356,14 @@ overrides. A failure prints `pre-push: check <n> (<name>) failed:` with what is 
   `<commit> <sha256 of the binary>`, written when it is built from the bats checkout at the pin:
   `printf '%s %s\n' "$(git rev-parse HEAD)" "$(sha256sum release/bats | cut -d' ' -f1)" > release/bats.pin`.
   A binary replaced after the record, or built from another commit, or with no record, fails the check.
-* **Why python, not bats:** the checks read git objects of two repositories and a clone at a commit, which no
-  bats program does today, and run before the compiler is known to be right (check 3 is that); check 1 is
-  the python CI itself runs. `tests/static/pre_push_test.py` (group `checkers`) fails each check by injection
+* **A stopgap for bats-lang/bats#575 (keyword: pre-push):** the new non-bats code is the hook wrapper and checks 2 to 4 of
+  `scripts/pre-push.py`; check 1 is the existing `scripts/ci-groups.py`. Waiting costs more than the move
+  (quire#973: seven of fifty runs of a week were rejected by these classes, each a second full run of 1.5 to 12.6
+  hours; the bats route is `bats check-push`, a src-touching bats PR behind bats#573 and #574 and then the
+  pin move through the reviewed relock: days). `scripts/pre-push.py` is deleted when `bats check-push` lands and
+  quire's compiler pin moves to it; the hook then calls `bats check-push` and `scripts/ci-groups.py matrix`. The
+  `bats.pin` record exists only until bats#575 gives the compiler its own commit.
+  `tests/static/pre_push_test.py` (group `checkers`) fails each check by injection
   (a fixture in no group, a lock of another sha256, a version the pinned repository lacks, a compiler of
   another commit or changed after its record, the variable unset) and runs the hook through `git push`.
 
