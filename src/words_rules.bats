@@ -1,0 +1,66 @@
+(* words_rules -- the vocabulary's rules: what a word keeps at most and the schedule of a review (keyword: vocabulary) *)
+
+#target wasm begin
+
+#include "share/atspre_staload.hats"
+
+(* The most bytes of a word looked up (the selection toolbar copies as many) (keyword: vocabulary) *)
+#pub stadef WORD_BYTES_MOST = 64
+#pub stadef LANGUAGE_BYTES_MOST = 36
+#pub stadef SENTENCE_HALF_BYTES = 255
+#pub stadef SENTENCE_BYTES_MOST = 510
+
+(* The words kept at most, tombstones among them (keyword: vocabulary) *)
+#pub stadef WORDS_MOST = 10000
+
+#pub fn words_most (): int
+implement words_most () = 10000
+
+(* The rows of the words screen drawn at most: the newest, with a line saying how many are not shown (keyword: vocabulary) *)
+#pub stadef WORDS_SHOWN_MOST = 500
+
+(* Minutes after which a deleted word's tombstone is dropped (a hundred and eighty days) (keyword: vocabulary) *)
+#pub fn words_tombstone_minutes (): int
+implement words_tombstone_minutes () = 259200
+
+(* Minutes until a word is due again after Forgot (keyword: vocabulary) *)
+#pub fn words_forgot_minutes (): int
+implement words_forgot_minutes () = 5
+
+(* Minutes until a word is due again after Got it made its streak streak (keyword: vocabulary) *)
+#pub fn words_got_it_minutes {streak:int} (streak: int streak): int
+
+implement words_got_it_minutes {streak} (streak) =
+  if streak <= 1 then 30
+  else if streak = 2 then 720
+  else if streak = 3 then 1440
+  else if streak = 4 then 2880
+  else if streak = 5 then 5760
+  else if streak = 6 then 10080
+  else if streak = 7 then 21600
+  else let
+    fun double {times:nat} .<times>. (value: int, times: int times): int =
+      if times <= 0 then value else double(value * 2, times - 1)
+    val exponent = (if streak - 8 > 6 then 6 else streak - 8): [exponent:nat | exponent <= 6] int exponent
+  in double(43200, exponent) end
+
+(* What a word is, as the program holds it: still being learned with its streak and the minute it is due at, or mastered (keyword: vocabulary) *)
+#pub datavtype word_state =
+  | Learning of (Int, Int)
+  | Mastered of ()
+
+(* How a card was answered (keyword: vocabulary) *)
+#pub datatype review_answer =
+  | GotIt
+  | Forgot
+
+(* The streak and the minute a word is due at after a review at minute now: Got it adds one to the streak, Forgot ends it (keyword: vocabulary) *)
+#pub fn words_review_next {streak:int} (streak: int streak, answer: review_answer, now: int): @(int, int)
+implement words_review_next {streak} (streak, answer, now) =
+  case+ answer of
+  | GotIt() => let
+      val next = (if streak < 0 then 1 else if streak >= 1000 then 1000 else streak + 1): [next:int] int next
+    in @(next, now + words_got_it_minutes(next)) end
+  | Forgot() => @(0, now + words_forgot_minutes())
+
+end (* #target wasm (keyword: vocabulary) *)

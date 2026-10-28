@@ -16,7 +16,7 @@ mkdir -p "$TMP/src/bin"
 cp "$ROOT/tests/codec/bats.toml" "$TMP/bats.toml"
 cp "$ROOT/tests/codec/src/bin/codec.bats" "$TMP/src/bin/codec.bats"
 cp "$ROOT/tests/codec/bats.lock" "$TMP/bats.lock"
-for m in bytes crc chunk seq fields schema record bytesarr bookrec indexrec bookimage indeximage; do
+for m in bytes crc chunk seq fields schema record bytesarr bookrec indexrec bookimage indeximage wordrec wordimage; do
   python3 - "$ROOT/src/$m.bats" "$TMP/src/$m.bats" <<'PY'
 import sys
 s = open(sys.argv[1]).read()
