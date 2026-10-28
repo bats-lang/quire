@@ -63,15 +63,24 @@ fn _is_down (view: ruler_view): bool =
   | RulerScrolled() => false
   | RulerNone() => false
 
+(* Reading ruler: whether the style chosen draws a band *)
+fn _style_draws (): bool =
+  case+ set_ruler_get() of
+  | RulerOff() => false
+  | RulerUnderline() => true
+  | RulerGreyBar() => true
+  | RulerShade() => true
+  | RulerLightbox() => true
+
 (* Reading ruler: whether the style chosen draws a band on this view *)
 fn _drawn (view: ruler_view): bool =
   case+ view of
   | RulerNone() => false
-  | RulerPaged() => (case+ set_ruler_get() of RulerOff() => false | _ => true)
-  | RulerPagedBack() => (case+ set_ruler_get() of RulerOff() => false | _ => true)
-  | RulerScrolled() => (case+ set_ruler_get() of RulerOff() => false | _ => true)
-  | RulerDownRight() => (case+ set_ruler_get() of RulerOff() => false | _ => true)
-  | RulerDownLeft() => (case+ set_ruler_get() of RulerOff() => false | _ => true)
+  | RulerPaged() => _style_draws ()
+  | RulerPagedBack() => _style_draws ()
+  | RulerScrolled() => _style_draws ()
+  | RulerDownRight() => _style_draws ()
+  | RulerDownLeft() => _style_draws ()
 
 (* Reading ruler: the line's height in px, the text's size times its spacing *)
 fn _line_px (): int = let
