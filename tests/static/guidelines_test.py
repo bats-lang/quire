@@ -922,6 +922,38 @@ class OwnerAttribution(unittest.TestCase):
                 self.assertNotRegex(line, r'\(owner, 2026-10-18\)')
 
 
+TRANSCRIPT = '/root/.claude/projects/-home-user/470579b5-e357-55fb-95b6-0b0f548219ea.jsonl'
+LINE_PAIR = re.compile(r'(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ),? (?:transcript )?line (\d+)')
+
+
+def wrong_pairs(text, time_of_line):
+    """The (time, line) pairs of a text whose time is not the time of that line (quire#995, finding 3 of the review of 1e3b8a4)."""
+    return [(found.group(1), int(found.group(2))) for found in LINE_PAIR.finditer(text)
+            if time_of_line(int(found.group(2))) != found.group(1)]
+
+
+class OwnerTimes(unittest.TestCase):
+    FILES = OwnerAttribution.FILES + (('.claude', 'rules', 'ci.md'),)
+
+    def test_a_pair_with_the_wrong_time_is_found_and_a_right_one_is_not(self):
+        times = {59493: '2026-10-21T04:39:10Z'}.get
+        self.assertEqual(wrong_pairs('(owner, 2026-10-21T04:39:00Z, transcript line 59493: "x")', times), [('2026-10-21T04:39:00Z', 59493)])
+        self.assertEqual(wrong_pairs('(owner, 2026-10-21T04:39:10Z, transcript line 59493: "x")', times), [])
+
+    def test_every_time_and_line_of_the_rules_is_the_time_of_that_line_of_the_transcript(self):
+        if not os.path.exists(TRANSCRIPT):
+            self.skipTest('the session transcript is not on this machine')
+        import json
+        text = ''.join(read_root(*parts) for parts in self.FILES)
+        wanted = {int(found.group(2)) for found in LINE_PAIR.finditer(text)}
+        times = {}
+        with open(TRANSCRIPT, encoding='utf-8') as handle:
+            for number, line in enumerate(handle, 1):
+                if number in wanted:
+                    times[number] = json.loads(line)['timestamp'][:19] + 'Z'
+        self.assertEqual(wrong_pairs(text, times.get), [])
+
+
 class SweepFiles(unittest.TestCase):
     def test_no_sweep_file_calls_pitboss_a_bats_program(self):
         for parts in (('.claude', 'skills', 'sweep', 'qsweep'), ('.claude', 'skills', 'sweep', 'slots'), ('.claude', 'skills', 'sweep', 'SKILL.md')):
