@@ -13,7 +13,7 @@
 # With members named, it runs only those (CI's static groups, in
 # tests/groups.json, each run by a job of its own): `check` (bats check of
 # the app itself), `checkers` (ids.py, case_plus.py, groups.py, with their
-# fixtures, affected_test.py, and guidelines.py with its test), `solver`, `mutation/<module>`, and fixtures, `accept/<name>` or `reject/<name>`. With none,
+# fixtures, affected_test.py, pre_push_test.py, and guidelines.py with its test), `solver`, `mutation/<module>`, and fixtures, `accept/<name>` or `reject/<name>`. With none,
 # it runs the checkers and every fixture (the mutation members, which take
 # minutes a module, only when named: mutation/<module>, see below).
 #
@@ -168,6 +168,11 @@ if python3 "$ROOT/tests/static/guidelines.py" "$ROOT" > "$TMP/guidelines.log" 2>
 else echo "FAIL guidelines:"; cat "$TMP/guidelines.log"; fail=1; fi
 if python3 "$ROOT/tests/static/guidelines_test.py" > "$TMP/guidelines_test.log" 2>&1; then echo "ok   guidelines_test: $(tail -1 "$TMP/guidelines_test.log")"
 else echo "FAIL guidelines_test:"; cat "$TMP/guidelines_test.log"; fail=1; fi
+
+# The pre-push hook's four checks, each failed by an injected class, and the hook run by
+# `git push` (pre_push_test.py, quire#973)
+if python3 "$ROOT/tests/static/pre_push_test.py" > "$TMP/pre_push_test.log" 2>&1; then echo "ok   pre_push_test: $(tail -1 "$TMP/pre_push_test.log")"
+else echo "FAIL pre_push_test:"; cat "$TMP/pre_push_test.log"; fail=1; fi
 
 # The solver's 32 bits (literals.py) and the library's keys (keys.py)
 if python3 "$ROOT/tests/static/literals.py" "$ROOT/src" > "$TMP/literals.log" 2>&1; then echo "ok   literals: $(tail -1 "$TMP/literals.log")"

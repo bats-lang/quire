@@ -333,6 +333,31 @@ each kind selects) and prints each path's reason in its summary. Rules:
   queue's 60 minutes, which the groups' balance keeps (#618); the PR's run is
   where the selection saves.
 
+## The pre-push hook (quire#973, keyword: pre-push)
+
+`.githooks/pre-push` (tracked) runs `scripts/pre-push.py` on every `git push`, `qsweep push` included, for the
+commits being pushed, in this order and stopping at the first failure: (1) `scripts/ci-groups.py matrix`, as
+CI's `plan` job runs it, on the pushed commit's tree: every spec and fixture is in exactly one group of
+`tests/groups.json`; (2) every `bats.lock` of the tree (`./bats.lock`, `tests/*/bats.lock`) names only
+(package, version, sha256) that the package repository holds at the commit of `.github/repository-version`, read
+with `git show <commit>:<sidecar>` from the clone at `$BATS_REPOSITORY`, so what that clone has checked out does
+not matter; (3) the `bats` on PATH is built from the commit of `.github/bats-version`; (4)
+`BATS_PATSOPT_MEM_MB` is `4096` in the pushing shell, the default of the setup action, which no workflow here
+overrides. A failure prints `pre-push: check <n> (<name>) failed:` with what is wrong and `fix:` with the fix.
+
+* **Install:** `git config core.hooksPath .githooks` in the checkout (a worktree's creation, `worker.md`). The
+  sweep prints `HOOKS-NOT-INSTALLED` for a checkout that has the hook and a different `core.hooksPath`, and
+  `NO-VERIFY` for a transcript with `git push --no-verify`. `qsweep push` keeps the pressure hold only.
+* **Check 3's record:** a binary does not carry its commit, so the compiler's directory holds `bats.pin`,
+  `<commit> <sha256 of the binary>`, written when it is built from the bats checkout at the pin:
+  `printf '%s %s\n' "$(git rev-parse HEAD)" "$(sha256sum release/bats | cut -d' ' -f1)" > release/bats.pin`.
+  A binary replaced after the record, or built from another commit, or with no record, fails the check.
+* **Why python, not bats:** the checks read git objects of two repositories and a clone at a commit, which no
+  bats program does today, and run before the compiler is known to be right (check 3 is that); check 1 is
+  the python CI itself runs. `tests/static/pre_push_test.py` (group `checkers`) fails each check by injection
+  (a fixture in no group, a lock of another sha256, a version the pinned repository lacks, a compiler of
+  another commit or changed after its record, the variable unset) and runs the hook through `git push`.
+
 ## Checking locally before a push
 
 A session sets up the compiler in its own environment: what bats's composite action does
