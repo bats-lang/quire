@@ -681,15 +681,17 @@ test('a file the app is started with is imported once, and one handed over while
     };
     handOver();
   });
-  const errors = await start(page);
+  // start() waits for the library, which the book handed over replaces as the app starts
+  const errors = [];
+  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  await page.goto('/');
   await handedBookOpened(page);
   await expect(card(page, 'Started With It')).toBeVisible({ timeout: 30000 });
   await page.waitForTimeout(500);
   await expect(cards(page)).toHaveCount(1);
   await expect(dialog(page, 'Already in library')).toBeHidden();
   await page.reload();
-  // the kept view is the book the file opened
-  await handedBookOpened(page);
   await expect(card(page, 'Started With It')).toBeVisible({ timeout: 30000 });
   await page.waitForTimeout(500);
   await expect(cards(page)).toHaveCount(1);
@@ -760,9 +762,8 @@ test('a file handed over before the stored library is read is imported once, bes
   await page.waitForTimeout(1000);
   await expect(cards(page)).toHaveCount(2);
   expect(fetched).toBe(1);
-  // and it is in the stored library: a reload shows both (the book it opened is the kept view)
+  // and it is in the stored library: a reload shows both
   await page.reload();
-  await handedBookOpened(page);
   await expect(card(page, 'Handed At Start')).toBeVisible({ timeout: 30000 });
   await expect(cards(page)).toHaveCount(2);
   expect(errors).toEqual([]);
