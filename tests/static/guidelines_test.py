@@ -669,6 +669,9 @@ else:
 '''
 
 
+NOW = 1792756800    # 2026-10-23T12:00:00Z, the clock of the qsweep fixtures
+
+
 class QsweepLibraries(unittest.TestCase):
     """quire#751, rows 15 and 19: a library PR is judged by the rule of a quire PR, in both review forms, and a failing call prints its own line."""
 
@@ -683,7 +686,7 @@ class QsweepLibraries(unittest.TestCase):
             os.chmod(os.path.join(tmp, 'bin', 'gh'), 0o755)
             with open(os.path.join(tmp, 'fixture.json'), 'w', encoding='utf-8') as handle:
                 json.dump(fixture, handle)
-            env = dict(os.environ, PATH=os.path.join(tmp, 'bin') + os.pathsep + os.environ['PATH'], QSWEEP_FIXTURE=os.path.join(tmp, 'fixture.json'))
+            env = dict(os.environ, PATH=os.path.join(tmp, 'bin') + os.pathsep + os.environ['PATH'], QSWEEP_FIXTURE=os.path.join(tmp, 'fixture.json'), QSWEEP_NOW=str(NOW))
             done = subprocess.run(['bash', os.path.join(gl.ROOT, '.claude', 'skills', 'sweep', 'qsweep'), 'prs'], capture_output=True, text=True, env=env, check=True)
         return done.stdout.strip().split('\n')
 
@@ -695,7 +698,7 @@ class QsweepLibraries(unittest.TestCase):
         # by default a PR is created the day of its number, so a larger number is newer
         created = created or f'2026-01-{number:02d}T00:00:00Z'
         fixture[f'{base}/pulls/{number}'] = {'mergeable_state': state, 'head': {'sha': sha, 'ref': f'claude/{number}'}, 'title': f'PR {number}', 'auto_merge': None, 'created_at': created}
-        fixture[f'{base}/commits/{sha}/check-runs'] = {'check_runs': [{'name': name, 'status': status, 'conclusion': conclusion} for name, status, conclusion in runs]}
+        fixture[f'{base}/commits/{sha}/check-runs'] = {'check_runs': [{'id': number * 100 + index, 'name': name, 'status': status, 'conclusion': conclusion, 'completed_at': '2026-10-23T07:00:00Z'} for index, (name, status, conclusion) in enumerate(runs)]}
         fixture[f'{base}/commits/{sha}/status'] = {'statuses': [{'context': context, 'state': 'failure', 'description': 'red'} for context in statuses]}
         fixture[f'{base}/issues/{number}/comments'] = [] if review is None else [{'author_association': 'OWNER', 'body': review.replace('SHA', sha)}]
 
@@ -773,6 +776,60 @@ class QsweepLibraries(unittest.TestCase):
         self.pr(fixes, 'bridge', 8, 'dirty', self.GREEN, created='2026-10-20T03:00:00Z')
         self.pr(fixes, 'arith', 7, 'dirty', self.GREEN, created='2026-10-22T03:00:00Z')
         self.assertEqual(self.run_qsweep(fixes)[-1], 'NEXT FOR A FREE SLOT: a fix (an author; any author) for zip#9 bridge#8 quire#700 arith#7')
+
+    def relock(self, number, branch, completed_at, repository='quire'):
+        """a relock pull request whose `check` and `build` ended red at completed_at; its failing job has one failed step"""
+        fixture = {}
+        self.pr(fixture, repository, number, 'unstable', (('build', 'completed', 'failure'), ('check', 'completed', 'failure')))
+        base = f'repos/bats-lang/{repository}'
+        fixture[f'{base}/pulls/{number}']['head']['ref'] = branch
+        for run in fixture[f'{base}/commits/{number:040x}/check-runs']['check_runs']:
+            run['completed_at'] = completed_at
+        fixture[f'{base}/actions/jobs/{number * 100}'] = {'steps': [{'name': 'Set up job', 'conclusion': 'success'}, {'name': 'bats check-pins: input node-version is not declared', 'conclusion': 'failure'}]}
+        fixture[f'{base}/actions/jobs/{number * 100 + 1}'] = {'steps': [{'name': 'Fail when a needed job failed', 'conclusion': 'failure'}]}
+        return fixture
+
+    def test_a_relock_pull_request_red_for_five_hours_is_a_stall_with_the_failing_step_text(self):
+        # quire#992 item 1: red since 07:00, now 12:00 (5 hours)
+        lines = self.run_qsweep(self.relock(811, 'relock/2026-10-22', '2026-10-23T07:00:00Z'))
+        stall = self.line_of(lines, 'STALL ')
+        self.assertIn('quire#811', stall)
+        self.assertIn('red for 5 h 0 min', stall)
+        self.assertIn('build: bats check-pins: input node-version is not declared', stall)
+        self.assertIn('check: Fail when a needed job failed', stall)
+        self.assertNotIn('Set up job', stall)
+        self.assertIn('FIX-NEEDED', self.line_of(lines, '#811 '))
+
+    def test_a_relock_pull_request_red_for_three_hours_is_no_stall(self):
+        # quire#992 item 1: red since 09:00, now 12:00 (3 hours)
+        lines = self.run_qsweep(self.relock(811, 'relock/2026-10-22', '2026-10-23T09:00:00Z'))
+        self.assertEqual([line for line in lines if line.startswith('STALL')], [])
+
+    def test_the_stall_is_at_more_than_four_hours_not_at_four(self):
+        self.assertEqual([line for line in self.run_qsweep(self.relock(811, 'relock/x', '2026-10-23T08:00:00Z')) if line.startswith('STALL')], [])
+        self.assertEqual(len([line for line in self.run_qsweep(self.relock(811, 'relock/x', '2026-10-23T07:59:59Z')) if line.startswith('STALL')]), 1)
+
+    def test_a_pull_request_that_is_not_a_relock_is_no_stall_however_long_it_is_red(self):
+        lines = self.run_qsweep(self.relock(811, 'claude/811', '2026-10-22T00:00:00Z'))
+        self.assertEqual([line for line in lines if line.startswith('STALL')], [])
+
+    def test_a_library_relock_pull_request_is_a_stall_too(self):
+        lines = self.run_qsweep(self.relock(30, 'relock/2026-10-22', '2026-10-22T00:00:00Z', 'arith'))
+        self.assertIn('arith#30', self.line_of(lines, 'STALL '))
+
+    def test_a_relock_pull_request_whose_check_is_green_is_no_stall(self):
+        fixture = {}
+        self.pr(fixture, 'quire', 811, 'clean', self.GREEN)
+        fixture['repos/bats-lang/quire/pulls/811']['head']['ref'] = 'relock/2026-10-22'
+        for run in fixture[f'repos/bats-lang/quire/commits/{811:040x}/check-runs']['check_runs']:
+            run['completed_at'] = '2026-10-22T00:00:00Z'
+        self.assertEqual([line for line in self.run_qsweep(fixture) if line.startswith('STALL')], [])
+
+    def test_orchestration_carries_the_four_hour_stall_rule_qsweep_enforces(self):
+        rule = read_root('.claude', 'orchestration.md')
+        self.assertIn('red for more than four hours is a stall', rule)
+        self.assertIn('14400', rule)
+        self.assertIn('-gt 14400', read_root('.claude', 'skills', 'sweep', 'qsweep'))
 
     def test_the_repositories_are_listed_once_and_skill_md_points_to_the_list(self):
         import subprocess

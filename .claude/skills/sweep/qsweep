@@ -45,6 +45,24 @@ _read_pr(){  # $1 repository, $2 PR number: sets _st _sha _ref _t _am _created _
   _skipped=$(echo "$cr" | jq '[.check_runs[]|select(.conclusion=="skipped" or .conclusion=="neutral")]|length')
   _total=$(echo "$cr" | jq '.check_runs|length')
   _checkok=$(echo "$cr" | jq '[.check_runs[]|select(.name=="check" and .status=="completed" and .conclusion=="success")]|length')
+  # STALL (quire#992, repository-prototype#540 rule 2): a relock PR whose required check has been red for more than four hours (14400 s, completed_at of the
+  # red `check` run against now; QSWEEP_NOW replaces the clock for the tests) is reported with the text of each failing step of its failing jobs
+  _stall=""
+  local red now
+  case $_ref in relock/*)
+    red=$(echo "$cr" | jq -r '[.check_runs[]|select(.name=="check" and .status=="completed" and (.conclusion=="failure" or .conclusion=="cancelled" or .conclusion=="timed_out" or .conclusion=="action_required" or .conclusion=="startup_failure" or .conclusion=="stale"))|.completed_at|fromdateiso8601]|min // empty')
+    now=${QSWEEP_NOW:-$(date +%s)}
+    if [ -n "$red" ] && [ $((now-red)) -gt 14400 ]; then
+      local ids id steps text=""
+      ids=$(echo "$cr" | jq -r '.check_runs[]|select(.conclusion=="failure" or .conclusion=="cancelled" or .conclusion=="timed_out" or .conclusion=="action_required" or .conclusion=="startup_failure" or .conclusion=="stale")|[.id,.name]|@tsv')
+      while IFS=$'\t' read -r id name; do
+        [ -n "$id" ] || continue
+        steps=$(_gh "repos/bats-lang/$r/actions/jobs/$id" --jq '[.steps[]|select(.conclusion=="failure")|.name]|join(" | ")') || steps="(steps unread: $(_why))"
+        text="$text; $name: ${steps:-no failed step listed}"
+      done <<< "$ids"
+      _stall="STALL $r#$n relock pull request red for $(( (now-red)/3600 )) h $(( (now-red)%3600/60 )) min (since $(date -u -d @$red +%Y-%m-%dT%H:%M:%SZ), more than four hours): failing step text${text}"
+    fi;;
+  esac
   # commit statuses (text-lint, adversarial-review): one that failed or errored is a fix
   _badstatus=$(_gh "repos/bats-lang/$r/commits/$_sha/status" --jq '[.statuses[]|select(.state=="failure" or .state=="error")|.context]|join(",")') || return 1
   # the newest review comment of a trusted author, by its FIRST line only (reviewer.md, "The comment"); both forms, in every repository:
@@ -78,6 +96,7 @@ for n in $_quire_numbers; do
   _judge_pr
   case $_ready in FIX-NEEDED) _cand_fix="$_cand_fix$_created quire#$n"$'\n';; READY-FOR-REVIEW) _cand_review="$_cand_review$_created quire#$n"$'\n';; esac
   echo "#$n [$_st] auto-merge=$_am checks=$_total pending=$_pend skipped=$_skipped fails=[$_fails] statuses-red=[$_badstatus] review=$_rv $_ready $_t ($_ref)"
+  [ -n "$_stall" ] && echo "$_stall"
 done
 
 _lap "quire PRs done"
@@ -98,6 +117,7 @@ for r in $_repositories; do
     merge=""; [ "$_ready" = REVIEWED-approved ] && [ "$_st" = clean ] && merge=" READY-TO-MERGE"
     case $_ready in FIX-NEEDED) _cand_fix="$_cand_fix$_created $r#$n"$'\n';; READY-FOR-REVIEW) _cand_review="$_cand_review$_created $r#$n"$'\n';; esac
     echo "$r #$n [$_st] checks=$_total pending=$_pend skipped=$_skipped fails=[$_fails] statuses-red=[$_badstatus] review=$_rv gate=[$gate] $_ready$merge $_t ($_ref)"
+    [ -n "$_stall" ] && echo "$_stall"
   done
 done
 # a repository or a PR whose call failed was not read: the NEXT line below is incomplete and says so (it never lists a PR it could not read as if nothing were there)
