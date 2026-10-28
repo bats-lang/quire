@@ -1186,10 +1186,8 @@ in
     in _article_unread() end
 end
 
-(* Shows the word the last dict_find found, in the dictionary panel *)
-#pub fn dict_show (): void
-
-implement dict_show () =
+(* Shows the word the last dict_find found, in the dictionary panel: clear of the selection when it is about one *)
+fn _show_hit (from_selection: bool): void =
   case+ _hit_take() of
   | ~NoHit() => ()
   | ~Hit(id, word, word_len, offset, size) => let
@@ -1205,13 +1203,35 @@ implement dict_show () =
           val () = ui_text_buf("dictionary-source", name, name_len)
           val () = ui_text("dictionary-article", "-")
           (* clear of the selection it is about *)
-          val () = $DR.get_selection_rect()
-          val () = ui_reference_set($DR.get_measure_y() + $DR.get_measure_h() / 2)
+          val () = (if from_selection then let
+              val () = $DR.get_selection_rect()
+            in ui_reference_set($DR.get_measure_y() + $DR.get_measure_h() / 2) end else ())
           val () = ui_sheet_place(DictionarySheet())
           val () = layer_open(LDictionary())
           val () = ui_focus("dictionary-close")
         in _article(id, form, offset, size) end
     end
+
+#pub fn dict_show (): void
+implement dict_show () = _show_hit(true)
+
+(* The same for a word chosen from a list (the words kept), which no selection is behind (keyword: vocabulary) *)
+#pub fn dict_show_listed (): void
+implement dict_show_listed () = _show_hit(false)
+
+(* The dictionary panel for a word no dictionary has: the word, and that no dictionary has it (its link looks it up online) (keyword: vocabulary) *)
+#pub fn dict_show_none {word_loc:agz}{word_size:pos}{word_len:nat | word_len <= word_size; word_len < 65536}
+  (word: !$A.arr(byte, word_loc, word_size), word_len: int word_len): void
+
+implement dict_show_none (word, word_len) = let
+  val copy = $A.alloc<byte>(word_len + 1)
+  val () = _copy_bytes(word, 0, copy, 0, word_len, 0)
+  val () = ui_text_buf("dictionary-word", copy, word_len)
+  val () = ui_text("dictionary-source", "No dictionary you added has this word")
+  val () = ui_text("dictionary-article", "-")
+  val () = ui_sheet_place(DictionarySheet())
+  val () = layer_open(LDictionary())
+in ui_focus("dictionary-close") end
 
 (* ============================================================
    The dictionaries panel

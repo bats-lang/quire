@@ -209,6 +209,9 @@ test('a tap between the sides on another line moves the ruler there, and a tap o
   const height = await lineHeight(page);
   const text = await lineBoxes(page);
   const x = mid(text[4].left, text[4].right);
+  // no timer hides the bars (#560): the reader puts them away, by the key (a tap would move the ruler)
+  if (await topBar(page).isVisible()) await page.keyboard.press('t');
+  await expect(topBar(page)).toBeHidden();
   await rawMouse(page, 'click', x, across(text[4]));
   await expect.poll(async () => {
     const { band } = await drawn(page);

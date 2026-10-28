@@ -6,7 +6,7 @@
 
 import { test, expect } from './fixtures.js';
 import {
-  start, readBook, importFiles, epubFile, openBook, chapterTitle, visibleText, showChrome, control, dialog, toLibrary,
+  start, readBook, importFiles, epubFile, openBook, chapterTitle, expectChapter, visibleText, showChrome, control, dialog, toLibrary,
 } from './helpers.js';
 import { landmarkBooks } from './landmark-books.js';
 
@@ -19,7 +19,7 @@ for (const [name, text, title] of [
   test(`${name}: a book never read opens where its ${name === 'guideText' ? 'guide says the text' : 'landmarks say the body matter'} starts`, async ({ page }) => {
     const errors = await start(page);
     await readBook(page, landmarkBooks[name].opts);
-    await expect(chapterTitle(page)).toHaveText(title);
+    await expectChapter(page, title);
     await expect.poll(() => visibleText(page)).toContain(text);
     expect(await visibleText(page)).not.toContain('Cover page');
     await expect(page.getByRole('alert')).toBeHidden();
@@ -33,7 +33,7 @@ for (const name of ['noBodyMatter', 'startWithoutHref', 'startMissing', 'startOu
   test(`${name}: opens at the first chapter, as a book with no start does`, async ({ page }) => {
     const errors = await start(page);
     await readBook(page, landmarkBooks[name].opts);
-    await expect(chapterTitle(page)).toHaveText('Cover');
+    await expectChapter(page, 'Cover');
     await expect.poll(() => visibleText(page)).toContain('Cover page');
     await expect(page.getByRole('alert')).toBeHidden();
     expect(errors).toEqual([]);
@@ -44,23 +44,23 @@ test('a book that has been read opens at its kept place, not at the start again'
   const errors = await start(page);
   const opts = landmarkBooks.startsAtBody.opts;
   await readBook(page, opts);
-  await expect(chapterTitle(page)).toHaveText('Body begins here');
+  await expectChapter(page, 'Body begins here');
   // read on to the second chapter
   await showChrome(page);
   await control(page, 'Contents').click();
   await contents(page).getByRole('tabpanel', { name: 'Contents' }).getByRole('button', { name: 'Second chapter' }).click();
-  await expect(chapterTitle(page)).toHaveText('Second chapter');
+  await expectChapter(page, 'Second chapter');
   await toLibrary(page);
   await openBook(page, opts.title);
-  await expect(chapterTitle(page)).toHaveText('Second chapter');
+  await expectChapter(page, 'Second chapter');
   // and back to the cover: the reader's own move there is kept as well
   await showChrome(page);
   await control(page, 'Contents').click();
   await contents(page).getByRole('tabpanel', { name: 'Contents' }).getByRole('button', { name: 'Cover' }).click();
-  await expect(chapterTitle(page)).toHaveText('Cover');
+  await expectChapter(page, 'Cover');
   await toLibrary(page);
   await openBook(page, opts.title);
-  await expect(chapterTitle(page)).toHaveText('Cover');
+  await expectChapter(page, 'Cover');
   expect(errors).toEqual([]);
 });
 

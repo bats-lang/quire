@@ -22,10 +22,8 @@ const opener = (page, panel) => panel.top
 
 async function open(page, panel) {
   if (panel.top) {
-    await expect(async () => {
-      await showChrome(page);
-      await opener(page, panel).click({ timeout: 2000 });
-    }).toPass({ timeout: 20000 });
+    await showChrome(page);
+    await opener(page, panel).click();
   } else {
     await clickControl(page, panel.button);
   }

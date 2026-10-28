@@ -3,16 +3,16 @@
 # What is proved: an image is the record's value (book_image_of and book_of_image keep it), a string of
 # an image is held by the cells of its array (bytesarr's bstr), and a number is the number its bytes
 # make (fields' int32v), so a record written from an image and read again is that image.
-# usage: python3 gen-image.py book | index
+# usage: python3 gen-image.py book | index | word
 import sys
 import os
 NAME = sys.argv[1]
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from record_tables import tables
+from record_tables import tables, one_line_comments
 GROUPS, KIND = tables(NAME)
 PREFIX = NAME
 CAPITAL = NAME.capitalize()
-RESULT_PREFIX = "BR" if NAME == "book" else "IR"
+RESULT_PREFIX = {"book": "BR", "index": "IR", "word": "WR"}[NAME]
 SORT = f"{PREFIX}x"
 fields = [field for group in GROUPS for field in group[2]]
 ints = [name for name, kind in fields if kind == "i"]
@@ -228,4 +228,4 @@ in
 end
 """)
 emit("end")
-open(f"src/{PREFIX}image.bats", "w").write("\n".join(lines) + "\n")
+open(f"src/{PREFIX}image.bats", "w").write(one_line_comments("\n".join(lines) + "\n", NAME))

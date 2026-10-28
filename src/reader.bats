@@ -22,6 +22,7 @@ staload "pages.sats"
 staload "paths.sats"
 staload "overlay.sats"
 staload "ui.sats"
+staload "reader_act.sats"
 staload "notice.sats"
 staload "layer.sats"
 staload "image_viewer.sats"
@@ -4951,9 +4952,10 @@ fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
             if count_now <= 0 then ()
             (* opening, laid out as when the place was kept (its face
                come in): that very page *)
+            (* settle: showing the page clears the node kept, so it is kept again for the next count *)
             else if count_now <> page_count && _opening_pages(count_now) then let
               val () = _measure_pagination()
-            in _show_target(!_dated_page, _opening_anchor()) end
+            in _show_kept(!_dated_page, _opening_anchor()) end
             else if count_now <> page_count then let
               val @(target_page, target_anchor) = _place_kept(page, page_count)
               val () = _measure_pagination()
@@ -5257,8 +5259,8 @@ in
     val () = _measure_pagination()
     val count_now = (case+ reading_get() of @(_, page_count, _, _) => (page_count: Int)): Int
   in
-    (* opening, laid out as when the place was kept: that very page *)
-    if _opening_pages(count_now) then _show_target(!_dated_page, _opening_anchor())
+    (* opening, laid out as when the place was kept: that very page, its node kept again (settle) *)
+    if _opening_pages(count_now) then _show_kept(!_dated_page, _opening_anchor())
     else _show_kept(page, anchor)
   end
 end
@@ -6135,11 +6137,13 @@ implement reader_scrolled () =
    the back button goes *)
 #pub fun page_next(): void
 implement page_next() = let
+  val () = hint_hide(ActPageTurn())
   val () = reader_back_rest()
 in _page_next() end
 
 #pub fun page_prev(): void
 implement page_prev() = let
+  val () = hint_hide(ActPageTurn())
   val () = reader_back_rest()
 in _page_previous() end
 
@@ -6147,6 +6151,7 @@ in _page_previous() end
    first page; nothing when there is none *)
 #pub fun reader_chapter_step (direction: Int): void
 implement reader_chapter_step (direction) = let
+  val () = hint_hide(ActPageTurn())
   val () = reader_back_rest()
 in
   case+ reading_get() of
@@ -7028,6 +7033,7 @@ implement $P.dispose<turned>(_) = ()
 #pub fun reader_turn_on (): $P.promise(turned, $P.Chained)
 
 implement reader_turn_on () = let
+  val () = hint_hide(ActPageTurn())
   val () = reader_back_rest()
   val () = !_anchor_kept := ~1
 in

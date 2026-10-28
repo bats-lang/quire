@@ -27,6 +27,10 @@ FIRST_BOOK = {
     "PLCE": "opt", "SERI": "opt", "SHLF": "opt", "SIZE": "opt", "TIME": "opt", "TITL": "req",
 }
 FIRST_INDEX = {"LEGA": "opt", "NAMS": "req"}
+# the words looked up (quire#565): a kind of its own, whose first table is these groups
+FIRST_WORD = {
+    "BOOK": "req", "COUN": "opt", "LANG": "req", "MODF": "opt", "PLCE": "opt", "SENT": "opt", "STAT": "opt", "WORD": "req",
+}
 
 
 def load(root):
@@ -54,7 +58,7 @@ def shapes_in(root):
 def main(root):
     tables = load(root)
     problems = []
-    for label, groups, first in (("book", tables.BOOK_GROUPS, FIRST_BOOK), ("index", tables.INDEX_GROUPS, FIRST_INDEX)):
+    for label, groups, first in (("book", tables.BOOK_GROUPS, FIRST_BOOK), ("index", tables.INDEX_GROUPS, FIRST_INDEX), ("word", tables.WORD_GROUPS, FIRST_WORD)):
         seen = {}
         for tag, mode, _ in groups:
             seen[tag] = mode
@@ -64,7 +68,7 @@ def main(root):
         for tag, mode in seen.items():
             if tag not in first and mode != "added":
                 problems.append(f"{label} group {tag} is {mode}: a group added after records were written must be \"added\" (quire#506)")
-    added = [tag for tag, mode, _ in tables.BOOK_GROUPS + tables.INDEX_GROUPS if mode == "added"]
+    added = [tag for tag, mode, _ in tables.BOOK_GROUPS + tables.INDEX_GROUPS + tables.WORD_GROUPS if mode == "added"]
     released = [tag for tag, _ in tables.RELEASES]
     if sorted(released) != sorted(added) or len(set(released)) != len(released):
         problems.append(f"RELEASES names {released}, the added groups are {sorted(added)}: each once")
