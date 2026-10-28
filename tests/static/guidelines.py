@@ -59,6 +59,9 @@ GENERATED = (
 # the tools that run, build, measure or change something: a reviewer holds none (row 1)
 RUNNING_TOOLS = {'bash', 'edit', 'write', 'notebookedit', 'monitor', 'taskstop', 'skill', 'agent'}
 SHA = re.compile(r'\b[0-9a-f]{40}\b')
+# the two-line attribution block the session harness puts first in every PR body (quire#1001, keyword: attribution block)
+ATTRIBUTION_MARKER = re.compile(r'<!-- claude-projects-attribution: \{"github_login":"[A-Za-z0-9-]+"\} -->')
+ATTRIBUTION_REQUESTED = re.compile(r'_Requested by \*\*[^*\n]+\*\* \u00b7 \[project thread\]\(https://claude\.ai/code/project/[A-Za-z0-9_]+\?thread=[A-Za-z0-9_]+\)_')
 FIXES = re.compile(r'\bFixes\s+((?:[\w.-]+/[\w.-]+)?#\d+)', re.IGNORECASE)
 
 
@@ -172,7 +175,10 @@ def lint_guidelines(root, phrases):
 def lint_pr_body(text, head, phrases):
     findings = lint_text(text, 'PR body', phrases)
     lines = [line for line in text.split('\n') if line.strip()]
-    if not lines or not FIXES.match(lines[0]):
+    ticket_lines = lines
+    if len(lines) >= 2 and ATTRIBUTION_MARKER.fullmatch(lines[0]) and ATTRIBUTION_REQUESTED.fullmatch(lines[1]):
+        ticket_lines = lines[2:]
+    if not ticket_lines or not FIXES.match(ticket_lines[0]):
         findings.append('PR body: the first line is "Fixes #N" for the ticket; a PR that does not meet its Done-when as written is not opened as Refs (rows 2, 3)')
     tickets = {found.upper() for found in FIXES.findall(text)}
     if len(tickets) > 1:
