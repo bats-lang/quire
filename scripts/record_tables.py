@@ -51,8 +51,45 @@ INDEX_GROUPS = [
   ("NAMS", "req", [("name_count", "i")] + [(f"name{k}", "s") for k in range(8)]),
 ]
 INDEX_KIND = 2
+# A word looked up (quire#565): one record for each word and language, "words/<14 hex digits>". Its tags are in
+# ascending order. A new kind starts its own first table (its groups are req and opt, as the book's and the
+# index's first tables are); a group added to it later is "added" and named in RELEASES (tests/static/groups.py).
+#   BOOK  the book it was looked up in
+#   COUN  how many times it was looked up, and the minutes of the first and of the latest lookup
+#   LANG  the language of the book it was looked up in
+#   MODF  when it last changed (sync's stamp), and when it was deleted (0: it is not): a deleted word keeps
+#         only its key and these, which is its tombstone
+#   PLCE  the place of its latest lookup: chapter, content node and UTF-16 offset
+#   SENT  the sentence it was in, in two strings (the head, then the tail)
+#   STAT  whether it is mastered, the streak of reviews it was known in a row and the minute it is due
+#   WORD  the word as looked up
+WORD_GROUPS = [
+  ("BOOK", "req", [("book_high", "i"), ("book_low", "i")]),
+  ("COUN", "opt", [("lookups", "i"), ("first_minute", "i"), ("last_minute", "i")]),
+  ("LANG", "req", [("language", "s")]),
+  ("MODF", "opt", [("modified", "i"), ("deleted", "i")]),
+  ("PLCE", "opt", [("chapter", "i"), ("node", "i"), ("offset", "i")]),
+  ("SENT", "opt", [("sentence_head", "s"), ("sentence_tail", "s")]),
+  ("STAT", "opt", [("mastered", "i"), ("streak", "i"), ("due", "i")]),
+  ("WORD", "req", [("word", "s")]),
+]
+WORD_KIND = 3
 
 def tables(name):
     if name == "book":
         return BOOK_GROUPS, BOOK_KIND
+    if name == "word":
+        return WORD_GROUPS, WORD_KIND
     return INDEX_GROUPS, INDEX_KIND
+
+
+# The area keyword each generated module's comments name (the notes in .claude/rules/)
+AREAS = {"book": "library-records", "index": "library-records", "word": "vocabulary"}
+
+
+def one_line_comments(text, name):
+    """Every comment of a generated module is one line and names its area by keyword (CLAUDE.md)."""
+    import re
+    def one(match):
+        return "(* " + " ".join(match.group(1).split()) + " (keyword: " + AREAS[name] + ") *)"
+    return re.sub(r"\(\*(.*?)\*\)", one, text, flags=re.S)
