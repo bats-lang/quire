@@ -407,11 +407,21 @@ reports `the kernel ring did not start (no tracefs, or sudo refused: see the run
   A setup script must therefore mount only when the line is missing. Its line, tested here
   on the already-mounted path (exit 0 and no second mount), is
   `grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing`.
-* **Does the mount survive a container restart.** The ticket's reading is that it does not:
-  `/proc/mounts` is per boot, and nothing writes the mount to disk. This session did not restart
-  its container, so that is the ticket's reading, not a restart test. The mount is set again at
-  the start of each session by the environment's setup script, which is not in the repo: the
-  script holds the line above (the owner's confirmation with a screenshot, quire#785).
+* **Does the mount survive a container restart (quire#958).** No. `/proc/mounts` is per boot and
+  nothing writes the mount to disk. The environment's setup script (not in the repo; its line is
+  the one above, quire#785) runs for a new session: the platform's setup-script page says "New
+  sessions run the fixed script", and says nothing of a restart. After the restart of 2026-10-27/28
+  `grep tracefs /proc/mounts` printed nothing and the preflight failed with `PREFLIGHT FAILED:
+  kernel ring: no tracefs instances directory`; the boot was at 2026-10-27 23:56:40 UTC
+  (`uptime -s`) and tracefs was mounted only after the orchestrator ran the command by hand.
+  The repository cannot mount it (the setup script is the owner's, and a mount needs root and
+  the allow rule of `.claude/settings.json`), so the rule is: a worker on a container that was
+  restarted, or whose preflight prints that message, runs once, as root, exactly
+  `grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing` (the allowed
+  command, a no-op when already mounted), checks `grep tracefs /proc/mounts`, and runs the spec
+  again. The preflight's message (`e2e/flight-tracefs.js`), `worker.md` and the worker brief
+  (`.claude/orchestration.md`, "Briefs and the machine") carry the same command. No other
+  `mount` is run.
 * **Who runs the specs.** As uid 0, the specs run without any `sudo`. A run as another user
   (comment 6329897260 ran as user `quireci`, `sudo -u quireci -H env CI=true ...`) needs a user
   and a `sudo -n` grant. The ticket records no `useradd` and no `sudoers.d` command for that user,
