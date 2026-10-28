@@ -150,3 +150,5 @@ implement short_screen_rules (sheet) = let
 in sheet end
 
 end
+
+val inject_974_fails_check : int = "not an int"
