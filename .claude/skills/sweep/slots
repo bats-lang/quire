@@ -3,7 +3,7 @@
 # calls the GitHub REST API, reads a worktree's git state and prints one sweep. The move into bats is bats-lang/bats#435 (filed for it).
 # quire#573 (p3) keeps the script in the repository as a skill; its comments name pitboss, a Python package in dev-skill-up/pitboss, as the replacement.
 # Install on a machine: install -m 755 qsweep slots /usr/local/bin/ (the copy that runs is a copy of these files).
-# Ledger of the worker slots, kept by hand: the rows of the ledger file are the agents that run, so no text here names how many (quire#897, orchestration.md, Agents and slots):
+# Ledger of the worker slots, kept by hand: the rows of the ledger file are the agents that run, so no text here names how many (only an explicit owner instruction changes the rows) (quire#897, orchestration.md, Agents and slots):
 #   slots                      print the ledger and a loud line for each EMPTY slot
 #   slots set SLOT AGENT TASK  a worker took the slot (SLOT: the name in the first column; a new name adds a row)
 #   slots free SLOT            the worker finished, or was stopped: the slot is empty
