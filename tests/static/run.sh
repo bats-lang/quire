@@ -13,7 +13,7 @@
 # With members named, it runs only those (CI's static groups, in
 # tests/groups.json, each run by a job of its own): `check` (bats check of
 # the app itself), `checkers` (ids.py, case_plus.py, groups.py, with their
-# fixtures, affected_test.py, and guidelines.py with its test), `solver`, `mutation/<module>`, and fixtures, `accept/<name>` or `reject/<name>`. With none,
+# fixtures, affected_test.py, guidelines.py with its test, and e2e_waits.py with its test), `solver`, `mutation/<module>`, and fixtures, `accept/<name>` or `reject/<name>`. With none,
 # it runs the checkers and every fixture (the mutation members, which take
 # minutes a module, only when named: mutation/<module>, see below).
 #
@@ -168,6 +168,13 @@ if python3 "$ROOT/tests/static/guidelines.py" "$ROOT" > "$TMP/guidelines.log" 2>
 else echo "FAIL guidelines:"; cat "$TMP/guidelines.log"; fail=1; fi
 if python3 "$ROOT/tests/static/guidelines_test.py" > "$TMP/guidelines_test.log" 2>&1; then echo "ok   guidelines_test: $(tail -1 "$TMP/guidelines_test.log")"
 else echo "FAIL guidelines_test:"; cat "$TMP/guidelines_test.log"; fail=1; fi
+
+# The fixed waits of the e2e specs and the quarantine marks (e2e_waits.py, quire#976): no new
+# waitForTimeout or sleep, every old one listed with its ticket; the lint's own cases
+if python3 "$ROOT/tests/static/e2e_waits.py" "$ROOT" > "$TMP/e2e_waits.log" 2>&1; then echo "ok   e2e_waits: $(tail -1 "$TMP/e2e_waits.log")"
+else echo "FAIL e2e_waits:"; cat "$TMP/e2e_waits.log"; fail=1; fi
+if python3 "$ROOT/tests/static/e2e_waits_test.py" > "$TMP/e2e_waits_test.log" 2>&1; then echo "ok   e2e_waits_test: $(tail -1 "$TMP/e2e_waits_test.log")"
+else echo "FAIL e2e_waits_test:"; cat "$TMP/e2e_waits_test.log"; fail=1; fi
 
 # The solver's 32 bits (literals.py) and the library's keys (keys.py)
 if python3 "$ROOT/tests/static/literals.py" "$ROOT/src" > "$TMP/literals.log" 2>&1; then echo "ok   literals: $(tail -1 "$TMP/literals.log")"
