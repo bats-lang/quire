@@ -2,4 +2,4 @@ brief: it names worker.md and has no line "Design check: ..." (the ticket's decl
 brief: it names worker.md and has no line "Push: ..." (the branch is pushed after every commit; orchestration.md, "Briefs and the machine")
 brief: it names worker.md and has no line "Expects: ..." (reject expects are blessed, not written by hand; orchestration.md, "Briefs and the machine")
 brief: it names worker.md and has no line "Sample: ..." (a local population run is a seeded sample; orchestration.md, "Briefs and the machine")
-brief: it names worker.md and has no line "Affected: ..." (the local run is the output of scripts/ci-groups.py local, whole, before every push; orchestration.md, "Briefs and the machine")
+brief: it names worker.md and has no line "Affected: ..." (the local run is the output of scripts/ci-groups.py local before every push: the static members whole, the specs whole within the cap or else a printed-seed sample; orchestration.md, "Briefs and the machine")

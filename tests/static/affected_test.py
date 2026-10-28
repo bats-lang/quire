@@ -750,8 +750,12 @@ class LocalCommand(unittest.TestCase):
         self.assertEqual(status, 1)
 
     def test_the_stopgap_names_its_ticket_in_every_place(self):
-        for path in ('scripts/affected.py', 'scripts/ci-groups.py'):
-            self.assertIn('bats-lang/bats#570', (ROOT / path).read_text(), path)
+        """Four places: STALOAD, module_reach and fixture_readers in affected.py, the usage of ci-groups.py."""
+        places = {'scripts/affected.py': 3, 'scripts/ci-groups.py': 1}
+        for path, count in places.items():
+            text = (ROOT / path).read_text()
+            for needle in ('keyword: affected', 'bats-lang/bats#570', 'deleted when'):
+                self.assertGreaterEqual(text.count(needle), count, (path, needle))
 
 
 def strip_hash_comments(text):

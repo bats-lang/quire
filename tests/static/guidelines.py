@@ -224,7 +224,7 @@ WORKER_LINES = (
     (re.compile(r'^\s*Push:', re.MULTILINE), 'Push: ...', 'the branch is pushed after every commit'),
     (re.compile(r'^\s*Expects:', re.MULTILINE), 'Expects: ...', 'reject expects are blessed, not written by hand'),
     (re.compile(r'^\s*Sample:', re.MULTILINE), 'Sample: ...', 'a local population run is a seeded sample'),
-    (re.compile(r'^\s*Affected:', re.MULTILINE), 'Affected: ...', 'the local run is the output of scripts/ci-groups.py local, whole, before every push'),
+    (re.compile(r'^\s*Affected:', re.MULTILINE), 'Affected: ...', 'the local run is the output of scripts/ci-groups.py local before every push: the static members whole, the specs whole within the cap or else a printed-seed sample'),
 )
 
 
