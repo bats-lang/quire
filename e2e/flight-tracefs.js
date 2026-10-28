@@ -149,7 +149,7 @@ export function release({ instance, dir, holder }) {
 export function start({ tracefs = TRACEFS, name, pid, bufferKb = BUFFER_KB, events = EVENTS, alsoRequired = [] }) {
   const instance = `${tracefs}/instances/${name}`;
   try {
-    if (!existsSync(`${tracefs}/instances`)) return { error: 'no tracefs instances directory (tracefs is not mounted here; tracefs is mounted per boot, and a restarted container may lack it: as root run `grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing`, the allowed command (.claude/settings.json), then run again)' };
+    if (!existsSync(`${tracefs}/instances`)) return { error: 'no tracefs instances directory (tracefs is not mounted here; tracefs is mounted per boot, and a restarted container may lack it: as root run `grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing`, the allowed command, then run again)' };
     mkdirSync(instance);
   } catch (error) { return { error: `cannot make ${instance}: ${(error && error.code) || error}` }; }
   const skipped = [];
