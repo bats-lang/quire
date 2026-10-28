@@ -118,8 +118,8 @@ bats's judgement, by the mechanisms below.
   `continue-on-error`, every later step of `build` is skipped, `build` ends as a success with the
   output `app` (the step's outcome), `static`, `e2e` and `android` run only when it is `success`,
   and `check` (the required status) is the one job that fails, by a step naming the check. Research:
-  a skipped required check passes (GitHub: "if a job is skipped due to a conditional ... it will report
-  its status as 'Success'"; docs on skipped and required checks), so the aggregate cannot simply be
+  a skipped required check passes (GitHub, troubleshooting required status checks: "Successful check
+  statuses are `success`, `skipped`, and `neutral`"; a job skipped by a conditional "reports Success"), so the aggregate cannot simply be
   skipped while `build` fails unless `build` is itself a required status of the ruleset (an admin's
   change, in #974); a job's `needs` result is `skipped` for its dependents when it fails, and `if:
   always()` is what makes an aggregate run. Hence one red job needs the failing step not to fail its
