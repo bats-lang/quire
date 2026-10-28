@@ -120,15 +120,29 @@ function evidenceCheck(run, extra = []) {
 const kill = (pid, signal = 'SIGKILL') => (isRoot ? process.kill(pid, signal) : spawnSync('sudo', ['-n', 'kill', `-${signal.replace('SIG', '')}`, String(pid)]));
 
 /**
- * A pid a test is about to stop, checked to be a process of the nested run (quire#908): its working directory or an argument of its command line is
- * inside the run's own directory. The pids come from the nested run's output; a pid that is not the run's own (the outer run's watchdog or runner,
- * another run's) fails here, by name, before any signal, and never ends the outer run.
+ * A pid a test is about to stop, checked to be a process of the nested run (quire#908): a descendant of the run's own runner process (the parent
+ * chain of /proc/<pid>/stat, readable for every user), or one whose working directory or command line is inside the run's directory. The pids come
+ * from the nested run's output; a pid that is not the run's own (the outer run's watchdog or runner, another run's) fails here, by name, before any
+ * signal, and never ends the outer run. The watchdog runs as root on CI (sudo), so its /proc/<pid>/cwd is EACCES for the runner's user: only ENOENT
+ * on the stat file says the process ended, and the descent is what says it is the run's.
  */
 export function ownOfRun(run, pid) {
+  const parentOf = (of) => {
+    const stat = readFileSync(`/proc/${of}/stat`, 'utf8');
+    return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]); // after the command (which may hold spaces): state, then the parent
+  };
+  try {
+    let at = pid;
+    for (let depth = 0; at > 1 && depth < 64; depth += 1) {
+      if (at === run.child.pid) return pid;
+      at = parentOf(at);
+    }
+  } catch (gone) { throw new Error(`pid ${pid} is not a process (it ended), so it is not the nested run's`); }
   const inside = (path) => path === run.directory || path.startsWith(`${run.directory}/`);
   let where = '';
   let arguments_ = [];
-  try { where = readlinkSync(`/proc/${pid}/cwd`); arguments_ = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'); } catch (gone) { throw new Error(`pid ${pid} is not a process (it ended), so it is not the nested run's`); }
+  try { where = readlinkSync(`/proc/${pid}/cwd`); } catch (hidden) { /* a root process: its cwd is not the runner user's to read */ }
+  try { arguments_ = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'); } catch (gone) { /* it ended */ }
   if (!inside(where) && !arguments_.some(inside)) throw new Error(`pid ${pid} (${arguments_.join(' ').trim()}, in ${where}) is not a process of the nested run in ${run.directory}: not stopped`);
   return pid;
 }
