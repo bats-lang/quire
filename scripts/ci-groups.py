@@ -62,11 +62,16 @@ usage:
                                        granularity of a fixture (keyword: affected): the
                                        members to run, one per line (`check`, `checkers`,
                                        every fixture that reads a changed file, every e2e spec
-                                       the rule selects as e2e/<spec>), the reasons on standard
-                                       error. A path for which CI runs the whole static
+                                       the rule selects as e2e/<spec>: all of them for a change
+                                       under src/**), the reasons on standard error. A path for which CI runs the whole static
                                        population is said, and --sample N adds N fixtures drawn
                                        with the seed S (printed). --run runs the static
-                                       members with tests/static/run.sh (bats on PATH)
+                                       members with tests/static/run.sh (bats on PATH), then
+                                       the specs with `dist/debug/gen-pwa test -- <specs>` (built as
+                                       in .claude/rules/ci.md; run it under the env file).
+                                       Stopgap (keyword: affected): the fixture list is derived from
+                                       the source; bats-lang/bats#570 gives it from the fixtures memo,
+                                       and the derivation is deleted when it lands
   scripts/ci-groups.py members <kind> <group>
                                        check, then print that group's
                                        members, one per line (e2e specs
@@ -263,18 +268,25 @@ def local(groups, arguments):
         print(f'seeded sample: {len(drawn)} of {len(pool)} other fixtures, seed {seed}', file=sys.stderr)
         members += sorted(drawn)
     if result['e2e'] == selection.ALL:
-        print('e2e: every spec (the app or a shared module changed; a spec reads the built app, '
-              'so no spec is narrower: run the seeded sample of .claude/rules/ci.md)', file=sys.stderr)
-        specs_list = []
+        print('e2e: every spec (the app or a shared module changed; a spec reads the built app)', file=sys.stderr)
+        specs_list = [f'e2e/{name}' for name in specs()]
     else:
         specs_list = sorted(result['e2e'])
     print('\n'.join(members + specs_list))
-    if repository is not None:
-        if not members:
-            print('nothing static to run', file=sys.stderr)
-            return 0
-        return subprocess.run([os.path.join(ROOT, 'tests', 'static', 'run.sh'), repository] + members).returncode
-    return 0
+    if repository is None:
+        return 0
+    status = 0
+    if members:
+        status = subprocess.run([os.path.join(ROOT, 'tests', 'static', 'run.sh'), repository] + members).returncode
+    if specs_list:
+        # as CI's e2e job does (check.yml, "Run e2e tests"): the generator serves dist/pwa and runs the specs
+        try:
+            status = subprocess.run([os.path.join(ROOT, 'dist', 'debug', 'gen-pwa'), 'test', '--'] + specs_list,
+                                    cwd=ROOT).returncode or status
+        except FileNotFoundError:
+            print('dist/debug/gen-pwa is not built: the e2e steps of .claude/rules/ci.md, "Checking locally", come first', file=sys.stderr)
+            return 2
+    return status
 
 
 def main(arguments):

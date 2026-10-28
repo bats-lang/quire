@@ -363,8 +363,11 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   out. Every other path selects what CI's table says (a note, a spec, a fixture's directory); a path for which CI
   runs the whole static population (the CI files, the pins, an unknown path, `assets/**`) is said
   (`CI runs the whole static population for: ...`) and left to the sample. A spec reads the built
-  app, so a source change selects every spec: the command says so and the e2e run stays the
-  seeded sample below. `--run <repository>` runs the static members with `tests/static/run.sh`;
+  app, so a source change selects every spec, and the command lists all of them. `--run
+  <repository>` runs the static members with `tests/static/run.sh`, then the specs with
+  `./dist/debug/gen-pwa test -- <specs>` (the build steps and the env file below come first; a
+  source change is the whole e2e suite, CI-sized); the stopgap carries its ticket in a comment on
+  each piece (keyword: affected, bats-lang/bats#570, deleted when it lands);
   `--sample N [--seed S]` adds N other fixtures drawn with a seed that is printed, so the
   sample is added to the affected members and never takes their place. The list is an
   over-approximation of what `bats fixtures` knows exactly (the files patsopt read for each

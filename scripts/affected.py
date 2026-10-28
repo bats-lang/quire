@@ -350,6 +350,7 @@ def plan(groups, changes, tree, mutation_runs):
 
 # --- the local run: the same rule, at the granularity of a fixture (quire#957, keyword: affected) ----------
 
+# Stopgap (keyword: affected): the reads of a fixture are derived from the source until bats-lang/bats#570 lists them from the fixtures memo; STALOAD and module_reach are deleted when it lands.
 STALOAD = re.compile(r'staload\s+(?:\w+\s*=\s*)?"([\w./-]+)\.sats"')
 FIXTURE_FILES = ('file', 'before', 'expect', 'snippet.bats')
 
@@ -391,7 +392,8 @@ def staloaded(tree, path):
 
 
 def module_reach(tree, roots):
-    """{module: the module that staloads it, or None for a root}: every module the
+    """Stopgap (keyword: affected), deleted when bats-lang/bats#570 lands.
+    {module: the module that staloads it, or None for a root}: every module the
     roots read, however far (patsopt reads the interface of each one staloaded)."""
     reach, queue = {root: None for root in roots}, list(roots)
     while queue:
@@ -420,7 +422,8 @@ def fixture_reads(tree):
 
 
 def fixture_readers(changes, tree):
-    """{fixture: [why]} for each fixture that reads a changed path: its own files, the
+    """Stopgap (keyword: affected), deleted when bats-lang/bats#570 lands (the memo's reads replace it).
+    {fixture: [why]} for each fixture that reads a changed path: its own files, the
     module it is put into (`file`), a module that one reads through a staload, and any
     repository path its files spell out. This is the over-approximation of `bats fixtures`'s
     memo, which keeps the files patsopt read; the memo is the exact answer (bats-lang/bats)."""

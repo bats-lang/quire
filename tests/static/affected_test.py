@@ -690,12 +690,38 @@ class LocalCommand(unittest.TestCase):
         self.assertEqual(len(first[1]), len(base[1]) + 5)
         self.assertIn('seed 7', first[2])
 
-    def test_run_passes_the_static_members_to_the_runner(self):
-        calls = []
-        with patch('subprocess.run', side_effect=lambda command: calls.append(command) or subprocess.CompletedProcess(command, 0)):
-            status, lines, _ = self.run_local([('M', 'e2e/folders.spec.js')], '--run', '/repository')
+    def run_recording(self, changes, returncodes=(0, 0)):
+        calls, codes = [], list(returncodes)
+        def fake(command, **options):
+            calls.append((command, options))
+            return subprocess.CompletedProcess(command, codes.pop(0))
+        with patch('subprocess.run', side_effect=fake):
+            result = self.run_local(changes, '--run', '/repository')
+        return result, calls
+
+    def test_run_passes_the_static_members_then_the_specs_to_their_runners(self):
+        (status, lines, _), calls = self.run_recording([('M', 'e2e/folders.spec.js')])
         self.assertEqual(status, 0)
-        self.assertEqual([command[1:] for command in calls], [['/repository', 'checkers']])
+        self.assertEqual([command[1:] for command, _ in calls[:1]], [['/repository', 'checkers']])
+        self.assertEqual(calls[1][0][1:], ['test', '--', 'e2e/folders.spec.js'])
+        self.assertTrue(calls[1][0][0].endswith('dist/debug/gen-pwa'))
+
+    def test_a_source_change_lists_and_runs_every_spec(self):
+        (status, lines, _), calls = self.run_recording([('M', 'src/bookimage.bats')])
+        every = [f'e2e/{name}' for name in self.module.specs()]
+        self.assertGreater(len(every), 50)
+        self.assertEqual([line for line in lines if line.startswith('e2e/')], every)
+        self.assertEqual(calls[1][0][3:], every)
+
+    def test_a_failing_runner_fails_the_command(self):
+        (status, _, _), _ = self.run_recording([('M', 'e2e/folders.spec.js')], returncodes=(0, 3))
+        self.assertEqual(status, 3)
+        (status, _, _), _ = self.run_recording([('M', 'e2e/folders.spec.js')], returncodes=(1, 0))
+        self.assertEqual(status, 1)
+
+    def test_the_stopgap_names_its_ticket_in_every_place(self):
+        for path in ('scripts/affected.py', 'scripts/ci-groups.py'):
+            self.assertIn('bats-lang/bats#570', (ROOT / path).read_text(), path)
 
 
 def strip_hash_comments(text):
