@@ -5138,6 +5138,7 @@ fn _back_offer {count:pos} (positions: pstack(count)): void = let
   val (armed | timeout) = _back_arm()
 in _ps_put(PsShown(armed | timeout, positions)) end
 
+(* fixture: remembers-where-the-reader-is-before *)
 (* Remembers where the reader is, before a jump *)
 fn _push_position (): void = let
   (* a jump is the reader's move *)

@@ -58,6 +58,7 @@ fn _bytes_of {text_len:pos | text_len < 256} (text: string text_len): [l:agz] @(
   val _ = _put_from(bytes, 0, text, text_len, 0)
 in @(bytes, text_len) end
 
+(* fixture: how-a-text-s-share-ended *)
 (* How a text's share ended, each outcome its own (keyword: share-text-answer):
    the sheet took it or the reader closed it, which need no word; the others
    are said with their outcome as the code, and the unexpected as such *)

@@ -420,6 +420,7 @@ fn _collection_menu (): void = let
   val () = ui_menuitem("collection-menu-box", "collection-menu-done", "Close")
 in _hide("collection-menu") end
 
+(* fixture: the-settings-screen-opened-from-the *)
 (* The Settings screen, opened from the library menu:
    one screen of groups, each complex area a screen of its own opened
    from a row that says its state (Android's settings pattern). Sync

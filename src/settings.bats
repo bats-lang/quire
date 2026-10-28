@@ -948,6 +948,7 @@ fn _night (): bool = local_night()
    system asks for dark, else Light *)
 val _shown_theme = ref<theme>(Light())
 
+(* fixture: the-theme-auto-shows-now *)
 (* The theme auto shows now *)
 fn _auto_theme (): theme = if _night() then Night() else if !_system_dark then Dark() else Light()
 

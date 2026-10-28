@@ -167,6 +167,7 @@ datatype sync_result =
   | GoogleNoAnswer | GoogleAsking
   | GoogleNoToken | GoogleScriptNotLoaded | GoogleRequestThrew | GoogleAnswerUnread
 
+(* fixture: a-result-as-sync-state-stores *)
 (* A result as "sync-state" stores it, and back: decoded once, as it is
    read (an unknown number is not synced yet) *)
 fn _result_code (result: sync_result): [code:nat | code <= 37] int code =
@@ -2310,6 +2311,7 @@ in
       end)
 end
 
+(* fixture: the-text-bridge-kept-of-a *)
 (* The text bridge kept of a refused or thrown backup write is not shown: the banner names the outcome (keyword: backup-write-answer) *)
 fn _backup_text_free (text: $R.option([n:nat] $BD.dblob(n))): void =
   case+ text of
@@ -3573,6 +3575,7 @@ fn _fastmail_fields_make (): void = let
   val () = ui_form_field("fastmail-fields", "fastmail-user-label", "fastmail-user", FormUser, "mname", "Fastmail address", "you@fastmail.com")
 in ui_form_field("fastmail-fields", "fastmail-password-label", "fastmail-password", FormPassword, "mname", "Fastmail app password", "An app password") end
 
+(* fixture: a-service-s-row-its-name *)
 (* A service's row: its name, a button that opens its step, and its
    state beside it *)
 fn _row_make {row_len,button_len,state_len,hint_len:pos | row_len < 256; button_len < 256; state_len < 256; hint_len < 256}
@@ -3985,6 +3988,7 @@ fn _token_failed {code_len:pos | code_len < 64}
   val () = _refusal_free(_refusal_swap(TokenFailureKept(code, answer)))
 in result end
 
+(* fixture: in-a-browser-a-token-for *)
 (* In a browser: a token for drive.appdata from Google Identity
    Services, its window opened at the reader's tap *)
 fn _identity_ask {client_loc:agz}{client_len:pos | client_len <= 256}

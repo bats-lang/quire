@@ -996,6 +996,7 @@ implement notice_say_named (name, name_len, failed) = let
   val at = _remedy_put(out, at, next, where_)
 in _error_buf_with(out, at, _reopens(next), reported) end
 
+(* fixture: the-error-banner-goes-its-dismiss *)
 (* The error banner goes (its Dismiss button, or a new import) *)
 #pub fn notice_dismiss (): void
 

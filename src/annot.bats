@@ -65,6 +65,7 @@ fn _highlight_of (style: highlight_style): annotation_kind =
 fn _kind_code (kind: annotation_kind): [code:nat | code <= 3] int code =
   case+ kind of Bookmark() => 0 | YellowHighlight() => 1 | OrangeHighlight() => 2 | UnderlinedHighlight() => 3
 
+(* fixture: whether-an-annotation-of-kind-kind *)
 (* Whether an annotation of kind kind is a highlight *)
 fn _is_highlight (kind: annotation_kind): bool =
   case+ kind of Bookmark() => false | YellowHighlight() => true | OrangeHighlight() => true | UnderlinedHighlight() => true
@@ -663,6 +664,7 @@ in
   | QA1() => _parse_undated(stored, n, version)
 end
 
+(* fixture: reads-the-annotations-of-the-book *)
 (* Reads the annotations of the book whose id is id_high, id_low *)
 #pub fn annot_load (id_high: int, id_low: int): $P.promise(int, $P.Chained)
 
