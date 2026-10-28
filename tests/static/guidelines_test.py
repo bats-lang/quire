@@ -807,8 +807,20 @@ class QsweepMechanical(unittest.TestCase):
 
     RED_AT = '2026-01-05T10:00:00Z'
     RED_EPOCH = 1767607200   # 2026-01-05T10:00:00Z
-    EXPECT_LOG = 'step 3\nsome output\nno line "function f" in tests/static/reject/x/expect\nthe rest\n'
-    STALE_LOG = 'step 3\nrejected, but not as its expect says\nnew expect: function g\nline 4\n'
+    STAMP = '2026-01-05T10:00:00.1234567Z '   # the runner's time before each line
+    EXPECT_LOG = ('step 3\n' + STAMP + 'ok   accept/a (2 s)\n' + STAMP + 'FAIL reject/x: no line "function f" in src/lib.bats\n' + STAMP + 'fixtures: 1 ok, 1 failed\n'
+                  + STAMP + '##[error]Process completed with exit code 1.\n')
+    STALE_LOG = ('step 3\n' + STAMP + 'FAIL reject/g: rejected, but not as its expect says: function g\nline 4\n' + STAMP + 'fixtures: 0 ok, 1 failed\n'
+                 + STAMP + '##[error]Process completed with exit code 1.\n')
+    BOTH_LOG = ('FAIL reject/x: no line "function f" in src/lib.bats\nFAIL reject/g: rejected, but not as its expect says: function g\nfixtures: 3 ok, 2 failed\n')
+    # a stale expect, and a real failure beside it: a fixture accepted that should be rejected, a fixture that fails otherwise, the app that does not check, an error of the runner, a failed count nobody printed a line for
+    MIXED_LOGS = (
+        'FAIL reject/x: no line "function f" in src/lib.bats\nFAIL accept/y: the check failed\nfixtures: 1 ok, 2 failed\n',
+        'FAIL reject/x: no line "function f" in src/lib.bats\nFAIL reject/z: accepted, but the fixture is a reject\nfixtures: 1 ok, 2 failed\n',
+        'FAIL check (the app, which the fixtures start from):\nFAIL reject/x: no line "function f" in src/lib.bats\nfixtures: 0 ok, 1 failed\n',
+        'FAIL reject/x: no line "function f" in src/lib.bats\nfixtures: 1 ok, 1 failed\n##[error]Error: the cache could not be saved\n',
+        'FAIL reject/x: no line "function f" in src/lib.bats\nfixtures: 1 ok, 2 failed\n',
+        'FAIL reject/x: no line "function f" in src/lib.bats\n')
     OTHER_LOG = 'step 3\nTimeoutError: page.click: Timeout 30000ms exceeded\n'
 
     @staticmethod
@@ -885,12 +897,21 @@ class QsweepMechanical(unittest.TestCase):
             self.assertIn('FIX-NEEDED', line, failed)
             self.assertNotIn('MECHANICAL-FIX', line, failed)
 
+    def test_a_job_log_with_any_failure_beside_the_mechanical_ones_is_not_mechanical(self):
+        # per failure, not per job: each of these logs holds a mechanical text and another failure (or a count with no line for it)
+        for log in self.MIXED_LOGS:
+            line, _ = self.quire_line(self.case([(3, 'static (reject/x)', 'failure')], {3: log}))
+            self.assertIn('FIX-NEEDED', line, log)
+            self.assertNotIn('MECHANICAL-FIX', line, log)
+        line, _ = self.quire_line(self.case([(3, 'static (reject/x)', 'failure')], {3: self.BOTH_LOG}))
+        self.assertIn('FIX-NEEDED MECHANICAL-FIX', line)
+
     def test_a_log_is_read_to_a_bound(self):
         # the text is past 4 MiB: the read stops before it, so the red is not classified from it
         late = 'x' * (5 * 1024 * 1024) + '\n' + self.EXPECT_LOG
         line, _ = self.quire_line(self.case([(3, 'static (reject/x)', 'failure')], {3: late}))
         self.assertNotIn('MECHANICAL-FIX', line)
-        early = self.EXPECT_LOG + 'x' * (5 * 1024 * 1024)
+        early = self.EXPECT_LOG + 'x' * (5 * 1024 * 1024)   # the summary is early too
         line, _ = self.quire_line(self.case([(3, 'static (reject/x)', 'failure')], {3: early}))
         self.assertIn('MECHANICAL-FIX', line)
 
