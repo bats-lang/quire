@@ -719,6 +719,7 @@ class LocalCommand(unittest.TestCase):
         self.assertEqual(len(sample), self.module.E2E_CAP)
         self.assertTrue(set(sample) <= set(every))
         self.assertIn(f'{self.module.E2E_CAP} of the {len(every)} selected specs run (seed 7', err)
+        self.assertIn(' '.join(sample), err)
         again = self.run_with([('M', 'src/bookimage.bats')], '--seed', '7')[2][0][3:]
         other = self.run_with([('M', 'src/bookimage.bats')], '--seed', '8')[2][0][3:]
         self.assertEqual(sample, again)

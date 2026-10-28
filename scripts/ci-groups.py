@@ -292,7 +292,7 @@ def local(groups, arguments):
     to_run = specs_list
     if len(specs_list) > spec_cap:
         to_run = sorted(random.Random(seed).sample(specs_list, spec_cap))
-        print(f'e2e: {len(to_run)} of the {len(specs_list)} selected specs run (seed {seed}, --specs {spec_cap}); CI runs the rest',
+        print(f'e2e: {len(to_run)} of the {len(specs_list)} selected specs run (seed {seed}, --specs {spec_cap}); CI runs the rest: ' + ' '.join(to_run),
               file=sys.stderr)
     elif specs_list:
         print(f'e2e: the {len(specs_list)} selected specs fit the cap of {spec_cap} and run whole', file=sys.stderr)
