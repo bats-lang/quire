@@ -129,6 +129,33 @@ jobs:
           name: build
           path: build
 
+      # The app checked once, first: a module that fails `bats check` fails
+      # this job, in about a minute, and the static groups (which need this
+      # job) never start; they take this build/ instead of each checking the
+      # app again (keyword: checked app, #974). run.sh's `check` member is the
+      # copy of the checkout the groups work in and its `bats check`
+      - name: Restore the checked app's cache
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        uses: ./.github/actions/build-cache
+        with:
+          mode: restore
+          name: static
+          path: ${{ runner.temp }}/quire-static/app/build
+
+      - name: Check the app
+        env:
+          QUIRE_STATIC_WORK: ${{ runner.temp }}/quire-static
+        run: tests/static/run.sh "$BATS_REPOSITORY" check
+
+      # Hidden files: build/.bats_stamp, which bats judges the build/ by
+      - name: Upload the checked app
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: quire-app-checked
+          include-hidden-files: true
+          path: ${{ runner.temp }}/quire-static/app/build
+          retention-days: 1
+
       - name: Build the app and the PWA generator
         run: bats build
 
@@ -240,12 +267,21 @@ jobs:
           name: build
           path: build
 
+      - name: Save the checked app's cache
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        uses: ./.github/actions/build-cache
+        with:
+          mode: save
+          name: static
+          path: ${{ runner.temp }}/quire-static/app/build
+
   # The static tests (tests/static/run.sh): bats check of the app, the
   # checkers, and the fixtures, each put into the app checked whole, so
-  # each checks only its module again; in groups side by side, each
-  # checking the app first
+  # each checks only its module again; in groups side by side, each on the
+  # app that `build` checked (quire-app-checked, #974): bats judges that
+  # build/ itself, so a groups' `check` member is a check of what it was given
   static:
-    needs: plan
+    needs: [plan, build]
     runs-on: ubuntu-24.04
     # a mutation group of a change to crc.bats is the longest (keyword: mutation, #594)
     timeout-minutes: 120
@@ -294,16 +330,17 @@ jobs:
         uses: bats-lang/bats/.github/actions/setup@d1926f43378b54246e6ab0abba4d7b019cf053db # bats main d1926f4
 
       # What bats keeps of the static run, in the directory run.sh works in
-      # (QUIRE_STATIC_WORK): the app's build/, which every group shares, and
-      # the fixtures' memo, which is the group's own (#622). bats judges both
-      # itself: a build/ made by another bats is dropped, a memo entry is
-      # served only when what it read is unchanged
-      - name: Restore the compiler cache
-        if: env.GROUP_BATS == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
-        uses: ./.github/actions/build-cache
+      # (QUIRE_STATIC_WORK): the app's build/, which `build` made and every
+      # group takes (on every event, a push to main and the nightly run too:
+      # `build` made it from nothing there), and the fixtures' memo, which is
+      # the group's own (#622). bats judges both itself: a build/ made by
+      # another bats is dropped, a memo entry is served only when what it read
+      # is unchanged
+      - name: Download the checked app
+        if: env.GROUP_BATS == 'yes'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          mode: restore
-          name: static
+          name: quire-app-checked
           path: ${{ runner.temp }}/quire-static/app/build
 
       - name: Restore the fixtures' memo
@@ -324,17 +361,6 @@ jobs:
           FIXTURES_COLD: ${{ (github.event_name != 'pull_request' && github.event_name != 'merge_group') && '--cold' || '' }}
           QUIRE_MUTATION_BASE: ${{ steps.scope.outputs.base != 'none' && steps.scope.outputs.base || '' }}
         run: tests/static/run.sh $FIXTURES_COLD "${BATS_REPOSITORY:-none}" $GROUP_MEMBERS
-
-      # One saver: every group restores the app's build/ but only the app
-      # group saves it, because the six jobs would reserve one key (name plus
-      # commit) and five would print "Cache save failed" (keyword: build cache, #622)
-      - name: Save the compiler cache
-        if: matrix.group == 'app' && env.GROUP_BATS == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'push')
-        uses: ./.github/actions/build-cache
-        with:
-          mode: save
-          name: static
-          path: ${{ runner.temp }}/quire-static/app/build
 
       - name: Save the fixtures' memo
         if: env.GROUP_BATS == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'push')

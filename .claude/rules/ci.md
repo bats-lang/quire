@@ -103,9 +103,18 @@ bats's judgement, by the mechanisms below.
   anywhere. `QUIRE_STATIC_WORK` (CI: `$RUNNER_TEMP/quire-static`) is the directory
   `tests/static/run.sh` works in. It stays a fixed directory because the save step names the
   directory it keeps (`app/build`, `memo`), and a `mktemp` one has no name the save can know.
-* **What is cached**: the `build` job caches `build/`. A static job caches the app's `build/`
-  under the one name `static` (every group checks the same app) and its memo under
-  `static-memo-<group>`. `check` and `build` never share a `build/` (check is mode 2 and 3,
+* **What is cached**: the `build` job caches `build/`, and the checked app's `build/` under the
+  one name `static`. A static job caches its memo under `static-memo-<group>`.
+* **The checked app (keyword: checked app, #974)**: `static` has `needs: build`. `build` runs
+  `tests/static/run.sh check` (a copy of the checkout in `$RUNNER_TEMP/quire-static/app` and
+  `bats check` of it) before `bats build`, restores and saves the `static` cache for it, and
+  uploads `app/build` (hidden files included: `.bats_stamp`) as the artifact `quire-app-checked`.
+  Every group that needs the compiler downloads it to the same place, on every event: a push to
+  main and the nightly run restore no cache, so `build` made it from nothing. The artifact is a
+  locator as the cache is: the group's own `bats fixtures` (and its `check` member) judge it by
+  bats's stamp and memo and check what differs. A module that fails `bats check` therefore fails
+  `build` (about a minute into it) and the groups do not start, where each of them used to fail on
+  the same line. `check` and `build` never share a `build/` (check is mode 2 and 3,
   build 0 and 1).
 * **Who restores**: a pull request and the merge queue's group (#586: restoring main's cache
   keeps its build job near 3 minutes, where cold it took 13 of a 60-minute window). Main's push,
@@ -117,7 +126,7 @@ bats's judgement, by the mechanisms below.
   that passed.
 * **Sharing**: jobs of one run start together, so none sees what another saves; the gain is from
   the previous build. A key is a name plus the commit and a save of it is immutable, so one name
-  is saved by one job: the `static` build (every group restores it) only by the `app` group, and
+  is saved by one job: the `static` build (the groups take it as an artifact, #974) only by the `build` job, and
   each group saves its own `static-memo-<group>`. Two jobs saving one key print
   `Cache save failed` (seen in the run of #750). Caches are immutable, 10 GB per repository, evicted
   by last access and after 7 days.
