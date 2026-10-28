@@ -3,6 +3,7 @@
 fn _static_failed (result: sync_result): bool =
   case+ result of
   | NotSyncedYet() => false | Synced() => false | Syncing() => false
+  | BackupReadUnavailable() => true | BackupReadRejected() => true | BackupReadThrown() => true | BackupReadUnexpected() => true
   | BackupUnavailable() => true | BackupRejected() => true | BackupThrown() => true | BackupUnexpected() => true
   | Unreachable() => true | WrongCredentials() => true | FolderNotFound() => true
   | KeptChanging() => true | ServerError() => true | TooLarge() => true
