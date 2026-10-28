@@ -46,7 +46,7 @@
 import { test, expect } from './fixtures.js';
 import {
   start, rawFile, importInput, importFiles, cards, card, pageShown, showChrome, control, dialog, visibleText,
-  chapterTitle, expectBannerSaysWhatToDo, toLibrary,
+  chapterTitle, expectChapter, expectBannerSaysWhatToDo, toLibrary,
 } from './helpers.js';
 import { containerBooks } from './container-books.js';
 import { coveredByBanner } from './controls-shown.js';
@@ -116,7 +116,7 @@ for (const [name, what] of Object.entries(opensAndReads)) {
 test('names flagged UTF-8 and names not flagged but in UTF-8 are both found by the package that names them', async ({ page }) => {
   const errors = await start(page);
   await openContainer(page, 'utf8Names');
-  await expect(chapterTitle(page)).toHaveText('Flagged');
+  await expectChapter(page, 'Flagged');
   await showChrome(page);
   await control(page, 'Contents').click();
   await rows(page).nth(1).click();

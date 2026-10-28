@@ -40,7 +40,7 @@ jobs:
         with:
           fetch-depth: 2
       - name: Set up bats
-        uses: bats-lang/bats/.github/actions/setup@d1926f43378b54246e6ab0abba4d7b019cf053db # bats main d1926f4
+        uses: bats-lang/bats/.github/actions/setup@41360b0c0dd4552fa1d2a77efb3ec79fe51d6818 # bats main 41360b0
       - name: Mutation check
         env:
           QUIRE_STATIC_WORK: ${{ runner.temp }}/quire-static

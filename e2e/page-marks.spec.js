@@ -4,15 +4,15 @@
 // (the bars up, then the button) where the contents took three (#388).
 
 import { test, expect } from './fixtures.js';
-import { start, readBook, place, showChrome, chapters, control, bookPage } from './helpers.js';
+import { start, readBook, place, showChrome, chapters, control, bookPage, bareReader } from './helpers.js';
 
 const star = page => page.getByRole('button', { name: 'Bookmark this page' });
 const mark = page => page.locator('#bookmark-mark');
 const book = { title: 'Page Marks', author: 'Marks Tests', rawChapters: chapters(3) };
 
+// reader acts: the bars go on a page turn or the t key
 async function hideBars(page) {
-  await page.keyboard.press('t');
-  await expect(control(page, 'Next page')).toBeHidden();
+  await bareReader(page);
 }
 
 test('a bookmarked page shows its mark in the top-right band after the bars hide', async ({ page }) => {
