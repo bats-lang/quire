@@ -12,7 +12,7 @@
 // `gen-pwa test` runs alone on one worker before the rest (#499).
 
 import { test, expect } from './fixtures.js';
-import { start, readBook, place, bookPage, chapters, clickControl, rawMouse } from './helpers.js';
+import { start, readBook, place, bookPage, chapters, clickControl, rawMouse, clockNow, expectMoment, placeChanged } from './helpers.js';
 
 const book = (title, rtl = false) => ({ title, author: 'Turn Tests', rawChapters: chapters(2, 20), rtl });
 
@@ -304,3 +304,148 @@ test.describe('on a touch screen', () => {
     });
   });
 });
+
+// The book's edge (#860): a turn refused on the book's last page (on) or
+// first page (back) shows a bar on the edge pushed against and says it in
+// words (a status), by a key, a tap, a button and a swipe alike; the page
+// does not move, and the edge goes by itself (EDGE_MS, 1.5 s, on the page's
+// clock, #657). Under less motion it is the same: the bar has no motion.
+const bookEdge = page => page.locator('#book-edge');
+const edgeWords = (page, words) => page.getByRole('status').filter({ hasText: words });
+
+// The book's last page (the last page of chapter 2), reached by the arrow
+// that turns on, and its place
+async function toLastPage(page, arrow = 'ArrowRight') {
+  for (let i = 0; i < 60; i++) {
+    const here = await place(page);
+    if (here.ch === 2 && here.p === here.t) return here;
+    await page.keyboard.press(arrow);
+    await placeChanged(page, here);
+  }
+  throw new Error('no last page');
+}
+
+// The bar is in the page's margin, over no text: no rectangle of any text
+// in the page meets the bar's (#860, the "covers no text" claim)
+async function expectNoTextUnder(page) {
+  const covered = await page.evaluate(() => {
+    const bar = document.getElementById('book-edge').getBoundingClientRect();
+    const walker = document.createTreeWalker(document.getElementById('page'), NodeFilter.SHOW_TEXT);
+    const hits = [];
+    let texts = 0;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.nodeValue.trim()) continue;
+      texts++;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const r of range.getClientRects()) {
+        if (r.width > 0 && r.height > 0 && r.left < bar.right && r.right > bar.left && r.top < bar.bottom && r.bottom > bar.top) {
+          hits.push(`${node.nodeValue.trim().slice(0, 20)} [${r.left},${r.top},${r.right},${r.bottom}]`);
+        }
+      }
+    }
+    return { texts, bar: [bar.left, bar.top, bar.right, bar.bottom], hits };
+  });
+  expect(covered.texts).toBeGreaterThan(0);
+  expect(covered.hits, `text under the bar ${covered.bar}`).toEqual([]);
+}
+
+// The edge is up on the side, in words, and the page is where it was; then
+// it goes by itself
+async function expectEdge(page, here, { side, words, since }) {
+  await expect(bookEdge(page)).toBeVisible();
+  await expect(bookEdge(page)).toHaveClass(new RegExp(`edge-${side}`));
+  await expectNoTextUnder(page);
+  await expect(edgeWords(page, words)).toBeVisible();
+  expect(await place(page)).toEqual(here);
+  await expectMoment(page, bookEdge(page), { since, ms: 1500, slack: 1000 });
+  await expect(edgeWords(page, words)).toBeHidden();
+}
+
+const edgeBook = (title, rtl = false) => ({ title, author: 'Edge Tests', rawChapters: chapters(2, 6), rtl });
+
+for (const motion of ['no-preference', 'reduce']) {
+  test.describe(`a turn past the book's end, with ${motion === 'reduce' ? 'less' : 'the usual'} motion`, () => {
+    test.beforeEach(async ({ page }) => {
+      await page.clock.install({ time: new Date('2026-06-01T12:00:00Z') });
+      await page.emulateMedia({ reducedMotion: motion });
+    });
+
+    test('a key, a tap and the button show the edge and keep the page', async ({ page }) => {
+      await start(page);
+      await readBook(page, edgeBook('Edge Keys'));
+      const { y, left, right } = await sides(page);
+      // the first page: back is refused, on the left
+      const first = await place(page);
+      let since = await clockNow(page);
+      await page.keyboard.press('ArrowLeft');
+      await expectEdge(page, first, { side: 'left', words: 'Start of the book', since });
+      since = await clockNow(page);
+      await rawMouse(page, 'click', left, y);
+      await expectEdge(page, first, { side: 'left', words: 'Start of the book', since });
+      // the last page: on is refused, on the right
+      const last = await toLastPage(page);
+      since = await clockNow(page);
+      await page.keyboard.press('ArrowRight');
+      await expectEdge(page, last, { side: 'right', words: 'End of the book', since });
+      since = await clockNow(page);
+      await rawMouse(page, 'click', right, y);
+      await expectEdge(page, last, { side: 'right', words: 'End of the book', since });
+      since = await clockNow(page);
+      await clickControl(page, 'Next page');
+      await expectEdge(page, last, { side: 'right', words: 'End of the book', since });
+    });
+
+    test('a repeated refusal leaves the edge up for the last one only, and it goes', async ({ page }) => {
+      await start(page);
+      await readBook(page, edgeBook('Edge Repeated'));
+      const last = await toLastPage(page);
+      await page.keyboard.press('ArrowRight');
+      await expect(bookEdge(page)).toBeVisible();
+      // a second refusal a second later: the first one's timeout runs at
+      // 1.5 s and must not take this one's edge away
+      await page.clock.runFor(1000);
+      const again = await clockNow(page);
+      await page.keyboard.press('ArrowRight');
+      await page.clock.runFor(700);
+      await expect(bookEdge(page)).toBeVisible();
+      await expectMoment(page, bookEdge(page), { since: again, ms: 1500, slack: 1000 });
+      expect(await place(page)).toEqual(last);
+    });
+
+    test('right to left the edges are the other way', async ({ page }) => {
+      await start(page);
+      await readBook(page, edgeBook('Edge Leftward', true));
+      const first = await place(page);
+      let since = await clockNow(page);
+      await page.keyboard.press('ArrowRight');
+      await expectEdge(page, first, { side: 'right', words: 'Start of the book', since });
+      const last = await toLastPage(page, 'ArrowLeft');
+      since = await clockNow(page);
+      await page.keyboard.press('ArrowLeft');
+      await expectEdge(page, last, { side: 'left', words: 'End of the book', since });
+    });
+  });
+
+  test.describe(`a swipe past the book's end, with ${motion === 'reduce' ? 'less' : 'the usual'} motion`, () => {
+    test.use({ hasTouch: true });
+    test.beforeEach(async ({ page }) => {
+      await page.clock.install({ time: new Date('2026-06-01T12:00:00Z') });
+      await page.emulateMedia({ reducedMotion: motion });
+    });
+
+    test('a swipe on the last page and on the first show the edge and keep the page', async ({ page }) => {
+      await start(page);
+      await readBook(page, edgeBook('Edge Swipes'));
+      const { y, mid } = await sides(page);
+      const first = await place(page);
+      let since = await clockNow(page);
+      await drag(page, mid - 60, mid + 60, y);
+      await expectEdge(page, first, { side: 'left', words: 'Start of the book', since });
+      const last = await toLastPage(page);
+      since = await clockNow(page);
+      await drag(page, mid + 60, mid - 60, y);
+      await expectEdge(page, last, { side: 'right', words: 'End of the book', since });
+    });
+  });
+}

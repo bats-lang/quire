@@ -257,3 +257,35 @@ footnote popup, the toolbar's place and a tap that ends a selection. Decisions:
   Underline the selection is cleared (`annot_selection_end`). A `select_range`
   that is refused or finds no element is said (`HighlightNotSelected`, and
   `SelectionNotEnded`).
+
+## The book's edge (#860, keyword: book-edge)
+
+A turn refused on the book's last page (forward) or first page (back) shows a
+bar on the edge the reader pushed against (the right for a forward turn read
+left to right, the left right to left, the bottom when pages go down; the
+opposite for back) and says "End of the book" or "Start of the book" in a
+status toast (`edge-status`, `role=status`). Every way of turning ends in
+`_page_next`, `_page_previous` or `reader_turn_on` (read aloud), so the one
+`_edge_show` serves tap, key, button, swipe and reading aloud.
+
+* **Research** (ticket comment 6427152579): no comparable reader documents a cue
+  for a refused turn (Apple Books, Play Books, Moon+ Reader, KOReader and
+  Readium were searched and nothing was found; Kindle ends a book with a
+  dialog); the platform's own convention for a gesture refused at the end of
+  content is an edge effect on the side pushed against (Android's glow or
+  stretch, Flutter's `GlowingOverscrollIndicator`, iOS's rubber band), and WCAG
+  4.1.3 asks for the words to be a status message.
+* **Colour**: the bar is a `fill` in role `edge` (style.bats' proven ground with no
+  text, 3:1 against the grounds), 6px wide in the page's margin;
+  `expectNoTextUnder` (e2e/page-turn.spec.js) checks, at every edge shown, that no rectangle of text in
+  the page meets the bar's, in every project (a bar widened to 200px fails it). There is no shadow: a black shadow is invisible on
+  Night's ground (its veil strength is 0, `V_night_0`).
+* **Motion**: none, the bar appears and goes at once, so `prefers-reduced-motion`
+  changes nothing and the static indication stays (WCAG 2.3.3).
+* **Never stuck**: the edge is one linear mark (`edge_mark`) that only
+  `_edge_clear` consumes, held in `edge_cell` with the serial of its timeout
+  (1.5 s); a timeout of an older serial puts it back and does nothing, and a new
+  refusal clears the old edge first. `tests/static/reject/book-edge-unfinished`
+  drops a shown edge and must not type-check; `accept/book-edge-ended` is its control.
+* **Tests**: `e2e/page-turn.spec.js` ("The book's edge"), every project, with and
+  without less motion: key, tap and button, a swipe, a repeated refusal, right to left.
