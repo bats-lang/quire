@@ -90,7 +90,7 @@ The checkouts the agents load (`/home/user/<repo>` for each repository: quire, b
 * A proof is a proof: static, from types and lemmas; say "tested" when only tested. No runtime checks standing in for proofs.
 * No mtimes in freshness. We write bats, not shell (quire#646). The bootstrap/c regenerate-and-compare check catches a forgotten update; it is not a security check.
 * Report outcomes by their evidence: the command and what it printed. A claim is never larger than its evidence, and is never made smaller to fit it: the work is made to match the claim.
-* **`Honesty is never an excuse`** (owner, 2026-10-28, the phrase as the owner wrote it). A limitation is not admitted in a comment, a PR body or a report: it is removed. What cannot be done is escalated as not done, with what was tried and why it failed. Work is never "mostly" done or "done except": it is not done.
+* **`Honesty is never an excuse`** (orchestrator, 2026-10-28, the owner's ruling of that date; the title is his phrase). A limitation is not admitted in a comment, a PR body or a report: it is removed. What cannot be done is escalated as not done, with what was tried and why it failed. Work is never "mostly" done or "done except": it is not done.
 * **A pitboss tool that does not work is fixed, never shimmed** (orchestrator, 2026-10-28, the owner's ruling of that date). The fix is a worker in dev-skill-up/pitboss. A tool that fails is read another way (`api.github.com` through `gh api`), and the failure is not reported as unreadable.
 * The owner's preferences in the system prompt apply to every message (no analogies unless they help, no "makes you wonder", search before factual claims).
 
