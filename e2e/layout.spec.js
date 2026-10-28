@@ -6,7 +6,7 @@
 import { test, expect, onAndroid } from './fixtures.js';
 import {
   collectionButton, start, epubFile, importFiles, readBook, openBook, showChrome, chapters, cards, importInput, bookPage,
-  chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
+  chapterTitle, bareReader, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
   readingSettings, openReadingSettings, openShelf, emptyTrashDialog, shelfTitle, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
   rawMouse,
@@ -497,12 +497,9 @@ test('in the app, scrolled and in full screen with the bars still shown, no text
 /** The bars put down, so the running footer shows (a tap on the page's
     middle brings them up and puts them down) */
 async function barsDown(page) {
-  const footer = page.locator('#footer');
-  if (!(await footer.isVisible())) {
-    const box = await bookPage(page).boundingBox();
-    await rawMouse(page, 'click', box.x + box.width / 2, box.y + box.height / 2);
-  }
-  await expect(footer).toBeVisible();
+  // reader acts: by acts, as a tap can land on the hint
+  await bareReader(page);
+  await expect(page.locator('#footer')).toBeVisible();
 }
 
 // A paged page keeps its last line clear of its running footer, the
@@ -910,4 +907,27 @@ test('the library menu is reachable under the banner of records that cannot be u
   await page.evaluate(() => document.getElementById('settings-sync').click());
   await expect(dialog(page, 'Sync')).toBeVisible();
   await reachable();
+});
+
+// reader acts: on a first open the hint is not covered by a bar, in every project
+test('on a first open no bar covers the hint, and the bars would', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Uncovered', author: 'Layout Tests', rawChapters: chapters(2, 20) }, { asOpened: true });
+  const hint = page.getByRole('status').filter({ hasText: 'Tap the sides to turn pages. Tap the middle for the menu.' });
+  await expect(hint).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Page controls' })).toBeHidden();
+  const overlap = async () => page.evaluate(() => {
+    const hintBox = [...document.querySelectorAll('#turn-hint')][0].getBoundingClientRect();
+    const covers = [...document.querySelectorAll('.top, .bot')].filter(bar => bar.checkVisibility({ visibilityProperty: true })).map(bar => {
+      const box = bar.getBoundingClientRect();
+      return box.left < hintBox.right && box.right > hintBox.left && box.top < hintBox.bottom && box.bottom > hintBox.top;
+    });
+    return { width: innerWidth, bars: covers.length, covered: covers.some(Boolean) };
+  });
+  const down = await overlap();
+  expect(down.covered, `a bar over the hint at ${down.width} px with the bars down`).toBe(false);
+  await showChrome(page);
+  const up = await overlap();
+  expect(up.bars).toBeGreaterThan(0);
+  expect(up.covered, `the bars over the hint at ${up.width} px`).toBe(true);
 });

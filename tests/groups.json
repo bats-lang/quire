@@ -80,7 +80,8 @@
       "reading-ruler.spec.js",
       "search.spec.js",
       "titles-redraw.spec.js",
-      "vertical.spec.js"
+      "vertical.spec.js",
+      "vocabulary.spec.js"
     ],
     "relaunch": [
       "drm.spec.js",
@@ -117,6 +118,7 @@
       "check",
       "checkers",
       "accept/back-offer",
+      "accept/chrome-hidden-with-act",
       "accept/codec-cut-is-a-loss",
       "accept/crc-shift-8",
       "accept/fixed-box-fits",
@@ -227,11 +229,13 @@
     ],
     "accepts-reader": [
       "accept/aloud-placement-matched",
+      "accept/book-edge-ended",
       "accept/codec-any-order",
       "accept/crc-loop-step-of-the-byte",
       "accept/dictionary-files-deleted-in-library",
       "accept/page-turn-ended",
       "reject/back-kept-nothing",
+      "reject/book-edge-unfinished",
       "reject/codec-absent-needs-defaults",
       "reject/codec-cut-claims-unread-chunk",
       "reject/codec-cut-read-unmatched",
@@ -279,10 +283,12 @@
       "accept/clip-last",
       "accept/codec-length-ok",
       "accept/crc-step-by-the-entry",
+      "accept/backup-read-answer-matched",
       "accept/harm-empty-some",
       "accept/page-width-whole",
       "reject/back-other-timeout",
       "reject/cfi-side-unmatched",
+      "reject/chrome-hidden-without-act",
       "reject/codec-absent-then-same-tag",
       "reject/codec-cut-lost-another-cause",
       "reject/codec-drops-unknown-chunk",
@@ -392,6 +398,12 @@
       "reject/lay-writes-overflow",
       "reject/nav-row-without-summary",
       "reject/page-turn-forged-sheet",
+      "reject/backup-read-answer-unexpected-unmatched",
+      "reject/backup-read-answer-none-unmatched",
+      "reject/backup-read-answer-empty-unmatched",
+      "reject/backup-read-answer-not-here-unmatched",
+      "reject/backup-read-answer-rejected-unmatched",
+      "reject/backup-read-answer-thrown-unmatched",
       "reject/pieces-forged-cut",
       "reject/sync-result-unmatched",
       "reject/token-answer-unexpected-unmatched",
@@ -441,7 +453,8 @@
     "mutation-bytes-records": [
       "mutation/bytes-part2of2",
       "mutation/bookrec",
-      "mutation/indexrec"
+      "mutation/indexrec",
+      "mutation/wordrec"
     ],
     "mutation-schema-1": [
       "mutation/schema-part1of2"

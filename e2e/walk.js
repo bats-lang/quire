@@ -10,7 +10,7 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, bookPage,
   libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, topBar,
-  readingSettings, openReadingSettings, selectText, rawFile, openSortMenu, shelfTitle, openShelf, emptyTrashDialog,
+  readingSettings, openReadingSettings, selectText, rawFile, openSortMenu, shelfTitle, openShelf, emptyTrashDialog, toLibrary, openBook,
 } from './helpers.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
@@ -218,6 +218,21 @@ export async function walkEveryScreen(page, { look, back }) {
   await expect(dialog(page, 'Dictionary')).toBeVisible();
   await check('a word looked up');
   await back();
+  // the word looked up is kept: the Words screen lists it, and the review shows it (keyword: vocabulary)
+  await toLibrary(page);
+  await libraryMenu(page);
+  await menuItem(page, 'Words').click();
+  const words = page.getByRole('dialog', { name: 'Words', exact: true });
+  await expect(words).toBeVisible();
+  await expect(words.getByRole('group', { name: /ephemeral/i })).toBeVisible();
+  await check('Words');
+  await words.getByRole('button', { name: 'Review', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Review', exact: true })).toBeVisible();
+  await check('Review');
+  await back();
+  await back();
+  // and the book again, where the walk ends
+  await openBook(page, 'A Rather Long Title, Read');
   const unwalked = await page.evaluate(seen => [...document.querySelectorAll('[role=dialog]')]
     .map(e => e.id).filter(id => !seen.includes(id)), [...seen]);
   expect(unwalked, 'screens this walk never checked: walk them here').toEqual([]);

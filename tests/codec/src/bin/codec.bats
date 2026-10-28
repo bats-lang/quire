@@ -12,6 +12,8 @@ staload "schema.sats"
 staload "record.sats"
 staload "bookrec.sats"
 staload "bookimage.sats"
+staload "wordrec.sats"
+staload "wordimage.sats"
 
 (* What the codec's proofs cannot say, and the app's callers rely on:
    the checksum is the CRC-32 everyone knows, the numbers at the edge of
@@ -837,6 +839,99 @@ fn check_fuzz {rounds:nat} (rounds: int rounds): void =
      | ~NoTested() => book_image_free(image)
      | ~Tested(other) => fuzz_with(image, other, rounds))
 
+(* ---------------- the words looked up (quire#565) ---------------- *)
+
+fn word_numbers_with (value: Int): word_numbers = @{
+  book_high = value, book_low = value, lookups = value, first_minute = value, last_minute = value, modified = value, deleted = value,
+  chapter = value, node = value, offset = value, mastered = value, streak = value, due = value
+}
+
+datavtype word_tested =
+  | {contents:wordx} WordTested of word_image(contents)
+  | WordNoTested of ()
+
+fn word_image_of {head_n,tail_n,word_n:nat | head_n < 256; tail_n < 256; word_n < 256} (value: Int, head_len: int head_n, tail_len: int tail_n, word_len: int word_n): word_tested =
+  case+ word_image_make(word_numbers_with(value), text_of(2, 1), 2, text_of(head_len, 2), head_len, text_of(tail_len, 3), tail_len, text_of(word_len, 4), word_len) of
+  | ~WordImaged(image) => WordTested(image)
+  | ~WordNotImaged() => let val () = fail("an image of a word of numbers of 32 bits") in WordNoTested() end
+
+fn word_encode {contents:wordx} (image: !word_image(contents)): [l:agz][n:pos | n <= 1048576] @($A.arr(byte, l, n), int n) = let
+  val record = word_record_new(image)
+  val (_ | list) = word_record_write(record)
+  val () = word_record_free(record)
+  val (_ | count) = blist_len(list)
+in
+  if count >= 1 then
+    (if count <= 1048576 then let
+       val bytes = blist_to_buffer(list, count)
+       val () = blist_free(list)
+     in @(bytes, count) end
+     else let val () = blist_free(list) val one = $A.alloc<byte>(1) in @(one, 1) end)
+  else let val () = blist_free(list) val one = $A.alloc<byte>(1) in @(one, 1) end
+end
+
+(* 0 whole and the same word, 1 whole but another word, 2 lost a group, 3 not a record, 4 newer, 5 damaged *)
+fn word_classify {l:agz}{n:pos | n <= 1048576}{contents:wordx} (bytes: !$A.arr(byte, l, n), n: int n, original: !word_image(contents)): int = let
+  val list = blist_of_array(bytes, 0, n)
+  val (_ | read) = word_record_read(list)
+in
+  case+ read of
+  | ~WR_ok(record) => let
+      val back = word_record_image(record)
+      val same = (word_image_diff(original, back) = 0)
+      val () = word_image_free(back)
+      val () = word_record_free(record)
+    in if same then 0 else 1 end
+  | ~WR_loss(record, lost) => let
+      val () = lostv_free(lost)
+      val () = word_record_free(record)
+    in 2 end
+  | ~WR_notquire() => 3
+  | ~WR_newer() => 4
+  | ~WR_damaged() => 5
+end
+
+(* every prefix of the record is a cut: never the word as it was, nor another one read whole *)
+fun word_prefixes {l:agz}{n:pos | n <= 1048576}{contents:wordx}{length:nat | length <= n} .<n - length>.
+  (bytes: !$A.arr(byte, l, n), n: int n, original: !word_image(contents), length: int length): void =
+  if length >= n then ()
+  else if length < 1 then word_prefixes(bytes, n, original, 1)
+  else let
+    val cut_bytes = prefix_of(bytes, n, length)
+    val code = word_classify(cut_bytes, length, original)
+    val () = expect(code >= 2, "a cut word record was read whole")
+    val () = $A.free<byte>(cut_bytes)
+  in word_prefixes(bytes, n, original, length + 1) end
+
+(* every byte changed, one at a time: the word read is never another word *)
+fun word_damage {l:agz}{n:pos | n <= 1048576}{contents:wordx}{at:nat | at <= n} .<n - at>.
+  (bytes: !$A.arr(byte, l, n), n: int n, original: !word_image(contents), at: int at): void =
+  if at >= n then ()
+  else let
+    val copy = with_byte(bytes, n, at, 1 + byte_at(bytes, n, at))
+    val code = word_classify(copy, n, original)
+    val () = expect(code <> 1, "damage to a word record gave another word")
+    val () = $A.free<byte>(copy)
+  in word_damage(bytes, n, original, at + 1) end
+
+fn check_word_at (value: Int): void =
+  case+ word_image_of(value, 200, 100, 9) of
+  | ~WordNoTested() => ()
+  | ~WordTested(image) => let
+      val @(bytes, n) = word_encode(image)
+      val whole = word_classify(bytes, n, image)
+      val () = expect(whole = 0, "a word record is read back as the word written")
+      val () = word_prefixes(bytes, n, image, 0)
+      val () = word_damage(bytes, n, image, 0)
+      val () = $A.free<byte>(bytes)
+    in word_image_free(image) end
+
+fn check_words (): void = let
+  val () = check_word_at(0)
+  val () = check_word_at(31337)
+  val () = check_word_at(2147483647)
+in check_word_at(~2147483647) end
+
 implement main0 () = let
   val () = check_crc()
   val () = check_crc_arrays()
@@ -847,6 +942,7 @@ implement main0 () = let
   val () = check_absent()
   val () = check_any_order()
   val () = check_needed_lost()
+  val () = check_words()
   val () = check_fuzz(20000)
 in
   if !_failures = 0 then println! ("all ok")
