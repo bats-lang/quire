@@ -601,18 +601,27 @@ test('a lookup that cannot be written is said, and the word is not listed', asyn
   await start(page);
   await importDictionary(page, english, 'en');
   await readBook(page, novel('Vocabulary Unwritten'));
+  // only a word's record is refused: a write of the reader's own (the place, after the book opens) that is
+  // aborted too says "could not save your changes" over the selection toolbar, at a time that depends on the load
   await page.evaluate(() => {
-    IDBObjectStore.prototype.put = function () {
-      this.transaction.abort();
-      return {};
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value, key) {
+      if (String(key).startsWith('words/')) {
+        this.transaction.abort();
+        return {};
+      }
+      return put.apply(this, arguments);
     };
   });
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowLeft');
   const [from, to] = at('Ephemeral');
   await selectText(page, from, to);
   await expect(selection(page)).toBeVisible();
   await lookUpHere(page).click();
   await expect(page.getByRole('alert').filter({ hasText: 'This word could not be kept in your words' })).toContainText(
     'Reopen Quire to try again.', ALERT_TIMEOUT);
+  await expect(page.getByRole('alert').filter({ hasText: 'could not save your changes' })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await toLibrary(page);
   await openWords(page);
