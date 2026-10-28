@@ -25,7 +25,9 @@ No bats and no patsopt: it reads files (and runs git on a repository of its own)
 
 usage: python3 tests/static/affected_test.py
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -550,6 +552,150 @@ class Readers(unittest.TestCase):
         rule = af.Rule('fake', ['home' + 'page/**'], af.NONE, af.NONE)
         hits = self.mentions(self.e2e_readers(), self.names_of(rule))
         self.assertTrue(any('about.spec.js' in hit for hit in hits), hits)
+
+
+class LocalRun(unittest.TestCase):
+    """The local run takes CI's rule at the granularity of a fixture (quire#957, keyword: affected)."""
+
+    FILES = {
+        'src/a.bats': '#include "x"\nstaload "b.sats"\n',
+        'src/b.bats': 'staload "c.sats"\n',
+        'src/c.bats': 'val c = 1\n',
+        'src/d.bats': 'val d = 1\n',
+        'src/bin/q.bats': 'staload "d.sats"\n',
+        'tests/static/accept/reads-a/file': 'src/a.bats',
+        'tests/static/accept/reads-a/before': 'x',
+        'tests/static/accept/reads-a/snippet.bats': 'val s = 1',
+        'tests/static/reject/reads-d/file': 'src/d.bats\n',
+        'tests/static/reject/reads-d/before': 'val d = 1',
+        'tests/static/reject/reads-d/snippet.bats': 'val s = 1',
+        'tests/static/reject/reads-d/expect': 'function s\nline 1\nerror',
+        'tests/static/accept/names-doc/file': 'src/d.bats',
+        'tests/static/accept/names-doc/before': 'val d = 1',
+        'tests/static/accept/names-doc/snippet.bats': '(* e2e/shared.js is the mirror *)',
+        'tests/static/accept/uses-c/file': 'src/d.bats',
+        'tests/static/accept/uses-c/before': 'val d = 1',
+        'tests/static/accept/uses-c/snippet.bats': 'staload "c.sats"',
+        'e2e/one.spec.js': "import './shared.js';\n",
+        'e2e/two.spec.js': 'export {};\n',
+        'e2e/shared.js': 'export {};\n',
+    }
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        for path, text in self.FILES.items():
+            full = Path(self.directory.name) / path
+            full.parent.mkdir(parents=True, exist_ok=True)
+            full.write_text(text)
+        self.tree = af.Tree(self.directory.name)
+
+    def plan(self, *changes):
+        return af.local_plan([(status, path) for status, path in changes], self.tree)
+
+    def test_a_fixture_is_listed_for_the_module_it_is_put_into(self):
+        self.assertEqual(self.plan(('M', 'src/a.bats'))['static'], ['accept/reads-a', 'check', 'checkers'])
+
+    def test_a_fixture_is_listed_for_a_module_its_module_staloads_however_far(self):
+        # c is read by a through b; the snippet of uses-c staloads c itself
+        self.assertEqual(self.plan(('M', 'src/c.bats'))['static'], ['accept/reads-a', 'accept/uses-c', 'check', 'checkers'])
+
+    def test_a_fixture_is_not_listed_for_a_module_it_does_not_read(self):
+        found = self.plan(('M', 'src/d.bats'))['static']
+        self.assertNotIn('accept/reads-a', found)
+        self.assertEqual(found, ['accept/names-doc', 'accept/uses-c', 'check', 'checkers', 'reject/reads-d'])
+
+    def test_a_fixture_is_listed_for_a_path_its_files_name(self):
+        found = self.plan(('M', 'e2e/shared.js'))
+        self.assertEqual(found['static'], ['accept/names-doc', 'checkers'])
+        self.assertEqual(found['e2e'], {'e2e/one.spec.js'})
+
+    def test_a_module_the_driver_staloads_is_found_through_src(self):
+        self.assertEqual(self.plan(('M', 'src/bin/q.bats'))['static'], ['check', 'checkers'])
+
+    def test_a_spec_only_change_lists_no_fixture(self):
+        found = self.plan(('M', 'e2e/two.spec.js'))
+        self.assertEqual(found['static'], ['checkers'])
+        self.assertEqual(found['e2e'], {'e2e/two.spec.js'})
+        self.assertEqual(found['whole'], [])
+
+    def test_a_fixture_change_lists_that_fixture(self):
+        self.assertEqual(self.plan(('M', 'tests/static/reject/reads-d/expect'))['static'], ['reject/reads-d'])
+
+    def test_notes_list_the_checkers_only(self):
+        self.assertEqual(self.plan(('M', '.claude/rules/ci.md'))['static'], ['checkers'])
+
+    def test_a_path_that_runs_the_whole_population_in_ci_is_said_and_lists_no_member_for_it(self):
+        found = self.plan(('M', 'bats.lock'), ('M', 'src/d.bats'))
+        self.assertEqual(found['whole'], ['bats.lock: CI files'])
+        self.assertIn('reject/reads-d', found['static'])
+
+    def test_an_app_path_outside_src_is_whole(self):
+        self.assertEqual(self.plan(('M', 'assets/x.png'))['whole'], ['assets/x.png: the app'])
+
+    def test_no_change_to_go_by_is_whole(self):
+        self.assertEqual(self.plan()['whole'], ['no change to go by: everything'])
+
+    def test_a_deleted_module_still_lists_its_readers(self):
+        os.remove(Path(self.directory.name) / 'src/d.bats')
+        self.assertIn('reject/reads-d', self.plan(('D', 'src/d.bats'))['static'])
+
+    def test_a_src_change_selects_every_spec(self):
+        self.assertEqual(self.plan(('M', 'src/a.bats'))['e2e'], af.ALL)
+
+
+class LocalCommand(unittest.TestCase):
+    """`scripts/ci-groups.py local` on the real fixtures."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location('ci_groups_local', ROOT / 'scripts' / 'ci-groups.py')
+        cls.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.module)
+
+    def run_local(self, changes, *options):
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(self.module.selection, 'git_changes', return_value=changes), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            status = self.module.local(GROUPS, ['origin/main', *options])
+        return status, out.getvalue().split('\n')[:-1], err.getvalue()
+
+    def test_a_change_to_a_module_lists_every_fixture_anchored_in_it(self):
+        """quire#890: the fixtures anchored on the lines of src/bookimage.bats were not in the sample."""
+        status, lines, _ = self.run_local([('M', 'src/bookimage.bats')])
+        self.assertEqual(status, 0)
+        for member in ('accept/image-roundtrip', 'reject/image-roundtrip-another-book', 'check', 'checkers'):
+            self.assertIn(member, lines)
+        self.assertLess(len(lines), len(non_mutation_members()))
+
+    def test_every_fixture_is_listed_for_a_change_to_its_module(self):
+        tree = af.Tree(str(ROOT))
+        for member in sorted(af.fixture_members(tree)):
+            module = (ROOT / 'tests' / 'static' / member / 'file').read_text().strip()
+            with self.subTest(member):
+                self.assertIn(member, af.local_plan([('M', module)], tree)['static'])
+
+    def test_a_spec_only_change_lists_no_fixture(self):
+        status, lines, _ = self.run_local([('M', 'e2e/folders.spec.js')])
+        self.assertEqual(lines, ['checkers', 'e2e/folders.spec.js'])
+
+    def test_the_sample_is_seeded_and_adds_other_fixtures(self):
+        changes = [('M', 'src/bookimage.bats')]
+        first = self.run_local(changes, '--sample', '5', '--seed', '7')
+        second = self.run_local(changes, '--sample', '5', '--seed', '7')
+        other = self.run_local(changes, '--sample', '5', '--seed', '8')
+        base = self.run_local(changes)
+        self.assertEqual(first[1], second[1])
+        self.assertNotEqual(first[1], other[1])
+        self.assertEqual(len(first[1]), len(base[1]) + 5)
+        self.assertIn('seed 7', first[2])
+
+    def test_run_passes_the_static_members_to_the_runner(self):
+        calls = []
+        with patch('subprocess.run', side_effect=lambda command: calls.append(command) or subprocess.CompletedProcess(command, 0)):
+            status, lines, _ = self.run_local([('M', 'e2e/folders.spec.js')], '--run', '/repository')
+        self.assertEqual(status, 0)
+        self.assertEqual([command[1:] for command in calls], [['/repository', 'checkers']])
 
 
 def strip_hash_comments(text):

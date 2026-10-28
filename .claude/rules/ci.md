@@ -351,6 +351,27 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   command, and a wrapper below it kills a cold check for nothing. The first build of a new checkout
   runs with `run_in_background` and its log is read until it ends, in the same turn. A push is
   `qsweep push <arguments>`, which holds when `qsweep pressure` does not say `runner pressure: none`.
+* **The affected members, whole (quire#957, keyword: affected).** Before every push, a worker
+  runs `python3 scripts/ci-groups.py local $(git merge-base origin/main HEAD)` and runs what it
+  prints: the rule of the `plan` job (`scripts/affected.py`, #619) at the granularity of a
+  fixture, over the diff against the merge base, tracked files of the working tree included (commit
+  new files first). It prints one member a line (`check`, `checkers`, `accept/<name>`,
+  `reject/<name>`, `e2e/<spec>`) and the reason of each on standard error. A source module
+  (`src/**`) selects `check`, `checkers`, and each fixture that reads it: the module the
+  fixture is put into (`file`), a module that one staloads, however far (`staload "x.sats"` is
+  `src/x.bats`), and any repository path a fixture's `before`, `expect`, `file` or `snippet.bats` spells
+  out. Every other path selects what CI's table says (a note, a spec, a fixture's directory); a path for which CI
+  runs the whole static population (the CI files, the pins, an unknown path, `assets/**`) is said
+  (`CI runs the whole static population for: ...`) and left to the sample. A spec reads the built
+  app, so a source change selects every spec: the command says so and the e2e run stays the
+  seeded sample below. `--run <repository>` runs the static members with `tests/static/run.sh`;
+  `--sample N [--seed S]` adds N other fixtures drawn with a seed that is printed, so the
+  sample is added to the affected members and never takes their place. The list is an
+  over-approximation of what `bats fixtures` knows exactly (the files patsopt read for each
+  fixture, kept by its memo, `fixtures-memo` in bats); the exact form is bats-lang/bats#570
+  and replaces the staload walk when it lands. The PR's Evidence has the command and its output;
+  a reviewer sends back a PR without it. Tested: `LocalRun` and `LocalCommand` in
+  `tests/static/affected_test.py`; the brief line: `tests/static/guidelines.py` (`WORKER_LINES`).
 * **A run over a population is a sample** (quire#751): about 10 minutes, the members drawn at random
   with a seed that is printed (`python3 -c 'import random; r = random.Random(SEED); ...'`), and the
   PR says the sample, its seed and size and why it suffices; the whole population is CI's.

@@ -55,6 +55,18 @@ usage:
                                        members run only the lemmas the change can have made
                                        vacuous (#594), the others what scripts/affected.py
                                        selects
+  scripts/ci-groups.py local <base> [--sample N [--seed S]] [--run <repository>]
+                                       a worker's local run for the change since <base> (the
+                                       merge base with origin/main, tracked files of the
+                                       working tree included), by the rule CI uses at the
+                                       granularity of a fixture (keyword: affected): the
+                                       members to run, one per line (`check`, `checkers`,
+                                       every fixture that reads a changed file, every e2e spec
+                                       the rule selects as e2e/<spec>), the reasons on standard
+                                       error. A path for which CI runs the whole static
+                                       population is said, and --sample N adds N fixtures drawn
+                                       with the seed S (printed). --run runs the static
+                                       members with tests/static/run.sh (bats on PATH)
   scripts/ci-groups.py members <kind> <group>
                                        check, then print that group's
                                        members, one per line (e2e specs
@@ -222,6 +234,49 @@ def group_affected(groups, group, base):
     return 'yes' if result['static'][group]['members'] else 'no'
 
 
+def local(groups, arguments):
+    """The `local` command: print (and with --run, run) a change's members. Returns the status."""
+    import random
+    import subprocess
+    base, options = arguments[0], arguments[1:]
+    sample, seed, repository = 0, None, None
+    while options:
+        if options[0] == '--sample' and len(options) > 1 and options[1].isdigit():
+            sample, options = int(options[1]), options[2:]
+        elif options[0] == '--seed' and len(options) > 1 and options[1].isdigit():
+            seed, options = int(options[1]), options[2:]
+        elif options[0] == '--run' and len(options) > 1:
+            repository, options = options[1], options[2:]
+        else:
+            return None
+    changes = selection.git_changes(base, ROOT, head=None)
+    result = selection.local_plan(changes, selection.Tree(ROOT))
+    members = list(result['static'])
+    for line in result['why']:
+        print(line, file=sys.stderr)
+    if result['whole']:
+        print('CI runs the whole static population for: ' + '; '.join(result['whole']), file=sys.stderr)
+    if sample:
+        seed = random.SystemRandom().randrange(10**9) if seed is None else seed
+        pool = [member for member in selection.fixture_members(selection.Tree(ROOT)) if member not in members]
+        drawn = random.Random(seed).sample(pool, min(sample, len(pool)))
+        print(f'seeded sample: {len(drawn)} of {len(pool)} other fixtures, seed {seed}', file=sys.stderr)
+        members += sorted(drawn)
+    if result['e2e'] == selection.ALL:
+        print('e2e: every spec (the app or a shared module changed; a spec reads the built app, '
+              'so no spec is narrower: run the seeded sample of .claude/rules/ci.md)', file=sys.stderr)
+        specs_list = []
+    else:
+        specs_list = sorted(result['e2e'])
+    print('\n'.join(members + specs_list))
+    if repository is not None:
+        if not members:
+            print('nothing static to run', file=sys.stderr)
+            return 0
+        return subprocess.run([os.path.join(ROOT, 'tests', 'static', 'run.sh'), repository] + members).returncode
+    return 0
+
+
 def main(arguments):
     with open(os.path.join(ROOT, 'tests', 'groups.json')) as groups_file:
         groups = json.load(groups_file)
@@ -262,6 +317,10 @@ def main(arguments):
                 summary_file.write('\n'.join(report) + '\n')
         print('\n'.join(lines + report))
         return 0
+    if arguments[:1] == ['local'] and len(arguments) >= 2:
+        status = local(groups, arguments[1:])
+        if status is not None:
+            return status
     if len(arguments) == 3 and arguments[0] == 'affected' \
             and (arguments[1] in groups['static'] or arguments[1] in groups['e2e']):
         print(group_affected(groups, arguments[1], arguments[2]))

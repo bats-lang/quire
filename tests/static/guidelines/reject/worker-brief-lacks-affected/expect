@@ -1,0 +1,1 @@
+brief: it names worker.md and has no line "Affected: ..." (the local run is the output of scripts/ci-groups.py local, whole, before every push; orchestration.md, "Briefs and the machine")
