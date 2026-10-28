@@ -192,7 +192,7 @@ restores main's build cache; the long pole is the slowest static group. A
 change that would make its own group longer than about 45 minutes is sharded
 first (the mutation check is, below).
 
-* **At most two entries in the queue at a time**; the next goes in when one has
+* **No more than two entries in the queue at a time**; the next goes in when one has
   merged or been removed (five at once wanted more runners than the pool has,
   and nothing merged for 3.5 hours).
 * **Superseded runs are cancelled**: GitHub rebuilds the groups behind a
