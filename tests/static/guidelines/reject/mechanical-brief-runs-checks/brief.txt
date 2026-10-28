@@ -1,0 +1,10 @@
+Follow the worker.md rules; finish inside the turn; do not merge; do not write the review.
+
+Mechanical fix: make the edit the log names in tests/groups.json.
+Design check: none, no declaration changes.
+Push: push the branch with qsweep push origin fix-1.
+Expects: none, the edit is the text the log prints.
+Sample: none, no population is checked.
+Run bats check and then the fixture before the push.
+
+The tests pass.

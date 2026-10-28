@@ -13,6 +13,14 @@ _pressure(){
 }
 # `qsweep pressure` prints only that line (and exits 1 under pressure), so no caller pipes qsweep through grep
 if [ "$1" = pressure ]; then r=$(_pressure); echo "$r"; case "$r" in "runner pressure: none") exit 0;; *) exit 1;; esac; fi
+# `qsweep push --mechanical <git push arguments>` (quire#977, rule 2, keyword: mechanical-fix): the push that only fixes a mechanical CI red is exempt from the runner hold.
+# `qsweep mechanical --record` (below, after the PR reader is defined) decides it from the PR of the current branch, never from a flag alone: it exits 1, and nothing is
+# pushed, when the red is not mechanical. The hold line is then not asked for, and the push goes on through the push line below as any other.
+if [ "$1" = push ] && [ "$2" = --mechanical ]; then
+  bash "$0" mechanical --record || { echo "mechanical push refused: the red of this branch's PR is not a mechanical CI failure (qsweep push without --mechanical keeps the hold)"; exit 1; }
+  shift 2; set -- push "$@"
+  _pressure(){ echo "runner pressure: none"; }
+fi
 # `qsweep push <git push arguments>` is the pressure check and the push in one command (quire#751, row 5): the check cannot be left out
 # or put in the wrong place. Under pressure it prints the hold line, exits 1 and pushes nothing.
 if [ "$1" = push ]; then shift; r=$(_pressure); echo "$r"; case "$r" in "runner pressure: none") exec git push "$@";; *) exit 1;; esac; fi
@@ -40,6 +48,7 @@ _read_pr(){  # $1 repository, $2 PR number: sets _st _sha _ref _t _am _created _
   j=$(_gh "repos/bats-lang/$r/pulls/$n" --jq '[.mergeable_state,.head.sha,.head.ref,.title[0:55],.auto_merge!=null,.created_at]|@tsv') || return 1
   _st=$(echo "$j" | cut -f1); _sha=$(echo "$j" | cut -f2); _ref=$(echo "$j" | cut -f3); _t=$(echo "$j" | cut -f4); _am=$(echo "$j" | cut -f5); _created=$(echo "$j" | cut -f6)
   cr=$(_gh "repos/bats-lang/$r/commits/$_sha/check-runs?per_page=100") || return 1
+  _cr="$cr"   # the job ids and times of the failed jobs, for _mechanical
   _fails=$(echo "$cr" | jq -r '[.check_runs[]|select(.conclusion=="failure" or .conclusion=="cancelled" or .conclusion=="timed_out" or .conclusion=="action_required" or .conclusion=="startup_failure" or .conclusion=="stale")|.name]|join(",")')
   _pend=$(echo "$cr" | jq '[.check_runs[]|select(.status!="completed")]|length')
   _skipped=$(echo "$cr" | jq '[.check_runs[]|select(.conclusion=="skipped" or .conclusion=="neutral")]|length')
@@ -68,6 +77,40 @@ _judge_pr(){  # sets _ready from what _read_pr read
   elif [ "$_rv" = "approved-this-head" ]; then _ready=REVIEWED-approved
   else _ready=READY-FOR-REVIEW; fi
 }
+# MECHANICAL-FIX (quire#977, keyword: mechanical-fix): a red whose fix is an edit the failure text names. FIX-NEEDED with every failed job (the aggregate `check` aside) either the
+# `plan` job (grouping) or a job whose log holds `no line "..." in <file>` or `rejected, but not as its expect says`: one gh api call per failed job, its log cut at 4 MiB.
+# A conflict, a red status or a changes-needed review is not mechanical. Rule 3: the minutes from the red (the earliest failed job's completed_at) to the fix push are reported over 20.
+_mech_pattern='no line ".*" in |rejected, but not as its expect says'; _mech_limit=20
+_now(){ echo "${QSWEEP_NOW:-$(date +%s)}"; }
+_mechanical(){  # $1 repository; after _read_pr and _judge_pr: sets _mech (yes or empty) and _red_at (epoch seconds)
+  _mech=""; _red_at=""
+  { [ "$_ready" = FIX-NEEDED ] && [ -n "$_fails" ] && [ "$_st" != dirty ] && [ -z "$_badstatus" ] && [ "$_rv" != changes-needed-this-head ]; } || return 0
+  local id name conclusion ok=1 seen=0
+  while IFS=$'\t' read -r id name conclusion; do
+    [ "$name" = check ] && continue
+    seen=1
+    [ "$conclusion" = failure ] || { ok=0; break; }
+    [ "$name" = plan ] && continue
+    _gh "repos/bats-lang/$1/actions/jobs/$id/logs" | head -c 4194304 | grep -E -q -e "$_mech_pattern" || { ok=0; break; }
+  done < <(echo "$_cr" | jq -r '.check_runs[]|select(.conclusion=="failure" or .conclusion=="cancelled" or .conclusion=="timed_out" or .conclusion=="action_required" or .conclusion=="startup_failure" or .conclusion=="stale")|[.id,.name,.conclusion]|@tsv')
+  [ "$ok" = 1 ] && [ "$seen" = 1 ] || return 0
+  _mech=yes
+  _red_at=$(echo "$_cr" | jq '[.check_runs[]|select(.name!="check" and .conclusion=="failure")|.completed_at|select(.!=null)|fromdateiso8601]|min // empty')
+}
+_mech_record="${QSWEEP_MECHANICAL_RECORD:-$HOME/qsweep-mechanical.tsv}"   # one line per fix push: pushed_at, PR, red head, red_at, minutes from red to push
+# `qsweep mechanical [--record]`: the verdict for the PR of the current branch (exit 0 mechanical, 1 not); --record appends the push's line to the record
+if [ "$1" = mechanical ]; then
+  _b=$(git branch --show-current)
+  _n=$(_gh "repos/bats-lang/quire/pulls?head=bats-lang:$_b&state=open" --jq '.[0].number // empty') || { echo "NOT-MECHANICAL: could not list the PRs of $_b: $(_why)"; exit 1; }
+  [ -n "$_n" ] || { echo "NOT-MECHANICAL: branch ${_b:-detached} has no open quire PR"; exit 1; }
+  _read_pr quire "$_n" || { echo "NOT-MECHANICAL quire#$_n: could not read it: $(_why)"; exit 1; }
+  _judge_pr; _mechanical quire
+  [ "$_mech" = yes ] || { echo "NOT-MECHANICAL quire#$_n [$_st] $_ready fails=[$_fails] statuses-red=[$_badstatus] review=$_rv"; exit 1; }
+  _minutes=0; [ -n "$_red_at" ] && _minutes=$(( ($(_now)-_red_at)/60 ))
+  echo "MECHANICAL-FIX quire#$_n red-for=${_minutes}m fails=[$_fails]"
+  [ "$2" = --record ] && printf '%s\t%s\t%s\t%s\t%s\n' "$(_now)" "$_n" "$_sha" "${_red_at:-0}" "$_minutes" >> "$_mech_record"
+  exit 0
+fi
 # the candidates of the NEXT line, one per line "<created_at> <repository>#<number>", for quire and the libraries together: the line is ordered oldest first by the
 # PR's creation date across all repositories (orchestration.md, Agents and slots: "As always inside each category, go by oldest"), not by the API's order or by repository
 _cand_fix=""; _cand_review=""
@@ -77,7 +120,12 @@ for n in $_quire_numbers; do
   if ! _read_pr quire $n; then echo "#$n ERROR reading the pull request: $(_why)"; _unread="$_unread quire#$n"; continue; fi
   _judge_pr
   case $_ready in FIX-NEEDED) _cand_fix="$_cand_fix$_created quire#$n"$'\n';; READY-FOR-REVIEW) _cand_review="$_cand_review$_created quire#$n"$'\n';; esac
-  echo "#$n [$_st] auto-merge=$_am checks=$_total pending=$_pend skipped=$_skipped fails=[$_fails] statuses-red=[$_badstatus] review=$_rv $_ready $_t ($_ref)"
+  _mechanical quire; _mechtxt=""
+  if [ "$_mech" = yes ]; then
+    _mechtxt=" MECHANICAL-FIX"
+    if [ -n "$_red_at" ]; then _red_min=$(( ($(_now)-_red_at)/60 )); _mechtxt="$_mechtxt red-for=${_red_min}m"; [ "$_red_min" -gt "$_mech_limit" ] && _mechtxt="$_mechtxt SLOW-MECHANICAL-FIX(over ${_mech_limit}m)"; fi
+  fi
+  echo "#$n [$_st] auto-merge=$_am checks=$_total pending=$_pend skipped=$_skipped fails=[$_fails] statuses-red=[$_badstatus] review=$_rv $_ready$_mechtxt $_t ($_ref)"
 done
 
 _lap "quire PRs done"
@@ -103,6 +151,8 @@ done
 # a repository or a PR whose call failed was not read: the NEXT line below is incomplete and says so (it never lists a PR it could not read as if nothing were there)
 [ -n "$_unread" ] && echo "UNREAD (the NEXT line is incomplete; look at these by hand):$_unread"
 rm -f "$_errfile"
+# rule 3 (quire#977): the mechanical fixes pushed in the last day, with the minutes from the red to the push; over 20 is reported as slow
+[ -f "$_mech_record" ] && awk -F'\t' -v now="$(_now)" -v lim="$_mech_limit" 'now-$1<86400{printf "MECHANICAL-FIX-RECORD quire#%s red-to-push=%dm%s\n",$2,$5,($5>lim?" SLOW-MECHANICAL-FIX(over "lim"m)":"")}' "$_mech_record"
 # the one NEXT line: the quire PRs and the library PRs together, a fix before a review before a new ticket (orchestration.md, Agents and slots), each category oldest first
 if [ -n "$_cand_fix" ]; then echo "NEXT FOR A FREE SLOT: a fix (an author; any author) for$(_order "$_cand_fix")"
 elif [ -n "$_cand_review" ]; then echo "NEXT FOR A FREE SLOT: a review (not by the author) of$(_order "$_cand_review")"

@@ -1,0 +1,3 @@
+brief: it has a "Mechanical fix:" line and no line "No checks: no bats check, no fixture run, no e2e" (quire#977; orchestration.md, "Briefs and the machine")
+brief: it has a "Mechanical fix:" line and does not say to push with "qsweep push --mechanical" (quire#977)
+brief:8: a mechanical fix runs no check, and this line tells the worker to run one: Run bats check and then the fixture before the push. (quire#977)

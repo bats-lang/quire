@@ -657,10 +657,15 @@ args = sys.argv[1:]
 path = args[1].split('?')[0]
 expr = args[args.index('--jq') + 1] if '--jq' in args else None
 fixture = json.load(open(os.environ['QSWEEP_FIXTURE']))
+if os.environ.get('QSWEEP_CALLS'):
+    open(os.environ['QSWEEP_CALLS'], 'a').write(args[1] + '\n')
 value = fixture.get(path, [] if path.endswith('/pulls') else {})
 if value == 'FAIL':
     sys.stderr.write('gh: HTTP 500 (fixture failure for ' + path + ')\n')
     sys.exit(1)
+if isinstance(value, str):
+    sys.stdout.write(value)   # a job log is text
+    sys.exit(0)
 text = json.dumps(value)
 if expr is None:
     print(text)
@@ -789,6 +794,218 @@ class QsweepLibraries(unittest.TestCase):
         self.assertIn('fixture failure', self.line_of(lines, 'zip ERROR reading the open pull requests'))
         self.assertIn('fixture failure', self.line_of(lines, 'gestures #10 ERROR reading the pull request'))
         self.assertEqual(self.line_of(lines, 'UNREAD'), 'UNREAD (the NEXT line is incomplete; look at these by hand): zip gestures#10')
+
+
+FAKE_GIT = r"""#!/bin/bash
+echo "$*" >> "$QSWEEP_GIT_CALLS"
+case "$1" in branch) echo "$QSWEEP_BRANCH";; push) exit 0;; esac
+"""
+
+
+class QsweepMechanical(unittest.TestCase):
+    """quire#977 (keyword: mechanical-fix): a mechanical red is classified from its failed job, its fix push is exempt from the runner hold, and the time from the red to the push is reported."""
+
+    RED_AT = '2026-01-05T10:00:00Z'
+    RED_EPOCH = 1767607200   # 2026-01-05T10:00:00Z
+    EXPECT_LOG = 'step 3\nsome output\nno line "function f" in tests/static/reject/x/expect\nthe rest\n'
+    STALE_LOG = 'step 3\nrejected, but not as its expect says\nnew expect: function g\nline 4\n'
+    OTHER_LOG = 'step 3\nTimeoutError: page.click: Timeout 30000ms exceeded\n'
+
+    @staticmethod
+    def jobs(fixture, number, failed):
+        """failed: [(id, name, conclusion)]; the aggregate check fails with them."""
+        sha = f'{number:040x}'
+        runs = [{'id': 1, 'name': 'build', 'status': 'completed', 'conclusion': 'success', 'completed_at': '2026-01-05T09:00:00Z'}]
+        runs += [{'id': i, 'name': name, 'status': 'completed', 'conclusion': conclusion, 'completed_at': QsweepMechanical.RED_AT} for i, name, conclusion in failed]
+        runs.append({'id': 9, 'name': 'check', 'status': 'completed', 'conclusion': 'failure', 'completed_at': '2026-01-05T10:01:00Z'})
+        fixture[f'repos/bats-lang/quire/commits/{sha}/check-runs'] = {'check_runs': runs}
+
+    def case(self, failed, logs=None, state='unstable', number=40):
+        fixture = {}
+        QsweepLibraries.pr(fixture, 'quire', number, state, (('build', 'completed', 'success'),))
+        self.jobs(fixture, number, failed)
+        for job_id, text in (logs or {}).items():
+            fixture[f'repos/bats-lang/quire/actions/jobs/{job_id}/logs'] = text
+        return fixture
+
+    def run_qsweep(self, fixture, args, minutes_after_red=0, hold=False, branch='fix-40'):
+        import json
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            os.mkdir(os.path.join(tmp, 'bin'))
+            for name, text in (('gh', FAKE_GH), ('git', FAKE_GIT)):
+                with open(os.path.join(tmp, 'bin', name), 'w', encoding='utf-8') as handle:
+                    handle.write(text)
+                os.chmod(os.path.join(tmp, 'bin', name), 0o755)
+            fixture['repos/bats-lang/quire/actions/runs'] = {'workflow_runs': [{'id': 5}] if hold else []}
+            fixture['repos/bats-lang/quire/actions/runs/5/jobs'] = {'jobs': [{'status': 'queued'}]}
+            with open(os.path.join(tmp, 'fixture.json'), 'w', encoding='utf-8') as handle:
+                json.dump(fixture, handle)
+            record = os.path.join(tmp, 'record.tsv')
+            env = dict(os.environ, PATH=os.path.join(tmp, 'bin') + os.pathsep + os.environ['PATH'], QSWEEP_FIXTURE=os.path.join(tmp, 'fixture.json'),
+                       QSWEEP_CALLS=os.path.join(tmp, 'gh-calls'), QSWEEP_GIT_CALLS=os.path.join(tmp, 'git-calls'), QSWEEP_BRANCH=branch,
+                       QSWEEP_NOW=str(self.RED_EPOCH + minutes_after_red * 60), QSWEEP_MECHANICAL_RECORD=record)
+            done = subprocess.run(['bash', os.path.join(gl.ROOT, '.claude', 'skills', 'sweep', 'qsweep')] + args, capture_output=True, text=True, env=env)
+            def read(name):
+                if not os.path.exists(os.path.join(tmp, name)):
+                    return ''
+                with open(os.path.join(tmp, name), encoding='utf-8') as handle:
+                    return handle.read()
+            return done, read('gh-calls'), read('git-calls'), read('record.tsv')
+
+    def quire_line(self, fixture, **kwargs):
+        done, calls, _, _ = self.run_qsweep(fixture, ['prs'], **kwargs)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        found = [line for line in done.stdout.split('\n') if line.startswith('#40 ')]
+        self.assertEqual(len(found), 1, done.stdout)
+        return found[0], calls
+
+    # rule 1: the classification the sweep prints
+
+    def test_a_failed_plan_job_is_mechanical_and_its_log_is_not_read(self):
+        line, calls = self.quire_line(self.case([(2, 'plan', 'failure')]))
+        self.assertIn('FIX-NEEDED MECHANICAL-FIX red-for=0m', line)
+        self.assertNotIn('/logs', calls)
+
+    def test_a_stale_expect_and_an_unlisted_fixture_are_mechanical_with_one_log_read_for_each_failed_job(self):
+        line, calls = self.quire_line(self.case([(3, 'static (reject/x)', 'failure'), (4, 'static (reject/y)', 'failure')], {3: self.EXPECT_LOG, 4: self.STALE_LOG}))
+        self.assertIn('FIX-NEEDED MECHANICAL-FIX', line)
+        self.assertEqual(sorted(c for c in calls.split() if c.endswith('/logs')), ['repos/bats-lang/quire/actions/jobs/3/logs', 'repos/bats-lang/quire/actions/jobs/4/logs'])
+
+    def test_a_red_that_is_not_the_class_is_not_mechanical(self):
+        # the injection: each of these is a red the class does not cover, and each line says FIX-NEEDED alone
+        for failed, logs, state in (
+                ([(3, 'e2e (reader)', 'failure')], {3: self.OTHER_LOG}, 'unstable'),                                   # another failure text
+                ([(2, 'plan', 'failure'), (3, 'e2e (reader)', 'failure')], {3: self.OTHER_LOG}, 'unstable'),           # plan, and a failure that is not mechanical
+                ([(3, 'static (reject/x)', 'failure'), (4, 'e2e (reader)', 'failure')], {3: self.EXPECT_LOG, 4: self.OTHER_LOG}, 'unstable'),
+                ([(2, 'plan', 'cancelled')], {}, 'unstable'),                                                          # cancelled, not failed
+                ([(2, 'plan', 'failure')], {}, 'dirty')):                                                              # a conflict is a fix of its own
+            line, _ = self.quire_line(self.case(failed, logs, state))
+            self.assertIn('FIX-NEEDED', line, failed)
+            self.assertNotIn('MECHANICAL-FIX', line, failed)
+
+    def test_a_log_is_read_to_a_bound(self):
+        # the text is past 4 MiB: the read stops before it, so the red is not classified from it
+        late = 'x' * (5 * 1024 * 1024) + '\n' + self.EXPECT_LOG
+        line, _ = self.quire_line(self.case([(3, 'static (reject/x)', 'failure')], {3: late}))
+        self.assertNotIn('MECHANICAL-FIX', line)
+        early = self.EXPECT_LOG + 'x' * (5 * 1024 * 1024)
+        line, _ = self.quire_line(self.case([(3, 'static (reject/x)', 'failure')], {3: early}))
+        self.assertIn('MECHANICAL-FIX', line)
+
+    # rule 3: the time from the red to the fix push
+
+    def test_a_mechanical_red_over_20_minutes_old_is_reported_slow(self):
+        for minutes, slow in ((19, False), (20, False), (21, True), (150, True)):
+            line, _ = self.quire_line(self.case([(2, 'plan', 'failure')]), minutes_after_red=minutes)
+            self.assertIn(f'MECHANICAL-FIX red-for={minutes}m', line)
+            self.assertEqual('SLOW-MECHANICAL-FIX(over 20m)' in line, slow, (minutes, line))
+
+    def test_the_fix_push_is_recorded_and_the_sweep_reports_a_slow_one(self):
+        done, _, git, record = self.run_qsweep(self.case([(2, 'plan', 'failure')]), ['push', '--mechanical', '-u', 'origin', 'fix-40'], minutes_after_red=25)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(record.strip().split('\t'), [str(self.RED_EPOCH + 25 * 60), '40', f'{40:040x}', str(self.RED_EPOCH), '25'])
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'record.tsv')
+            with open(path, 'w', encoding='utf-8') as handle:
+                handle.write(record + f'{self.RED_EPOCH + 3600}\t41\t{41:040x}\t{self.RED_EPOCH + 3000}\t10\n' + f'{self.RED_EPOCH - 3 * 86400}\t30\t{30:040x}\t{self.RED_EPOCH - 3 * 86400}\t90\n')
+            import json
+            import subprocess
+            fixture = {}
+            with open(os.path.join(tmp, 'fixture.json'), 'w', encoding='utf-8') as handle:
+                json.dump(fixture, handle)
+            os.mkdir(os.path.join(tmp, 'bin'))
+            with open(os.path.join(tmp, 'bin', 'gh'), 'w', encoding='utf-8') as handle:
+                handle.write(FAKE_GH)
+            os.chmod(os.path.join(tmp, 'bin', 'gh'), 0o755)
+            env = dict(os.environ, PATH=os.path.join(tmp, 'bin') + os.pathsep + os.environ['PATH'], QSWEEP_FIXTURE=os.path.join(tmp, 'fixture.json'),
+                       QSWEEP_NOW=str(self.RED_EPOCH + 7200), QSWEEP_MECHANICAL_RECORD=path)
+            out = subprocess.run(['bash', os.path.join(gl.ROOT, '.claude', 'skills', 'sweep', 'qsweep'), 'prs'], capture_output=True, text=True, env=env, check=True).stdout.split('\n')
+        self.assertIn('MECHANICAL-FIX-RECORD quire#40 red-to-push=25m SLOW-MECHANICAL-FIX(over 20m)', out)
+        self.assertIn('MECHANICAL-FIX-RECORD quire#41 red-to-push=10m', out)
+        self.assertFalse([line for line in out if 'quire#30 ' in line], 'a record older than a day is not reported')
+
+    # rule 2: the hold does not apply to a mechanical fix, and only to one
+
+    def test_a_push_goes_out_under_the_hold_only_with_mechanical_and_only_for_a_mechanical_red(self):
+        mechanical = self.case([(2, 'plan', 'failure')])
+        done, _, git, record = self.run_qsweep(mechanical, ['push', 'origin', 'fix-40'], hold=True)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn('RUNNER PRESSURE', done.stdout)
+        self.assertNotIn('push', git)
+        self.assertEqual(record, '')
+        done, _, git, record = self.run_qsweep(mechanical, ['push', '--mechanical', 'origin', 'fix-40'], hold=True)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn('push origin fix-40', git)
+        self.assertNotIn('--mechanical', git)
+        self.assertEqual(len(record.strip().split('\n')), 1)
+        # the injection: a red that is not mechanical is refused with the flag, under the hold or not, and pushes and records nothing
+        other = self.case([(3, 'e2e (reader)', 'failure')], {3: self.OTHER_LOG})
+        for hold in (True, False):
+            done, _, git, record = self.run_qsweep(other, ['push', '--mechanical', 'origin', 'fix-40'], hold=hold)
+            self.assertEqual(done.returncode, 1, hold)
+            self.assertIn('mechanical push refused', done.stdout)
+            self.assertNotIn('push', git)
+            self.assertEqual(record, '')
+
+    def test_a_mechanical_push_with_no_open_pr_for_the_branch_is_refused(self):
+        done, _, git, _ = self.run_qsweep({}, ['push', '--mechanical', 'origin', 'fix-40'], hold=True)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn('no open quire PR', done.stdout)
+        self.assertNotIn('push', git)
+
+    def test_the_push_line_without_the_flag_keeps_the_hold(self):
+        text = read_root('.claude', 'skills', 'sweep', 'qsweep')
+        self.assertEqual(len(re.findall(r'^if \[ "\$1" = push \]; then shift; r=\$\(_pressure\)', text, re.M)), 1)
+
+
+TICKET = '## Done when\n\nThe tests pass.\n'
+
+
+class MechanicalBrief(unittest.TestCase):
+    """quire#977 (keyword: mechanical-fix): the mechanical brief template of orchestration.md passes the lint, and a mechanical brief that tells the worker to run a check is refused."""
+    DIR = os.path.join(HERE, 'guidelines', 'reject', 'mechanical-brief-runs-checks')
+
+    def template(self):
+        text = read_root('.claude', 'orchestration.md')
+        section = text[text.index('**A mechanical red gets the mechanical brief**'):text.index('## Pushing and merging')]
+        return [part for line in section.split('\n') if line.startswith('  * `') for part in re.findall(r'`([^`]+)`', line)]
+
+    def brief(self, extra=()):
+        lines = self.template()
+        self.assertEqual([line.split(':')[0] for line in lines], ['Mechanical fix', 'No checks', 'Push', 'Design check', 'Expects', 'Sample'])
+        return 'Follow the worker.md rules; finish inside the turn; do not merge; do not write the review.\n\n' + '\n'.join(lines + list(extra)) + '\n\nThe tests pass.\n'
+
+    def test_the_template_in_orchestration_md_is_a_brief_the_lint_accepts(self):
+        self.assertEqual(gl.lint_brief(self.brief(), TICKET, PHRASES), [])
+
+    def test_a_line_that_tells_the_worker_to_run_a_check_is_refused(self):
+        for line in ('Run bats check before the push.', 'Then run the fixture again.', 'Start the e2e spec for the group.', 'Run python3 scripts/ci-groups.py local HEAD.', 'Execute bats fixtures on it.'):
+            found = gl.lint_brief(self.brief([line]), TICKET, PHRASES)
+            self.assertEqual(len(found), 1, (line, found))
+            self.assertIn('a mechanical fix runs no check', found[0])
+        for line in ('Do not run bats check.', 'Never run the e2e specs.'):
+            self.assertEqual(gl.lint_brief(self.brief([line]), TICKET, PHRASES), [], line)
+
+    def test_a_brief_that_is_not_mechanical_may_run_checks(self):
+        self.assertEqual(gl.lint_mechanical('Run bats check before the push.\n', 'brief'), [])
+
+    def test_the_fixture_is_refused_exactly_as_its_expect_says(self):
+        brief, ticket, expect = [open(os.path.join(self.DIR, name)).read() for name in ('brief.txt', 'ticket.txt', 'expect')]
+        self.assertEqual('\n'.join(gl.lint_brief(brief, ticket, PHRASES)) + '\n', expect)
+
+    def test_a_mutation_of_the_checker_that_drops_a_check_fails_the_fixture(self):
+        brief, ticket, expect = [open(os.path.join(self.DIR, name)).read() for name in ('brief.txt', 'ticket.txt', 'expect')]
+        for name in ('MECHANICAL_NO_CHECKS', 'MECHANICAL_PUSH', 'RUNS_A_CHECK'):
+            original = getattr(gl, name)
+            setattr(gl, name, re.compile(r'(?!x)x|^' if name == 'RUNS_A_CHECK' else r'^|'))
+            try:
+                found = '\n'.join(gl.lint_brief(brief, ticket, PHRASES)) + '\n'
+            finally:
+                setattr(gl, name, original)
+            self.assertNotEqual(found, expect, name)
 
 
 class PersistentCheckout(unittest.TestCase):

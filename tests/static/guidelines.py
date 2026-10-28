@@ -235,6 +235,29 @@ def lint_worker_lines(text, name):
             for line_form, line_name, reason in WORKER_LINES if not line_form.search(text)]
 
 
+# A mechanical brief (quire#977, keyword: mechanical-fix): the fix is the edit the failure text names, pushed with qsweep push --mechanical, and the worker runs no check.
+MECHANICAL_BRIEF = re.compile(r'^\s*Mechanical fix:', re.MULTILINE)
+MECHANICAL_NO_CHECKS = re.compile(r'^\s*No checks:.*\bbats check\b.*\bfixture\b.*\be2e\b', re.MULTILINE)
+MECHANICAL_PUSH = re.compile(r'qsweep push --mechanical')
+RUNS_A_CHECK = re.compile(r'(?i)\b(?:run|rerun|re-run|execute|start)\b[^.\n]*(?:\bbats (?:check|fixtures|test|build)\b|\be2e\b|\bplaywright\b|ci-groups\.py local|\bfixture)')
+NEGATION = re.compile(r"(?i)\b(?:no|not|never|without|don't|none)\b")
+
+
+def lint_mechanical(text, name):
+    """A brief with a `Mechanical fix:` line says to push with qsweep push --mechanical, has the `No checks:` line, and tells the worker to run no check (a line that says to run one, unless it denies it, is refused)."""
+    if not MECHANICAL_BRIEF.search(text):
+        return []
+    findings = []
+    if not MECHANICAL_NO_CHECKS.search(text):
+        findings.append(f'{name}: it has a "Mechanical fix:" line and no line "No checks: no bats check, no fixture run, no e2e" (quire#977; orchestration.md, "Briefs and the machine")')
+    if not MECHANICAL_PUSH.search(text):
+        findings.append(f'{name}: it has a "Mechanical fix:" line and does not say to push with "qsweep push --mechanical" (quire#977)')
+    for number, line in enumerate(text.split('\n'), 1):
+        if RUNS_A_CHECK.search(line) and not NEGATION.search(line):
+            findings.append(f'{name}:{number}: a mechanical fix runs no check, and this line tells the worker to run one: {line.strip()[:80]} (quire#977)')
+    return findings
+
+
 def lint_review(text, phrases, gate_form=False):
     findings = lint_text(text, 'review', phrases) + lint_overlap(text, 'review', OVERLAP_REVIEW, 'Overlap check: ...')
     lines = [line for line in text.split('\n') if line.strip()]
@@ -260,6 +283,7 @@ def done_when(ticket):
 
 def lint_brief(brief, ticket, phrases):
     findings = lint_text(brief, 'brief', phrases) + lint_overlap(brief, 'brief', OVERLAP_BRIEF, 'Overlap: ...') + lint_worker_lines(brief, 'brief')
+    findings += lint_mechanical(brief, 'brief')
     lines = done_when(ticket)
     if lines is None:
         findings.append('ticket: it has no "Done when" section: add it before the brief (the Done-when is what the work is measured by)')
