@@ -365,15 +365,15 @@ in
 end
 
 (* Whether the words of a file replace what is stored or are merged into it (keyword: vocabulary) *)
-#pub datatype restore_mode = RestoreReplace | RestoreMerge
+#pub datatype words_restore_mode = WordsReplace | WordsMerge
 
 (* Each word of words edited into the store (keyword: vocabulary) *)
-fun _apply {count:nat} .<count>. (words: stored_words(count), mode: restore_mode, done: Int): $P.promise(Int, $P.Chained) =
+fun _apply {count:nat} .<count>. (words: stored_words(count), mode: words_restore_mode, done: Int): $P.promise(Int, $P.Chained) =
   case+ words of
   | ~StoredWordsNone() => $P.ret<Int>(done)
   | ~StoredWordsSome(word, rest) => let
       val ~StoredWord(id_high, id_low, image) = word
-      val edit = (case+ mode of RestoreReplace() => PutWord(image, stamp_now()) | RestoreMerge() => MergeWord(image)): word_edit
+      val edit = (case+ mode of WordsReplace() => PutWord(image, stamp_now()) | WordsMerge() => MergeWord(image)): word_edit
     in
       $P.and_then<word_saved><Int>(wordstore_edit(id_high, id_low, edit), llam(_) => _apply(rest, mode, done + 1))
     end
@@ -402,21 +402,21 @@ fun _delete_missing {count,kept:nat} .<count>. (nearby: stored_words(count), wor
     in _delete_missing(rest, words) end
 
 (* The words of a file put into the store (keyword: vocabulary) *)
-#pub fn words_restore (read: words_read, mode: restore_mode): $P.promise(Int, $P.Chained)
+#pub fn words_restore (read: words_read, mode: words_restore_mode): $P.promise(Int, $P.Chained)
 
 implement words_restore (read, mode) =
   case+ read of
   | ~WordsUnreadable() => $P.ret<Int>(~1)
   | ~WordsRead(words, _) =>
     (case+ mode of
-     | RestoreMerge() => _apply(words, RestoreMerge(), 0)
-     | RestoreReplace() =>
+     | WordsMerge() => _apply(words, WordsMerge(), 0)
+     | WordsReplace() =>
       $P.and_then<words_read><Int>(wordstore_read(), llam(kept) =>
         case+ kept of
         | ~WordsUnreadable() => let val () = stored_words_free(words) in $P.ret<Int>(~1) end
         | ~WordsRead(nearby, _) => let
             val () = _delete_missing(nearby, words)
-          in _apply(words, RestoreReplace(), 0) end))
+          in _apply(words, WordsReplace(), 0) end))
 
 
 (* Sync: the words of two devices, merged (keyword: vocabulary) *)

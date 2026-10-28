@@ -3048,7 +3048,7 @@ fn _words_take (): void =
       val () = _held_free(_held_swap(_written, Held(owner, file, n, names_at, books, devices)))
     in
       (* ignored: how many words were put; one that was not stays as it was, and is merged by the next sync (keyword: vocabulary) *)
-      $P.finish<Int>(words_restore(parsed, RestoreMerge()), llam(_) => _done())
+      $P.finish<Int>(words_restore(parsed, WordsMerge()), llam(_) => _done())
     end
 
 (* The file's books' annotations from the k-th on, each merged with

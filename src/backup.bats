@@ -1544,7 +1544,7 @@ in
       (if jr_is(buf, n, value_start, 91) then let
          val read = words_parse(buf, n, value_start)
          val stop = jr_skip(buf, n, value_start)
-         val mode = (case+ !_mode of PutBack() => RestoreReplace() | FromFile() => RestoreMerge())
+         val mode = (case+ !_mode of PutBack() => WordsReplace() | FromFile() => WordsMerge())
          (* ignored: the words are put into the store as the restore goes on; one that is not stays as it was (keyword: vocabulary) *)
          val () = $P.finish<Int>(words_restore(read, mode), llam(_) => ())
        in _top_members(buf, n, stop, key, numbers, map, quire, books, sort) end
