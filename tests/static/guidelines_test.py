@@ -832,9 +832,9 @@ class QsweepMechanical(unittest.TestCase):
         runs.append({'id': 9, 'name': 'check', 'status': 'completed', 'conclusion': 'failure', 'completed_at': '2026-01-05T10:01:00Z'})
         fixture[f'repos/bats-lang/quire/commits/{sha}/check-runs'] = {'check_runs': runs}
 
-    def case(self, failed, logs=None, state='unstable', number=40):
+    def case(self, failed, logs=None, state='unstable', number=40, review=None, statuses=()):
         fixture = {}
-        QsweepLibraries.pr(fixture, 'quire', number, state, (('build', 'completed', 'success'),))
+        QsweepLibraries.pr(fixture, 'quire', number, state, (('build', 'completed', 'success'),), review, statuses)
         self.jobs(fixture, number, failed)
         for job_id, text in (logs or {}).items():
             fixture[f'repos/bats-lang/quire/actions/jobs/{job_id}/logs'] = text
@@ -887,13 +887,16 @@ class QsweepMechanical(unittest.TestCase):
 
     def test_a_red_that_is_not_the_class_is_not_mechanical(self):
         # the injection: each of these is a red the class does not cover, and each line says FIX-NEEDED alone
-        for failed, logs, state in (
-                ([(3, 'e2e (reader)', 'failure')], {3: self.OTHER_LOG}, 'unstable'),                                   # another failure text
-                ([(2, 'plan', 'failure'), (3, 'e2e (reader)', 'failure')], {3: self.OTHER_LOG}, 'unstable'),           # plan, and a failure that is not mechanical
-                ([(3, 'static (reject/x)', 'failure'), (4, 'e2e (reader)', 'failure')], {3: self.EXPECT_LOG, 4: self.OTHER_LOG}, 'unstable'),
-                ([(2, 'plan', 'cancelled')], {}, 'unstable'),                                                          # cancelled, not failed
-                ([(2, 'plan', 'failure')], {}, 'dirty')):                                                              # a conflict is a fix of its own
-            line, _ = self.quire_line(self.case(failed, logs, state))
+        changes_needed = 'Independent review (a separate reviewer agent, not the author) of head SHA: changes needed\n\nDone.'
+        for failed, logs, state, extra in (
+                ([(3, 'e2e (reader)', 'failure')], {3: self.OTHER_LOG}, 'unstable', {}),                                   # another failure text
+                ([(2, 'plan', 'failure'), (3, 'e2e (reader)', 'failure')], {3: self.OTHER_LOG}, 'unstable', {}),           # plan, and a failure that is not mechanical
+                ([(3, 'static (reject/x)', 'failure'), (4, 'e2e (reader)', 'failure')], {3: self.EXPECT_LOG, 4: self.OTHER_LOG}, 'unstable', {}),
+                ([(2, 'plan', 'cancelled')], {}, 'unstable', {}),                                                          # cancelled, not failed
+                ([(2, 'plan', 'failure')], {}, 'dirty', {}),                                                                # a conflict is a fix of its own
+                ([(2, 'plan', 'failure')], {}, 'unstable', {'statuses': ('text-lint',)}),                               # a red status is a fix of its own
+                ([(2, 'plan', 'failure')], {}, 'unstable', {'review': changes_needed})):                               # a review that wants changes is not a typo
+            line, _ = self.quire_line(self.case(failed, logs, state, **extra))
             self.assertIn('FIX-NEEDED', line, failed)
             self.assertNotIn('MECHANICAL-FIX', line, failed)
 
