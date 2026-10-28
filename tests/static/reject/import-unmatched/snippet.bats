@@ -3,4 +3,5 @@
 fn _static_outcome_text (outcome: import_outcome): string =
   case+ outcome of
   | ~Added(_) => "Added to your library."
+  | ~Held(_) => "Already in your library."
   | ~Failed() => "This book could not be imported."
