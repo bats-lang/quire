@@ -83,7 +83,7 @@ import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, placeChanged, bookPage, control, showChrome, dialog, selectionButton, marks, oneColumn,
   openReadingSettings, readingSettings,
-  rawMouse, runUntil,
+  rawMouse, bareReader,
 } from './helpers.js';
 import { cutOff, insetsShort, labelInName, coveredByBanner } from './controls-shown.js';
 import { selectionBooks } from './selection-books.js';
@@ -285,10 +285,8 @@ async function open(page, name, opts = {}) {
   await page.keyboard.press('Escape');
   await expect(readingSettings(page)).toBeHidden();
   if (opts.oneColumn) await oneColumn(page);
-  // the bars are up as the book opens, and the app hides them 5 s after
-  // they were shown (quire.bats): the page's clock runs until they are
-  // gone, and a bars timer that never fires makes this time out (#657)
-  await runUntil(page, async () => !(await barsUp(page)));
+  // reader acts: the bars and the hint stay until taken away
+  await bareReader(page);
   await settled(page);
 }
 
@@ -542,7 +540,7 @@ test('a selection across the gap between two columns is whole, and is one highli
   await readingSettings(page).getByRole('group', { name: 'Pages on screen' }).getByRole('button', { name: 'Two', exact: true }).click();
   await page.keyboard.press('Escape');
   await expect(readingSettings(page)).toBeHidden();
-  await expect(control(page, 'Previous page')).toBeHidden({ timeout: 20000 });
+  await bareReader(page);
   await settled(page);
   const words = await pageWords(page);
   const width = page.viewportSize().width;
@@ -690,7 +688,7 @@ for (const how of ['extend', 'shorten']) {
     await highlightWithNote(page, testInfo, anchor, end, 'My thought');
     const old = wordsFrom(words, anchor, end);
     expect(squash((await marks(page)).text)).toBe(old);
-    await expect(control(page, 'Previous page')).toBeHidden({ timeout: 20000 });
+    await bareReader(page);
 
     // tapping the highlight shows the toolbar with the highlight selected
     await tapAt(page, testInfo, middle);

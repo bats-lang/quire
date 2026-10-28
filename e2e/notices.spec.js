@@ -4,7 +4,7 @@
 
 import { test, expect, onAndroid } from './fixtures.js';
 import {
-  expectBannerSaysWhatToDo, start, readBook, importFiles, epubFile, card, place, chapterTitle, showChrome, control, dialog,
+  expectBannerSaysWhatToDo, start, readBook, importFiles, epubFile, card, place, chapterTitle, expectChapter, showChrome, control, dialog,
   librarySearch, selectText, selectionButton, bookPage, chapters, libraryShown, clockNow, expectMoment,
 } from './helpers.js';
 
@@ -63,13 +63,13 @@ test('a chapter that cannot be read leaves the reader on its page, with the bann
   await expect(alert(page)).toContainText(unreadable);
   await expectBannerSaysWhatToDo(page, testInfo);
   await expect(bookPage(page)).toContainText('Para 1.0 short');
-  await expect(chapterTitle(page)).toHaveText('Chapter 1');
+  await expectChapter(page, 'Chapter 1');
   // the chapter after it still opens
   await alert(page).getByRole('button', { name: 'Dismiss' }).click();
   await showChrome(page);
   await control(page, 'Contents').click();
   await contents.getByRole('tabpanel', { name: 'Contents' }).getByRole('button', { name: 'Chapter 3' }).click();
-  await expect(chapterTitle(page)).toHaveText('Chapter 3');
+  await expectChapter(page, 'Chapter 3');
   await expect(alert(page)).toBeHidden();
   expect(errors).toEqual([]);
 });
