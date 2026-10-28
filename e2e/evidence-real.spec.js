@@ -306,7 +306,12 @@ test('heartbeat: the runner and the watchdog stopped together, for longer than t
     parent = Number((await run.until(/the watchdog (\d+) \(child and heartbeat\)/))[1]);
     for (const pid of pids()) kill(pid, 'SIGSTOP');
     await new Promise((resolve) => setTimeout(resolve, 7000));
-    for (const pid of pids()) kill(pid, 'SIGCONT');
+    // the runner returns first, as in the observed stall (its timer ran before the watchdog's): the monitor's tick finds the beat written before the stop
+    // (a process the old rule ended with the run is gone: the expectations below then say so, not a kill)
+    const resume = (pid) => { try { kill(pid, 'SIGCONT'); } catch (gone) { /* it ended with the run */ } };
+    resume(run.child.pid);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    for (const pid of pids()) resume(pid);
     // long enough for several monitor ticks after the return
     await new Promise((resolve) => setTimeout(resolve, 9000));
     expect(run.output(), 'a stop of the whole machine is not a quiet watchdog').not.toMatch(/EVIDENCE MISSING/);
