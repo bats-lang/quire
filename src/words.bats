@@ -846,39 +846,36 @@ fn _card_swap (next: card): card = let
   val () = ref_exch_elt<card>(_card, previous)
 in previous end
 
-(* The word that has been due the longest, of the words that are due (keyword: vocabulary) *)
+(* The word that has been due the longest, of the words that are due, with the minute it is due at (keyword: vocabulary) *)
 datavtype best =
   | NoBest of ()
-  | Best of stored_word
-
-(* The minute a word is due at; a mastered word is never due, so it is the far future (keyword: vocabulary) *)
-fn _due_of (word: !stored_word): Int =
-  case+ word_state_of(_numbers_of(word)) of
-  | ~Mastered() => 2147483647
-  | ~Learning(_, due) => due
+  | Best of (Int, stored_word)
 
 fun _earliest {count:nat} .<count>. (words: stored_words(count), now: Int, held: best): best =
   case+ words of
   | ~StoredWordsNone() => held
   | ~StoredWordsSome(word, rest) => let
       val numbers = _numbers_of(word)
-      val due = _due_of(word)
     in
-      if numbers.deleted > 0 then let val () = stored_word_free(word) in _earliest(rest, now, held) end
-      else if due > now then let val () = stored_word_free(word) in _earliest(rest, now, held) end
-      else let
-        val () = !_due_count := !_due_count + 1
-      in
-        case+ held of
-        | ~NoBest() => _earliest(rest, now, Best(word))
-        | ~Best(earlier) =>
-          if due < _due_of(earlier) then let
-            val () = stored_word_free(earlier)
-          in _earliest(rest, now, Best(word)) end
-          else let
-            val () = stored_word_free(word)
-          in _earliest(rest, now, Best(earlier)) end
-      end
+    if numbers.deleted > 0 then let val () = stored_word_free(word) in _earliest(rest, now, held) end
+    else
+      (case+ word_state_of(numbers) of
+       | ~Mastered() => let val () = stored_word_free(word) in _earliest(rest, now, held) end
+       | ~Learning(_, due) =>
+         if due > now then let val () = stored_word_free(word) in _earliest(rest, now, held) end
+         else let
+           val () = !_due_count := !_due_count + 1
+         in
+           case+ held of
+           | ~NoBest() => _earliest(rest, now, Best(due, word))
+           | ~Best(earlier_due, earlier) =>
+             if due < earlier_due then let
+               val () = stored_word_free(earlier)
+             in _earliest(rest, now, Best(due, word)) end
+             else let
+               val () = stored_word_free(word)
+             in _earliest(rest, now, Best(earlier_due, earlier)) end
+         end)
     end
 
 (* The sentence of the review, with the word marked, in its element (keyword: vocabulary) *)
@@ -967,7 +964,7 @@ fn _review_next (): void =
       in
         case+ chosen of
         | ~NoBest() => _review_empty()
-        | ~Best(word) => let
+        | ~Best(_, word) => let
             val ~StoredWord(id_high, id_low, image) = word
             val () = _review_draw(id_high, id_low, image, !_due_count)
           in word_image_free(image) end
