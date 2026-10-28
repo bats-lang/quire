@@ -63,13 +63,20 @@ def lock_lines(tree):
     return lines
 
 
-def make_package_repository(directory, lines, digest_of=lambda digest: digest):
-    """A package repository with one sidecar for each lock line, one commit; returns the commit."""
+FIXTURES = ROOT / 'tests' / 'static' / 'pre_push'
+
+
+def make_package_repository(directory):
+    """A package repository of one commit, laid out as the real one is at the pin: the paths and
+    sidecars in tests/static/pre_push/repository.tsv are copied from `git ls-tree` and `git show` of
+    bats-lang/repository-prototype at the commit of .github/repository-version (not made by the
+    check's own function). Returns the commit."""
     directory.mkdir()
     git('init', '-q', cwd=directory)
-    for package, version, digest in lines:
-        name = pre_push.sidecar_name(package, version)
-        (directory / name).write_text(f'{digest_of(digest)}  {name[:-7]}\n')
+    for row in (FIXTURES / 'repository.tsv').read_text().splitlines():
+        path, digest, name = row.split('\t')
+        (directory / path).parent.mkdir(parents=True, exist_ok=True)
+        (directory / path).write_text(f'{digest}  {name}\n')
     git('add', '.', cwd=directory)
     git('commit', '-q', '-m', 'packages', cwd=directory)
     return git('rev-parse', 'HEAD', cwd=directory)
@@ -91,6 +98,10 @@ class Fixtures(unittest.TestCase):
         self.tree = self.temp / 'tree'
         self.tree.mkdir()
         export_head(self.tree)
+        # the locks of the fixture repository (copies of this tree's, at the time the layout was copied)
+        shutil.copy2(FIXTURES / 'root.lock', self.tree / 'bats.lock')
+        for name, path in (('cfi', 'tests/cfi'), ('codec', 'tests/codec'), ('css-size', 'tests/css-size')):
+            shutil.copy2(FIXTURES / f'{name}.lock', self.tree / path / 'bats.lock')
 
 
 class GroupsCheck(Fixtures):
@@ -133,7 +144,7 @@ class LocksCheck(Fixtures):
         self.lines = lock_lines(self.tree)
         self.assertGreater(len(self.lines), 10)
         self.repository = self.temp / 'packages'
-        self.pin = make_package_repository(self.repository, self.lines)
+        self.pin = make_package_repository(self.repository)
 
     def test_the_repository_locks_resolve_at_the_pin(self):
         pre_push.check_locks(str(self.tree), str(self.repository), self.pin)
@@ -159,8 +170,8 @@ class LocksCheck(Fixtures):
     def test_a_clone_newer_than_the_pin_is_not_what_is_read(self):
         # the machine's clone has moved on: its files hold a package the pin lacks
         newer = ('zip', '2099.1.1.1', '2' * 64)
-        name = pre_push.sidecar_name(newer[0], newer[1])
-        (self.repository / name).write_text(f'{newer[2]}  x\n')
+        (self.repository / 'zip').mkdir(exist_ok=True)
+        (self.repository / 'zip/zip_2099.1.1.1.bats.sha256').write_text(f'{newer[2]}  x\n')
         git('add', '.', cwd=self.repository)
         git('commit', '-q', '-m', 'newer', cwd=self.repository)
         lock = self.tree / 'bats.lock'
@@ -172,6 +183,15 @@ class LocksCheck(Fixtures):
         with self.assertRaises(pre_push.Failure) as failure:
             pre_push.check_locks(str(self.tree), str(self.repository), PIN)
         self.assertIn('fetch origin', failure.exception.fix)
+
+    def test_the_locks_of_this_tree_resolve_in_the_real_repository_at_the_pin(self):
+        # where a clone of the package repository with the pin exists (the machine's, not CI's)
+        pin = pre_push.read_pin(str(ROOT), 'repository-version')
+        for clone in (os.environ.get('BATS_REPOSITORY'), '/home/user/repository-prototype', '/root/repository'):
+            if clone and subprocess.run(['git', '-C', clone, 'cat-file', '-e', f'{pin}^{{commit}}'], capture_output=True).returncode == 0:
+                pre_push.check_locks(str(ROOT), clone, pin)
+                return
+        self.skipTest('no clone of the package repository with the pin on this machine')
 
     def test_no_repository_fails(self):
         with self.assertRaises(pre_push.Failure) as failure:
@@ -222,7 +242,7 @@ class MemoryCheck(unittest.TestCase):
             pre_push.check_memory({})
         self.assertEqual(failure.exception.number, 4)
         self.assertIn('unset', failure.exception.what)
-        self.assertIn('export BATS_PATSOPT_MEM_MB=', failure.exception.fix)
+        self.assertIn('BATS_PATSOPT_MEM_MB=4096 to ~/quire.env', failure.exception.fix)
 
     def test_another_value_fails(self):
         with self.assertRaises(pre_push.Failure):
@@ -239,9 +259,8 @@ class Hook(Fixtures):
 
     def setUp(self):
         super().setUp()
-        lines = lock_lines(self.tree)
         self.packages = self.temp / 'packages'
-        pin = make_package_repository(self.packages, lines)
+        pin = make_package_repository(self.packages)
         self.compiler_commit = 'c' * 40
         (self.tree / '.github/repository-version').write_text(pin + '\n')
         (self.tree / '.github/bats-version').write_text(self.compiler_commit + '\n')
@@ -300,6 +319,27 @@ class Hook(Fixtures):
         done = self.push(BATS_PATSOPT_MEM_MB=None)
         self.refused(done, '3 (compiler)')
         self.assertNotIn('check 4', done.stderr)
+
+    def test_qsweep_push_passes_the_env_file(self):
+        # qsweep push, with a gh that sees no runner pressure, sources the env file: the push is made
+        # with PATH, BATS_REPOSITORY and BATS_PATSOPT_MEM_MB from it and none from the caller's shell
+        stand_in = self.temp / 'stand-in'
+        stand_in.mkdir()
+        (stand_in / 'gh').write_text('#!/bin/sh\nexit 0\n')
+        (stand_in / 'gh').chmod(0o755)
+        env_file = self.temp / 'quire.env'
+        env_file.write_text(f'PATH={self.bin}:$PATH\nBATS_REPOSITORY={self.packages}\nBATS_PATSOPT_MEM_MB=4096\n')
+        bare = {key: value for key, value in self.environment.items()
+                if key not in ('BATS_REPOSITORY', 'BATS_PATSOPT_MEM_MB')}
+        bare['PATH'] = f'{stand_in}:{os.environ["PATH"]}'
+        bare['QUIRE_ENV'] = str(env_file)
+        refused = subprocess.run(['git', 'push', str(self.remote), 'work'], cwd=self.tree, env=bare, capture_output=True, text=True)
+        self.refused(refused, '2 (locks)')
+        done = subprocess.run(['bash', str(ROOT / '.claude/skills/sweep/qsweep'), 'push', str(self.remote), 'work'],
+                              cwd=self.tree, env=bare, capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn('pre-push: groups, locks, compiler and memory ok', done.stderr + done.stdout)
+        self.assertTrue(self.remote_has_branch())
 
     def test_a_deletion_runs_no_check(self):
         # a branch deleted from the remote has no commit to check

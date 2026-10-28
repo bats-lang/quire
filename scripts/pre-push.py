@@ -18,9 +18,17 @@ each ref that is not a deletion, in this order, and stopping at the first failur
 A failure prints `pre-push: check <n> (<name>) failed: <what>` and `fix: <the fix>`, and
 exits 1. `git push --no-verify` skips the hook; the sweep reports a transcript that has it.
 
-Why not bats: this runs before a compiler is known to be right (check 3 is that), and the
-checks read git objects of two repositories and a clone of the package repository at a
-commit, which no bats program does today; check 1 is the python CI itself runs.
+Why not bats, for each check (quire#982; the move of all four is quire#988, a stopgap):
+ 1. groups    scripts/ci-groups.py is the python CI itself runs; porting it is not this hook's job.
+              The hook only exports the pushed tree and calls it.
+ 2. locks     bats can spawn git (the process package, as tools/pin-audit does), but no bats
+              subcommand checks a lock's sha256 against a repository without building the app:
+              `bats lock --dry-run --repository <pin checkout>` and `bats tree` both accept a lock
+              whose sha256 is wrong (measured: exit 0, "no changes"), and `bats check`, which does
+              fetch and compare, takes minutes. A bats program for it would be a new program.
+ 3. compiler  it is about the compiler, so no program that the compiler builds can vet it first.
+ 4. memory    a variable of the pushing shell; the one reason for non-bats is that the hook has
+              to be a program that runs before any worker has built a bats program in a new checkout.
 """
 import hashlib
 import os
@@ -85,8 +93,12 @@ def lock_paths(tree):
     return sorted(found)
 
 
-def sidecar_name(package, version):
-    return f'{package.replace("/", "_")}_{version}.bats.sha256'
+def sidecar_path(package, version):
+    """Where the package repository keeps a version's sha256: in the package's directory, named
+    by the package with its slashes as underscores (arith/arith_<v>.bats.sha256,
+    wasm.bats-packages.dev/dom/wasm.bats-packages.dev_dom_<v>.bats.sha256)."""
+    flat = package.replace('/', '_')
+    return f'{package}/{flat}_{version}.bats.sha256'
 
 
 def check_locks(tree, repository, pin):
@@ -94,11 +106,11 @@ def check_locks(tree, repository, pin):
     package repository at `pin`, read from the commit and not from the clone's files."""
     if not repository:
         raise Failure(2, 'locks', 'BATS_REPOSITORY is not set, so the package repository at the pin cannot be read',
-                      f'clone bats-lang/repository-prototype and set BATS_REPOSITORY to it (CI is at {pin})')
+                      f'clone bats-lang/repository-prototype and set BATS_REPOSITORY to it in the env file (~/quire.env, which qsweep push reads, or `bats with-env ~/quire.env git push`); CI is at {pin}')
     have = subprocess.run(['git', '-C', repository, 'cat-file', '-e', f'{pin}^{{commit}}'], capture_output=True)
     if have.returncode != 0:
         raise Failure(2, 'locks', f'{repository} does not have the commit {pin} of .github/repository-version',
-                      f'git -C {repository} fetch origin {pin}')
+                      f'git -C {repository} fetch origin {pin} (BATS_REPOSITORY comes from ~/quire.env: qsweep push reads it, or use `bats with-env ~/quire.env git push`)')
     wrong = []
     for path in lock_paths(tree):
         shown = os.path.relpath(path, tree)
@@ -111,7 +123,7 @@ def check_locks(tree, repository, pin):
                     wrong.append(f'{shown}:{number}: not "<package> <version> <sha256>": {line.strip()}')
                     continue
                 package, version, digest = fields
-                sidecar = subprocess.run(['git', '-C', repository, 'show', f'{pin}:{sidecar_name(package, version)}'],
+                sidecar = subprocess.run(['git', '-C', repository, 'show', f'{pin}:{sidecar_path(package, version)}'],
                                          capture_output=True, text=True)
                 if sidecar.returncode != 0:
                     wrong.append(f'{shown}:{number}: {package} {version} is not in the package repository at {pin[:12]}')
@@ -137,7 +149,7 @@ def check_compiler(pin, path_value):
     found = shutil.which('bats', path=path_value)
     recipe = ('in a checkout of bats at the pin: make -C bootstrap/c release/bats, then write '
               '`printf "%s %s\\n" "$(git rev-parse HEAD)" "$(sha256sum release/bats | cut -d" " -f1)" > release/bats.pin` '
-              'beside the binary, and put that directory first on PATH')
+              'beside the binary, and put that directory first on PATH (once for each compiler a worker already has)')
     if not found:
         raise Failure(3, 'compiler', 'there is no bats on PATH', recipe)
     found = os.path.realpath(found)
@@ -162,7 +174,7 @@ def check_memory(environment):
     if value != CI_PATSOPT_MEM_MB:
         shown = 'unset' if value is None else repr(value)
         raise Failure(4, 'memory', f'BATS_PATSOPT_MEM_MB is {shown}, CI runs with {CI_PATSOPT_MEM_MB}',
-                      f'export BATS_PATSOPT_MEM_MB={CI_PATSOPT_MEM_MB} in the shell that pushes (a patsopt that needs more fails there, as in CI)')
+                      f'add BATS_PATSOPT_MEM_MB={CI_PATSOPT_MEM_MB} to ~/quire.env (qsweep push reads it, or push with `bats with-env ~/quire.env git push`); a patsopt that needs more fails there, as in CI')
 
 
 def run(commits, environment, path_value):
