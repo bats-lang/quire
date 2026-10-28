@@ -111,8 +111,10 @@ paths:
 
 No timer hides the reader's bars or the first-book hint (keyword: reader acts). Hiding either
 takes a `reader_act` (`src/reader_act.bats`: `ActMiddleTap`, `ActPageTurn`, `ActJump`, `ActEscape`,
-`ActHintTap`, `ActFirstOpen`), so a timer, which has none to pass, cannot call `_chrome_hide`
-(`tests/static/reject/chrome-hidden-without-act`; the accept fixture passes an act).
+`ActHintTap`, `ActFirstOpen`), so a call that names no act is refused
+(`tests/static/reject/chrome-hidden-without-act`; the accept fixture passes an act). The act
+constructors are public: a timer that builds one type-checks, and only the e2e specs "the reader's
+bars stay up 30 s" and "the hint waits for the first turn" catch it (their injections are in #888).
 
 * **Bars.** They come up on a tap in the middle (or the `t` key), a scrubber touch, or a book
   opening, and go on a tap in the middle, a page turn (`_next`, `_previous`), Escape, a jump from

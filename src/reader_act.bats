@@ -1,4 +1,4 @@
-(* reader acts: what takes the bars or the first-book hint away; a timer has no act to pass *)
+(* reader acts: what takes the bars or the first-book hint away; a hiding call names the act that did it *)
 
 #target wasm begin
 
