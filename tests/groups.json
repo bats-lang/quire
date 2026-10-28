@@ -79,7 +79,8 @@
       "reading-ruler.spec.js",
       "search.spec.js",
       "titles-redraw.spec.js",
-      "vertical.spec.js"
+      "vertical.spec.js",
+      "vocabulary.spec.js"
     ],
     "relaunch": [
       "drm.spec.js",
@@ -116,6 +117,7 @@
       "check",
       "checkers",
       "accept/back-offer",
+      "accept/chrome-hidden-with-act",
       "accept/codec-cut-is-a-loss",
       "accept/crc-shift-8",
       "accept/fixed-box-fits",
@@ -282,6 +284,7 @@
       "accept/page-width-whole",
       "reject/back-other-timeout",
       "reject/cfi-side-unmatched",
+      "reject/chrome-hidden-without-act",
       "reject/codec-absent-then-same-tag",
       "reject/codec-cut-lost-another-cause",
       "reject/codec-drops-unknown-chunk",
@@ -440,7 +443,8 @@
     "mutation-bytes-records": [
       "mutation/bytes-part2of2",
       "mutation/bookrec",
-      "mutation/indexrec"
+      "mutation/indexrec",
+      "mutation/wordrec"
     ],
     "mutation-schema-1": [
       "mutation/schema-part1of2"

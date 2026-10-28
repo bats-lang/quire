@@ -6,7 +6,7 @@
 
 import { test, expect } from './fixtures.js';
 import {
-  start, readBook, importFiles, epubFile, openBook, card, chapterTitle, visibleText, showChrome, control, dialog, bookPage,
+  start, readBook, importFiles, epubFile, openBook, card, chapterTitle, expectChapter, visibleText, showChrome, control, dialog, bookPage,
   expectBarFollows,
 } from './helpers.js';
 import { epub2Books } from './epub2-books.js';
@@ -25,11 +25,11 @@ test('an EPUB 2 package opens: its title, author, chapters and contents', async 
   await importFiles(page, [epubFile(opts)], 1);
   await expect(card(page, 'Plain EPUB 2')).toContainText('Ann Author');
   await openBook(page, 'Plain EPUB 2');
-  await expect(chapterTitle(page)).toHaveText('First part');
+  await expectChapter(page, 'First part');
   await expect.poll(() => visibleText(page)).toContain('Part 1 text');
   expect(await rows(page)).toEqual(['First part', 'Second part', 'Deep in two', 'Third part']);
   await contents(page).getByRole('tabpanel', { name: 'Contents' }).getByRole('button', { name: 'Third part' }).click();
-  await expect(chapterTitle(page)).toHaveText('Third part');
+  await expectChapter(page, 'Third part');
   await expect(page.getByRole('alert')).toBeHidden();
   expect(errors).toEqual([]);
 });
@@ -66,7 +66,7 @@ test('a navPoint with no content, and one with an empty label, leave the rest of
   await list.getByRole('button', { name: 'Goes nowhere' }).click();
   await expect(contents(page)).toBeVisible();
   await list.getByRole('button', { name: 'Third part' }).click();
-  await expect(chapterTitle(page)).toHaveText('Third part');
+  await expectChapter(page, 'Third part');
   await page.keyboard.press('Escape');
   expect(errors).toEqual([]);
 });
