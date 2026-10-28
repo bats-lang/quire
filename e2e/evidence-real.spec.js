@@ -297,7 +297,7 @@ test('heartbeat: a watchdog that is alive and stops beating fails the job at tha
 test('heartbeat: the runner and the watchdog stopped together, for longer than the limit, are not a watchdog gone quiet (quire#908)', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();
-  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000', QUIRE_FLIGHT_BEAT_STALE_MS: '3000' });
+  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '20000', QUIRE_NESTED_TIMEOUT: '60000', QUIRE_FLIGHT_BEAT_STALE_MS: '3000' });
   let watchdog = null;
   let parent = null;
   const pids = () => [...new Set([run.child.pid, parent, watchdog].filter(Boolean))];
@@ -312,11 +312,12 @@ test('heartbeat: the runner and the watchdog stopped together, for longer than t
     resume(run.child.pid);
     await new Promise((resolve) => setTimeout(resolve, 600));
     for (const pid of pids()) resume(pid);
-    // long enough for several monitor ticks after the return
-    await new Promise((resolve) => setTimeout(resolve, 9000));
+    // the run goes on to its own end, which prints the monitor's stopped line: the stall is counted in it
+    const { code } = await run.done(60000);
     expect(run.output(), 'a stop of the whole machine is not a quiet watchdog').not.toMatch(/EVIDENCE MISSING/);
-    expect(run.output()).toMatch(/\[monitor\] started/);
-    expect(run.child.exitCode, 'the run goes on').toBeNull();
+    expect(code, run.output()).toBe(0);
+    expect(run.output(), 'the stopped line counts the monitor\'s own late tick').toMatch(/\[monitor\] stopped: .*; the monitor itself was late [1-9]\d* time\(s\) \(host stall\)/);
+    console.error(`nested run after the stop: ${/\[monitor\] stopped: .*/.exec(run.output())[0]}`);
   } finally { for (const pid of pids()) { try { kill(pid, 'SIGCONT'); kill(pid, 'SIGKILL'); } catch (gone) { /* it ended with the run */ } } run.child.kill('SIGKILL'); }
 });
 
