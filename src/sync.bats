@@ -141,7 +141,7 @@ val _last_status = ref<Int>(0)
    server; the file too large, or not one Quire can read; no memory for
    it; under way; or no folder's address. Android: no token (one is
    asked for when the reader acts), no Google account on the device, no
-   client ID in this build, Google refused (the build's clients not
+   client ID in this build, Google refused (GoogleNotRegistered: the build's clients not
    registered for this app), the reader said no. Dropbox: its sign-in no
    longer good (the reader took the app's access away), no app key in
    this build, a sign-in Dropbox or the page refused (a state that is
@@ -151,15 +151,21 @@ val _last_status = ref<Int>(0)
    (GoogleSignInFailed), the device's Google account must be signed in
    to again (SIGN_IN_REQUIRED, INVALID_ACCOUNT), Google not reached
    (NETWORK_ERROR, TIMEOUT), another consent screen open, an answer not
-   recognised (GoogleUnexpected, said in the banner with its details) *)
+   recognised (GoogleUnexpected, said in the banner with its details).
+   Google, in a browser (google_token_get_answer, keyword: google-token-answer):
+   Google answered with no token (GoogleNoToken), its script did not load
+   (GoogleScriptNotLoaded), the request threw (GoogleRequestThrew), its answer
+   could not be read (GoogleAnswerUnread), each said with the text bridge kept *)
 datatype sync_result =
   | NotSyncedYet | Synced | Unreachable | WrongCredentials | FolderNotFound | KeptChanging | ServerError
+  | BackupUnavailable | BackupRejected | BackupThrown | BackupUnexpected
   | TooLarge | Damaged | NoMemory | Blocked | Syncing | NoAddress
-  | SignInAgain | NoGoogleAccount | NotSetUp | GoogleRefused | SignInCanceled
+  | SignInAgain | NoGoogleAccount | NotSetUp | GoogleNotRegistered | SignInCanceled
   | DropboxSignInAgain | DropboxNotSetUp | DropboxSignInRefused | DropboxSignInCanceled
   | FastmailRefused
   | GoogleSignInFailed | GoogleAccountNeeded | GoogleUnreachable | GoogleConsentShowing | GoogleUnexpected
   | GoogleNoAnswer | GoogleAsking
+  | GoogleNoToken | GoogleScriptNotLoaded | GoogleRequestThrew | GoogleAnswerUnread
   | BackupReadUnavailable | BackupReadRejected | BackupReadThrown | BackupReadUnexpected
 
 (* A result as "sync-state" stores it, and back: decoded once, as it is
@@ -176,13 +182,17 @@ fn _result_code (result: sync_result): [code:nat | code <= 41] int code =
   | TooLarge() => 7
   | Damaged() => 8
   | NoMemory() => 9
+  | BackupUnavailable() => 34
+  | BackupRejected() => 35
+  | BackupThrown() => 36
+  | BackupUnexpected() => 37
   | Blocked() => 10
   | Syncing() => 11
   | NoAddress() => 12
   | SignInAgain() => 13
   | NoGoogleAccount() => 14
   | NotSetUp() => 15
-  | GoogleRefused() => 16
+  | GoogleNotRegistered() => 16
   | SignInCanceled() => 17
   | DropboxSignInAgain() => 18
   | DropboxNotSetUp() => 19
@@ -200,6 +210,10 @@ fn _result_code (result: sync_result): [code:nat | code <= 41] int code =
   | BackupReadRejected() => 39
   | BackupReadThrown() => 40
   | BackupReadUnexpected() => 41
+  | GoogleNoToken() => 30
+  | GoogleScriptNotLoaded() => 31
+  | GoogleRequestThrew() => 32
+  | GoogleAnswerUnread() => 33
 
 fn _result_of_code (code: int): sync_result =
   if code = 1 then Synced()
@@ -211,13 +225,17 @@ fn _result_of_code (code: int): sync_result =
   else if code = 7 then TooLarge()
   else if code = 8 then Damaged()
   else if code = 9 then NoMemory()
+  else if code = 34 then BackupUnavailable()
+  else if code = 35 then BackupRejected()
+  else if code = 36 then BackupThrown()
+  else if code = 37 then BackupUnexpected()
   else if code = 10 then Blocked()
   else if code = 11 then Syncing()
   else if code = 12 then NoAddress()
   else if code = 13 then SignInAgain()
   else if code = 14 then NoGoogleAccount()
   else if code = 15 then NotSetUp()
-  else if code = 16 then GoogleRefused()
+  else if code = 16 then GoogleNotRegistered()
   else if code = 17 then SignInCanceled()
   else if code = 18 then DropboxSignInAgain()
   else if code = 19 then DropboxNotSetUp()
@@ -235,6 +253,10 @@ fn _result_of_code (code: int): sync_result =
   else if code = 39 then BackupReadRejected()
   else if code = 40 then BackupReadThrown()
   else if code = 41 then BackupReadUnexpected()
+  else if code = 30 then GoogleNoToken()
+  else if code = 31 then GoogleScriptNotLoaded()
+  else if code = 32 then GoogleRequestThrew()
+  else if code = 33 then GoogleAnswerUnread()
   else NotSyncedYet()
 
 (* How the last sync ended *)
@@ -608,6 +630,10 @@ fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte
   | TooLarge() => _put_literal(out, position, "The sync file is over 16 MB.")
   | Damaged() => _put_literal(out, position, "The sync file isn't one Quire can read.")
   | NoMemory() => _put_literal(out, position, "There isn't enough memory to sync.")
+  | BackupUnavailable() => _put_literal(out, position, "This build of Quire can't keep the backup file Android restores after a reinstall.")
+  | BackupRejected() => _put_literal(out, position, "Android refused to write the backup file Quire keeps for a reinstall. Free some space on the device, then try again.")
+  | BackupThrown() => _put_literal(out, position, "Writing the backup file Quire keeps for a reinstall failed. Try again.")
+  | BackupUnexpected() => _put_literal(out, position, "The backup file Quire keeps for a reinstall gave an answer Quire does not know.")
   | NoAddress() => _put_literal(out, position, "Enter the folder's address, starting with https://.")
   | BackupReadUnavailable() => _put_literal(out, position, "This build of Quire can't read the backup file Android restores after a reinstall.")
   | BackupReadRejected() => _put_literal(out, position, "Android refused to read the backup file Quire keeps for a reinstall. Try again.")
@@ -618,9 +644,13 @@ fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte
   | NotSetUp() =>
     if $BAPP.is_native_platform() then _put_literal(out, position, "Android sync isn't set up in this build of Quire.")
     else _put_literal(out, position, "Google Drive sync isn't set up in this build of Quire.")
-  | GoogleRefused() => _put_literal(out, position, "Google refused: this build of Quire isn't registered with it. Copy the details and post them in a report.")
+  | GoogleNotRegistered() => _put_literal(out, position, "Google refused: this build of Quire isn't registered with it. Copy the details and post them in a report.")
   | SignInCanceled() => _put_literal(out, position, "Google sign-in was canceled.")
   | GoogleSignInFailed() => _put_literal(out, position, "Google sign-in failed. Try again; if it fails again, copy the details and post them in a report.")
+  | GoogleNoToken() => _put_literal(out, position, "Google did not give a token. Try again; if it fails again, copy the details and post them in a report.")
+  | GoogleScriptNotLoaded() => _put_literal(out, position, "Google's sign-in page did not load. Check the connection, then try again; if it fails again, copy the details and post them in a report.")
+  | GoogleRequestThrew() => _put_literal(out, position, "The request to Google failed. Try again; if it fails again, copy the details and post them in a report.")
+  | GoogleAnswerUnread() => _put_literal(out, position, "Google's answer could not be read. Try again; if it fails again, copy the details and post them in a report.")
   | GoogleAccountNeeded() => _put_literal(out, position, "Google asks you to sign in to the Google account on this device again: open Android's Settings, then Google, then try again.")
   | GoogleUnreachable() => _put_literal(out, position, "Can't reach Google. Check the connection, then try again.")
   | GoogleConsentShowing() => _put_literal(out, position, "Google's consent screen is already open: finish it, then try again.")
@@ -674,11 +704,19 @@ in _put_literal(out, after, ".)") end
    not turn it on *)
 fn _said_when_off (result: sync_result): bool =
   case+ result of
+  | BackupUnavailable() => true
+  | BackupRejected() => true
+  | BackupThrown() => true
+  | BackupUnexpected() => true
   | NoGoogleAccount() => true
   | NotSetUp() => true
-  | GoogleRefused() => true
+  | GoogleNotRegistered() => true
   | SignInCanceled() => true
   | GoogleSignInFailed() => true
+  | GoogleNoToken() => true
+  | GoogleScriptNotLoaded() => true
+  | GoogleRequestThrew() => true
+  | GoogleAnswerUnread() => true
   | GoogleAccountNeeded() => true
   | GoogleUnreachable() => true
   | GoogleConsentShowing() => true
@@ -701,10 +739,18 @@ fn _said_when_off (result: sync_result): bool =
 
 fn _google_refusal (result: sync_result): bool =
   case+ result of
+  | BackupUnavailable() => false
+  | BackupRejected() => false
+  | BackupThrown() => false
+  | BackupUnexpected() => false
   | NoGoogleAccount() => true
   | NotSetUp() => true
-  | GoogleRefused() => true
+  | GoogleNotRegistered() => true
   | GoogleSignInFailed() => true
+  | GoogleNoToken() => true
+  | GoogleScriptNotLoaded() => true
+  | GoogleRequestThrew() => true
+  | GoogleAnswerUnread() => true
   | GoogleAccountNeeded() => true
   | GoogleUnreachable() => true
   | GoogleConsentShowing() => true
@@ -721,6 +767,10 @@ fn _google_refusal (result: sync_result): bool =
 
 fn _told_in_banner (result: sync_result): bool =
   case+ result of
+  | BackupUnavailable() => true
+  | BackupRejected() => true
+  | BackupThrown() => true
+  | BackupUnexpected() => false
   | Synced() => false
   | NotSyncedYet() => false
   | Syncing() => false
@@ -734,18 +784,21 @@ fn _told_in_banner (result: sync_result): bool =
   | Unreachable() => true | WrongCredentials() => true | FolderNotFound() => true | KeptChanging() => true
   | ServerError() => true | TooLarge() => true | Damaged() => true | NoMemory() => true | Blocked() => true
   | NoAddress() => true | SignInAgain() => true | NoGoogleAccount() => true | NotSetUp() => true
-  | GoogleRefused() => true | DropboxSignInAgain() => true | DropboxNotSetUp() => true
+  | GoogleNotRegistered() => true | DropboxSignInAgain() => true | DropboxNotSetUp() => true
   | DropboxSignInRefused() => true | FastmailRefused() => true | GoogleSignInFailed() => true
+  | GoogleNoToken() => true | GoogleScriptNotLoaded() => true | GoogleRequestThrew() => true | GoogleAnswerUnread() => true
   | GoogleAccountNeeded() => true | GoogleUnreachable() => true | GoogleConsentShowing() => true
 
 datavtype refusal_kept =
   | NoRefusalKept
   | {call_len:pos | call_len < 64} RefusalKept of ($GA.google_status, string call_len, answer_shown)
+  | {code_len:pos | code_len < 64} TokenFailureKept of (string code_len, answer_shown)
 
 fn _refusal_free (kept: refusal_kept): void =
   case+ kept of
   | ~NoRefusalKept() => ()
   | ~RefusalKept(_, _, answer) => answer_shown_free(answer)
+  | ~TokenFailureKept(_, answer) => answer_shown_free(answer)
 
 val _refusal = ref<refusal_kept>(NoRefusalKept())
 
@@ -776,6 +829,11 @@ fn _detail_put {l:agz}{position:nat | position + 80 <= 512} (out: !$A.arr(byte, 
   | ~RefusalKept(status, call, answer) => let
       val stop = _status_detail(out, position, status)
       val () = _refusal_free(_refusal_swap(RefusalKept(status, call, answer)))
+    in stop end
+  | ~TokenFailureKept(code, answer) => let
+      val after = _put_literal(out, position, "Details: ")
+      val stop = _put_literal(out, after, code)
+      val () = _refusal_free(_refusal_swap(TokenFailureKept(code, answer)))
     in stop end
 
 fn _with_detail {l:agz}{stop:nat | stop <= 512} (out: !$A.arr(byte, l, 512), stop: int stop, result: sync_result)
@@ -815,12 +873,20 @@ in
     | BackupReadRejected() => _tried(out, result)
     | BackupReadThrown() => _tried(out, result)
     | BackupReadUnexpected() => _tried(out, result)
+    | BackupUnavailable() => _tried(out, result)
+    | BackupRejected() => _tried(out, result)
+    | BackupThrown() => _tried(out, result)
+    | BackupUnexpected() => _tried(out, result)
     | SignInAgain() => _tried(out, result)
     | NoGoogleAccount() => _tried(out, result)
     | NotSetUp() => _tried(out, result)
-    | GoogleRefused() => _tried(out, result)
+    | GoogleNotRegistered() => _tried(out, result)
     | SignInCanceled() => _tried(out, result)
     | GoogleSignInFailed() => _tried(out, result)
+    | GoogleNoToken() => _tried(out, result)
+    | GoogleScriptNotLoaded() => _tried(out, result)
+    | GoogleRequestThrew() => _tried(out, result)
+    | GoogleAnswerUnread() => _tried(out, result)
     | GoogleAccountNeeded() => _tried(out, result)
     | GoogleUnreachable() => _tried(out, result)
     | GoogleConsentShowing() => _tried(out, result)
@@ -847,14 +913,22 @@ fn _result_short {l:agz}{position:nat | position + 64 <= 512} (out: !$A.arr(byte
   | TooLarge() => _put_literal(out, position, "The sync file is over 16 MB")
   | Damaged() => _put_literal(out, position, "The sync file can't be read")
   | NoMemory() => _put_literal(out, position, "Not enough memory")
+  | BackupUnavailable() => _put_literal(out, position, "No backup file here")
+  | BackupRejected() => _put_literal(out, position, "Backup file refused")
+  | BackupThrown() => _put_literal(out, position, "Backup file failed")
+  | BackupUnexpected() => _put_literal(out, position, "Backup file: unknown answer")
   | NoAddress() => _put_literal(out, position, "No folder address")
   | BackupReadUnavailable() => _put_literal(out, position, "No backup file here")
   | BackupReadRejected() => _put_literal(out, position, "Backup file refused")
   | BackupReadThrown() => _put_literal(out, position, "Backup file failed")
   | BackupReadUnexpected() => _put_literal(out, position, "Backup file: unknown answer")
   | SignInAgain() => _put_literal(out, position, "paused, tap Sync now")
-  | GoogleRefused() => _put_literal(out, position, "Google sign-in failed")
+  | GoogleNotRegistered() => _put_literal(out, position, "Google sign-in failed")
   | GoogleSignInFailed() => _put_literal(out, position, "Google sign-in failed")
+  | GoogleNoToken() => _put_literal(out, position, "No token from Google")
+  | GoogleScriptNotLoaded() => _put_literal(out, position, "Google's sign-in page did not load")
+  | GoogleRequestThrew() => _put_literal(out, position, "Google sign-in failed")
+  | GoogleAnswerUnread() => _put_literal(out, position, "Google's answer can't be read")
   | GoogleAccountNeeded() => _put_literal(out, position, "Sign in to Google on this device")
   | GoogleUnreachable() => _put_literal(out, position, "Can't reach Google")
   | GoogleConsentShowing() => _put_literal(out, position, "Google's consent screen is open")
@@ -922,6 +996,10 @@ in
     | TooLarge() => _result_short(out, 0, result, !_last_status)
     | Damaged() => _result_short(out, 0, result, !_last_status)
     | NoMemory() => _result_short(out, 0, result, !_last_status)
+    | BackupUnavailable() => _result_short(out, 0, result, !_last_status)
+    | BackupRejected() => _result_short(out, 0, result, !_last_status)
+    | BackupThrown() => _result_short(out, 0, result, !_last_status)
+    | BackupUnexpected() => _result_short(out, 0, result, !_last_status)
     | NoAddress() => _result_short(out, 0, result, !_last_status)
     | BackupReadUnavailable() => _result_short(out, 0, result, !_last_status)
     | BackupReadRejected() => _result_short(out, 0, result, !_last_status)
@@ -931,9 +1009,13 @@ in
     | SignInAgain() => _result_short(out, after, result, !_last_status)
     | NoGoogleAccount() => _result_short(out, 0, result, !_last_status)
     | NotSetUp() => _result_short(out, 0, result, !_last_status)
-    | GoogleRefused() => _result_short(out, 0, result, !_last_status)
+    | GoogleNotRegistered() => _result_short(out, 0, result, !_last_status)
     | SignInCanceled() => _result_short(out, 0, result, !_last_status)
     | GoogleSignInFailed() => _result_short(out, 0, result, !_last_status)
+    | GoogleNoToken() => _result_short(out, 0, result, !_last_status)
+    | GoogleScriptNotLoaded() => _result_short(out, 0, result, !_last_status)
+    | GoogleRequestThrew() => _result_short(out, 0, result, !_last_status)
+    | GoogleAnswerUnread() => _result_short(out, 0, result, !_last_status)
     | GoogleAccountNeeded() => _result_short(out, 0, result, !_last_status)
     | GoogleUnreachable() => _result_short(out, 0, result, !_last_status)
     | GoogleConsentShowing() => _result_short(out, 0, result, !_last_status)
@@ -1081,9 +1163,13 @@ fn _row_show (service: sync_service): void =
       | BackupReadRejected() => ui_text(_row_state_id(service), "Not syncing")
       | BackupReadThrown() => ui_text(_row_state_id(service), "Not syncing")
       | BackupReadUnexpected() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupUnavailable() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupRejected() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupThrown() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupUnexpected() => ui_text(_row_state_id(service), "Not syncing")
       | NoGoogleAccount() => ui_text(_row_state_id(service), "Not syncing")
       | NotSetUp() => ui_text(_row_state_id(service), "Not syncing")
-      | GoogleRefused() => ui_text(_row_state_id(service), "Not syncing")
+      | GoogleNotRegistered() => ui_text(_row_state_id(service), "Not syncing")
       | SignInCanceled() => ui_text(_row_state_id(service), "Not syncing")
       | DropboxSignInAgain() => ui_text(_row_state_id(service), "Not syncing")
       | DropboxNotSetUp() => ui_text(_row_state_id(service), "Not syncing")
@@ -1091,6 +1177,10 @@ fn _row_show (service: sync_service): void =
       | DropboxSignInCanceled() => ui_text(_row_state_id(service), "Not syncing")
       | FastmailRefused() => ui_text(_row_state_id(service), "Not syncing")
       | GoogleSignInFailed() => ui_text(_row_state_id(service), "Not syncing")
+      | GoogleNoToken() => ui_text(_row_state_id(service), "Not syncing")
+      | GoogleScriptNotLoaded() => ui_text(_row_state_id(service), "Not syncing")
+      | GoogleRequestThrew() => ui_text(_row_state_id(service), "Not syncing")
+      | GoogleAnswerUnread() => ui_text(_row_state_id(service), "Not syncing")
       | GoogleAccountNeeded() => ui_text(_row_state_id(service), "Not syncing")
       | GoogleUnreachable() => ui_text(_row_state_id(service), "Not syncing")
       | GoogleConsentShowing() => ui_text(_row_state_id(service), "Not syncing")
@@ -1163,6 +1253,9 @@ in
     | ~RefusalKept(status, call, answer) => let
         val () = notice_failure(out, stop, "signing in to Google", call, $GA.google_status_name(status), answer)
       in _refusal_free(_refusal_swap(RefusalKept(status, call, NoAnswer()))) end
+    | ~TokenFailureKept(code, answer) => let
+        val () = notice_failure(out, stop, "signing in to Google", "google_token_get_answer", code, answer)
+      in _refusal_free(_refusal_swap(TokenFailureKept(code, NoAnswer()))) end
 end
 
 val _reader_waits = ref<bool>(false)
@@ -1766,7 +1859,7 @@ fn _refusal_result (status: $GA.google_status): sync_result =
   | $GA.StatusTimeout() => GoogleUnreachable()
   | $GA.StatusSignInRequired() => GoogleAccountNeeded()
   | $GA.StatusInvalidAccount() => GoogleAccountNeeded()
-  | $GA.StatusDeveloperError() => GoogleRefused()
+  | $GA.StatusDeveloperError() => GoogleNotRegistered()
   | $GA.StatusServiceVersionUpdateRequired() => GoogleSignInFailed()
   | $GA.StatusServiceDisabled() => GoogleSignInFailed()
   | $GA.StatusResolutionRequired() => GoogleSignInFailed()
@@ -1829,7 +1922,7 @@ fn _answer_unregistered (answer: !answer_shown): bool =
 fn _authorize_refused {call_len:pos | call_len < 64}
   (call: string call_len, status: $GA.google_status, said: $GA.google_said): sync_result = let
   val answer = _said_shown(said)
-  val result = (if _answer_unregistered(answer) then GoogleRefused() else _refusal_result(status)): sync_result
+  val result = (if _answer_unregistered(answer) then GoogleNotRegistered() else _refusal_result(status)): sync_result
   val () = _refusal_free(_refusal_swap(RefusalKept(status, call, answer)))
 in result end
 
@@ -2047,7 +2140,7 @@ fn _silent_access (answer: $GA.google_authorization($GA.Silently)): token_access
       val () = (case+ account of ~$R.some(named) => $GA.google_text_free(named) | ~$R.none() => ())
     in
       if _text_token_keep(token) then AccessHeld()
-      else AccessFailed(GoogleRefused())
+      else AccessFailed(GoogleNotRegistered())
     end
   | ~$GA.NotAuthorized(said) => let
       val () = $GA.google_said_free(said)
@@ -2164,7 +2257,7 @@ fn _drive_failure (status: Int): sync_result =
   else if status = ~1 then TooLarge()
   else if status = ~2 then NoMemory()
   else if status = ~3 then Damaged()
-  else if status = 403 then GoogleRefused()
+  else if status = 403 then GoogleNotRegistered()
   else ServerError()
 
 (* The file read from the account's Drive with the token held *)
@@ -2277,17 +2370,32 @@ in
     | ~$BACKUP.BackupReadFound(blob) => _backup_blob_taken(blob))
 end
 
+(* The text bridge kept of a refused or thrown backup write is not shown: the banner names the outcome (keyword: backup-write-answer) *)
+fn _backup_text_free (text: $R.option([n:nat] $BD.dblob(n))): void =
+  case+ text of
+  | ~$R.some(blob) => $BD.blob_free(blob)
+  | ~$R.none() => ()
+
 (* body[0, body_size) as the backed-up file *)
 fn _backup_write {body_loc:agz}{body_size:pos}
   (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) = let
   val @(name_frozen, name_bytes) = $A.freeze<byte>(_backup_name())
-  val pending = $BACKUP.backup_file_write(name_bytes, 15, body, body_size)
+  val pending = $BACKUP.backup_file_write_answer(name_bytes, 15, body, body_size)
   val () = release_bytes(name_frozen, name_bytes)
 in
-  $P.and_then<$BACKUP.backup_written><write_answer>(pending, llam(written) =>
+  $P.and_then<$BACKUP.backup_write_answer><write_answer>(pending, llam(written) =>
     case+ written of
-    | $BACKUP.BackupWritten() => $P.ret<write_answer>(Written())
-    | $BACKUP.BackupNotWritten() => $P.ret<write_answer>(WriteFailed(NoMemory(), 0)))
+    | ~$BACKUP.BackupWriteDone() => $P.ret<write_answer>(Written())
+    | ~$BACKUP.BackupWriteNotHere() => $P.ret<write_answer>(WriteFailed(BackupUnavailable(), 0))
+    | ~$BACKUP.BackupWriteRejected(text) => let
+        val () = _backup_text_free(text)
+      in $P.ret<write_answer>(WriteFailed(BackupRejected(), 0)) end
+    | ~$BACKUP.BackupWriteThrown(text) => let
+        val () = _backup_text_free(text)
+      in $P.ret<write_answer>(WriteFailed(BackupThrown(), 0)) end
+    | ~$BACKUP.BackupWriteUnexpected(code) => let
+        val () = notice_unexpected("keeping the backup file", "backup_file_write_answer", CaseNumbered("BackupWriteUnexpected", code), NoAnswer())
+      in $P.ret<write_answer>(WriteFailed(BackupUnexpected(), 0)) end)
 end
 
 (* The Dropbox store: an access token, kept, or got anew with the
@@ -3454,13 +3562,15 @@ fn _paused (): bool =
   else case+ !_last_result of
     | SignInAgain() => true
     | BackupReadUnavailable() => false | BackupReadRejected() => false | BackupReadThrown() => false | BackupReadUnexpected() => false
+    | BackupUnavailable() => false | BackupRejected() => false | BackupThrown() => false | BackupUnexpected() => false
     | NotSyncedYet() => false | Synced() => false | Unreachable() => false | WrongCredentials() => false
     | FolderNotFound() => false | KeptChanging() => false | ServerError() => false | TooLarge() => false
     | Damaged() => false | NoMemory() => false | Blocked() => false | Syncing() => false | NoAddress() => false
-    | NoGoogleAccount() => false | NotSetUp() => false | GoogleRefused() => false | SignInCanceled() => false
+    | NoGoogleAccount() => false | NotSetUp() => false | GoogleNotRegistered() => false | SignInCanceled() => false
     | DropboxSignInAgain() => false | DropboxNotSetUp() => false | DropboxSignInRefused() => false
     | DropboxSignInCanceled() => false | FastmailRefused() => false
-    | GoogleSignInFailed() => false | GoogleAccountNeeded() => false | GoogleUnreachable() => false
+    | GoogleSignInFailed() => false | GoogleAccountNeeded() => false | GoogleUnreachable() => false | GoogleNoToken() => false
+    | GoogleScriptNotLoaded() => false | GoogleRequestThrew() => false | GoogleAnswerUnread() => false
     | GoogleConsentShowing() => false | GoogleUnexpected() => false
     | GoogleNoAnswer() => false | GoogleAsking() => false
 
@@ -3887,7 +3997,7 @@ fn _consent_answer (answer: $GA.google_authorization($GA.MayAsk)): $P.promise(as
       val kept = _text_token_keep(token)
       val @(address, address_len) = _text_address_of(account)
     in
-      if ~kept then let val () = $A.free<byte>(address) in $P.ret<asked>(AskFailed(GoogleRefused())) end
+      if ~kept then let val () = $A.free<byte>(address) in $P.ret<asked>(AskFailed(GoogleNotRegistered())) end
       else if address_len > 0 then $P.ret<asked>(Asked(address, address_len))
       else let val () = $A.free<byte>(address) in _drive_address() end
     end
@@ -3928,6 +4038,16 @@ fn _authorized_ask (): $P.promise(asked, $P.Chained) =
       else $P.finish<asked>(_consent_answer(answer), llam(done) => _consent_settle(number, done)))
   in $P.vow(outcome) end
 
+(* A browser's sign-in that ended with text of Google's or the script's
+   (keyword: google-token-answer): kept with the outcome's name for the banner's details *)
+fn _token_failed {code_len:pos | code_len < 64}
+  (code: string code_len, text: $R.option([n:nat] $BD.dblob(n)), result: sync_result): sync_result = let
+  val answer = (case+ text of
+    | ~$R.some(blob) => _blob_shown("as text", blob)
+    | ~$R.none() => NoAnswer()): answer_shown
+  val () = _refusal_free(_refusal_swap(TokenFailureKept(code, answer)))
+in result end
+
 (* In a browser: a token for drive.appdata from Google Identity
    Services, its window opened at the reader's tap *)
 fn _identity_ask {client_loc:agz}{client_len:pos | client_len <= 256}
@@ -3935,24 +4055,30 @@ fn _identity_ask {client_loc:agz}{client_len:pos | client_len <= 256}
   val @(scope_frozen, scope_bytes) = $A.freeze<byte>(_scope())
   val @(client_frozen, client_bytes) = $A.freeze<byte>(client)
   val @(client_used, client_rest) = $A.borrow_split<byte>(client_frozen, client_bytes, client_len)
-  val pending = $GOOGLE.google_token_get(client_used, client_len, scope_bytes, SCOPE_LEN)
+  val pending = $GOOGLE.google_token_get_answer(client_used, client_len, scope_bytes, SCOPE_LEN)
   val client_bytes = $A.borrow_join<byte>(client_frozen, client_used, client_rest)
   val () = release_bytes(client_frozen, client_bytes)
   val () = release_bytes(scope_frozen, scope_bytes)
 in
-  $P.and_then<$GOOGLE.google_token><asked>(pending, llam(answer) =>
+  $P.and_then<$GOOGLE.token_answer><asked>(pending, llam(answer) =>
     case+ answer of
-    | ~$GOOGLE.GoogleToken(token, account) => let
+    | ~$GOOGLE.TokenGiven(token, account) => let
         val kept = _token_keep(token)
         val @(address, address_len) = _address_of(account)
       in
         if kept then $P.ret<asked>(Asked(address, address_len))
-        else let val () = $A.free<byte>(address) in $P.ret<asked>(AskFailed(GoogleRefused())) end
+        else let val () = $A.free<byte>(address) in $P.ret<asked>(AskFailed(GoogleNotRegistered())) end
       end
-    | ~$GOOGLE.GoogleNoAccount() => $P.ret<asked>(AskFailed(NoGoogleAccount()))
-    | ~$GOOGLE.GoogleCanceled() => $P.ret<asked>(AskFailed(SignInCanceled()))
-    | ~$GOOGLE.GoogleRefused() => $P.ret<asked>(AskFailed(GoogleRefused()))
-    | ~$GOOGLE.GoogleUnavailable() => $P.ret<asked>(AskFailed(NotSetUp())))
+    | ~$GOOGLE.TokenCanceled() => $P.ret<asked>(AskFailed(SignInCanceled()))
+    | ~$GOOGLE.TokenRefused(text) => $P.ret<asked>(AskFailed(_token_failed("TokenRefused", text, GoogleNoToken())))
+    | ~$GOOGLE.TokenNotHere() => $P.ret<asked>(AskFailed(NotSetUp()))
+    | ~$GOOGLE.TokenLoadFailed(text) => $P.ret<asked>(AskFailed(_token_failed("TokenLoadFailed", text, GoogleScriptNotLoaded())))
+    | ~$GOOGLE.TokenThrown(text) => $P.ret<asked>(AskFailed(_token_failed("TokenThrown", text, GoogleRequestThrew())))
+    | ~$GOOGLE.TokenAnswerUnread(text) => $P.ret<asked>(AskFailed(_token_failed("TokenAnswerUnread", text, GoogleAnswerUnread())))
+    | ~$GOOGLE.TokenUnexpected(code) => let
+        val () = _refusal_forget()
+        val () = notice_unexpected("signing in to Google", "google_token_get_answer", CaseNumbered("TokenUnexpected", code), NoAnswer())
+      in $P.ret<asked>(AskFailed(GoogleUnexpected())) end)
 end
 
 (* Asks Google for a token for drive.appdata, for the reader's account:

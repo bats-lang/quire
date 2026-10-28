@@ -84,7 +84,7 @@ it (bats-lang/bats#243).
   48px square (quire#403; `targetsShort`), text fields use a 16px font (iOS does
   not zoom), and focus shows a 2px ring in the text's own colour.
 * **The sheet's size is in its type** (`sheet(r, media, open)`), so it fits the
-  64 KiB text it is put in (the budget is 64500 bytes, raised from 64000 by #412: the costs the forms
+  64 KiB text it is put in (the budget is 65000 bytes, raised from 64000 by #412 and from 64500 by #861: the costs the forms
   declare are upper bounds), and a rule is opened only outside another and
   closed only once.
 

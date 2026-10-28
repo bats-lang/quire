@@ -310,9 +310,15 @@ const IDENTITY_SERVICES = `
   window.google = { accounts: { oauth2: {
     initTokenClient: o => {
       window.__gis.clients.push({ client_id: o.client_id, scope: o.scope });
+      if (window.__gis.throws) throw new Error('initTokenClient threw');
       return { requestAccessToken: () => {
         window.__gis.requests++;
-        setTimeout(() => window.__gis.closed ? o.error_callback({ type: 'popup_closed' }) : o.callback({ access_token: window.__gis.token }), 10);
+        setTimeout(() => {
+          if (window.__gis.closed) o.error_callback({ type: 'popup_closed' });
+          else if (window.__gis.refused) o.callback({ error: 'invalid_request', error_description: 'the origin is not registered' });
+          else if (window.__gis.unreadable) o.callback({ get access_token() { throw new Error('the answer cannot be read'); } });
+          else o.callback({ access_token: window.__gis.token });
+        }, 10);
       } };
     },
     revoke: (token, done) => { window.__gis.revoked.push(token); done && done(); },

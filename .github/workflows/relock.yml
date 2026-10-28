@@ -18,19 +18,22 @@ permissions:
 jobs:
   relock:
     # main of repository-prototype at 8365e83: has 11f7260, which stages only the tracked npm and Gradle files (a repository with none failed the staging step, #872)
-    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@5bd621eac67f87b2761cf419e80e5416271e8267 # repository-prototype main 5bd621e
+    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@3b0e3a98f734c4d8bab8f86fa67eaf4c1776e5aa # repository-prototype main 3b0e3a9
     secrets: inherit
     with:
       # pwa's e2e-setup has no pwa-ref copy of its pin, so the relock moves it whole (#777).
-      # play-release.yml is not listed: it is called at its own commit, and only its pwa-ref input follows android.yml (pin-copies below).
+      # play-release.yml is listed beside android.yml and has its own pwa-ref copy (area: pwa-ref, #851).
       workflow-pins: |
         bats-lang/pwa/.github/workflows/android.yml
+        bats-lang/pwa/.github/workflows/play-release.yml
         bats-lang/pwa/.github/actions/e2e-setup
         bats-lang/repository-prototype/.github/workflows/relock-pins.yml
         bats-lang/bats/.github/actions/setup
         bats-lang/repository-prototype/.github/actions/check-aggregate
-      # check.yml repeats android.yml's commit as pwa-ref, which pwa's android.yml and
+      # check.yml repeats each pin's commit as pwa-ref, which pwa's android.yml and
       # play-release.yml read (a reusable workflow cannot read its own ref): the relock
-      # writes the new commit into every pwa-ref line of the files that call android.yml (#821)
+      # writes the new commit into every pwa-ref line of the files that call the pin (#821, #851);
+      # both pins are pwa's main, so they move to one commit and every pwa-ref equals both
       pin-copies: |
         bats-lang/pwa/.github/workflows/android.yml pwa-ref
+        bats-lang/pwa/.github/workflows/play-release.yml pwa-ref

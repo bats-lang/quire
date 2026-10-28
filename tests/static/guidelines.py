@@ -283,10 +283,27 @@ def is_review_first_line(line):
     return bool(UNGATED_FIRST.fullmatch(line)) or line == GATED_FIRST
 
 
+GH_API_WAITS = (2, 5, 10)  # gh-retry (#931): seconds before the 1st, 2nd and 3rd retry of a 5xx answer
+GH_API_RETRIES = len(GH_API_WAITS)
+
+
+def _gh_run(command):
+    import subprocess
+    return subprocess.run(command, capture_output=True, text=True)
+
+
+def _gh_sleep(seconds):
+    import time
+    time.sleep(seconds)
+
+
+GH_RUN = _gh_run  # gh-retry (#931): tests replace these two
+GH_SLEEP = _gh_sleep
+
+
 def gh_api(path, method='GET', fields=None):
     """The GitHub REST API through the runner's `gh`; JSON back, None for an empty answer."""
     import json
-    import subprocess
     command = ['gh', 'api', '-X', method, path]
     for key, value in (fields or {}).items():
         command += ['-f', f'{key}={value}']
@@ -294,10 +311,15 @@ def gh_api(path, method='GET', fields=None):
         # a reading run (on a machine whose token may not write): say what would be sent
         print(f'would send: {method} {path} {fields}')
         return None
-    done = subprocess.run(command, capture_output=True, text=True)
-    if done.returncode:
-        raise SystemExit(f'gh api {method} {path} failed: {done.stderr.strip()}')
-    return json.loads(done.stdout) if done.stdout.strip() else None
+    # gh-retry (#931): a 5xx answer is retried, GH_API_RETRIES more times, waiting GH_API_WAITS seconds before each
+    for attempt in range(GH_API_RETRIES + 1):
+        done = GH_RUN(command)
+        if not done.returncode:
+            return json.loads(done.stdout) if done.stdout.strip() else None
+        if attempt == GH_API_RETRIES or not re.search(r'HTTP 5\d\d', done.stderr):
+            break
+        GH_SLEEP(GH_API_WAITS[attempt])
+    raise SystemExit(f'gh api {method} {path} failed: {done.stderr.strip()}')
 
 
 def newest_review(comments):
