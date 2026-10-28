@@ -14,6 +14,13 @@ import {
 
 const empty = /Import an EPUB file/;
 
+/** A file handed to the app opens its book (#959): the reader shows it, and the library is back for the
+    cards the test looks at */
+async function handedBookOpened(page) {
+  await pageShown(page);
+  await toLibrary(page);
+}
+
 /** Leaves a shelf's screen by its back button: the library is shown */
 async function leaveShelf(page) {
   await shelfBack(page).click();
@@ -641,6 +648,7 @@ test('a file handed over by the host is imported', async ({ page }) => {
   const epub = epubFile({ title: 'Shared With Quire', author: 'Smoke Test', chapters: 2, storeChapters: true });
   await page.route('**/_capacitor_file_/**', r => r.fulfill({ path: epub, contentType: 'application/octet-stream' }));
   await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/data/cache/incoming/in1.bin', 'smoke-share'));
+  await handedBookOpened(page);
   await expect(card(page, 'Shared With Quire')).toContainText('Smoke Test', { timeout: 30000 });
   expect(errors).toEqual([]);
 });
@@ -674,16 +682,20 @@ test('a file the app is started with is imported once, and one handed over while
     handOver();
   });
   const errors = await start(page);
+  await handedBookOpened(page);
   await expect(card(page, 'Started With It')).toBeVisible({ timeout: 30000 });
   await page.waitForTimeout(500);
   await expect(cards(page)).toHaveCount(1);
   await expect(dialog(page, 'Already in library')).toBeHidden();
   await page.reload();
+  // the kept view is the book the file opened
+  await handedBookOpened(page);
   await expect(card(page, 'Started With It')).toBeVisible({ timeout: 30000 });
   await page.waitForTimeout(500);
   await expect(cards(page)).toHaveCount(1);
   await expect(dialog(page, 'Already in library')).toBeHidden();
   await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/opened', 'opened.epub'));
+  await handedBookOpened(page);
   await expect(card(page, 'Opened While Open')).toBeVisible({ timeout: 30000 });
   await page.waitForTimeout(500);
   await expect(cards(page)).toHaveCount(2);
@@ -705,6 +717,7 @@ test('a file handed over by the host that cannot be read is said, and the next i
   await expectBannerSaysWhatToDo(page, testInfo);
   await expect(cards(page)).toHaveCount(0);
   await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/next', 'next.epub'));
+  await handedBookOpened(page);
   await expect(card(page, 'After The Gone One')).toBeVisible({ timeout: 30000 });
   // the browser's own report of the 404 is the one message
   expect(errors).toEqual(['console: Failed to load resource: the server responded with a status of 404 (Not Found)']);
@@ -741,13 +754,15 @@ test('a file handed over before the stored library is read is imported once, bes
     (globalThis.batsExternalEarly = []).push({ url: '/_capacitor_file_/at-start', name: 'at-start.epub' });
   });
   await page.reload();
+  await handedBookOpened(page);
   await expect(card(page, 'Handed At Start')).toBeVisible({ timeout: 30000 });
   await expect(card(page, 'Already Here')).toBeVisible();
   await page.waitForTimeout(1000);
   await expect(cards(page)).toHaveCount(2);
   expect(fetched).toBe(1);
-  // and it is in the stored library: a reload shows both
+  // and it is in the stored library: a reload shows both (the book it opened is the kept view)
   await page.reload();
+  await handedBookOpened(page);
   await expect(card(page, 'Handed At Start')).toBeVisible({ timeout: 30000 });
   await expect(cards(page)).toHaveCount(2);
   expect(errors).toEqual([]);
@@ -1171,6 +1186,7 @@ test('an EPUB the system opens with the installed app is imported', async ({ pag
     const data = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     window.consume({ files: [{ getFile: () => Promise.resolve(new File([data], 'opened.epub', { type: 'application/epub+zip' })) }] });
   }, bytes);
+  await handedBookOpened(page);
   await expect(card(page, 'Opened From Files')).toBeVisible({ timeout: 30000 });
   expect(errors).toEqual([]);
 });
@@ -1189,9 +1205,11 @@ test('the storage is asked to be kept once, after the first book is imported', a
   await page.route('**/_capacitor_file_/second', r => r.fulfill({ path: second, contentType: 'application/octet-stream' }));
   expect(await page.evaluate(() => window.persistCalls)).toBe(0);
   await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/first', 'first.epub'));
+  await handedBookOpened(page);
   await expect(card(page, 'First Kept')).toBeVisible({ timeout: 30000 });
   await expect.poll(() => page.evaluate(() => window.persistCalls)).toBe(1);
   await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/second', 'second.epub'));
+  await handedBookOpened(page);
   await expect(card(page, 'Second Kept')).toBeVisible({ timeout: 30000 });
   await page.waitForTimeout(300);
   expect(await page.evaluate(() => window.persistCalls)).toBe(1);
@@ -1233,6 +1251,7 @@ test('an EPUB shared with the installed web app is imported', async ({ page }) =
   }, bytes);
   expect(redirected).toBe('opaqueredirect');
   await page.goto('/?shared=1');
+  await handedBookOpened(page);
   await expect(card(page, 'Shared To The App')).toBeVisible({ timeout: 30000 });
   expect(await page.evaluate(() => location.search)).toBe('');
   expect(errors).toEqual([]);

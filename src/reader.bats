@@ -6357,6 +6357,11 @@ in
 end
 
 (* Stores where the reader is *)
+(* Whether the page just shown is still settling after a book opened (its place
+   is not final: leaving now records the first page, keyword: handed-intent) *)
+#pub fun reader_settling (): bool
+implement reader_settling () = !_settling
+
 #pub fun reader_save (): void
 implement reader_save () = _record_position()
 

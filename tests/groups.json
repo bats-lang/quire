@@ -3,6 +3,7 @@
     "library": [
       "book-id.spec.js",
       "folders.spec.js",
+      "intent-open.spec.js",
       "keys.spec.js",
       "media.spec.js",
       "page-keys-modes.spec.js",

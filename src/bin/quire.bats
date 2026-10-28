@@ -734,13 +734,21 @@ implement $P.dispose<import_outcome>(outcome) = import_outcome_free(outcome)
 fn _opened_of (outcome: load_outcome): opened =
   if load_shown(outcome) then OpenedShown() else OpenedNotShown()
 
-fn _opened_checked (result: opened): void =
+(* How many books are being opened (their chain not ended): a handed-over
+   file's import waits for them, since both use the book cell
+   (handed-intent) *)
+val _opening_pending = ref<int>(0)
+
+fn _opened_checked (result: opened): void = let
+  val () = !_opening_pending := !_opening_pending - 1
+in
   case+ result of
   | OpenedShown() => ()
   | OpenedInLibrary() => ()
   | OpenedNotShown() => let
     val () = (if _in_reader() then _show_library() else ())
   in notice_say_part(reader_chapter_asked()) end
+end
 
 fn _open_book {book:int} (book: int book, cause: opening_cause): void =
   case+ lib_nums(book) of
@@ -780,6 +788,7 @@ fn _open_book {book:int} (book: int book, cause: opening_cause): void =
       val id_low = book_numbers.id_low
       (* the file this tab reads: another tab may replace it *)
       val () = file_version_remember(id_high, id_low)
+      val () = !_opening_pending := !_opening_pending + 1
       (* the other devices' place and annotations, brought *)
       val () = sync_book_opened(book_numbers.key)
     in
@@ -805,8 +814,22 @@ fn _open_book {book:int} (book: int book, cause: opening_cause): void =
           _opened_checked(result))
     end
 
+(* Where a file handed to the app from outside it (an intent) is: none
+   yet; its import under way (the view kept by the last run waits for it,
+   since both use the book cell); or its book opened, which the kept view
+   must not replace (keyword: handed-intent) *)
+datatype intent_phase = IntentNone | IntentImporting | IntentOpened
+
+val _intent_phase = ref<intent_phase>(IntentNone())
+
+(* Whether the kept view was left waiting for the import that was under
+   way, to be restored if that import ends without opening a book *)
+val _view_waits = ref<bool>(false)
+
 (* The view kept by the last run: its book opened again, on its page,
-   when it is still on a shelf it is read from; else the library *)
+   when it is still on a shelf it is read from; else the library. While a
+   handed-over file is imported it waits, and a book opened from it is
+   not replaced (handed-intent) *)
 fn _view_restore (): $P.promise(int, $P.Chained) = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_view_key())
   val stored = $IDB.idb_get(key_bytes, 4)
@@ -836,8 +859,12 @@ in
       | ~$R.none() => false
       | ~$R.some(book_numbers) => (case+ book_numbers.shelf of OnShelf() => true | Hidden() => true | _ => false))): bool
   in
-    if readable then let val () = _open_book(book, LastRunKept()) in $P.ret<int>(0) end
-    else let val () = _show_library() in $P.ret<int>(0) end
+    case+ !_intent_phase of
+    | IntentOpened() => $P.ret<int>(0)
+    | IntentImporting() => let val () = !_view_waits := true in $P.ret<int>(0) end
+    | IntentNone() =>
+      if readable then let val () = _open_book(book, LastRunKept()) in $P.ret<int>(0) end
+      else let val () = _show_library() in $P.ret<int>(0) end
   end)
 end
 
@@ -3205,17 +3232,83 @@ fn _library_read (): $P.promise(library_reading, $P.Chained) =
     else $P.ret<library_reading>(LibraryUnreadable()))
 end
 
+(* What the screen showed when the handed-over file arrived: whether a
+   book was open, and which (its key) *)
+val _intent_was_reading = ref<bool>(false)
+val _intent_previous = ref<int>(0)
+
+(* A book of a handed-over file opened (handed-intent): whatever was over
+   the app (a sheet, Settings, a question) is closed, and the book is
+   opened at the place the library keeps for it (its first page when it
+   is new). The book cell holds it when it was just imported; a book
+   already held is read from storage *)
+fn _intent_open (key: int): void = let
+  val () = !_intent_phase := IntentOpened()
+  val () = (if modal_open_now() then modal_dismiss() else ())
+  val () = (if _in_reader() then _show_library() else ())
+  val _ = layer_close_all()
+in _open_book(lib_index_of_key(key), ReaderChose()) end
+
+(* A handed-over file that opened no book (not a book, or declined): what
+   was on the screen is back, with the failure said. A book that was
+   open is read again from storage, since the import used the book cell
+   (open_key_set(0): the cell no longer holds it); the kept view that
+   waited for the import is restored now *)
+fn _intent_restore (was_reading: bool, previous: int): void = let
+  val () = !_intent_phase := IntentNone()
+  val () = open_key_set(0)
+  val () = (if was_reading then _open_book(lib_index_of_key(previous), LastRunKept()) else ())
+in
+  if !_view_waits then let
+    val () = !_view_waits := false
+  in $P.finish<int>(_view_restore(), llam(_) => ()) end
+  else ()
+end
+
+(* A handed-over file's import ended: a new or a held book is opened; a
+   failure or a skipped one leaves the screen as it was *)
+fn _intent_settled (outcome: import_outcome, was_reading: bool, previous: int): void =
+  case+ outcome of
+  | ~Added(key) => _intent_open(key)
+  | ~Held(key) => _intent_open(key)
+  | ~Kept() => _intent_restore(was_reading, previous)
+  | ~Failed() => _intent_restore(was_reading, previous)
+
+(* How many times a handed-over file waits (50 ms each) for the book being
+   opened: a few seconds, then it goes on whatever the opening does *)
+#define OPENING_WAITS 100
+
+(* The handed-over file's import, once no book is being opened (the kept
+   view's, at start-up): what the screen shows is remembered, the library
+   is shown where the import is seen, and the file imported *)
+fn _intent_start (handed: $BE.external): $P.promise(import_outcome, $P.Chained) = let
+  val () = !_intent_was_reading := _in_reader()
+  val () = !_intent_previous := open_key_get()
+  val () = (if _in_reader() then reader_save() else ())
+  val () = (if _in_reader() then _show_library() else ())
+  (* no page laid or timer fired meanwhile writes a place into the record of the book that was open *)
+  val () = open_key_set(0)
+in import_external(handed) end
+
+fun _intent_import {waits:nat} .<waits>. (handed: $BE.external, waits: int waits): $P.promise(import_outcome, $P.Chained) =
+  if waits > 0 then
+    (if (!_opening_pending > 0 || reader_settling()) then
+      $P.and_then<Int><import_outcome>($P.vow($TM.timer_set(50)), llam(_) => _intent_import(handed, waits - 1))
+    else _intent_start(handed))
+  else _intent_start(handed)
+
 (* Imports each file handed to the app from outside it, as it comes,
    the library read (the proof): one at a time, the next asked for when
-   the last one's import is done. The library is shown first, where the
-   import is seen *)
+   the last one's import is done. The library is shown while it
+   imports, where the progress is seen; the book is then opened
+   (handed-intent) *)
 fun _external_wait {rounds:nat} .<rounds>. (pf: LIBRARY_READ() | rounds: int rounds): void =
   if rounds <= 0 then ()
   else $P.finish<import_outcome>($P.and_then<$BE.external><import_outcome>($BE.external_next(), llam(handed) => let
-      val () = (if _in_reader() then _show_library() else ())
-    in import_external(handed) end), llam(outcome) => let
-      (* its outcome is already reported *)
-      val () = import_outcome_free(outcome)
+      val () = !_intent_phase := IntentImporting()
+    in _intent_import(handed, OPENING_WAITS) end), llam(outcome) => let
+      (* its failures are already reported *)
+      val () = _intent_settled(outcome, !_intent_was_reading, !_intent_previous)
     in _external_wait(pf | rounds - 1) end)
 
 (* The library could not be read: each file handed over is kept, not
