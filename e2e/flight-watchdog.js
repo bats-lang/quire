@@ -116,10 +116,8 @@ const run = (command, args, ms) => new Promise((resolve) => {
 });
 
 export class Watchdog {
-  constructor({ root, out, instance, proc = '/proc', sustainMs = SUSTAIN_MS, gapMs = GAP_MS, stacks = true, match = '--type=renderer\\b', holdDir = null, env = process.env, chown = chownSync, asyncRing = false }) {
-    Object.assign(this, { root, out, instance, proc, sustainMs, gapMs, stacks, holdDir: holdDir || out, owner: ownerOf(env), chown, asyncRing });
-    this.reading = null;        // the last reading of the ring (asyncRing), with the time it was made
-    this.refreshing = false;    // a reading of the ring is out and has not come back
+  constructor({ root, out, instance, proc = '/proc', sustainMs = SUSTAIN_MS, gapMs = GAP_MS, stacks = true, match = '--type=renderer\\b', holdDir = null, env = process.env, chown = chownSync }) {
+    Object.assign(this, { root, out, instance, proc, sustainMs, gapMs, stacks, holdDir: holdDir || out, owner: ownerOf(env), chown });
     this.written = false;       // a file was written since own() last walked (owner)
     this.listed = '';           // the names in the output and the holds' directory at that walk
     this.walks = 0;
@@ -198,25 +196,10 @@ export class Watchdog {
     this.lastWall = wall;
   }
 
-  /**
-   * The ring's reading. With asyncRing the heartbeat never waits for it (quire#972): a tracefs open that waits on the host's lock or a read that waits on
-   * the disk, in uninterruptible sleep, left the event loop with nothing to write and the monitor read a watchdog gone quiet. The first reading is made
-   * at the start (the preflight reads it); later ones are asked for off the loop and the last answer is carried, with `readAt`, the time it was made.
-   */
-  ringReading() {
-    if (!this.asyncRing) return tracefs.stats({ instance: this.instance });
-    if (this.reading === null) this.reading = { ...tracefs.stats({ instance: this.instance }), readAt: Date.now() };
-    if (!this.refreshing) {
-      this.refreshing = true;
-      tracefs.statsAsync({ instance: this.instance }).then((answer) => { this.reading = { ...answer, readAt: Date.now() }; }).finally(() => { this.refreshing = false; });
-    }
-    return this.reading;
-  }
-
   /** What the monitor reads: when this looked last, what the ring has taken, and what was seen. */
   heartbeat() {
     this.scans += 1;
-    const ring = this.instance ? this.ringReading() : { unavailable: 'no ring' };
+    const ring = this.instance ? tracefs.stats({ instance: this.instance }) : { unavailable: 'no ring' };
     const body = { at: Date.now(), pid: process.pid, scans: this.scans, ring, stalls: this.stalls.length, clockJumps: this.clockJumps.length, reports: this.count };
     // written whole or not at all: the monitor reads this file while it is written, and a half-written one must not look like a missing one
     try {
@@ -305,7 +288,7 @@ export class Watchdog {
 // node flight-watchdog.js <root pid> <out dir> [<ring instance> [<sustain ms> [<match>]]]: until the root is gone
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [root, out, instance, sustain, match, marker] = [Number(process.argv[2]), process.argv[3], process.argv[4] || undefined, Number(process.argv[5]) || SUSTAIN_MS, process.argv[6] || undefined, process.argv[7] || undefined];
-  const dog = new Watchdog({ root, out, instance, sustainMs: sustain, match, holdDir: marker, asyncRing: true });
+  const dog = new Watchdog({ root, out, instance, sustainMs: sustain, match, holdDir: marker });
   const origin = performance.now();
   const ticker = setInterval(() => dog.tick(performance.now() - origin, Date.now()), TICK_MS);
   // on a timer of its own: a report that takes seconds (the ring written, the stacks) must not look like a dead watchdog

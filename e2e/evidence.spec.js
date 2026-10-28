@@ -24,7 +24,7 @@ import { missingFields } from './evidence-check.js';
 import { futexAnalysis, ringContent } from './flight-recorder.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { Watchdog } from './flight-watchdog.js';
-import { heartbeatQuiet, processState } from './preflight.js';
+import { heartbeatQuiet } from './preflight.js';
 import { LOCK_NAME, LOCK_UNREADABLE_MS, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
 
 function desktopOnly(testInfo) {
@@ -1162,54 +1162,4 @@ test('the monitor does not take a stop of the whole machine for a watchdog gone 
   expect(heartbeatQuiet({ beatAgeMs: 7846, monitorLateMs: 7900, staleMs: 6000 }), 'the monitor was as late as the beat is old').toBe(false);
   expect(heartbeatQuiet({ beatAgeMs: 7846, monitorLateMs: 0, staleMs: 6000 }), 'a watchdog quiet while the monitor was on time').toBe(true);
   expect(heartbeatQuiet({ beatAgeMs: 14000, monitorLateMs: 7900, staleMs: 6000 }), 'quiet for longer than the monitor was late').toBe(true);
-});
-
-// A watchdog whose reading of the ring does not come back keeps beating (quire#972, found in the pull request of #908: the outer watchdog sat in a tracefs
-// open, uninterruptible, for about 6 s and the monitor ended the run). The class is made on purpose: the ring's `tracing_on` becomes a pipe nobody writes,
-// so the read waits until the test opens it for writing. The watchdog is the real one, as a process.
-test('a watchdog whose reading of the ring does not return keeps beating, and carries the last reading with its time (quire#972)', async ({}, testInfo) => {
-  const directory = testInfo.outputPath('ring-blocked');
-  const instance = join(directory, 'instance');
-  const out = join(directory, 'out');
-  mkdirSync(join(instance, 'per_cpu', 'cpu0'), { recursive: true });
-  writeFileSync(join(instance, 'tracing_on'), '1\n');
-  writeFileSync(join(instance, 'per_cpu', 'cpu0', 'stats'), 'entries: 5\noverrun: 0\n');
-  const dog = spawn(process.execPath, [new URL('./flight-watchdog.js', import.meta.url).pathname, String(process.pid), out, instance], { stdio: 'ignore' });
-  const beats = () => { try { return readdirSync(out).filter((name) => /^heartbeat-\d+-\d+\.json$/.test(name)).map((name) => JSON.parse(readFileSync(join(out, name), 'utf8'))); } catch (error) { return []; } };
-  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  try {
-    let first = null;
-    for (let tries = 0; tries < 100 && !first; tries += 1) { first = beats()[0] || null; if (!first) await wait(100); }
-    expect(first, 'the watchdog wrote its first heartbeat').not.toBeNull();
-    expect(first.ring).toMatchObject({ on: '1', written: 5 });
-    unlinkSync(join(instance, 'tracing_on'));
-    expect(spawnSync('mkfifo', [join(instance, 'tracing_on')]).status).toBe(0);
-    await wait(1500); // the reading that waits has been asked for
-    const before = beats()[0];
-    await wait(3500);
-    const after = beats()[0];
-    expect(after.at - before.at, 'the heartbeat moved on while the reading of the ring waited').toBeGreaterThan(2000);
-    expect(after.scans).toBeGreaterThan(before.scans + 2);
-    expect(after.ring.readAt, 'the last reading is carried with the time it was made').toBeLessThan(before.at);
-    expect(after.ring).toMatchObject({ on: '1', written: 5 });
-  } finally {
-    dog.kill('SIGKILL');
-    try { closeSync(openSync(join(instance, 'tracing_on'), 'r+')); } catch (gone) { /* nothing waits on it */ }
-  }
-});
-
-test('a watchdog blocked in the kernel (state D) is given the longer limit and is still ended past it; one that is only quiet is not (quire#972, runs of #908 with 6052, 7744 and 9580 ms)', async ({}, testInfo) => {
-  for (const age of [6052, 7744, 9580]) {
-    expect(heartbeatQuiet({ beatAgeMs: age, monitorLateMs: 0, staleMs: 6000, watchdogState: 'D', blockedStaleMs: 60000 }), `blocked in the kernel, ${age} ms`).toBe(false);
-    expect(heartbeatQuiet({ beatAgeMs: age, monitorLateMs: 0, staleMs: 6000, watchdogState: 'S', blockedStaleMs: 60000 }), `asleep and quiet, ${age} ms`).toBe(true);
-    expect(heartbeatQuiet({ beatAgeMs: age, monitorLateMs: 0, staleMs: 6000, watchdogState: 'T', blockedStaleMs: 60000 }), `stopped, ${age} ms`).toBe(true);
-  }
-  expect(heartbeatQuiet({ beatAgeMs: 61000, monitorLateMs: 0, staleMs: 6000, watchdogState: 'D', blockedStaleMs: 60000 }), 'blocked past the longer limit').toBe(true);
-  // the state is read from the stat file, whose process name may hold spaces and brackets
-  const proc = testInfo.outputPath('proc');
-  mkdirSync(join(proc, '4242'), { recursive: true });
-  writeFileSync(join(proc, '4242', 'stat'), '4242 (node (a b) c) D 1 4242 4242 0 -1\n');
-  expect(processState(4242, proc)).toBe('D');
-  expect(processState(4243, proc), 'a process that is gone').toBeNull();
-  expect(processState(process.pid)).toMatch(/^[RSD]$/);
 });

@@ -24,7 +24,6 @@ const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 const FIRST_HEARTBEAT_MS = 20000;
 const MONITOR_EVERY_MS = 2000;
 const RING_QUIET_MS = 60000;
-const BLOCKED_STALE_MS = 60000; // a watchdog blocked in the kernel (state D) may be silent this long (quire#972)
 // The specs' way to see an end condition without waiting for its real limit (evidence-real.spec.js; nothing else sets these): the limit, in ms,
 // that the variable names, in place of the constant. The condition and the code that ends the run are the real ones.
 const limit = (env, name, fallback) => (Number(env[name]) > 0 ? Number(env[name]) : fallback);
@@ -179,21 +178,7 @@ export function fatal(part, why, out) {
  * When the whole machine stops, the monitor's timer runs before the watchdog's on its return and finds the old beat; that is the machine's
  * stop, recorded by the watchdog as a host stall, not a watchdog gone quiet. A watchdog stopped alone leaves the monitor on time.
  */
-export function heartbeatQuiet({ beatAgeMs, monitorLateMs, staleMs, watchdogState = null, blockedStaleMs = staleMs }) {
-  // a watchdog in uninterruptible sleep (state D) is blocked in the kernel on a disk or a tracefs lock the host's other work holds (quire#972), not quiet
-  // by a fault of its own: it gets the longer limit, and one that stays blocked past it is still ended
-  const limitMs = watchdogState === 'D' ? Math.max(staleMs, blockedStaleMs) : staleMs;
-  return beatAgeMs - Math.max(0, monitorLateMs) > limitMs;
-}
-
-/** The state letter of a process (R, S, D, T, Z ...) from `<proc>/<pid>/stat`, or null when it cannot be read. The name in the file may hold spaces and brackets: the state follows its last bracket. */
-export function processState(pid, proc = '/proc') {
-  try {
-    const text = readFileSync(`${proc}/${pid}/stat`, 'utf8');
-    const state = text[text.lastIndexOf(')') + 2];
-    return /^[A-Za-z]$/.test(state) ? state : null;
-  } catch (error) { return null; }
-}
+export function heartbeatQuiet({ beatAgeMs, monitorLateMs, staleMs }) { return beatAgeMs - Math.max(0, monitorLateMs) > staleMs; }
 
 /** Watches the parts while the run goes on. Returns a function that ends the watching. Logs a line at its start and a summary at its end (or at its fatal). */
 export function startMonitor(started, env = process.env) {
@@ -201,7 +186,6 @@ export function startMonitor(started, env = process.env) {
   const { watchdog, out } = started;
   const staleMs = limit(env, 'QUIRE_FLIGHT_BEAT_STALE_MS', HEARTBEAT_STALE_MS);
   const ringQuietMs = limit(env, 'QUIRE_FLIGHT_RING_QUIET_MS', RING_QUIET_MS);
-  const blockedStaleMs = limit(env, 'QUIRE_FLIGHT_BLOCKED_STALE_MS', BLOCKED_STALE_MS);
   const began = Date.now();
   let lastWritten = null;
   let lastMoved = Date.now();
@@ -226,9 +210,7 @@ export function startMonitor(started, env = process.env) {
     unreadable = 0;
     seen.beats.add(beat.at);
     seen.lastScans = beat.scans;
-    const beatAgeMs = Date.now() - beat.at;
-    const watchdogState = beatAgeMs - Math.max(0, monitorLateMs) > staleMs ? processState(beat.pid) : null; // read only when the beat is old
-    if (heartbeatQuiet({ beatAgeMs, monitorLateMs, staleMs, watchdogState, blockedStaleMs })) return die('watchdog', `no heartbeat for ${beatAgeMs} ms (the watchdog's state: ${watchdogState === null ? 'unreadable' : watchdogState})`);
+    if (heartbeatQuiet({ beatAgeMs: Date.now() - beat.at, monitorLateMs, staleMs })) return die('watchdog', `no heartbeat for ${Date.now() - beat.at} ms`);
     const ring = beat.ring || {};
     if (ring.error) return die('kernel ring', `unreadable by the watchdog: ${ring.error}`);
     if (ring.written !== undefined) seen.lastRing = ring.written;
@@ -241,7 +223,7 @@ export function startMonitor(started, env = process.env) {
       // a capture resumes the ring and then takes its hold down, so a heartbeat read just before the resume shows a stopped ring with no hold:
       // it is the ring's failure only when a reading made after the hold was first seen missing still shows it stopped
       if (stoppedSeenAt === null) stoppedSeenAt = Date.now();
-      else if ((ring.readAt === undefined ? beat.at : ring.readAt) > stoppedSeenAt) return die('kernel ring', `stopped (tracing_on is ${ring.on}) and no capture paused it`);
+      else if (beat.at > stoppedSeenAt) return die('kernel ring', `stopped (tracing_on is ${ring.on}) and no capture paused it`);
     } else stoppedSeenAt = null;
     if (ring.written !== lastWritten) { lastWritten = ring.written; lastMoved = Date.now(); }
     else if (ring.on === '1' && Date.now() - lastMoved > ringQuietMs) return die('kernel ring', `takes no events: ${ring.written} written, unchanged for ${Math.round((Date.now() - lastMoved) / 1000)} s`);
