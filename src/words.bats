@@ -203,9 +203,12 @@ implement words_start () =
 (* The words screen: what is shown (keyword: vocabulary) *)
 
 (* Which words the screen lists: those still being learned, or those mastered (keyword: vocabulary) *)
-datatype words_tab = TabLearning | TabMastered
+#pub datatype words_tab = TabLearning | TabMastered
 
 val _tab = ref<words_tab>(TabLearning())
+
+(* Whether the words listed are of every book or of the one chosen (keyword: vocabulary) *)
+datatype book_scope = AllBooks | ChosenBook
 
 (* The book the words are of: its place in the books the words came from, -1 for every book (keyword: vocabulary) *)
 val _book_chosen = ref<int>(~1)
@@ -264,7 +267,7 @@ in _books_free(next) end
 datavtype shown(int) =
   | ShownNil(0) of ()
   | {count:nat}{word_loc,language_loc:agz}{word_len,language_len:nat | word_len < 256; language_len < 256}
-    ShownCons(count + 1) of (Int, Int, bool, Int, Int, Int, Int, $A.arr(byte, word_loc, word_len + 1), int word_len, $A.arr(byte, language_loc, language_len + 1), int language_len, shown(count))
+    ShownCons(count + 1) of (Int, Int, word_state, Int, Int, Int, Int, $A.arr(byte, word_loc, word_len + 1), int word_len, $A.arr(byte, language_loc, language_len + 1), int language_len, shown(count))
 
 val _shown = ref<[count:nat] shown(count)>(ShownNil())
 
@@ -276,7 +279,8 @@ in taken end
 fun _shown_free {count:nat} .<count>. (list: shown(count)): void =
   case+ list of
   | ~ShownNil() => ()
-  | ~ShownCons(_, _, _, _, _, _, _, word, _, language, _, rest) => let
+  | ~ShownCons(_, _, state, _, _, _, _, word, _, language, _, rest) => let
+      val () = (case+ state of ~Mastered() => () | ~Learning(_, _) => ())
       val () = $A.free<byte>(word)
       val () = $A.free<byte>(language)
     in _shown_free(rest) end
@@ -287,11 +291,12 @@ fn _shown_put {count:nat} (list: shown(count)): void = let
 in _shown_free(previous) end
 
 (* A synchronized word is told by the row it is in: the ids of the row row of the list, or -1 (keyword: vocabulary) *)
-fun _shown_row {count:nat} .<count>. (list: !shown(count), row: int): @(Int, Int, bool, Int, Int, Int, Int) =
+fun _shown_row {count:nat} .<count>. (list: !shown(count), row: int): @(Int, Int, words_tab, Int, Int, Int, Int) =
   case+ list of
-  | ShownNil() => @(~1, ~1, false, ~1, ~1, ~1, ~1)
-  | ShownCons(high, low, mastered, book_high, book_low, chapter, node, _, _, _, _, rest) =>
-    if row <= 0 then @(high, low, mastered, book_high, book_low, chapter, node) else _shown_row(rest, row - 1)
+  | ShownNil() => @(~1, ~1, TabLearning(), ~1, ~1, ~1, ~1)
+  | ShownCons(high, low, state, book_high, book_low, chapter, node, _, _, _, _, rest) =>
+    if row <= 0 then @(high, low, (case+ state of Mastered() => TabMastered() | Learning(_, _) => TabLearning()), book_high, book_low, chapter, node)
+    else _shown_row(rest, row - 1)
 
 fun _shown_word {count:nat} .<count>. (list: !shown(count), row: int): [word_loc,language_loc:agz][word_len,language_len:nat | word_len < 256; language_len < 256]
   @($A.arr(byte, word_loc, word_len + 1), int word_len, $A.arr(byte, language_loc, language_len + 1), int language_len) =
@@ -338,7 +343,7 @@ fun _insert_newest {count:nat} .<count>. (word: stored_word, sorted: stored_word
 
 (* The words the screen lists, newest first (keyword: vocabulary) *)
 fun _gather {count,kept:nat} .<count>.
-  (words: stored_words(count), now: Int, learning: bool, book_all: bool, book_high: Int, book_low: Int, listed: stored_words(kept))
+  (words: stored_words(count), now: Int, tab: words_tab, scope: book_scope, book_high: Int, book_low: Int, listed: stored_words(kept))
   : [total:nat] stored_words(total) =
   case+ words of
   | ~StoredWordsNone() => listed
@@ -347,18 +352,24 @@ fun _gather {count,kept:nat} .<count>.
     in
       if numbers.deleted > 0 then let
         val () = stored_word_free(word)
-      in _gather(rest, now, learning, book_all, book_high, book_low, listed) end
+      in _gather(rest, now, tab, scope, book_high, book_low, listed) end
       else let
-        val mastered = numbers.mastered <> 0
-        val () = (if mastered then !_mastered_count := !_mastered_count + 1 else !_learning_count := !_learning_count + 1)
-        val () = (if mastered then () else (if numbers.due <= now then !_due_count := !_due_count + 1 else ()))
+        val in_tab = (case+ word_state_of(numbers) of
+          | ~Mastered() => let
+              val () = !_mastered_count := !_mastered_count + 1
+            in (case+ tab of TabMastered() => true | TabLearning() => false) end
+          | ~Learning(_, due) => let
+              val () = !_learning_count := !_learning_count + 1
+              val () = (if due <= now then !_due_count := !_due_count + 1 else ())
+            in (case+ tab of TabLearning() => true | TabMastered() => false) end): bool
         val () = _books_put_one(numbers.book_high, numbers.book_low)
-        val in_tab = (if learning then ~mastered else mastered): bool
-        val in_book = (if book_all then true else (if numbers.book_high = book_high then numbers.book_low = book_low else false)): bool
+        val in_book = (case+ scope of
+          | AllBooks() => true
+          | ChosenBook() => (if numbers.book_high = book_high then numbers.book_low = book_low else false)): bool
       in
-        if in_tab then (if in_book then _gather(rest, now, learning, book_all, book_high, book_low, _insert_newest(word, listed))
-          else let val () = stored_word_free(word) in _gather(rest, now, learning, book_all, book_high, book_low, listed) end)
-        else let val () = stored_word_free(word) in _gather(rest, now, learning, book_all, book_high, book_low, listed) end
+        if in_tab then (if in_book then _gather(rest, now, tab, scope, book_high, book_low, _insert_newest(word, listed))
+          else let val () = stored_word_free(word) in _gather(rest, now, tab, scope, book_high, book_low, listed) end)
+        else let val () = stored_word_free(word) in _gather(rest, now, tab, scope, book_high, book_low, listed) end
       end
     end
 
@@ -401,12 +412,14 @@ in
 end
 
 (* What a word's state is, in words: Mastered, or Learning and when it is due (keyword: vocabulary) *)
-fn _put_state {l:agz}{at:nat | at + 80 <= 400}{due,now:int} (out: !$A.arr(byte, l, 400), at: int at, mastered: bool, due: int due, now: int now): [stop:nat | stop <= 400] int stop =
-  if mastered then _put_literal(out, at, "Mastered")
-  else if due <= now then _put_literal(out, at, "Learning, due now")
-  else let
-    val after = _put_literal(out, at, "Learning, due in ")
-  in _put_wait(out, after, due - now) end
+fn _put_state {l:agz}{at:nat | at + 80 <= 400}{now:int} (out: !$A.arr(byte, l, 400), at: int at, state: word_state, now: int now): [stop:nat | stop <= 400] int stop =
+  case+ state of
+  | ~Mastered() => _put_literal(out, at, "Mastered")
+  | ~Learning(_, due) =>
+    if due <= now then _put_literal(out, at, "Learning, due now")
+    else let
+      val after = _put_literal(out, at, "Learning, due in ")
+    in _put_wait(out, after, due - now) end
 
 (* A child element of numbered parent parent_prefix<k>, numbered child_prefix<k> (keyword: vocabulary) *)
 fn _child {parent_prefix_len,child_prefix_len:pos | parent_prefix_len <= 16; child_prefix_len <= 16}{k:nat}{class_len:pos | class_len < 256}
@@ -553,7 +566,7 @@ fn _row_draw {k:nat}{c:wordx} (k: int k, image: !word_image(c), now: Int): void 
   val () = _copy_at(book_title, line, book_title_len, 0, 0)
   val () = $A.free<byte>(book_title)
   val after_title = _put_literal(line, book_title_len, " \xC2\xB7 ")
-  val ended = _put_state(line, after_title, numbers.mastered <> 0, numbers.due, now)
+  val ended = _put_state(line, after_title, word_state_of(numbers), now)
   val @(book_id, book_id_len) = nid_make("word-book", k)
   val () = ui_text_n_buf(book_id, book_id_len, line, ended)
   val () = _child("word-go", "word-times", k, TSpan, "hstyle")
@@ -567,8 +580,9 @@ fn _row_draw {k:nat}{c:wordx} (k: int k, image: !word_image(c), now: Int): void 
   val () = $A.free<byte>(marked_word)
   val () = _child("word-row", "word-tools", k, TDiv, "hbtns")
   val () = _child_text_button("word-tools", "word-goto", k, "hbtn", "Go to")
-  val () = (if numbers.mastered <> 0 then _child_text_button("word-tools", "word-master", k, "hbtn", "Learn again")
-    else _child_text_button("word-tools", "word-master", k, "hbtn", "Mark as mastered"))
+  val () = (case+ word_state_of(numbers) of
+    | ~Mastered() => _child_text_button("word-tools", "word-master", k, "hbtn", "Learn again")
+    | ~Learning(_, _) => _child_text_button("word-tools", "word-master", k, "hbtn", "Mark as mastered"))
 in _child_text_button("word-tools", "word-delete", k, "hbtn quiet", "Delete") end
 
 (* The rows of the words sorted, from row k on, at most as many as the screen draws: the list of what they are (keyword: vocabulary) *)
@@ -590,31 +604,28 @@ fun _rows {count,k:nat} .<count>. (words: stored_words(count), k: int k, now: In
       val () = word_image_free(image)
       val shown_rest = _rows(rest, k + 1, now)
     in
-      ShownCons(id_high, id_low, numbers.mastered <> 0, numbers.book_high, numbers.book_low, numbers.chapter, numbers.node,
+      ShownCons(id_high, id_low, word_state_of(numbers), numbers.book_high, numbers.book_low, numbers.chapter, numbers.node,
         word_text, word_len, language, language_len, shown_rest)
     end
 
-fn _pressed {id_len:pos | id_len < 256} (id: string id_len, on: bool): void =
-  if on then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
-
 (* The options of the book select: every book, then each book the words are of, the chosen one selected (keyword: vocabulary) *)
-fun _book_options {count:nat}{k:nat} .<count>. (list: !books(count), k: int k, book_all: bool, chosen_high: Int, chosen_low: Int): void =
+fun _book_options {count:nat}{k:nat} .<count>. (list: !books(count), k: int k, scope: book_scope, chosen_high: Int, chosen_low: Int): void =
   case+ list of
   | BooksNil() => ()
   | BooksCons(high, low, rest) => let
       val @(title, title_len) = _book_title(high, low)
       val @(option_id, option_id_len) = nid_make("words-book-opt", k)
       val @(value, value_len) = _digits(k)
-      val chosen = (if book_all then false else (if high = chosen_high then low = chosen_low else false)): bool
+      val chosen = (case+ scope of AllBooks() => false | ChosenBook() => (if high = chosen_high then low = chosen_low else false)): bool
       val () = (if title_len > 0 then ui_option("words-book", option_id, option_id_len, value, value_len, title, title_len, chosen)
         else let
           val () = $A.free<byte>(option_id)
           val () = $A.free<byte>(value)
         in $A.free<byte>(title) end)
-    in _book_options(rest, k + 1, book_all, chosen_high, chosen_low) end
+    in _book_options(rest, k + 1, scope, chosen_high, chosen_low) end
 
 (* The book the words are of that the select has chosen: every book, or the ids of the one (keyword: vocabulary) *)
-val _book_all = ref<bool>(true)
+val _book_scope = ref<book_scope>(AllBooks())
 val _book_high = ref<Int>(0)
 val _book_low = ref<Int>(0)
 
@@ -643,22 +654,27 @@ implement words_render () =
         val () = !_hidden_count := 0
         val () = _books_free(_books_take())
         val now = $TM.epoch_minutes()
-        val learning = (case+ !_tab of TabLearning() => true | TabMastered() => false): bool
-        val sorted = _gather(words, now, learning, !_book_all, !_book_high, !_book_low, StoredWordsNone())
+        val tab = !_tab
+        val sorted = _gather(words, now, tab, !_book_scope, !_book_high, !_book_low, StoredWordsNone())
         val () = ui_clear("words-list")
         val listed = _rows(sorted, 0, now)
         val () = _shown_put(listed)
-        val () = _pressed("words-tab-learning", learning)
-        val () = _pressed("words-tab-mastered", ~learning)
+        val () = (case+ tab of
+          | TabLearning() => let
+              val () = ui_attr("words-tab-learning", APressed, "true")
+            in ui_attr("words-tab-mastered", APressed, "false") end
+          | TabMastered() => let
+              val () = ui_attr("words-tab-learning", APressed, "false")
+            in ui_attr("words-tab-mastered", APressed, "true") end)
         val () = ui_clear("words-book")
         val @(all_id, all_id_len) = nid_make("words-book-opt", 99999)
         val all_value = $A.alloc<byte>(3)
         val () = $A.write_text(all_value, 0, $A.text_lit("all"), 3)
         val all_label = $A.alloc<byte>(9)
         val () = $A.write_text(all_label, 0, $A.text_lit("All books"), 9)
-        val () = ui_option("words-book", all_id, all_id_len, all_value, 3, all_label, 9, !_book_all)
+        val () = ui_option("words-book", all_id, all_id_len, all_value, 3, all_label, 9, (case+ !_book_scope of AllBooks() => true | ChosenBook() => false))
         val books = _books_take()
-        val () = _book_options(books, 0, !_book_all, !_book_high, !_book_low)
+        val () = _book_options(books, 0, !_book_scope, !_book_high, !_book_low)
         val () = _books_put(books)
         val () = _status_show()
         val () = ui_show("words-none", !_learning_count + !_mastered_count = 0)
@@ -677,10 +693,10 @@ implement words_screen_open () = let
 in ui_focus("words-back") end
 
 (* The tab chosen: the words being learned, or the mastered ones (keyword: vocabulary) *)
-#pub fn words_tab_set (learning: bool): void
+#pub fn words_tab_set (tab: words_tab): void
 
-implement words_tab_set (learning) = let
-  val () = !_tab := (if learning then TabLearning() else TabMastered())
+implement words_tab_set (tab) = let
+  val () = !_tab := tab
 in words_render() end
 
 (* A select's value as the number it names, or -1 (every book) (keyword: vocabulary) *)
@@ -720,13 +736,13 @@ implement words_book_changed () = let
   val chosen = _chosen_number()
 in
   if chosen < 0 then let
-    val () = !_book_all := true
+    val () = !_book_scope := AllBooks()
   in words_render() end
   else let
     val books = _books_take()
     val @(high, low) = _books_at(books, chosen)
     val () = _books_free(books)
-    val () = !_book_all := (high < 0)
+    val () = !_book_scope := (if high < 0 then AllBooks() else ChosenBook())
     val () = !_book_high := high
     val () = !_book_low := low
   in words_render() end
@@ -747,12 +763,14 @@ in words_render() end
 
 implement words_row_master (row) = let
   val list = _shown_take()
-  val @(high, low, mastered, _, _, _, _) = _shown_row(list, row)
+  val @(high, low, tab, _, _, _, _) = _shown_row(list, row)
   val () = _shown_put(list)
 in
   if high < 0 then ()
   else let
-    val edit = (if mastered then LearnWordAgain($TM.epoch_minutes(), stamp_now()) else MasterWord(stamp_now())): word_edit
+    val edit = (case+ tab of
+      | TabMastered() => LearnWordAgain($TM.epoch_minutes(), stamp_now())
+      | TabLearning() => MasterWord(stamp_now())): word_edit
   in $P.finish<word_saved>(wordstore_edit(high, low, edit), llam(saved) => _after_edit(saved)) end
 end
 
@@ -833,30 +851,33 @@ datavtype best =
   | NoBest of ()
   | Best of stored_word
 
+(* The minute a word is due at; a mastered word is never due, so it is the far future (keyword: vocabulary) *)
+fn _due_of (word: !stored_word): Int =
+  case+ word_state_of(_numbers_of(word)) of
+  | ~Mastered() => 2147483647
+  | ~Learning(_, due) => due
+
 fun _earliest {count:nat} .<count>. (words: stored_words(count), now: Int, held: best): best =
   case+ words of
   | ~StoredWordsNone() => held
   | ~StoredWordsSome(word, rest) => let
       val numbers = _numbers_of(word)
+      val due = _due_of(word)
     in
       if numbers.deleted > 0 then let val () = stored_word_free(word) in _earliest(rest, now, held) end
-      else if numbers.mastered <> 0 then let val () = stored_word_free(word) in _earliest(rest, now, held) end
-      else if numbers.due > now then let val () = stored_word_free(word) in _earliest(rest, now, held) end
+      else if due > now then let val () = stored_word_free(word) in _earliest(rest, now, held) end
       else let
         val () = !_due_count := !_due_count + 1
       in
         case+ held of
         | ~NoBest() => _earliest(rest, now, Best(word))
-        | ~Best(earlier) => let
-            val earlier_numbers = _numbers_of(earlier)
-          in
-            if numbers.due < earlier_numbers.due then let
-              val () = stored_word_free(earlier)
-            in _earliest(rest, now, Best(word)) end
-            else let
-              val () = stored_word_free(word)
-            in _earliest(rest, now, Best(earlier)) end
-          end
+        | ~Best(earlier) =>
+          if due < _due_of(earlier) then let
+            val () = stored_word_free(earlier)
+          in _earliest(rest, now, Best(word)) end
+          else let
+            val () = stored_word_free(word)
+          in _earliest(rest, now, Best(earlier)) end
       end
     end
 
@@ -987,16 +1008,16 @@ implement words_review_word () =
     in @(word_copy, word_len, language_copy, language_len) end
 
 (* The card answered, Got it or Forgot: the word is due again as the schedule says, and the next card comes (keyword: vocabulary) *)
-#pub fn words_review_answer (known: bool): void
+#pub fn words_review_answer (answer: review_answer): void
 
-implement words_review_answer (known) =
+implement words_review_answer (answer) =
   case+ _card_swap(NoCard()) of
   | ~NoCard() => ()
   | ~Card(id_high, id_low, word, _, language, _) => let
       val () = $A.free<byte>(word)
       val () = $A.free<byte>(language)
     in
-      $P.finish<word_saved>(wordstore_edit(id_high, id_low, ReviewWord(known, $TM.epoch_minutes(), stamp_now())), llam(saved) => let
+      $P.finish<word_saved>(wordstore_edit(id_high, id_low, ReviewWord(answer, $TM.epoch_minutes(), stamp_now())), llam(saved) => let
         val () = (case+ saved of
           | WordNotSaved() => notice_say(WordsNotStored())
           | WordRefused() => notice_say(WordsNotStored())

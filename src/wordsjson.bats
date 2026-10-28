@@ -103,9 +103,15 @@ in
   in jw_lit(out, at, "}") end
 end
 
+(* Whether the words written include the tombstones of the deleted ones (keyword: vocabulary) *)
+datatype tombstone_use = WithTombstones | WithoutTombstones
+
+(* Whether a word is the first of an array: the others come after a comma (keyword: vocabulary) *)
+datatype array_place = FirstWord | LaterWord
+
 (* The words of list as JSON objects, each after a comma but the first: the live ones, or every one with its tombstone (keyword: vocabulary) *)
 fun _words_json {l:agz}{arena:addr}{n:nat}{count:nat}{position:nat | position + 7200 * count + 1 <= n} .<count>.
-  (out: !$A.arrx(byte, l, n, arena), position: int position, words: !stored_words(count), first: bool, tombstones: bool, now: Int)
+  (out: !$A.arrx(byte, l, n, arena), position: int position, words: !stored_words(count), place: array_place, tombstones: tombstone_use, now: Int)
   : [stop:nat | stop <= position + 7200 * count] int stop =
   case+ words of
   | StoredWordsNone() => position
@@ -113,13 +119,13 @@ fun _words_json {l:agz}{arena:addr}{n:nat}{count:nat}{position:nat | position + 
     (case+ word of
      | StoredWord(id_high, id_low, image) => let
          val numbers = word_image_numbers(image)
-         val kept = (if numbers.deleted > 0 then (if tombstones then (now - numbers.deleted <= words_tombstone_minutes()) else false) else true): bool
+         val kept = (if numbers.deleted > 0 then (case+ tombstones of WithTombstones() => (now - numbers.deleted <= words_tombstone_minutes()) | WithoutTombstones() => false) else true): bool
        in
-         if ~kept then _words_json(out, position, rest, first, tombstones, now)
+         if ~kept then _words_json(out, position, rest, place, tombstones, now)
          else let
-           val comma = (if first then position else jw_lit(out, position, ",")): [comma:nat | position <= comma; comma <= position + 1] int comma
+           val comma = (case+ place of FirstWord() => position | LaterWord() => jw_lit(out, position, ",")): [comma:nat | position <= comma; comma <= position + 1] int comma
            val after = _word_json(out, comma, id_high, id_low, image)
-         in _words_json(out, after, rest, false, tombstones, now) end
+         in _words_json(out, after, rest, LaterWord(), tombstones, now) end
        end)
 
 fun _words_count {count:nat} .<count>. (words: !stored_words(count)): int count =
@@ -128,17 +134,17 @@ fun _words_count {count:nat} .<count>. (words: !stored_words(count)): int count 
   | StoredWordsSome(_, rest) => 1 + _words_count(rest)
 
 (* The words as a JSON array in a chunk, under the key "words" after a comma: none when they cannot be had (keyword: vocabulary) *)
-fn _chunk_of {count:nat | count <= 20000} (words: !stored_words(count), count: int count, tombstones: bool): jchunk =
+fn _chunk_of {count:nat | count <= 20000} (words: !stored_words(count), count: int count, tombstones: tombstone_use): jchunk =
   case+ piece_new(64 + 7200 * count) of
   | ~NoPiece() => JNone()
   | ~Piece(owner, out) => let
       val at = jw_lit(out, 0, ",\"words\":[")
-      val stop = _words_json(out, at, words, true, tombstones, $TM.epoch_minutes())
+      val stop = _words_json(out, at, words, FirstWord(), tombstones, $TM.epoch_minutes())
       val stop2 = jw_lit(out, stop, "]")
     in JChunk(owner, out, stop2) end
 
 (* The chunk when there are no more words than a file takes (keyword: vocabulary) *)
-fn _chunk_guarded {count:nat} (words: !stored_words(count), count: int count, tombstones: bool): jchunk =
+fn _chunk_guarded {count:nat} (words: !stored_words(count), count: int count, tombstones: tombstone_use): jchunk =
   if count > 20000 then JNone() else _chunk_of(words, count, tombstones)
 
 (* The words kept, as a backup holds them: the live ones (keyword: vocabulary) *)
@@ -150,7 +156,7 @@ implement words_backup_chunk () =
     | ~WordsUnreadable() => $P.ret<jchunk>(JNone())
     | ~WordsRead(words, _) => let
         val count = _words_count(words)
-        val chunk = _chunk_guarded(words, count, false)
+        val chunk = _chunk_guarded(words, count, WithoutTombstones())
         val () = stored_words_free(words)
       in $P.ret<jchunk>(chunk) end)
 
@@ -358,15 +364,18 @@ in
   else words_parse(buf, n, at)
 end
 
+(* Whether the words of a file replace what is stored or are merged into it (keyword: vocabulary) *)
+#pub datatype restore_mode = RestoreReplace | RestoreMerge
+
 (* Each word of words edited into the store (keyword: vocabulary) *)
-fun _apply {count:nat} .<count>. (words: stored_words(count), replace: bool, done: Int): $P.promise(Int, $P.Chained) =
+fun _apply {count:nat} .<count>. (words: stored_words(count), mode: restore_mode, done: Int): $P.promise(Int, $P.Chained) =
   case+ words of
   | ~StoredWordsNone() => $P.ret<Int>(done)
   | ~StoredWordsSome(word, rest) => let
       val ~StoredWord(id_high, id_low, image) = word
-      val edit = (if replace then PutWord(image, stamp_now()) else MergeWord(image)): word_edit
+      val edit = (case+ mode of RestoreReplace() => PutWord(image, stamp_now()) | RestoreMerge() => MergeWord(image)): word_edit
     in
-      $P.and_then<word_saved><Int>(wordstore_edit(id_high, id_low, edit), llam(_) => _apply(rest, replace, done + 1))
+      $P.and_then<word_saved><Int>(wordstore_edit(id_high, id_low, edit), llam(_) => _apply(rest, mode, done + 1))
     end
 
 (* Whether words holds the word with the id (keyword: vocabulary) *)
@@ -393,20 +402,21 @@ fun _delete_missing {count,kept:nat} .<count>. (nearby: stored_words(count), wor
     in _delete_missing(rest, words) end
 
 (* The words of a file put into the store (keyword: vocabulary) *)
-#pub fn words_restore (read: words_read, replace: bool): $P.promise(Int, $P.Chained)
+#pub fn words_restore (read: words_read, mode: restore_mode): $P.promise(Int, $P.Chained)
 
-implement words_restore (read, replace) =
+implement words_restore (read, mode) =
   case+ read of
   | ~WordsUnreadable() => $P.ret<Int>(~1)
   | ~WordsRead(words, _) =>
-    if ~replace then _apply(words, false, 0)
-    else
+    (case+ mode of
+     | RestoreMerge() => _apply(words, RestoreMerge(), 0)
+     | RestoreReplace() =>
       $P.and_then<words_read><Int>(wordstore_read(), llam(kept) =>
         case+ kept of
         | ~WordsUnreadable() => let val () = stored_words_free(words) in $P.ret<Int>(~1) end
         | ~WordsRead(nearby, _) => let
             val () = _delete_missing(nearby, words)
-          in _apply(words, true, 0) end)
+          in _apply(words, RestoreReplace(), 0) end))
 
 
 (* Sync: the words of two devices, merged (keyword: vocabulary) *)
@@ -476,7 +486,7 @@ implement words_sync_chunk (remote) =
        | ~WordsUnreadable() => $P.ret<jchunk>(JNone())
        | ~WordsRead(words, _) => let
            val count = _words_count(words)
-           val chunk = _chunk_guarded(words, count, true)
+           val chunk = _chunk_guarded(words, count, WithTombstones())
            val () = stored_words_free(words)
          in $P.ret<jchunk>(chunk) end)
     | ~WordsRead(nearby, _) => let
@@ -485,7 +495,7 @@ implement words_sync_chunk (remote) =
           | ~WordsRead(words, _) => words): [there:nat] stored_words(there)
         val both = _merged(nearby, there, StoredWordsNone())
         val count = _words_count(both)
-        val chunk = _chunk_guarded(both, count, true)
+        val chunk = _chunk_guarded(both, count, WithTombstones())
         val () = stored_words_free(both)
       in $P.ret<jchunk>(chunk) end)
 

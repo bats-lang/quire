@@ -31,6 +31,7 @@ staload "file_version.sats"
 staload "mem.sats"
 staload "stats.sats"
 staload "dictionary.sats"
+staload "words_rules.sats"
 staload "words.sats"
 staload "clock.sats"
 staload "sync.sats"
@@ -3261,8 +3262,8 @@ fn _wire_words {count:nat} (listeners: regs(count)): regs(count + 3) = let
         | ~$R.some(WordsBack()) => let
             val () = layer_close(LWords())
           in ui_focus("library-menu-button") end
-        | ~$R.some(WordsLearning()) => words_tab_set(true)
-        | ~$R.some(WordsMastered()) => words_tab_set(false)
+        | ~$R.some(WordsLearning()) => words_tab_set(TabLearning())
+        | ~$R.some(WordsMastered()) => words_tab_set(TabMastered())
         | ~$R.some(WordsReview()) => words_review_open()
         | ~$R.some(WordsShare()) => _share_words(share_as_now())
         | ~$R.some(WordsScreen()) => ()
@@ -3286,8 +3287,8 @@ fn _wire_words {count:nat} (listeners: regs(count)): regs(count + 3) = let
         | ~$R.some(ReviewShow()) => let
             val () = words_review_revealed()
           in _define_card() end
-        | ~$R.some(ReviewKnown()) => words_review_answer(true)
-        | ~$R.some(ReviewForgot()) => words_review_answer(false)
+        | ~$R.some(ReviewKnown()) => words_review_answer(GotIt())
+        | ~$R.some(ReviewForgot()) => words_review_answer(Forgot())
         | ~$R.some(ReviewScreen()) => ()
         | ~$R.none() => ())
     in 0 end)

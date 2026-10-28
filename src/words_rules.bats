@@ -44,12 +44,23 @@ implement words_got_it_minutes {streak} (streak) =
     val exponent = (if streak - 8 > 6 then 6 else streak - 8): [exponent:nat | exponent <= 6] int exponent
   in double(43200, exponent) end
 
+(* What a word is, as the program holds it: still being learned with its streak and the minute it is due at, or mastered (keyword: vocabulary) *)
+#pub datavtype word_state =
+  | Learning of (Int, Int)
+  | Mastered of ()
+
+(* How a card was answered (keyword: vocabulary) *)
+#pub datatype review_answer =
+  | GotIt
+  | Forgot
+
 (* The streak and the minute a word is due at after a review at minute now: Got it adds one to the streak, Forgot ends it (keyword: vocabulary) *)
-#pub fn words_review_next {streak:int} (streak: int streak, known: bool, now: int): @(int, int)
-implement words_review_next {streak} (streak, known, now) =
-  if known then let
-    val next = (if streak < 0 then 1 else if streak >= 1000 then 1000 else streak + 1): [next:int] int next
-  in @(next, now + words_got_it_minutes(next)) end
-  else @(0, now + words_forgot_minutes())
+#pub fn words_review_next {streak:int} (streak: int streak, answer: review_answer, now: int): @(int, int)
+implement words_review_next {streak} (streak, answer, now) =
+  case+ answer of
+  | GotIt() => let
+      val next = (if streak < 0 then 1 else if streak >= 1000 then 1000 else streak + 1): [next:int] int next
+    in @(next, now + words_got_it_minutes(next)) end
+  | Forgot() => @(0, now + words_forgot_minutes())
 
 end (* #target wasm (keyword: vocabulary) *)

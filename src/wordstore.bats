@@ -280,7 +280,7 @@ implement wordstore_kept_set (count) = !_kept := count
   | {contents:wordx} MergeWord of word_image(contents)      (* the word of another device: taken when it changed later (keyword: vocabulary) *)
   | MasterWord of (Int)                                      (* mastered, at this stamp (keyword: vocabulary) *)
   | LearnWordAgain of (Int, Int)                             (* learning again from now: the minute, the stamp (keyword: vocabulary) *)
-  | ReviewWord of (bool, Int, Int)                           (* reviewed, known or not: at this minute and stamp (keyword: vocabulary) *)
+  | ReviewWord of (review_answer, Int, Int)                         (* reviewed, answered Got it or Forgot: at this minute and stamp (keyword: vocabulary) *)
   | DeleteWord of (Int, Int)                                 (* deleted at this minute and stamp: only the tombstone is kept (keyword: vocabulary) *)
 
 datavtype word_made =
@@ -334,6 +334,24 @@ datavtype applied =
   | {contents:wordx} Apply of word_image(contents)
   | NoApply of ()
 
+(* A word's state as its stored numbers say it (keyword: vocabulary) *)
+#pub fn word_state_of (numbers: word_numbers): word_state
+
+implement word_state_of (numbers) =
+  if numbers.mastered <> 0 then Mastered() else Learning(numbers.streak, numbers.due)
+
+(* The numbers with the state written in them: Mastered keeps the streak and the due minute (keyword: vocabulary) *)
+#pub fn word_numbers_with_state (numbers: word_numbers, state: word_state): word_numbers
+
+implement word_numbers_with_state (numbers, state) =
+  case+ state of
+  | ~Mastered() => @{book_high = numbers.book_high, book_low = numbers.book_low, lookups = numbers.lookups, first_minute = numbers.first_minute,
+      last_minute = numbers.last_minute, modified = numbers.modified, deleted = numbers.deleted, chapter = numbers.chapter, node = numbers.node,
+      offset = numbers.offset, mastered = 1, streak = numbers.streak, due = numbers.due}
+  | ~Learning(streak, due) => @{book_high = numbers.book_high, book_low = numbers.book_low, lookups = numbers.lookups, first_minute = numbers.first_minute,
+      last_minute = numbers.last_minute, modified = numbers.modified, deleted = numbers.deleted, chapter = numbers.chapter, node = numbers.node,
+      offset = numbers.offset, mastered = 0, streak = streak, due = due}
+
 (* The edit applied to the word read, own (consumed) (keyword: vocabulary) *)
 fn _apply {own_value:wordx} (edit: word_edit, own: !word_image(own_value)): applied = let
   val own_numbers = word_image_numbers(own)
@@ -368,29 +386,25 @@ in
   | ~MasterWord(stamp) =>
     if own_numbers.deleted > 0 then NoApply()
     else let
-      var changed: word_numbers = own_numbers
-      val () = changed.mastered := 1
+      var changed: word_numbers = word_numbers_with_state(own_numbers, Mastered())
       val () = changed.modified := stamp
     in case+ _renumbered(own, changed) of ~Made(image) => Apply(image) | ~NotMade() => NoApply() end
   | ~LearnWordAgain(now, stamp) =>
     if own_numbers.deleted > 0 then NoApply()
     else let
-      var changed: word_numbers = own_numbers
-      val () = changed.mastered := 0
-      val () = changed.streak := 0
-      val () = changed.due := now
+      var changed: word_numbers = word_numbers_with_state(own_numbers, Learning(0, now))
       val () = changed.modified := stamp
     in case+ _renumbered(own, changed) of ~Made(image) => Apply(image) | ~NotMade() => NoApply() end
-  | ~ReviewWord(known, now, stamp) =>
+  | ~ReviewWord(answer, now, stamp) =>
     if own_numbers.deleted > 0 then NoApply()
-    else if own_numbers.mastered <> 0 then NoApply()
-    else let
-      var changed: word_numbers = own_numbers
-      val @(streak, due) = words_review_next(own_numbers.streak, known, now)
-      val () = changed.streak := g1ofg0(streak)
-      val () = changed.due := g1ofg0(due)
-      val () = changed.modified := stamp
-    in case+ _renumbered(own, changed) of ~Made(image) => Apply(image) | ~NotMade() => NoApply() end
+    else
+      (case+ word_state_of(own_numbers) of
+       | ~Mastered() => NoApply()
+       | ~Learning(streak, _) => let
+           val @(next_streak, due) = words_review_next(streak, answer, now)
+           var changed: word_numbers = word_numbers_with_state(own_numbers, Learning(g1ofg0(next_streak), g1ofg0(due)))
+           val () = changed.modified := stamp
+         in case+ _renumbered(own, changed) of ~Made(image) => Apply(image) | ~NotMade() => NoApply() end)
   | ~DeleteWord(minute, stamp) =>
     if own_numbers.deleted > 0 then NoApply()
     else (case+ _tombstone(minute, stamp) of ~Made(image) => Apply(image) | ~NotMade() => NoApply())
