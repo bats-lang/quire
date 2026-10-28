@@ -1764,6 +1764,7 @@ fun _id_is {l:agz}{n:nat}{at:nat}{text_len:nat}{i:nat | i <= text_len} .<text_le
   | SettingsGoalSixty
   | SettingsSync
   | SettingsDictionaries
+  | SettingsWordsKeep
   | SettingsExportBackup
   | SettingsSetAside
   | SettingsResetSettings
@@ -1781,6 +1782,7 @@ implement settings_control_id (control) =
   | SettingsGoalSixty() => "settings-goal-60"
   | SettingsSync() => "settings-sync"
   | SettingsDictionaries() => "settings-dictionaries"
+  | SettingsWordsKeep() => "settings-words-keep"
   | SettingsExportBackup() => "settings-export-backup"
   | SettingsSetAside() => "settings-set-aside"
   | SettingsResetSettings() => "settings-reset-settings"
@@ -1797,7 +1799,8 @@ fn _settings_control_after (control: settings_control): $R.option(settings_contr
   | SettingsGoalThirty() => $R.some(SettingsGoalSixty())
   | SettingsGoalSixty() => $R.some(SettingsSync())
   | SettingsSync() => $R.some(SettingsDictionaries())
-  | SettingsDictionaries() => $R.some(SettingsExportBackup())
+  | SettingsDictionaries() => $R.some(SettingsWordsKeep())
+  | SettingsWordsKeep() => $R.some(SettingsExportBackup())
   | SettingsExportBackup() => $R.some(SettingsSetAside())
   | SettingsSetAside() => $R.some(SettingsResetSettings())
   | SettingsResetSettings() => $R.some(SettingsFactoryReset())
@@ -1819,7 +1822,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_settings_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(settings_control)
-implement ui_settings_control (bytes, n, at) = _settings_control_from(bytes, n, at, SettingsGoalOff(), 12)
+implement ui_settings_control (bytes, n, at) = _settings_control_from(bytes, n, at, SettingsGoalOff(), 13)
 
 (* The library view's status filters and the collection button, each by its element's id (library_view_control_id) *)
 #pub datatype library_view_control =
@@ -2096,6 +2099,7 @@ implement ui_library_search_control (bytes, n, at) = _library_search_control_fro
   | MenuAbout
   | MenuInstall
   | MenuStats
+  | MenuWords
   | MenuCatalogues
   | MenuHidden
   | MenuArchived
@@ -2111,6 +2115,7 @@ implement library_menu_control_id (control) =
   | MenuAbout() => "menu-about"
   | MenuInstall() => "menu-install"
   | MenuStats() => "menu-stats"
+  | MenuWords() => "menu-words"
   | MenuCatalogues() => "menu-catalogues"
   | MenuHidden() => "menu-hidden"
   | MenuArchived() => "menu-archived"
@@ -2125,7 +2130,8 @@ fn _library_menu_control_after (control: library_menu_control): $R.option(librar
   | MenuSync() => $R.some(MenuAbout())
   | MenuAbout() => $R.some(MenuInstall())
   | MenuInstall() => $R.some(MenuStats())
-  | MenuStats() => $R.some(MenuCatalogues())
+  | MenuStats() => $R.some(MenuWords())
+  | MenuWords() => $R.some(MenuCatalogues())
   | MenuCatalogues() => $R.some(MenuHidden())
   | MenuHidden() => $R.some(MenuArchived())
   | MenuArchived() => $R.some(MenuTrash())
@@ -2147,7 +2153,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_library_menu_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(library_menu_control)
-implement ui_library_menu_control (bytes, n, at) = _library_menu_control_from(bytes, n, at, MenuSettings(), 11)
+implement ui_library_menu_control (bytes, n, at) = _library_menu_control_from(bytes, n, at, MenuSettings(), 12)
 
 (* The sort and view menu's choices, done, and its backdrop, each by its element's id (sort_menu_control_id) *)
 #pub datatype sort_menu_control =
@@ -2284,6 +2290,91 @@ end
 #pub fn ui_dictionaries_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(dictionaries_control)
 implement ui_dictionaries_control (bytes, n, at) = _dictionaries_control_from(bytes, n, at, DictionariesBack(), 2)
 
+(* The words screen's controls, and its backdrop, each by its element's id (words_control_id; keyword: vocabulary) *)
+#pub datatype words_control =
+  | WordsBack
+  | WordsLearning
+  | WordsMastered
+  | WordsReview
+  | WordsShare
+  | WordsScreen
+
+#pub fn words_control_id (control: words_control): [id_len:pos | id_len < 256] string id_len
+implement words_control_id (control) =
+  case+ control of
+  | WordsBack() => "words-back"
+  | WordsLearning() => "words-tab-learning"
+  | WordsMastered() => "words-tab-mastered"
+  | WordsReview() => "words-review"
+  | WordsShare() => "words-share"
+  | WordsScreen() => "words-screen"
+
+(* The control after control, in the decoder's order (keyword: vocabulary) *)
+fn _words_control_after (control: words_control): $R.option(words_control) =
+  case+ control of
+  | WordsBack() => $R.some(WordsLearning())
+  | WordsLearning() => $R.some(WordsMastered())
+  | WordsMastered() => $R.some(WordsReview())
+  | WordsReview() => $R.some(WordsShare())
+  | WordsShare() => $R.some(WordsScreen())
+  | WordsScreen() => $R.none()
+
+(* The first of control and those after it whose id is the bytes at the offset (keyword: vocabulary) *)
+fun _words_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: words_control, fuel: int fuel): $R.option(words_control) = let
+  val id = words_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _words_control_after(control) of
+    | ~$R.some(next) => _words_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is the bytes at the offset, if it is one (keyword: vocabulary) *)
+#pub fn ui_words_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(words_control)
+implement ui_words_control (bytes, n, at) = _words_control_from(bytes, n, at, WordsBack(), 6)
+
+(* The review screen's controls, and its backdrop, each by its element's id (review_control_id) (keyword: vocabulary) *)
+#pub datatype review_control =
+  | ReviewBack
+  | ReviewShow
+  | ReviewKnown
+  | ReviewForgot
+  | ReviewScreen
+
+#pub fn review_control_id (control: review_control): [id_len:pos | id_len < 256] string id_len
+implement review_control_id (control) =
+  case+ control of
+  | ReviewBack() => "review-back"
+  | ReviewShow() => "review-show"
+  | ReviewKnown() => "review-known"
+  | ReviewForgot() => "review-forgot"
+  | ReviewScreen() => "review-screen"
+
+(* The control after control, in the decoder's order (keyword: vocabulary) *)
+fn _review_control_after (control: review_control): $R.option(review_control) =
+  case+ control of
+  | ReviewBack() => $R.some(ReviewShow())
+  | ReviewShow() => $R.some(ReviewKnown())
+  | ReviewKnown() => $R.some(ReviewForgot())
+  | ReviewForgot() => $R.some(ReviewScreen())
+  | ReviewScreen() => $R.none()
+
+(* The first of control and those after it whose id is the bytes at the offset (keyword: vocabulary) *)
+fun _review_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: review_control, fuel: int fuel): $R.option(review_control) = let
+  val id = review_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _review_control_after(control) of
+    | ~$R.some(next) => _review_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is the bytes at the offset, if it is one (keyword: vocabulary) *)
+#pub fn ui_review_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(review_control)
+implement ui_review_control (bytes, n, at) = _review_control_from(bytes, n, at, ReviewBack(), 5)
+
 (* The sync screen's buttons, each by its element's id (sync_screen_control_id) *)
 #pub datatype sync_screen_control =
   | SyncNow
@@ -2419,6 +2510,14 @@ implement ui_sync_offer_control (bytes, n, at) = _sync_offer_control_from(bytes,
   | RubyHide
   | DimImagesSwitch
   | PublisherSizesSwitch
+  | RulerChoiceOff
+  | RulerChoiceUnderline
+  | RulerChoiceGreyBar
+  | RulerChoiceShade
+  | RulerChoiceLightbox
+  | RulerLinesOne
+  | RulerLinesThree
+  | RulerLinesFive
   | TapsSides
   | TapsForward
   | TapsOneHand
@@ -2455,6 +2554,14 @@ implement typography_control_id (control) =
   | RubyHide() => "ruby-hide"
   | DimImagesSwitch() => "dim-images-switch"
   | PublisherSizesSwitch() => "publisher-sizes-switch"
+  | RulerChoiceOff() => "ruler-off"
+  | RulerChoiceUnderline() => "ruler-underline"
+  | RulerChoiceGreyBar() => "ruler-grey-bar"
+  | RulerChoiceShade() => "ruler-shade"
+  | RulerChoiceLightbox() => "ruler-lightbox"
+  | RulerLinesOne() => "ruler-lines-one"
+  | RulerLinesThree() => "ruler-lines-three"
+  | RulerLinesFive() => "ruler-lines-five"
   | TapsSides() => "taps-sides"
   | TapsForward() => "taps-forward"
   | TapsOneHand() => "taps-one-hand"
@@ -2490,7 +2597,15 @@ fn _typography_control_after (control: typography_control): $R.option(typography
   | RubyShow() => $R.some(RubyHide())
   | RubyHide() => $R.some(DimImagesSwitch())
   | DimImagesSwitch() => $R.some(PublisherSizesSwitch())
-  | PublisherSizesSwitch() => $R.some(TapsSides())
+  | PublisherSizesSwitch() => $R.some(RulerChoiceOff())
+  | RulerChoiceOff() => $R.some(RulerChoiceUnderline())
+  | RulerChoiceUnderline() => $R.some(RulerChoiceGreyBar())
+  | RulerChoiceGreyBar() => $R.some(RulerChoiceShade())
+  | RulerChoiceShade() => $R.some(RulerChoiceLightbox())
+  | RulerChoiceLightbox() => $R.some(RulerLinesOne())
+  | RulerLinesOne() => $R.some(RulerLinesThree())
+  | RulerLinesThree() => $R.some(RulerLinesFive())
+  | RulerLinesFive() => $R.some(TapsSides())
   | TapsSides() => $R.some(TapsForward())
   | TapsForward() => $R.some(TapsOneHand())
   | TapsOneHand() => $R.some(VolumeKeysTurn())
@@ -2517,7 +2632,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_typography_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(typography_control)
-implement ui_typography_control (bytes, n, at) = _typography_control_from(bytes, n, at, FontLiterata(), 40)
+implement ui_typography_control (bytes, n, at) = _typography_control_from(bytes, n, at, FontLiterata(), 48)
 
 (* The reading settings sheet's tabs (#288), each by its tab's id
    (sheet_tab_control_id); sheet_tab_panel_id is the panel it shows *)

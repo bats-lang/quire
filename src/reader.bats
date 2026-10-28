@@ -22,6 +22,7 @@ staload "pages.sats"
 staload "paths.sats"
 staload "overlay.sats"
 staload "ui.sats"
+staload "reader_act.sats"
 staload "notice.sats"
 staload "layer.sats"
 staload "image_viewer.sats"
@@ -43,6 +44,7 @@ staload "entity.sats"
 staload "mem.sats"
 staload "clock.sats"
 staload "screen_controls.sats"
+staload "reading_ruler.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -1988,6 +1990,14 @@ fn _page_waiter_resolve (): void =
   | ~PageWaiter(waiting) => $P.resolve<int>(waiting, 0)
   | ~NoPageWaiter() => ()
 
+(* The page as the reading ruler holds its lines (keyword: reading ruler) *)
+fn _ruler_view (): ruler_view =
+  if _is_fixed() then RulerNone()
+  else (case+ _writing() of
+    | VerticalRightToLeft() => RulerDownRight()
+    | VerticalLeftToRight() => RulerDownLeft()
+    | Horizontal() => if _scrolled() then RulerScrolled() else if _is_rtl() then RulerPagedBack() else RulerPaged())
+
 (* A page of page_count is the one shown: the reader's place, and everything that
    says it, without moving the page *)
 fn _place_shown {page_count:pos}{page:nat | page < page_count}{chapter,chapter_count:nat}
@@ -2003,6 +2013,7 @@ fn _place_shown {page_count:pos}{page:nat | page < page_count}{chapter,chapter_c
   (* scrolled, the last screen offers the next chapter *)
   val () = ui_show("next-chapter", (if _scrolled() then (if page + 1 >= page_count then chapter < chapter_count else false) else false))
   val () = _record_position()
+  val () = ruler_page_shown(_ruler_view())
 in _page_waiter_resolve() end
 
 (* Whether a layout made anew for the bars (reader_relayout_for_bars) is under way: it does not hide them *)
@@ -4941,9 +4952,10 @@ fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
             if count_now <= 0 then ()
             (* opening, laid out as when the place was kept (its face
                come in): that very page *)
+            (* settle: showing the page clears the node kept, so it is kept again for the next count *)
             else if count_now <> page_count && _opening_pages(count_now) then let
               val () = _measure_pagination()
-            in _show_target(!_dated_page, _opening_anchor()) end
+            in _show_kept(!_dated_page, _opening_anchor()) end
             else if count_now <> page_count then let
               val @(target_page, target_anchor) = _place_kept(page, page_count)
               val () = _measure_pagination()
@@ -5246,8 +5258,8 @@ in
     val () = _measure_pagination()
     val count_now = (case+ reading_get() of @(_, page_count, _, _) => (page_count: Int)): Int
   in
-    (* opening, laid out as when the place was kept: that very page *)
-    if _opening_pages(count_now) then _show_target(!_dated_page, _opening_anchor())
+    (* opening, laid out as when the place was kept: that very page, its node kept again (settle) *)
+    if _opening_pages(count_now) then _show_kept(!_dated_page, _opening_anchor())
     else _show_kept(page, anchor)
   end
 end
@@ -6109,7 +6121,8 @@ implement reader_scrolled () =
         else let
           val () = !_scroll_set := top
           val () = !_anchor_kept := ~1
-        in _record_position() end)
+          val () = _record_position()
+        in ruler_page_shown(_ruler_view()) end)
       (* the reader moved: a restored place no longer holds them *)
       else let
         val () = !_anchor_kept := ~1
@@ -6123,11 +6136,13 @@ implement reader_scrolled () =
    the back button goes *)
 #pub fun page_next(): void
 implement page_next() = let
+  val () = hint_hide(ActPageTurn())
   val () = reader_back_rest()
 in _page_next() end
 
 #pub fun page_prev(): void
 implement page_prev() = let
+  val () = hint_hide(ActPageTurn())
   val () = reader_back_rest()
 in _page_previous() end
 
@@ -6135,6 +6150,7 @@ in _page_previous() end
    first page; nothing when there is none *)
 #pub fun reader_chapter_step (direction: Int): void
 implement reader_chapter_step (direction) = let
+  val () = hint_hide(ActPageTurn())
   val () = reader_back_rest()
 in
   case+ reading_get() of
@@ -7016,6 +7032,7 @@ implement $P.dispose<turned>(_) = ()
 #pub fun reader_turn_on (): $P.promise(turned, $P.Chained)
 
 implement reader_turn_on () = let
+  val () = hint_hide(ActPageTurn())
   val () = reader_back_rest()
   val () = !_anchor_kept := ~1
 in

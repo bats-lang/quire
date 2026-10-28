@@ -21,7 +21,7 @@
 
 import { test, expect } from './fixtures.js';
 import {
-  start, readBook, place, showChrome, chapterTitle, control, dialog, jumpBack, bookPage, visibleText,
+  start, readBook, place, showChrome, chapterTitle, expectChapter, control, dialog, jumpBack, bookPage, visibleText,
   selectText, marks, selectionButton, indicator,
 } from './helpers.js';
 import { folderBooks } from './folder-books.js';
@@ -52,14 +52,14 @@ for (const [name, first, second] of [['idpf', 'Alpha', 'Beta'], ['deep', 'Gamma'
   test(`${name}: the book opens, its picture shows, and its contents and page list go to their places`, async ({ page }) => {
     const errors = await start(page);
     await readBook(page, folderBooks[name].opts);
-    await expect(chapterTitle(page)).toHaveText(first);
+    await expectChapter(page, first);
     // ../images/a.png (../../images/a.png) from the chapter's folder
     await expect.poll(() => pictures(page)).toEqual(['picture']);
     // nav hrefs text/ch1.xhtml#x, relative to the nav document
     await goToEntry(page, `${first} x`);
     await expect.poll(() => visibleText(page)).toContain(`Target x of ${first.toLowerCase()}`);
     await goToEntry(page, `${second} y`);
-    await expect(chapterTitle(page)).toHaveText(second);
+    await expectChapter(page, second);
     await expect.poll(() => visibleText(page)).toContain(`Target y of ${second.toLowerCase()}`);
     // the page list's hrefs are relative to the nav document too
     await openContents(page);
@@ -68,11 +68,11 @@ for (const [name, first, second] of [['idpf', 'Alpha', 'Beta'], ['deep', 'Gamma'
     await expect(pages).toHaveText(['1', '2']);
     await pages.nth(0).click();
     await expect(contents(page)).toBeHidden();
-    await expect(chapterTitle(page)).toHaveText(first);
+    await expectChapter(page, first);
     await openContents(page);
     await contents(page).getByRole('tab', { name: 'Pages' }).click();
     await pages.nth(1).click();
-    await expect(chapterTitle(page)).toHaveText(second);
+    await expectChapter(page, second);
     expect(await place(page)).toMatchObject({ p: 1 });
     expect(errors).toEqual([]);
   });
@@ -81,13 +81,13 @@ for (const [name, first, second] of [['idpf', 'Alpha', 'Beta'], ['deep', 'Gamma'
 test('chapter hrefs with ./, %20, +, and non-ASCII names are found in the archive, shown, and reached from the contents', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, folderBooks.names.opts);
-  await expect(chapterTitle(page)).toHaveText('Plain');
+  await expectChapter(page, 'Plain');
   const chapters = [
     ['Dot', 'Dot'], ['Space', 'Space'], ['Plus', 'Plus'], ['Umlaut', 'Umlaut'], ['Raw', 'Raw'], ['Plain', 'Plain'],
   ];
   for (const [label, heading] of chapters) {
     await goToEntry(page, label);
-    await expect(chapterTitle(page)).toHaveText(label);
+    await expectChapter(page, label);
     await expect.poll(() => visibleText(page)).toContain(heading);
   }
   // an entry with a fragment
@@ -111,7 +111,7 @@ test('chapter hrefs with ./, %20, +, and non-ASCII names are found in the archiv
 test('a chapter whose href climbs out of the container is missing, a path-absolute one is the container\'s own, and the book opens', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, folderBooks.outside.opts);
-  await expect(chapterTitle(page)).toHaveText('First');
+  await expectChapter(page, 'First');
   // the missing chapter leads nowhere: the panel stays and nothing is said
   await openContents(page);
   await rows(page).filter({ hasText: 'Lost' }).click();
@@ -121,7 +121,7 @@ test('a chapter whose href climbs out of the container is missing, a path-absolu
   // /OEBPS/three.xhtml is found from the container's root
   await rows(page).filter({ hasText: 'Third' }).click();
   await expect(contents(page)).toBeHidden();
-  await expect(chapterTitle(page)).toHaveText('Third');
+  await expectChapter(page, 'Third');
   await expect.poll(() => visibleText(page)).toContain('Third');
   await expect(page.getByRole('alert')).toBeHidden();
   expect(errors).toEqual([]);
@@ -137,13 +137,13 @@ for (const [href, text, chapter, shown] of links) {
   test(`a link to ${href} goes where it names, and Back returns`, async ({ page }) => {
     const errors = await start(page);
     await readBook(page, folderBooks.links.opts);
-    await expect(chapterTitle(page)).toHaveText('Start');
+    await expectChapter(page, 'Start');
     await link(page, text).click();
-    await expect(chapterTitle(page)).toHaveText(chapter);
+    await expectChapter(page, chapter);
     await expect.poll(() => visibleText(page)).toContain(shown);
     await expect(jumpBack(page)).toBeVisible();
     await jumpBack(page).click();
-    await expect(chapterTitle(page)).toHaveText('Start');
+    await expectChapter(page, 'Start');
     await expect.poll(() => visibleText(page)).toContain('Go far');
     await expect(jumpBack(page)).toBeHidden();
     expect(errors).toEqual([]);
@@ -157,7 +157,7 @@ test('a noteref to ../notes/notes.xhtml#n1 opens the note from a chapter in anot
   await expect(note(page)).toBeVisible();
   await expect(note(page)).toContainText('Note one lives in a folder of its own.');
   await note(page).getByRole('button', { name: 'Go to note' }).click();
-  await expect(chapterTitle(page)).toHaveText('Notes');
+  await expectChapter(page, 'Notes');
   await expect(jumpBack(page)).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -175,10 +175,10 @@ test('ids two chapters share: a noteref, the contents, search and highlights eac
   await note(page).getByRole('button', { name: 'Close' }).click();
   // the contents entries to ch1.xhtml#n1 and ch2.xhtml#n1 go to their own chapter
   await goToEntry(page, 'Note 1');
-  await expect(chapterTitle(page)).toHaveText('Number 1');
+  await expectChapter(page, 'Number 1');
   await expect.poll(() => visibleText(page)).toContain('The note of chapter 1.');
   await goToEntry(page, 'Note 2');
-  await expect(chapterTitle(page)).toHaveText('Number 2');
+  await expectChapter(page, 'Number 2');
   await expect.poll(() => visibleText(page)).toContain('The note of chapter 2.');
   // the page holds the chapter shown and nothing of the other
   const ids = await bookPage(page).evaluate(doc => ({
@@ -196,7 +196,7 @@ test('ids two chapters share: a noteref, the contents, search and highlights eac
   await expect(panel.getByRole('status')).toHaveText('2 results');
   const results = panel.getByRole('region', { name: 'Results' }).getByRole('button');
   await results.nth(1).click();
-  await expect(chapterTitle(page)).toHaveText('Number 2');
+  await expectChapter(page, 'Number 2');
   await expect.poll(() => marks(page)).toMatchObject({ size: 1, text: 'needle' });
   await page.getByRole('toolbar', { name: 'Search results' }).getByRole('button', { name: 'Close search' }).click();
   // a highlight in each chapter is its own: each chapter paints only its one
@@ -226,7 +226,7 @@ test('a stylesheet and a style of one chapter do not size another\'s text', asyn
   });
   const one = await sizes();
   await goToEntry(page, 'Styled two');
-  await expect(chapterTitle(page)).toHaveText('Styled two');
+  await expectChapter(page, 'Styled two');
   const two = await sizes();
   // the book's colours are not applied (#411), and its sizes are in proportion to the text
   // (#431): chapter 1's own 60px reaches the text as the largest size, three times the
@@ -274,10 +274,10 @@ const markedNode = page => page.evaluate(() => {
 test('ids two chapters share: a search hit and a highlight are at their own chapter\'s content node', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, folderBooks.repeated.opts);
-  await expect(chapterTitle(page)).toHaveText('Number 1');
+  await expectChapter(page, 'Number 1');
   const top1 = await nodeOfText(page, 'Top of 1');
   await goToEntry(page, 'Number 2');
-  await expect(chapterTitle(page)).toHaveText('Number 2');
+  await expectChapter(page, 'Number 2');
   const top2 = await nodeOfText(page, 'Top of 2');
   // the paragraph before chapter 2's heading moves the same words to other content nodes
   expect(top1).toMatch(/^c\d+$/);
@@ -289,7 +289,7 @@ test('ids two chapters share: a search hit and a highlight are at their own chap
   await page.keyboard.type('needle');
   await expect(panel.getByRole('status')).toHaveText('2 results');
   await panel.getByRole('region', { name: 'Results' }).getByRole('button').nth(1).click();
-  await expect(chapterTitle(page)).toHaveText('Number 2');
+  await expectChapter(page, 'Number 2');
   await expect.poll(() => marks(page)).toMatchObject({ size: 1, text: 'needle' });
   expect(await markedNode(page)).toBe(await nodeOfText(page, 'Target t of chapter 2'));
   await page.getByRole('toolbar', { name: 'Search results' }).getByRole('button', { name: 'Close search' }).click();
@@ -322,7 +322,7 @@ test('a stylesheet that two chapters both link sizes the text of each', async ({
   });
   const one = await sizes();
   await goToEntry(page, 'Shared two');
-  await expect(chapterTitle(page)).toHaveText('Shared two');
+  await expectChapter(page, 'Shared two');
   const two = await sizes();
   // the sheet's 72px rule reaches each chapter's text, held to three times the reader's size (#431)
   expect(parseFloat(one.big)).toBe(3 * parseFloat(one.plain));

@@ -1,0 +1,9 @@
+function _static_ruler_veil_other_theme
+line 3
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(palette_theme); S2Eapp(S2Ecst(PaletteLight); ))].
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(PaletteDark); )
+The needed term is: S2Eapp(S2Ecst(PaletteLight); )
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(palette_theme); S2Eapp(S2Ecst(PaletteDark); ))
+The needed term is: S2Eapp(S2Ecst(palette_theme); S2Eapp(S2Ecst(PaletteLight); ))

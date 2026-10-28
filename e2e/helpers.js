@@ -298,10 +298,28 @@ export const control = (page, name) =>
 /** The button that goes back after a jump */
 export const jumpBack = page => page.getByRole('button', { name: '↩ Back' });
 
-/** Opens the book whose card has text, and waits for its first page */
-export async function openBook(page, text) {
+/** Opens the book whose card has text, and waits for its first page; reader acts: the bars are brought up unless asOpened */
+export async function openBook(page, text, { asOpened = false } = {}) {
   await card(page, text).click();
   await pageShown(page);
+  await rulerOnWhenAsked(page);
+  // reader acts: the key, not a tap, which can land on the book's content
+  if (!asOpened && !(await control(page, 'Previous page').isVisible())) {
+    await page.keyboard.press('t');
+    await expect(control(page, 'Previous page')).toBeVisible();
+  }
+}
+
+/** With QUIRE_READING_RULER set to a style's name (say Lightbox), a book just opened has the reading
+    ruler on in that style, chosen in the Look tab as a reader does (reading-ruler.spec.js, #566) */
+async function rulerOnWhenAsked(page) {
+  const style = process.env.QUIRE_READING_RULER;
+  if (!style) return;
+  await openReadingSettings(page, 'Look');
+  const sheet = readingSettings(page);
+  await sheet.getByRole('group', { name: 'Reading ruler', exact: true }).getByRole('button', { name: style, exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(sheet).toBeHidden();
 }
 
 /** Waits until the book just opened shows its page: the reader is up
@@ -313,10 +331,10 @@ export async function pageShown(page) {
 }
 
 /** Imports one book made from opts and opens it */
-export async function readBook(page, opts) {
+export async function readBook(page, opts, { asOpened = false } = {}) {
   const n = await cards(page).count();
   await importFiles(page, [epubFile(opts)], n + 1);
-  await openBook(page, opts.title);
+  await openBook(page, opts.title, { asOpened });
 }
 
 /** The page indicator read back: the chapter, page and pages. The
@@ -453,7 +471,7 @@ export async function bareFrameMs(page) {
 }
 
 /** Leaves the reader for the library, through its back arrow (in the
-    bars, which hide themselves 5 s after they are shown: bringing them
+    bars, which a page turn or a jump can take down: bringing them
     up and clicking are tried again together, as clickControl does).
 
     The page answers a tap or a click only once the task it is in has
@@ -645,7 +663,7 @@ export function triesAllowanceMs(layoutMs) {
 // still sees time pass as real time does, and `runFor` adds to it: every
 // timer due in the span fires in order, those a timer sets in turn too, and
 // the network, IndexedDB and fonts, which are not the clock's, are left
-// alone. A test waits for a moment of the app's (the bars' 5 s, the back
+// alone. A test waits for a moment of the app's (the back
 // button's 10 s, a toast's 2 s, a poll's 3 s) by running the clock to it,
 // not by waiting for it.
 
@@ -684,11 +702,22 @@ export async function runUntil(page, done, { stepMs = 1000, timeout = 30000 } = 
   }, { timeout, intervals: [50] }).toBe(true);
 }
 
-/** Clicks the bottom bar's control name, bringing the bars up first.
-    The bars hide themselves 5 s after they are shown, so a slow step
-    before the click (an audit, a loaded machine) can see them up and
-    then lose them: bringing them up and clicking are tried again
-    together until the click lands */
+/** reader acts: takes the bars down and the hint away by acts, as neither goes by itself */
+export async function bareReader(page) {
+  const bars = page.getByRole('toolbar', { name: 'Page controls' });
+  if (await bars.isVisible()) await page.keyboard.press('t');
+  const hint = page.getByText('Tap the middle for the menu.');
+  if (await hint.isVisible()) await hint.click();
+  await expect(bars).toBeHidden();
+  await expect(hint).toBeHidden();
+}
+
+/** reader acts: waits for the chapter the page indicator names, leaving the bars as they are */
+export async function expectChapter(page, title, { timeout = 10000 } = {}) {
+  await expect.poll(async () => ((await indicator(page).textContent()) ?? '').replace(/\s·\s+pages?\s.*$/s, '').trim(), { timeout }).toBe(title);
+}
+
+/** Clicks the bottom bar's control name, bringing the bars up first (reader acts, layout: tried again together) */
 export async function clickControl(page, name, { layoutMs = 0 } = {}) {
   // a click waits as long as the layout the page is in (#600, as toLibrary's
   // does): a click made behind a columns layout is answered when the layout
