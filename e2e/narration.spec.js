@@ -149,10 +149,8 @@ const shownWhenMarked = (page, text) => page.evaluate(text => window.narrationSh
 /** Brings the bars up by the keyboard (a tap on the page would be a tap
     on the text the narration reads), and clicks the control name */
 async function press(page, name) {
-  await expect(async () => {
-    if (!(await control(page, 'Previous page').isVisible())) await page.keyboard.press('t');
-    await control(page, name).click({ timeout: 2000 });
-  }).toPass({ timeout: 20000 });
+  if (!(await control(page, 'Previous page').isVisible())) await page.keyboard.press('t');
+  await control(page, name).click();
 }
 
 const readAloud = page => control(page, 'Read aloud');
@@ -273,10 +271,8 @@ test('page numbers are passed over, unless the reader asks for them; a table can
 test('a book without overlays offers reading aloud by speech, and no narration', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, { title: 'Unvoiced', author: 'Narration Tests', rawChapters: [{ body: '<p id="a">Nothing recorded.</p>' }] });
-  await expect(async () => {
-    if (!(await control(page, 'Previous page').isVisible())) await page.keyboard.press('t');
-    await expect(readAloud(page)).toBeVisible({ timeout: 1000 });
-  }).toPass({ timeout: 20000 });
+  if (!(await control(page, 'Previous page').isVisible())) await page.keyboard.press('t');
+  await expect(readAloud(page)).toBeVisible();
   await expect(control(page, 'Previous phrase')).toBeHidden();
   await expect(control(page, 'Next phrase')).toBeHidden();
   await openReadingSettings(page, 'Read aloud');

@@ -10,7 +10,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn panel_rules {left:nat | left >= 10054} (sheet: sheet(left, false, false)): [after:nat | after >= left - 10054] sheet(after, false, false)
+#pub fn panel_rules {left:nat | left >= 10076} (sheet: sheet(left, false, false)): [after:nat | after >= left - 10076] sheet(after, false, false)
 
 (* The panel frame and tabs, from .panel on *)
 fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1690} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1690] sheet(after, false, false) = let
@@ -103,7 +103,7 @@ fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1690} (sheet: sheet(left
 in sheet end
 
 (* The contents and highlights, from .pi[aria-current=true] on *)
-fn panel_rules_contents_and_highlights {left:nat | left >= 3509} (sheet: sheet(left, false, false)): [after:nat | after >= left - 3509] sheet(after, false, false) = let
+fn panel_rules_contents_and_highlights {left:nat | left >= 3531} (sheet: sheet(left, false, false)): [after:nat | after >= left - 3531] sheet(after, false, false) = let
   val sheet = rule(sheet, ".pi[aria-current=true]")
   val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = surf(S_fg_line | sheet, RoleText(), RoleLine())
@@ -197,6 +197,8 @@ fn panel_rules_contents_and_highlights {left:nat | left >= 3509} (sheet: sheet(l
   val sheet = close(sheet)
   val sheet = rule(sheet, ".hbtns")
   val sheet = lay(sheet, Display(), "flex")
+  (* a row's buttons wrap at a large font scale (keyword: font-scale) *)
+  val sheet = lay(sheet, FlexWrap(), "wrap")
   val sheet = spaced(sheet, Gap(), SpaceSmall())
   val sheet = spaced(sheet, MarginTop(), SpaceSmall())
   val sheet = close(sheet)

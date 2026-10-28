@@ -19,15 +19,10 @@ export async function readMinutes(page, n) {
   }
 }
 
-/** Bookmarks the page shown. The bars hide 5 s after they were last
-    shown, which a loaded machine can pass between one step and this: the
-    bars are brought up and the click made again until it lands, as
-    clickControl does for the bottom bar's buttons */
+/** Bookmarks the page shown (reader acts: the bars are brought up first) */
 export async function bookmarkPage(page) {
-  await expect(async () => {
-    await showChrome(page);
-    await page.getByRole('button', { name: 'Bookmark this page' }).click({ timeout: 2000 });
-  }).toPass({ timeout: 20000 });
+  await showChrome(page);
+  await page.getByRole('button', { name: 'Bookmark this page' }).click();
 }
 
 /** A highlight of the first words of the chapter shown, with a note */
