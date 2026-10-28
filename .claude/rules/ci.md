@@ -402,6 +402,11 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   a spec or a static fixture runs that group too where the machine can (`tests/static/run.sh`,
   `gen-pwa test -- <spec>`); the rest of the population is CI's. Playwright
   1.58 or later is required (`.claude/rules/e2e.md`).
+  **The tight loop** (keyword: e2e loop): to edit, build and test again, gen-pwa is not rebuilt (it
+  changes only with `src/bin/gen-pwa.bats` or the way the pwa is assembled): `bats build --only debug
+  --only wasm`, then `cp dist/debug/quire.wasm dist/pwa/app.wasm` (the two are byte-identical), then
+  `./dist/debug/gen-pwa test -- <spec>`. The full build, gen-pwa and `scripts/sync-clients.sh` are for
+  the final evidence, when the Done-when names it.
 
 ## Running the e2e flight recorder on a local machine: tracefs and a non-root user (quire#765)
 
