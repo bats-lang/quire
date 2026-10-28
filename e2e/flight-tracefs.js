@@ -7,6 +7,7 @@
  */
 
 import { chmodSync, closeSync, createWriteStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { readFile, readdir } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
@@ -248,6 +249,22 @@ export function stats({ instance }) {
     let written = 0;
     for (const cpu of readdirSync(`${instance}/per_cpu`)) {
       const text = readFileSync(`${instance}/per_cpu/${cpu}/stats`, 'utf8');
+      written += Number((/^entries: (\d+)/m.exec(text) || [0, 0])[1]) + Number((/^overrun: (\d+)/m.exec(text) || [0, 0])[1]);
+    }
+    return { on, written };
+  } catch (error) { return { error: String((error && error.code) || (error && error.message) || error) }; }
+}
+
+/**
+ * `stats` off the event loop (heartbeat, quire#972): a tracefs open waits on the lock every ring instance of the host shares and a file read on the disk,
+ * in uninterruptible sleep, so a caller that must keep beating asks here and carries the last answer while this one is out.
+ */
+export async function statsAsync({ instance }) {
+  try {
+    const on = (await readFile(`${instance}/tracing_on`, 'utf8')).trim();
+    let written = 0;
+    for (const cpu of await readdir(`${instance}/per_cpu`)) {
+      const text = await readFile(`${instance}/per_cpu/${cpu}/stats`, 'utf8');
       written += Number((/^entries: (\d+)/m.exec(text) || [0, 0])[1]) + Number((/^overrun: (\d+)/m.exec(text) || [0, 0])[1]);
     }
     return { on, written };

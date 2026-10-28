@@ -8,7 +8,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, chmodSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, writeFileSync, chmodSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
@@ -118,6 +118,20 @@ function evidenceCheck(run, extra = []) {
 }
 
 const kill = (pid, signal = 'SIGKILL') => (isRoot ? process.kill(pid, signal) : spawnSync('sudo', ['-n', 'kill', `-${signal.replace('SIG', '')}`, String(pid)]));
+
+/**
+ * A pid a test is about to stop, checked to be a process of the nested run (quire#908): its working directory or an argument of its command line is
+ * inside the run's own directory. The pids come from the nested run's output; a pid that is not the run's own (the outer run's watchdog or runner,
+ * another run's) fails here, by name, before any signal, and never ends the outer run.
+ */
+export function ownOfRun(run, pid) {
+  const inside = (path) => path === run.directory || path.startsWith(`${run.directory}/`);
+  let where = '';
+  let arguments_ = [];
+  try { where = readlinkSync(`/proc/${pid}/cwd`); arguments_ = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'); } catch (gone) { throw new Error(`pid ${pid} is not a process (it ended), so it is not the nested run's`); }
+  if (!inside(where) && !arguments_.some(inside)) throw new Error(`pid ${pid} (${arguments_.join(' ').trim()}, in ${where}) is not a process of the nested run in ${run.directory}: not stopped`);
+  return pid;
+}
 
 // a ring is read a line at a time: one that recorded a whole run is larger than a string can be
 const ringFirst = async (file, pattern) => (await ringSeen(file, { found: pattern })).found;
@@ -273,9 +287,9 @@ test('heartbeat: a watchdog that is alive and stops beating fails the job at tha
   let parent = null;
   try {
     const ok = await run.until(/watchdog (\d+) beating/);
-    watchdog = Number(ok[1]);
+    watchdog = ownOfRun(run, Number(ok[1]));
     // the monitor's line names the process the runner started: on CI's user that is `sudo`, the parent of the watchdog (the heartbeat's pid)
-    parent = Number((await run.until(/the watchdog (\d+) \(child and heartbeat\)/))[1]);
+    parent = ownOfRun(run, Number((await run.until(/the watchdog (\d+) \(child and heartbeat\)/))[1]));
     const stoppedAt = Date.now();
     kill(watchdog, 'SIGSTOP'); // not killed: its process is there and its child has not exited
     await run.until(/EVIDENCE MISSING: watchdog: no heartbeat for/, 30000);
@@ -300,10 +314,12 @@ test('heartbeat: the runner and the watchdog stopped together, for longer than t
   const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '20000', QUIRE_NESTED_TIMEOUT: '60000', QUIRE_FLIGHT_BEAT_STALE_MS: '3000' });
   let watchdog = null;
   let parent = null;
-  const pids = () => [...new Set([run.child.pid, parent, watchdog].filter(Boolean))];
+  let owned = []; // only what was checked to be the nested run's is ever signalled, in the body and in the cleanup
+  const pids = () => owned;
   try {
     watchdog = Number((await run.until(/watchdog (\d+) beating/))[1]);
     parent = Number((await run.until(/the watchdog (\d+) \(child and heartbeat\)/))[1]);
+    owned = [...new Set([run.child.pid, parent, watchdog])].map((pid) => ownOfRun(run, pid));
     for (const pid of pids()) kill(pid, 'SIGSTOP');
     await new Promise((resolve) => setTimeout(resolve, 7000));
     // the runner returns first, as in the observed stall (its timer ran before the watchdog's): the monitor's tick finds the beat written before the stop
