@@ -323,6 +323,16 @@ each kind selects) and prints each path's reason in its summary. Rules:
   the ready run reports every context (`android / ...` included, which #656 keeps unskipped
   for a ready PR). Push, `workflow_dispatch`, `schedule` and `merge_group` are unchanged.
   Libraries: the condition is repository-prototype#525, their callers' types the tickets of #939.
+* **A push of a commit the merge queue passed skips the static and e2e groups (#882, keyword:
+  queue-passed; pwa#215).** `check.yml`'s `queue` job calls pwa's `queue-passed` action by commit
+  (the relock moves its pin: `relock.yml`'s `workflow-pins`) and outputs `skip`, `run_url` and
+  `reason`. The action decides by the commit alone (a `merge_group` run of this workflow, same
+  `head_sha`, `success`) and gives `skip=false` for every other event, so a schedule run, a
+  `workflow_dispatch` and a pull request run everything. `static` and `e2e` read `skip`: on `true`
+  a group is a job that runs and ends after its first step, as an unaffected group does (a skipped
+  job would fail `check`). `build`, `android` and `play-internal` never read it, so the AAB that
+  goes to Play is built and signed in the push run. `check` needs `queue`, prints its reason and
+  writes its `run_url` to the step summary. Tested: `Workflow` in `tests/static/affected_test.py`.
 * **The merge queue's group runs everything, by decision (#656).** Its diff
   (against `HEAD^1`) is one PR's, so a selection by it would be the PR's own
   and would miss what two PRs do together, which is what the queue is for
