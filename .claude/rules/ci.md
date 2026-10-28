@@ -408,25 +408,20 @@ reports `the kernel ring did not start (no tracefs, or sudo refused: see the run
   on the already-mounted path (exit 0 and no second mount), is
   `grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing`.
 * **Does the mount survive a container restart (quire#958).** It does not: tracefs is a mount, and
-  `/proc/mounts` is per boot. Whether the environment's setup script ran again after the restart
-  is **not established**. Observed after the restart of 2026-10-27/28: the boot was at
+  `/proc/mounts` is per boot. Observed after the restart of 2026-10-27/28: the boot was at
   2026-10-27 23:56:40 UTC (`uptime -s`), `grep tracefs /proc/mounts` printed nothing until the
   orchestrator ran the allowed command by hand, and the preflight failed with `PREFLIGHT FAILED:
-  kernel ring: no tracefs instances directory`. The platform's setup-script page says "New
-  sessions run the fixed script" and says nothing of a restart; the platform's own session-start
-  hook (`/root/.claude/session-start-setup-script-failure.sh`) speaks of a script that "failed when
-  the container was built", and reads the note `/root/.claude/environment-manager/setup-script-failed`,
-  which is absent here, so no failure was recorded. `/usr/local/bin/qsweep` and `slots` have the time
-  2026-10-27 01:00:51, before the restart, and are still on disk. None of this shows whether the
-  script ran at the restart and failed, or did not run. What would establish it is a line the
-  setup script writes to a log with the date (the script is the owner's, not in the repo). The
-  rule does not depend on the answer: a worker on a container that was restarted, or whose
-  preflight prints that message, runs once, as root, the allowed command
-  `grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing` (the compound form
-  `.claude/settings.json` allows on line 9; it does nothing where tracefs is mounted), checks
-  `grep tracefs /proc/mounts`, and runs the spec again. The preflight's message
-  (`e2e/flight-tracefs.js`), `worker.md` and the worker brief (`.claude/orchestration.md`,
-  "Briefs and the machine") carry the same command. No other `mount` is run.
+  kernel ring: no tracefs instances directory`. Why it was unmounted (the environment's setup script
+  did not run at the restart, or ran and failed) is not established, and an agent in the container
+  cannot establish it: the container's logs hold nothing after the boot that the script would leave
+  (no apt or dpkg entry since 2026-10-21, no shell history, and the mount line leaves no trace when
+  it runs). It is quire#965, for the owner. The rule does not depend on the answer: a worker on a
+  container that was restarted, or whose preflight prints that message, runs once, as root, the
+  allowed command `grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing`
+  (the compound form `.claude/settings.json` allows on line 9; it does nothing where tracefs is
+  mounted), checks `grep tracefs /proc/mounts`, and runs the spec again. The preflight's message
+  (`e2e/flight-tracefs.js`), `worker.md` and the worker brief (`.claude/orchestration.md`, "Briefs
+  and the machine") carry the same command. No other `mount` is run.
 * **Who runs the specs.** As uid 0, the specs run without any `sudo`. A run as another user
   (comment 6329897260 ran as user `quireci`, `sudo -u quireci -H env CI=true ...`) needs a user
   and a `sudo -n` grant. The ticket records no `useradd` and no `sudoers.d` command for that user,
