@@ -423,7 +423,7 @@ jobs:
           # alone on one worker first, then the others; each run's JSON
           # report in the timings directory (serial.json, parallel.json)
           mkdir -p "$RUNNER_TEMP/e2e-timings"
-          ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/e2e-timings" -- --reporter=list,html,json,./e2e/evidence-reporter.js $specs
+          ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/e2e-timings" -- --repeat-each 20 --reporter=list,html,json,./e2e/evidence-reporter.js $specs
         env:
           PLAYWRIGHT_HTML_OPEN: never
 
