@@ -1067,7 +1067,7 @@ class MechanicalBrief(unittest.TestCase):
     def brief(self, extra=()):
         lines = self.template()
         self.assertEqual([line.split(':')[0] for line in lines], ['Mechanical fix', 'No checks', 'Push', 'Design check', 'Expects', 'Sample'])
-        return 'Follow the worker.md rules; finish inside the turn; do not merge; do not write the review.\n\n' + '\n'.join(lines + list(extra)) + '\n\nThe tests pass.\n'
+        return 'Follow the worker.md rules; finish inside the turn; do not merge; do not write the review.\n\n' + '\n'.join(lines + ['No split: whole.', 'Compiler: /home/user/bats-pinned/bin/bats.'] + list(extra)) + '\n\nThe tests pass.\n'
 
     def test_the_template_in_orchestration_md_is_a_brief_the_lint_accepts(self):
         self.assertEqual(gl.lint_brief(self.brief(), TICKET, PHRASES), [])

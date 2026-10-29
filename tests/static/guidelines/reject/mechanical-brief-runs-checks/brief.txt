@@ -6,5 +6,7 @@ Push: push the branch with qsweep push origin fix-1.
 Expects: none, the edit is the text the log prints.
 Sample: none, no population is checked.
 Run bats check and then the fixture before the push.
+No split: whole.
+Compiler: /home/user/bats-pinned/bin/bats.
 
 The tests pass.
