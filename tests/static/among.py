@@ -32,7 +32,7 @@ HEADER = 'pattern match is nonexhaustive:'
 
 def problem(expect):
     """Why an expect that says nonexhaustive is not the `among` form, or None."""
-    if HEADER not in expect:
+    if 'pattern match is nonexhaustive' not in expect:
         return None
     lines = expect.rstrip('\n').split('\n')
     rest = lines[2:]
