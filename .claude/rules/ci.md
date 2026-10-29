@@ -14,7 +14,7 @@ paths:
 
 ## CI is pinned
 
-The pins and the relock are in CLAUDE.md. Specifics:
+The rule that every input is pinned, and the relock, are pitboss's `ci.md`; quire's pin names and its Dependabot and relock split are in CLAUDE.md, "CI is pinned". Specifics:
 
 * **The runner label** (#667): every job runs on `ubuntu-24.04`, written in each
   job's `runs-on` (quire has no reusable workflow to write it once in);
@@ -236,7 +236,7 @@ Both jobs that use Node install it with pwa's `e2e-setup` action (called by
 commit; `npm ci`, retried on a dropped connection, Playwright checked against
 `playwright-minimum`). Quire holds no install logic of its own (CLAUDE.md, "Pipeline and tooling improvements belong in bats or pwa").
 
-The owner ruled that every pin moves from the relock and that no bot opens a pull request (CLAUDE.md, "CI is pinned"); #996 moves these two to the relock and deletes `.github/dependabot.yml`. Until it does, which tool moves which pin here (#760; CLAUDE.md, "CI is pinned"): Dependabot
+The owner ruled that every pin moves from the relock and that no bot opens a pull request (pitboss's `ci.md`); #996 moves these two to the relock and deletes `.github/dependabot.yml`. Until it does, which tool moves which pin here (#760; CLAUDE.md, "CI is pinned"): Dependabot
 (`.github/dependabot.yml`, weekly, `cooldown` 7 days) moves the npm versions and `package-lock.json`
 of the root `package.json`.
 
@@ -334,7 +334,8 @@ each kind selects) and prints each path's reason in its summary. Rules:
   `e2e`; only `play-internal` needs `android`), a change of the branch
   protection that is an admin's;
   tested: `Workflow` in `tests/static/affected_test.py`.
-* **A draft PR runs no job (#939, keyword: draft).** `check.yml` has `types: [opened,
+* **The draft condition (#939, keyword: draft; the rule that a draft runs no costly job is
+  pitboss's `ci.md`).** `check.yml` has `types: [opened,
   synchronize, reopened, ready_for_review]` (GitHub's default three plus the transition to ready,
   so marking ready runs the check on the head) and `plan`, `build` and `check` carry
   `github.event_name != 'pull_request' || !github.event.pull_request.draft`; `static`, `e2e` and
@@ -406,9 +407,6 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   for each fixture, kept by its memo), and the exact form replaces the staload walk. The PR's Evidence has
   the command and its output; a reviewer sends back a PR without it. Tested: `LocalRun` and `LocalCommand`
   in `tests/static/affected_test.py`; the brief line: `tests/static/guidelines.py` (`WORKER_LINES`).
-* **A run over a population is a sample** (quire#751): about 10 minutes, the members drawn at random
-  with a seed that is printed (`python3 -c 'import random; r = random.Random(SEED); ...'`), and the
-  PR says the sample, its seed and size and why it suffices; the whole population is CI's.
 * Two bats in one checkout take turns (a lock on `bats.toml`). Two checkouts take turns by
   bats's opt-in machine-wide slots: with `BATS_SLOTS=N` (1 to 64) `check`, `build`, `test` and
   `run`'s build each hold one of N `flock` files in `BATS_LOCK_DIR`. `gen-pwa test` uses the

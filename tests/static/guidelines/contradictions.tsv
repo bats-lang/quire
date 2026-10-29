@@ -2,7 +2,7 @@
 #   regex A, regex B (case-insensitive), an example of A, an example of B, what to do
 # A pair is found when A matches in one file and B in another (or the same) after code spans are removed.
 left to CI and said in the PR	is not reported as a gap	what it cannot run is left to CI and said in the PR	What CI runs is CI's and is not reported as a gap	Say once what a PR reports about what CI runs.
-a p1 is not started while a p0 is open	p1 or lower only when	a p1 is not started while a p0 is open	takes a p1 or lower only when no p0 exists	Align the slot rules to CLAUDE.md's priority order.
+a p1 is not started while a p0 is open	p1 or lower only when	a p1 is not started while a p0 is open	takes a p1 or lower only when no p0 exists	Align the slot rules to the priority order of pitboss's rules.md, Tickets.
 you own CI until	not necessarily you	You own CI until it is green	A red CI is fixed by an author, not necessarily you	State who owns CI once.
 nothing else in this file is the owner'?s	\(owner, [0-9-]+\)[^\n]*removes a worktree	Nothing else in this file is the owner's word	(owner, 2026-10-21) The orchestrator removes a worktree only when	An orchestrator rule is not marked as the owner's.
-the orchestrator removes a (finished )?worktree	nobody deletes	The orchestrator removes a finished worktree only when the disk needs it	Nobody deletes the persistent checkout	One rule for the persistent checkout: nobody deletes it; at 90 percent disk only an older merged worktree goes (orchestration.md, Checkouts).
+the orchestrator removes a (finished )?worktree	nobody deletes	The orchestrator removes a finished worktree only when the disk needs it	Nobody deletes the persistent checkout	One rule for the persistent checkout: nobody deletes it; at 90 percent disk only an older merged worktree goes (pitboss rules.md, Checkouts and disk).
