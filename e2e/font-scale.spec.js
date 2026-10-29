@@ -31,6 +31,7 @@ import {
 import { walkEveryScreen, appPlayed } from './walk.js';
 import { fits } from './fits.js';
 import { launch, relaunch, rested } from './relaunch.js';
+import { scaledBy } from './font-scale.js';
 
 const SCALES = [130, 200];
 
@@ -45,14 +46,6 @@ function voicesPlayed() {
   Object.defineProperty(window, 'speechSynthesis', { value: {
     getVoices: () => voices, speak() {}, cancel() {}, pause() {}, resume() {}, addEventListener() {},
   } });
-}
-
-/** The script that makes every text size of the page scale percent of
-    itself, before the app starts */
-function scaledBy(percent) {
-  // (a constructable style sheet: the app's content security policy
-  // refuses a <style> element made by a script, not the CSSOM)
-  return `(() => { const sheet = new CSSStyleSheet(); sheet.replaceSync('html { text-size-adjust: ${percent}%; -webkit-text-size-adjust: ${percent}%; }'); document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]; })();`;
 }
 
 /** The size of the text of a chapter's first paragraph, in pixels */

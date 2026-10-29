@@ -2718,13 +2718,18 @@ fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
       if _in_reader() then let val () = reader_save() in 0 end else 0)
 in listeners end
 
-(* The toolbar's top: above the selection (with the gap Flutter's
-   TextSelectionToolbar keeps, 8 px), else below its end handle, which
-   hangs under the selection, clear of it by 20 px (Firefox for Android
-   moves its toolbar 20dp off the selection for the same reason). The
-   stylesheet keeps it inside the window and the safe area (quire#428) *)
+(* The toolbar's top, outside the band Android's floating selection menu
+   is drawn in (keyword: selection-menu-band, ActionMode.TYPE_FLOATING:
+   about 48 dp, in the strip above the selection's top edge, else below its
+   handles). Above the band, with the gap Flutter's TextSelectionToolbar
+   keeps (8 px), when the toolbar fits there; else, with the menu above,
+   below the end handle, which hangs under the selection, clear of it by
+   20 px (Firefox for Android moves its toolbar 20dp off the selection for
+   the same reason); else, with the menu below the handles, below the menu.
+   The stylesheet keeps it inside the window and the safe area (quire#428) *)
 #define TOOLBAR_GAP 8
 #define HANDLE_CLEARANCE 20
+#define SELECTION_MENU_BAND 48
 fn _toolbar_place (): void = let
   val () = $DR.get_selection_rect()
   val selection_top = $DR.get_measure_y()
@@ -2735,8 +2740,12 @@ fn _toolbar_place (): void = let
      (a probe the stylesheet makes that tall) *)
   val () = ui_measure("selection-toolbar-floor")
   val floor = $DR.get_measure_h()
-  val above = selection_top - TOOLBAR_GAP - height
-  val top = (if above >= floor then above else selection_bottom + HANDLE_CLEARANCE): Int
+  val above_band = selection_top - SELECTION_MENU_BAND - TOOLBAR_GAP - height
+  val below_handles = selection_bottom + HANDLE_CLEARANCE
+  val menu_above = selection_top - SELECTION_MENU_BAND >= floor
+  val top = (if above_band >= floor then above_band
+    else if menu_above then below_handles
+    else below_handles + SELECTION_MENU_BAND + TOOLBAR_GAP): Int
 in ui_toolbar_at(_clamp(top, 0, 10000), _clamp(height, 0, 10000)) end
 
 (* The toolbar shows view's row; its height changes, so it is placed again *)
