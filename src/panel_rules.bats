@@ -384,6 +384,7 @@ fn panel_rules_settings_sheet {left:nat | left >= 2771} (sheet: sheet(left, fals
   val sheet = close(sheet)
 in sheet end
 
+(* fixture: the-setting-rows-from-srow-on *)
 (* The setting rows, from .srow on *)
 fn panel_rules_setting_rows {left:nat | left >= 1592} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1592] sheet(after, false, false) = let
   val sheet = rule(sheet, ".srow")

@@ -30,6 +30,7 @@ fn dim_rule {number:palette}{strength:nat | strength <= 100}{left:nat | left >= 
   val () = raw(sheet, "%,transparent);")
 in close(sheet) end
 
+(* fixture: the-band-and-the-veils-are *)
 (* The band and the veils are laid over the text area (inside the paddings the page keeps clear, so the footer is never dimmed), by the placement the reader writes (reading_ruler.bats, style-ruler); the style chosen is the class of ruler. Neither takes a tap *)
 fn ruler_rules {left:nat | left >= 1403} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1403] sheet(after, false, false) = let
   val sheet = rule(sheet, ".ruler")

@@ -165,8 +165,8 @@ effect is never a `harm`.
 
 ## Failures are said, never dropped
 
-What fails is said
-(`src/notice.bats`; see `backup-errors.md`). A
+The rule that what fails is said is pitboss's (`engineering.md`, "Failures and
+outcomes are said"); quire says it in `src/notice.bats` (see `backup-errors.md`). A
 write of the reader's own data ends in `save_checked`, which says once a session
 that storage may be full; a chapter that cannot be shown leaves the reader on
 the page it was on (`_jump_checked`), or, as a book opens, back in the library.

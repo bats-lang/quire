@@ -52,6 +52,7 @@ in
   else length
 end
 
+(* fixture: the-zoom-now *)
 (* The zoom now *)
 val _zoom = ref<int>(ZOOM_FIT)
 

@@ -321,6 +321,7 @@ implement book_of_image {book_value} (image) =
       val number_text_directions = int32_copy(image_text_directions)
     in BookV(list_author, number_id_high, number_id_low, number_collections, number_collections_modified, number_minutes_elsewhere, number_pages_elsewhere, number_finished_at, number_finished_modified, number_position, number_chapter, number_chapters, number_page, number_pages, number_anchor, number_place_modified, number_place_declined, list_series, number_series_number, number_shelf, number_added, number_opened, number_shelf_modified, number_file_size, number_cover, number_done, number_minutes_read, number_pages_read, list_title, number_progress_weighted, number_series_position, number_text_directions) end
 
+(* fixture: the-image-of-a-stored-book *)
 (* The image of a stored book, as read (keyword: library-records) *)
 #pub fun book_record_image {book_value:bookx}{format_version,least_version:int}{kept_extras:extras} (record: !bookrecord(book_value, format_version, least_version, kept_extras)): book_image(book_value)
 

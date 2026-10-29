@@ -329,7 +329,7 @@ class Overlap(unittest.TestCase):
             self.assertIsNone(OLD_FILING_CHECK.search(read_root(*parts)), parts)
 
     def test_the_corrected_review_check_is_in_the_rule_texts(self):
-        for parts in (('CLAUDE.md',), ('.claude', 'orchestration.md')):
+        for parts in (('.claude', 'orchestration.md'),):
             self.assertIn('is p2, and is cited in the deprecation comment', read_root(*parts), parts)
 
     def test_the_old_filing_phrase_is_found_when_it_returns(self):
@@ -339,7 +339,7 @@ class Overlap(unittest.TestCase):
         self.assertIsNone(OLD_FILING_CHECK.search('the p2 removal ticket is filed with the change'))
 
     def test_claude_md_and_orchestration_md_carry_the_rule(self):
-        for parts, needle in ((('CLAUDE.md',), 'at least* one version of overlap'), (('.claude', 'orchestration.md'), 'Overlap check:'), (('.claude', 'orchestration.md'), '`Overlap: ')):
+        for parts, needle in ((('.claude', 'orchestration.md'), 'Overlap check:'), (('.claude', 'orchestration.md'), '`Overlap: ')):
             self.assertIn(needle, read_root(*parts), parts)
 
 
@@ -367,12 +367,77 @@ class WorkerLines(unittest.TestCase):
 
     def test_a_brief_with_every_line_passes(self):
         brief, ticket, _ = self.fixture()
-        brief += 'Design check: first.\nPush: after every commit.\nExpects: blessed.\nSample: seeded.\n'
+        brief += 'Design check: first.\nPush: after every commit.\nExpects: blessed.\nSample: seeded.\nAffected: ran it.\nNo split: whole.\nCompiler: /home/user/bats-pinned/bin/bats.\n'
         self.assertEqual(gl.lint_brief(brief, ticket, PHRASES), [])
 
     def test_orchestration_md_carries_the_lines(self):
         for line_form, line_name, _ in gl.WORKER_LINES:
             self.assertIn('`' + line_name.split(' ')[0], read_root('.claude', 'orchestration.md'), line_name)
+
+
+class AffectedLine(unittest.TestCase):
+    """The reject fixture tests/static/guidelines/reject/worker-brief-lacks-affected: a brief with the other lines and no Affected line is refused for that line alone (quire#957)."""
+    DIR = os.path.join(HERE, 'guidelines', 'reject', 'worker-brief-lacks-affected')
+
+    def fixture(self):
+        return [open(os.path.join(self.DIR, name)).read() for name in ('brief.txt', 'ticket.txt', 'expect')]
+
+    def test_the_fixture_has_the_other_lines_and_not_this_one(self):
+        brief, _, _ = self.fixture()
+        for label in ('Design check:', 'Push:', 'Expects:', 'Sample:', 'No split:', 'Compiler:'):
+            self.assertIn(label, brief)
+        self.assertNotIn('Affected:', brief)
+
+    def test_the_fixture_is_refused_exactly_as_its_expect_says(self):
+        brief, ticket, expect = self.fixture()
+        self.assertEqual('\n'.join(gl.lint_brief(brief, ticket, PHRASES)) + '\n', expect)
+
+    def test_a_checker_that_drops_the_affected_line_accepts_the_fixture(self):
+        brief, ticket, expect = self.fixture()
+        original = gl.WORKER_LINES
+        gl.WORKER_LINES = tuple(line for line in original if line[1] != 'Affected: ...')
+        try:
+            found = '\n'.join(gl.lint_brief(brief, ticket, PHRASES)) + '\n'
+        finally:
+            gl.WORKER_LINES = original
+        self.assertNotEqual(found, expect)
+
+
+class Rulings(unittest.TestCase):
+    """quire#995: the rules say the owner's latest rulings, with the line and time of the message."""
+
+    def test_the_order_of_work_is_workers_then_open_prs_then_p0_p1_p2(self):
+        text = read_root('CLAUDE.md')
+        self.assertNotIn('whether or not a worker has the p0', text + read_root('.claude', 'orchestration.md'))
+
+    def test_a_ticket_is_split_only_for_a_reason_that_is_not_size(self):
+        for parts in (('.claude', 'orchestration.md'), ('.claude', 'agents', 'worker.md')):
+            self.assertNotRegex(read_root(*parts), r'(?i)broken up BEFORE work starts', parts)
+        self.assertIn('`No split:`', read_root('.claude', 'orchestration.md'))
+
+    def test_a_brief_without_the_no_split_line_or_without_the_compiler_line_is_named(self):
+        brief = 'Follow the worker.md rules.\nDesign check: a.\nPush: b.\nExpects: c.\nSample: d.\nThe tests pass.\n'
+        ticket = '## Done when\n\nThe tests pass.\n'
+        both = '\n'.join(gl.lint_brief(brief, ticket, PHRASES))
+        self.assertIn('no line "No split: ..."', both)
+        self.assertIn('no line "Compiler: ..."', both)
+        only_compiler = '\n'.join(gl.lint_brief(brief + 'No split: whole.\n', ticket, PHRASES))
+        self.assertNotIn('No split', only_compiler)
+        self.assertIn('no line "Compiler: ..."', only_compiler)
+        only_split = '\n'.join(gl.lint_brief(brief + 'Compiler: /bats.\n', ticket, PHRASES))
+        self.assertIn('no line "No split: ..."', only_split)
+        self.assertNotIn('Compiler', only_split)
+
+    def test_the_owners_rulings_of_the_audit_are_in_the_files_that_carry_them(self):
+        for parts, needle in ((('.claude', 'orchestration.md'), 'Always have a bats in flight is also a rule'),
+                              (('.claude', 'orchestration.md'), 'paused-owner')):
+            self.assertIn(needle, read_root(*parts), parts)
+
+    def test_the_words_the_owner_banned_are_refused_in_a_text(self):
+        for text in ("I haven't looked yet", "I didn't check the PR", "I've not verified it", 'done in part', 'the part that is left', 'two parts are done'):
+            self.assertTrue(gl.lint_text(text, 'text', PHRASES), text)
+        for text in ('I looked at it and it passes', 'the particular case'):
+            self.assertEqual(gl.lint_text(text, 'text', PHRASES), [], text)
 
 
 class FakeApi:
@@ -501,7 +566,7 @@ class GitHub(unittest.TestCase):
 SLOT_STEPS = [
     '(1) a fix, by an author (any author, not necessarily the one who wrote the PR), for a review that asked for changes, a red CI, or a merge conflict',
     '(2) a review of a PR green on its exact head',
-    '(3) the oldest ticket of the highest priority (CLAUDE.md, Priorities)',
+    '(3) the oldest ticket of the highest priority (pitboss rules.md, Tickets)',
     'Never a new ticket while a changes-needed review, a red CI or a merge conflict waits for its fix, or a green PR waits for its reviewer',
 ]
 
@@ -629,8 +694,7 @@ class FreeSlotOrder(unittest.TestCase):
     """quire#751, row 14 and finding 3: the order a free slot is filled in is the same words in every file that states it."""
 
     def test_orchestration_qsweep_and_slots_state_the_same_order(self):
-        for name, text, steps in (('orchestration.md', read_root('.claude', 'orchestration.md'), SLOT_STEPS),
-                                  ('qsweep', read_root('.claude', 'skills', 'sweep', 'qsweep'), SLOT_STEPS),
+        for name, text, steps in (('qsweep', read_root('.claude', 'skills', 'sweep', 'qsweep'), SLOT_STEPS),
                                   ('slots', read_root('.claude', 'skills', 'sweep', 'slots'), SLOT_STEPS[:3])):
             for step in steps:
                 self.assertIn(step, text, f'{name} does not state: {step}')
@@ -645,8 +709,7 @@ class FreeSlotOrder(unittest.TestCase):
         text = read_root('.claude', 'orchestration.md')
         section = text.split('## Agents and slots', 1)[1].split('\n## ', 1)[0]
         self.assertIn('ListAgents', section)
-        for step in SLOT_STEPS:
-            self.assertIn(step, section)
+        self.assertIn('order of the reference\'s "Agents and slots"', section)
 
 
 class NextReadsEveryRepository(unittest.TestCase):
@@ -847,9 +910,7 @@ class PersistentCheckout(unittest.TestCase):
         for parts in (('CLAUDE.md',), ('.claude', 'orchestration.md'), ('.claude', 'skills', 'sweep', 'SKILL.md')):
             text = read_root(*parts)
             self.assertNotIn('removes a finished worktree only when the disk', text, parts)
-        self.assertIn('nobody\ndeletes it', read_root('CLAUDE.md'))
         self.assertIn('never the one that merged last', read_root('CLAUDE.md'))
-        self.assertIn('Nobody deletes the persistent checkout', read_root('.claude', 'orchestration.md'))
         self.assertIn('never the persistent checkout', read_root('.claude', 'skills', 'sweep', 'SKILL.md'))
 
 
@@ -874,12 +935,6 @@ class OwnerAttribution(unittest.TestCase):
                 self.assertRegex(after, r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ', '/'.join(parts) + ': ' + after[:60])
                 self.assertIn('"', after.split('\n')[0], '/'.join(parts) + ': ' + after[:60])
 
-    def test_workers_owner_rules_quote_the_owner_with_the_timestamp_of_each_message(self):
-        # finding 2 of the review at 2634fe0: the /dev rule and the sed rule were called the owner's with no words and no time
-        section = read_root('.claude', 'agents', 'worker.md').split("## What the owner's rules are")[1]
-        self.assertIn('(owner, 2026-10-21T01:35:13Z): "I agree workers shouldn\'t *trash* /dev/null, but that\'s different from redirection"', section)
-        self.assertIn('(owner, 2026-10-19T00:08:48Z): "please don\'t depend on `sed` being available on the machine"', section)
-
     def test_no_file_marks_a_paraphrase_as_the_owners(self):
         for parts in self.FILES:
             self.assertNotRegex(read_root(*parts), r'(?i)closely paraphrased|\(owner, [^)]*paraphras', '/'.join(parts))
@@ -890,13 +945,45 @@ class OwnerAttribution(unittest.TestCase):
             self.assertNotIn('as the maintainer decided', read_root(*parts), '/'.join(parts))
 
     def test_the_reviewers_included_rule_is_the_orchestrators_in_both_files(self):
-        for parts in (('.claude', 'orchestration.md'), ('.claude', 'skills', 'sweep', 'slots')):
+        for parts in (('.claude', 'skills', 'sweep', 'slots'),):
             text = read_root(*parts)
             hit = [line for line in text.split('\n') if re.search(r'reviewers? included', line, re.I) and 'owner' in line]
             self.assertTrue(hit, parts)
             for line in hit:
                 self.assertIn('orchestrator', line, parts)
                 self.assertNotRegex(line, r'\(owner, 2026-10-18\)')
+
+
+TRANSCRIPT = '/root/.claude/projects/-home-user/470579b5-e357-55fb-95b6-0b0f548219ea.jsonl'
+LINE_PAIR = re.compile(r'(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ),? (?:transcript )?line (\d+)')
+
+
+def wrong_pairs(text, time_of_line):
+    """The (time, line) pairs of a text whose time is not the time of that line (quire#995, finding 3 of the review of 1e3b8a4)."""
+    return [(found.group(1), int(found.group(2))) for found in LINE_PAIR.finditer(text)
+            if time_of_line(int(found.group(2))) != found.group(1)]
+
+
+class OwnerTimes(unittest.TestCase):
+    FILES = OwnerAttribution.FILES + (('.claude', 'rules', 'ci.md'),)
+
+    def test_a_pair_with_the_wrong_time_is_found_and_a_right_one_is_not(self):
+        times = {59493: '2026-10-21T04:39:10Z'}.get
+        self.assertEqual(wrong_pairs('(owner, 2026-10-21T04:39:00Z, transcript line 59493: "x")', times), [('2026-10-21T04:39:00Z', 59493)])
+        self.assertEqual(wrong_pairs('(owner, 2026-10-21T04:39:10Z, transcript line 59493: "x")', times), [])
+
+    def test_every_time_and_line_of_the_rules_is_the_time_of_that_line_of_the_transcript(self):
+        if not os.path.exists(TRANSCRIPT):
+            self.skipTest('the session transcript is not on this machine')
+        import json
+        text = ''.join(read_root(*parts) for parts in self.FILES)
+        wanted = {int(found.group(2)) for found in LINE_PAIR.finditer(text)}
+        times = {}
+        with open(TRANSCRIPT, encoding='utf-8') as handle:
+            for number, line in enumerate(handle, 1):
+                if number in wanted:
+                    times[number] = json.loads(line)['timestamp'][:19] + 'Z'
+        self.assertEqual(wrong_pairs(text, times.get), [])
 
 
 class SweepFiles(unittest.TestCase):
@@ -929,9 +1016,6 @@ class SweepFiles(unittest.TestCase):
             text = read_root(*parts)
             for banned in ('agent-holder', 'quire#754', 'bats#436', 'proposed.sh', 'owner installs', 'LOADED CHECKOUT OFF MAIN'):
                 self.assertNotIn(banned, text, '/'.join(parts))
-        worker = read_root('.claude', 'agents', 'worker.md')
-        self.assertIn('Never in the orchestrator\'s checkout', worker)
-        self.assertIn('git -C /home/user/<repo> worktree add', worker)
         self.assertIn('STRAY-WORK', read_root('.claude', 'skills', 'sweep', 'qsweep'))
 
     def test_qsweep_prints_stray_work_for_an_orchestrator_checkout_off_main_or_dirty(self):
