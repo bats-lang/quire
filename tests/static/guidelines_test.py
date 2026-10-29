@@ -367,12 +367,40 @@ class WorkerLines(unittest.TestCase):
 
     def test_a_brief_with_every_line_passes(self):
         brief, ticket, _ = self.fixture()
-        brief += 'Design check: first.\nPush: after every commit.\nExpects: blessed.\nSample: seeded.\nNo split: whole.\nCompiler: /home/user/bats-pinned/bin/bats.\n'
+        brief += 'Design check: first.\nPush: after every commit.\nExpects: blessed.\nSample: seeded.\nAffected: ran it.\nNo split: whole.\nCompiler: /home/user/bats-pinned/bin/bats.\n'
         self.assertEqual(gl.lint_brief(brief, ticket, PHRASES), [])
 
     def test_orchestration_md_carries_the_lines(self):
         for line_form, line_name, _ in gl.WORKER_LINES:
             self.assertIn('`' + line_name.split(' ')[0], read_root('.claude', 'orchestration.md'), line_name)
+
+
+class AffectedLine(unittest.TestCase):
+    """The reject fixture tests/static/guidelines/reject/worker-brief-lacks-affected: a brief with the other lines and no Affected line is refused for that line alone (quire#957)."""
+    DIR = os.path.join(HERE, 'guidelines', 'reject', 'worker-brief-lacks-affected')
+
+    def fixture(self):
+        return [open(os.path.join(self.DIR, name)).read() for name in ('brief.txt', 'ticket.txt', 'expect')]
+
+    def test_the_fixture_has_the_other_lines_and_not_this_one(self):
+        brief, _, _ = self.fixture()
+        for label in ('Design check:', 'Push:', 'Expects:', 'Sample:', 'No split:', 'Compiler:'):
+            self.assertIn(label, brief)
+        self.assertNotIn('Affected:', brief)
+
+    def test_the_fixture_is_refused_exactly_as_its_expect_says(self):
+        brief, ticket, expect = self.fixture()
+        self.assertEqual('\n'.join(gl.lint_brief(brief, ticket, PHRASES)) + '\n', expect)
+
+    def test_a_checker_that_drops_the_affected_line_accepts_the_fixture(self):
+        brief, ticket, expect = self.fixture()
+        original = gl.WORKER_LINES
+        gl.WORKER_LINES = tuple(line for line in original if line[1] != 'Affected: ...')
+        try:
+            found = '\n'.join(gl.lint_brief(brief, ticket, PHRASES)) + '\n'
+        finally:
+            gl.WORKER_LINES = original
+        self.assertNotEqual(found, expect)
 
 
 class Rulings(unittest.TestCase):
