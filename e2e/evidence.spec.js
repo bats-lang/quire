@@ -25,6 +25,7 @@ import { futexAnalysis, ringContent } from './flight-recorder.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { Watchdog } from './flight-watchdog.js';
 import { heartbeatLimitMs, processStateLetter } from './preflight.js';
+import { startBlockedProcess } from './blocked-process.js';
 import { memoryReclaim, runnerLoad } from './runner-load.js';
 import { LOCK_NAME, LOCK_UNREADABLE_MS, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
 
@@ -1252,7 +1253,7 @@ test('the state of a process is read from its stat file, a name with brackets an
 
 // The monitor itself, in a process of its own (it ends the run with process.exit): the heartbeat file is written once and never again, the watchdog's
 // state is the one given, and the limits are shortened as the real-path tests shorten them.
-async function monitorOn(testInfo, name, state) {
+async function monitorOn(testInfo, name, state, { pid = 4242, blockedStaleMs = 6000 } = {}) {
   const out = testInfo.outputPath(name);
   mkdirSync(out, { recursive: true });
   const began = Date.now();
@@ -1260,9 +1261,9 @@ async function monitorOn(testInfo, name, state) {
   const script = `
     import { writeFileSync } from 'node:fs';
     import { startMonitor } from ${JSON.stringify(new URL('./preflight.js', import.meta.url).href)};
-    writeFileSync(${JSON.stringify(out)} + '/heartbeat-' + process.pid + '-1.json', JSON.stringify({ at: Date.now(), pid: 4242, scans: 1, ring: { on: '1', written: 5 } }));
-    startMonitor({ watchdog: { exited: null, child: { pid: 4242 } }, kernel: { instance: 'x' }, out: ${JSON.stringify(out)} },
-      { ...process.env, QUIRE_FLIGHT_BEAT_STALE_MS: '1000', QUIRE_FLIGHT_BLOCKED_STALE_MS: '6000', QUIRE_FLIGHT_RING_QUIET_MS: '600000' }, () => ${JSON.stringify(state)});
+    writeFileSync(${JSON.stringify(out)} + '/heartbeat-' + process.pid + '-1.json', JSON.stringify({ at: Date.now(), pid: ${pid}, scans: 1, ring: { on: '1', written: 5 } }));
+    startMonitor({ watchdog: { exited: null, child: { pid: ${pid} } }, kernel: { instance: 'x' }, out: ${JSON.stringify(out)} },
+      { ...process.env, QUIRE_FLIGHT_BEAT_STALE_MS: '1000', QUIRE_FLIGHT_BLOCKED_STALE_MS: '${blockedStaleMs}', QUIRE_FLIGHT_RING_QUIET_MS: '600000' }, ${state === undefined ? '' : `() => ${JSON.stringify(state)}`});
     setTimeout(() => {}, 20000);`;
   const child = spawn(process.execPath, ['--input-type=module', '-e', script],{ stdio: ['ignore', 'pipe', 'pipe'], cwd: process.cwd() });
   let text = '';
@@ -1281,4 +1282,20 @@ test('the monitor lets a watchdog blocked in the kernel stay silent past the pla
   expect(quiet.code).toBe(1);
   expect(quiet.text).toMatch(/no heartbeat for \d+ ms \(the watchdog's state: S\)/);
   expect(quiet.afterMs, 'asleep and quiet: at the plain limit').toBeLessThan(5000);
+});
+
+// The same with a real process in state D, read from /proc by the monitor itself (no injected state): a vfork parent whose child waits on a FIFO (blocked-process.js).
+test('a real process in state D, silent past the plain limit, is let live to the longer one; with the old single limit the same process ends the run (quire#972)', async ({}, testInfo) => {
+  const blocked = await startBlockedProcess();
+  try {
+    expect(processStateLetter(blocked.pid), 'really in D, read from /proc').toBe('D');
+    const longer = await monitorOn(testInfo, 'real-blocked', undefined, { pid: blocked.pid, blockedStaleMs: 6000 });
+    expect(longer.text).toMatch(/no heartbeat for \d+ ms \(the watchdog's state: D\)/);
+    expect(longer.afterMs, 'past the plain limit (1 s, looks every 2 s), ended only at the longer one (6 s)').toBeGreaterThan(6000);
+    // the class occurring: the old single limit (the blocked limit no longer than the plain one) ends the same process at the plain limit
+    const old = await monitorOn(testInfo, 'real-blocked-old-limit', undefined, { pid: blocked.pid, blockedStaleMs: 1000 });
+    expect(old.text).toMatch(/no heartbeat for \d+ ms \(the watchdog's state: D\)/);
+    expect(old.afterMs, 'the old limit ends it at the plain limit').toBeLessThan(5000);
+  } finally { blocked.release(); }
+  expect(processStateLetter(blocked.pid), 'released: gone or no longer D').not.toBe('D');
 });
