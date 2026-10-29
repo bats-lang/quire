@@ -130,7 +130,7 @@ jobs:
           echo "play_signing_sha1=$sha1" >> "$GITHUB_OUTPUT"
 
       - name: Set up bats
-        uses: bats-lang/bats/.github/actions/setup@d1926f43378b54246e6ab0abba4d7b019cf053db # bats main d1926f4
+        uses: bats-lang/bats/.github/actions/setup@41360b0c0dd4552fa1d2a77efb3ec79fe51d6818 # bats main 41360b0
 
       # A pull request and the merge queue's group start from the newest
       # build of the same toolchain (main's, or the pull request's own earlier
@@ -217,7 +217,7 @@ jobs:
       # pwa's action (quire#637). The WASM smoke tests need no browsers, which
       # are restored from the cache here
       - name: Set up Node.js and Playwright
-        uses: bats-lang/pwa/.github/actions/e2e-setup@d5a5685a569df5a6ce126d9aac667c31aa28f866 # pwa main d5a5685
+        uses: bats-lang/pwa/.github/actions/e2e-setup@3cace57c2c9dde8923a5eef219a008791a85f54c # pwa main 3cace57
         with:
           playwright-minimum: "1.58"
 
@@ -305,7 +305,7 @@ jobs:
 
       - name: Set up bats
         if: env.GROUP_BATS == 'yes'
-        uses: bats-lang/bats/.github/actions/setup@d1926f43378b54246e6ab0abba4d7b019cf053db # bats main d1926f4
+        uses: bats-lang/bats/.github/actions/setup@41360b0c0dd4552fa1d2a77efb3ec79fe51d6818 # bats main 41360b0
 
       # What bats keeps of the static run, in the directory run.sh works in
       # (QUIRE_STATIC_WORK): the app's build/, which every group shares, and
@@ -411,7 +411,7 @@ jobs:
       # 1.58 is the least Playwright the suite may run on: its fake clock needs it (keyword: the fake clock)
       - name: Set up Node.js and Playwright
         if: env.GROUP_RUN == 'yes'
-        uses: bats-lang/pwa/.github/actions/e2e-setup@d5a5685a569df5a6ce126d9aac667c31aa28f866 # pwa main d5a5685
+        uses: bats-lang/pwa/.github/actions/e2e-setup@3cace57c2c9dde8923a5eef219a008791a85f54c # pwa main 3cace57
         with:
           playwright-minimum: "1.58"
           stall-tools: "true"
@@ -630,7 +630,7 @@ jobs:
       # not a pass, and a job missing from needs fails (repository-prototype's
       # check-aggregate, #328, called by commit)
       - name: Every group passed
-        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@3b0e3a98f734c4d8bab8f86fa67eaf4c1776e5aa # repository-prototype main 3b0e3a9
+        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@f7c08d40621f70f8190f8e6b71bb5d7ef4e88708 # repository-prototype main f7c08d4
         with:
           jobs: plan build static e2e
           results: ${{ toJSON(needs) }}
@@ -649,7 +649,7 @@ jobs:
   android:
     needs: build
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@d5a5685a569df5a6ce126d9aac667c31aa28f866 # pwa main d5a5685
+    uses: bats-lang/pwa/.github/workflows/android.yml@3cace57c2c9dde8923a5eef219a008791a85f54c # pwa main 3cace57
     secrets: inherit
     with:
       artifact: quire-android
@@ -659,7 +659,7 @@ jobs:
       # quire#623; replaces sync-identity.yml's own steps). pwa-ref is the
       # pin above (a reusable workflow cannot read the commit it was called
       # at; the relock moves it with the pin, #821); the SHA-1 is the committed one (scripts/sync-clients.env)
-      pwa-ref: d5a5685a569df5a6ce126d9aac667c31aa28f866
+      pwa-ref: 3cace57c2c9dde8923a5eef219a008791a85f54c
       play-signing-sha1: ${{ needs.build.outputs.play_signing_sha1 }}
       require-signed: true
       publish: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -691,12 +691,12 @@ jobs:
   play-internal:
     needs: [check, android]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: bats-lang/pwa/.github/workflows/play-release.yml@d5a5685a569df5a6ce126d9aac667c31aa28f866 # pwa main d5a5685
+    uses: bats-lang/pwa/.github/workflows/play-release.yml@3cace57c2c9dde8923a5eef219a008791a85f54c # pwa main 3cace57
     permissions:
       contents: read
       id-token: write
     with:
-      pwa-ref: d5a5685a569df5a6ce126d9aac667c31aa28f866
+      pwa-ref: 3cace57c2c9dde8923a5eef219a008791a85f54c
       package: dev.middlefield.quire
       workload-identity-provider: projects/162611675413/locations/global/workloadIdentityPools/github/providers/quire
       service-account: quire-play-release@spring-duality-395520.iam.gserviceaccount.com

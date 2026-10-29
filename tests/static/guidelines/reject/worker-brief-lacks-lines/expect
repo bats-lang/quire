@@ -2,3 +2,5 @@ brief: it names worker.md and has no line "Design check: ..." (the ticket's decl
 brief: it names worker.md and has no line "Push: ..." (the branch is pushed after every commit; orchestration.md, "Briefs and the machine")
 brief: it names worker.md and has no line "Expects: ..." (reject expects are blessed, not written by hand; orchestration.md, "Briefs and the machine")
 brief: it names worker.md and has no line "Sample: ..." (a local population run is a seeded sample; orchestration.md, "Briefs and the machine")
+brief: it names worker.md and has no line "No split: ..." (the whole ticket is done in one PR and a split needs a reason that is not size (owner, 2026-10-28T14:57:01Z); orchestration.md, "Briefs and the machine")
+brief: it names worker.md and has no line "Compiler: ..." (the brief names the path of the pinned bats (owner, 2026-10-27T02:36:57Z); orchestration.md, "Briefs and the machine")

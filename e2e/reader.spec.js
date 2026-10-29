@@ -7,7 +7,7 @@ import zlib from 'node:zlib';
 import { TINY_PNG } from './create-epub.js';
 import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
-  showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
+  showChrome, chapters, card, bookPage, chapterTitle, expectChapter, control, jumpBack, librarySearch, openSettings, reload, dialog,
   importFiles, indicator, chapterBody, oneColumn, selectText, selectionButton, selectionPick,
   readingSettings, openReadingSettings, expectBarFollows, libraryShown,
   rawMouse, clockNow, expectMoment,
@@ -20,7 +20,7 @@ test('a book opens on its first page with its first chapter shown', async ({ pag
   await readBook(page, book('First Page'));
   expect(await place(page)).toMatchObject({ ch: 1, p: 1 });
   expect(await visibleText(page)).toContain('Para 1.0');
-  await expect(chapterTitle(page)).toHaveText('Chapter 1');
+  await expectChapter(page, 'Chapter 1');
   expect(errors).toEqual([]);
 });
 
@@ -77,17 +77,6 @@ test('tapping the page\'s sides turns it, and its middle shows or hides the bars
   await expect(control(page, 'Previous page')).toBeVisible();
   await rawMouse(page, 'click', box.x + box.width / 2, y);
   await expect(control(page, 'Previous page')).toBeHidden();
-});
-
-test('the bars hide by themselves after a few seconds', async ({ page }) => {
-  await page.clock.install();
-  await start(page);
-  await readBook(page, book('Auto Hide'));
-  const since = await clockNow(page);
-  await showChrome(page);
-  // 5 s after they were shown (quire.bats), on the page's clock (#657):
-  // up at 3.5 s, gone at 6.5 s
-  await expectMoment(page, control(page, 'Previous page'), { since, ms: 5000 });
 });
 
 test('the mouse wheel turns pages', async ({ page }) => {
@@ -327,18 +316,18 @@ test('links: out of the book open outside it, inside it jump and can go back', a
   await asked.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(asked).toBeHidden();
   await bookPage(page).getByRole('link', { name: 'the far place' }).click();
-  await expect(chapterTitle(page)).toHaveText('Chapter 2');
+  await expectChapter(page, 'Chapter 2');
   expect(await visibleText(page)).toContain('FAR-TARGET');
   await expect(jumpBack(page)).toBeVisible();
   await jumpBack(page).click();
-  await expect(chapterTitle(page)).toHaveText('Chapter 1');
+  await expectChapter(page, 'Chapter 1');
   expect(await place(page)).toMatchObject({ ch: 1, p: 1 });
   // the link is reached and followed from the keyboard too
   const inside = bookPage(page).getByRole('link', { name: 'the far place' });
   await inside.focus();
   await expect(inside).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(chapterTitle(page)).toHaveText('Chapter 2');
+  await expectChapter(page, 'Chapter 2');
   expect(await visibleText(page)).toContain('FAR-TARGET');
 });
 
@@ -380,14 +369,14 @@ test('a note\'s reference opens the note over the page, which can be gone to', a
   await expect(note).toBeVisible();
   await note.getByRole('button', { name: 'Go to note' }).click();
   await expect(note).toBeHidden();
-  await expect(chapterTitle(page)).toHaveText('Chapter 3');
+  await expectChapter(page, 'Chapter 3');
   expect(await visibleText(page)).toContain("The endnote's own");
   await expect(jumpBack(page)).toBeVisible();
   await jumpBack(page).click();
   await expect.poll(() => place(page)).toEqual(at);
   // a reference to a note that is not there is followed as a link
   await bookPage(page).getByRole('link', { name: '3', exact: true }).click();
-  await expect(chapterTitle(page)).toHaveText('Chapter 2');
+  await expectChapter(page, 'Chapter 2');
   await expect(note).toBeHidden();
 });
 
@@ -903,9 +892,13 @@ test('in a browser, where the page is not given the volume keys, their switch is
 
 test('the t key shows and hides the bars', async ({ page }) => {
   await start(page);
-  await readBook(page, book('Toggle', 1, 10));
+  await readBook(page, book('Toggle', 1, 10), { asOpened: true });
   const prev = control(page, 'Previous page');
-  await page.keyboard.press('Escape'); // the bars shown on opening
+  // reader acts: the first book opens with the bars down
+  await expect(prev).toBeHidden();
+  await page.keyboard.press('t');
+  await expect(prev).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(prev).toBeHidden();
   await page.keyboard.press('t');
   await expect(prev).toBeVisible();
@@ -1230,12 +1223,23 @@ test('back to pages, the chapter is turned across again', async ({ page }) => {
   expect(await bookPage(page).evaluate(e => e.scrollTop)).toBe(0);
 });
 
-test('the first book opened says once how to turn the page', async ({ page }) => {
+const HINT_WORDS = 'Tap the sides to turn pages. Tap the middle for the menu.';
+const hintOf = page => page.getByRole('status').filter({ hasText: HINT_WORDS });
+const barsOf = page => page.getByRole('toolbar', { name: 'Page controls' });
+
+// reader acts: the hint stays until the first turn and shows once
+test('the first book opened says once how to turn the page, and the hint waits for the first turn', async ({ page }) => {
+  await page.clock.install();
   await start(page);
-  await readBook(page, book('First Book', 2));
-  const hint = page.getByRole('status').filter({ hasText: 'Tap the sides to turn pages. Tap the middle for the menu.' });
+  await readBook(page, book('First Book', 2), { asOpened: true });
+  const hint = hintOf(page);
   await expect(hint).toBeVisible();
-  // taps go through it: the page still turns, and it goes
+  await expect(barsOf(page)).toBeHidden();
+  await page.clock.runFor(30000);
+  await expect(hint).toBeVisible();
+  // reader acts: a tap in the middle is not a turn
+  await showChrome(page);
+  await expect(hint).toBeVisible();
   await page.keyboard.press('ArrowRight');
   await expect(hint).toBeHidden();
   await expect.poll(async () => (await place(page)).p).toBe(2);
@@ -1249,15 +1253,84 @@ test('the first book opened says once how to turn the page', async ({ page }) =>
   await expect(hint).toBeHidden();
 });
 
+// reader acts: the hint goes at the first turn by each route, and on a tap on it
+for (const route of ['a tap on the side', 'a swipe', 'the Next page button', 'Page Down', 'Space', 'a tap on the hint']) {
+  test(`the hint goes at the first turn: ${route}`, async ({ page }) => {
+    await start(page);
+    await readBook(page, book('Route Book', 2), { asOpened: true });
+    const hint = hintOf(page);
+    await expect(hint).toBeVisible();
+    const box = await bookPage(page).boundingBox();
+    const y = box.y + box.height / 2;
+    if (route === 'a tap on the side') await rawMouse(page, 'click', box.x + box.width - 10, y);
+    else if (route === 'a swipe') {
+      await bookPage(page).evaluate(async (el, [x0, x1, yy]) => {
+        const ev = (type, x) => el.dispatchEvent(new PointerEvent(type, {
+          bubbles: true, pointerId: 31, pointerType: 'touch', isPrimary: true, clientX: x, clientY: yy,
+        }));
+        const wait = t => new Promise(r => setTimeout(r, t));
+        ev('pointerdown', x0);
+        for (let i = 1; i <= 4; i++) { await wait(16); ev('pointermove', x0 + ((x1 - x0) * i) / 4); }
+        await wait(16);
+        ev('pointerup', x1);
+      }, [box.x + box.width * 0.8, box.x + box.width * 0.2, y]);
+    } else if (route === 'the Next page button') {
+      await showChrome(page);
+      await expect(hint).toBeVisible();
+      await control(page, 'Next page').click();
+    } else if (route === 'Page Down') await page.keyboard.press('PageDown');
+    else if (route === 'Space') await page.keyboard.press('Space');
+    else {
+      await hint.click();
+      await expect(hint).toBeHidden();
+      // reader acts: a tap on the hint is no turn
+      expect((await place(page)).p).toBe(1);
+      return;
+    }
+    await expect(hint).toBeHidden();
+    await expect.poll(async () => (await place(page)).p).toBe(2);
+  });
+}
+
+// reader acts: the bars stay up until the reader acts
+test('the reader\'s bars stay up 30 s and go on a tap in the middle', async ({ page }) => {
+  await page.clock.install();
+  await start(page);
+  await readBook(page, book('Bars One', 2), { asOpened: true });
+  await toLibrary(page);
+  await readBook(page, book('Bars Two', 2));
+  await expect(barsOf(page)).toBeVisible();
+  await page.clock.runFor(30000);
+  await expect(barsOf(page)).toBeVisible();
+  const box = await bookPage(page).boundingBox();
+  await rawMouse(page, 'click', box.x + box.width / 2, box.y + box.height / 2);
+  await expect(barsOf(page)).toBeHidden();
+  await page.clock.runFor(30000);
+  await expect(barsOf(page)).toBeHidden();
+});
+
+test('the bars go with a page turn, and with a jump from Contents', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Bars Act', 3), { asOpened: true });
+  await toLibrary(page);
+  await openBook(page, 'Bars Act');
+  await expect(barsOf(page)).toBeVisible();
+  await page.keyboard.press('ArrowRight');
+  await expect(barsOf(page)).toBeHidden();
+  await showChrome(page);
+  await control(page, 'Contents').click();
+  await dialog(page, 'Contents').getByRole('tabpanel', { name: 'Contents' }).getByRole('button', { name: 'Chapter 3' }).click();
+  await expect.poll(async () => (await place(page)).ch).toBe(3);
+  await expect(barsOf(page)).toBeHidden();
+});
+
 // #384: the hint lies in the band above the text, not over the page's middle,
 // and says both gestures in one line of words
 test('the hint on turning pages lies clear of the text, and says both gestures', async ({ page }) => {
   await start(page);
-  await readBook(page, book('Hint Book', 2));
+  await readBook(page, book('Hint Book', 2), { asOpened: true });
   const hint = page.getByRole('status').filter({ hasText: 'Tap the sides to turn pages. Tap the middle for the menu.' });
   await expect(hint).toBeVisible();
-  // under the bars it is not seen: take them down, as the middle tap does
-  await page.keyboard.press('t');
   await expect(page.getByRole('toolbar', { name: 'Page controls' })).toBeHidden();
   const box = await hint.boundingBox();
   const geometry = await bookPage(page).evaluate((element, hintBox) => {
@@ -1448,7 +1521,7 @@ test('read aloud goes on into the next chapter, from a selection, at the speed a
   // on into the next chapter
   await page.evaluate(() => window.sentenceSpoken());
   await expect.poll(async () => (await spoken(page)).map(s => s.text)).toEqual(['Two!', 'Three?']);
-  await expect(chapterTitle(page)).toHaveText('Chapter 2');
+  await expectChapter(page, 'Chapter 2');
   // the choices are kept
   await reload(page);
   await openReadingSettings(page, 'Read aloud');
