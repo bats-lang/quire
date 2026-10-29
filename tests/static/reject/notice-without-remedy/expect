@@ -1,8 +1,4 @@
 function _static_remedy
 line 4
 pattern match is nonexhaustive:
-StorageFull()
-pattern match is nonexhaustive:
-WordsNotStored()
-pattern match is nonexhaustive:
-WordsFull()
+among StorageFull()

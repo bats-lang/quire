@@ -146,7 +146,17 @@ that exists in the module for that purpose, or a code line such as a function's 
 directly above the place the snippet goes. `tests/static/anchors.py` (in `checkers`, with its own accept and reject
 trees in `tests/static/anchors/`) refuses a `before` that is a comment with no marker, one that is a line inside a block comment (a continuation
 line, found by reading the module's `(* *)` nesting; its tree has a `comment-continuation` reject), and one that no
-line of its `file` equals. It is Python as a stopgap (bats's `fixtures` cannot judge a `before`): bats#577 moves it. An exhaustiveness `expect` naming only the one constructor it is about is quire#984.
+line of its `file` equals. It is Python as a stopgap (bats's `fixtures` cannot judge a `before`): bats#577 moves it.
+
+A reject fixture about a nonexhaustive match names the one constructor it is about (keyword: fixture among, #984): its
+`expect` is `function <name>`, `line <n>`, `pattern match is nonexhaustive:` and `among <Constructor>` (bats#573, in the
+compiler since the pin of 2026-10-29), written as patsopt prints the constructor, and its snippet is a match with one arm of
+another constructor (nothing spells out the datatype's other constructors, so adding one breaks no fixture). The expect is
+written by hand in that form: `bats fixtures --bless` writes the full error, which is the form this removes. A nested
+constructor keeps the arms that make patsopt print it (`Fixed(Grey())` needs the other `Fixed` arms). `tests/static/among.py`
+(in `checkers`, with its trees in `tests/static/among/`) refuses an `expect` that says `pattern match is nonexhaustive` in any
+other form: constructors listed line for line (one or several) or more than one `among` line. Python as a stopgap, as anchors.py
+is (bats's `fixtures` accepts both forms and cannot refuse one); it is deleted with anchors.py.
 
 ### The solver fixtures written from the sources (keyword: solver fixtures, #837 to #841, pieces of #594)
 

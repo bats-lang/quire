@@ -3,4 +3,3 @@
 fn _static_turned (result: turned): bool =
   case+ result of
   | TurnedPage() => true
-  | TurnedChapter() => true
