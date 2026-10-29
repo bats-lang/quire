@@ -354,6 +354,40 @@ each kind selects) and prints each path's reason in its summary. Rules:
   queue's 60 minutes, which the groups' balance keeps (#618); the PR's run is
   where the selection saves.
 
+## The pre-push hook (quire#973, keyword: pre-push)
+
+`.githooks/pre-push` (tracked) runs `scripts/pre-push.py` on every `git push`, `qsweep push` included, for the
+commits being pushed, in this order and stopping at the first failure: (1) `scripts/ci-groups.py matrix`, as
+CI's `plan` job runs it, on the pushed commit's tree: every spec and fixture is in exactly one group of
+`tests/groups.json`; (2) every `bats.lock` of the tree (`./bats.lock`, `tests/*/bats.lock`) names only
+(package, version, sha256) that the package repository holds at the commit of `.github/repository-version`, read
+with `git show <commit>:<package>/<package>_<version>.bats.sha256` (slashes of a namespaced package as underscores in the file name) from the clone at `$BATS_REPOSITORY`, so what that clone has checked out does
+not matter; (3) the `bats` on PATH is built from the commit of `.github/bats-version`; (4)
+`BATS_PATSOPT_MEM_MB` is `4096` in the pushing shell, the default of the setup action, which no workflow here
+overrides. A failure prints `pre-push: check <n> (<name>) failed:` with what is wrong and `fix:` with the fix.
+
+* **Its variables:** the hook reads `BATS_REPOSITORY` and `BATS_PATSOPT_MEM_MB` and the `bats` on PATH from the pushing
+  process. `qsweep push` sources the env file for the push (tested: `test_qsweep_push_passes_the_env_file`); a
+  plain `git push` gets them from `bats with-env ~/quire.env git push` or the shell's profile.
+* **Every compiler a worker already has** needs its `bats.pin` written once (the recipe below), or check 3 refuses.
+* **Install:** `git config core.hooksPath .githooks` in the checkout (a worktree's creation, `worker.md`). The
+  sweep prints `HOOKS-NOT-INSTALLED` for a checkout that has the hook and a different `core.hooksPath`, and
+  `NO-VERIFY` for a transcript with `git push --no-verify`. `qsweep push` keeps the pressure hold only.
+* **Check 3's record:** a binary does not carry its commit, so the compiler's directory holds `bats.pin`,
+  `<commit> <sha256 of the binary>`, written when it is built from the bats checkout at the pin:
+  `printf '%s %s\n' "$(git rev-parse HEAD)" "$(sha256sum release/bats | cut -d' ' -f1)" > release/bats.pin`.
+  A binary replaced after the record, or built from another commit, or with no record, fails the check.
+* **A stopgap for bats-lang/bats#575 (keyword: pre-push):** the new non-bats code is the hook wrapper and checks 2 to 4 of
+  `scripts/pre-push.py`; check 1 is the existing `scripts/ci-groups.py`. Waiting costs more than the move
+  (quire#973: seven of fifty runs of a week were rejected by these classes, each a second full run of 1.5 to 12.6
+  hours; the bats route is `bats check-push`, a src-touching bats PR behind bats#573 and #574 and then the
+  pin move through the reviewed relock: days). `scripts/pre-push.py` is deleted when `bats check-push` lands and
+  quire's compiler pin moves to it; the hook then calls `bats check-push` and `scripts/ci-groups.py matrix`. The
+  `bats.pin` record exists only until bats#575 gives the compiler its own commit.
+  `tests/static/pre_push_test.py` (group `checkers`) fails each check by injection
+  (a fixture in no group, a lock of another sha256, a version the pinned repository lacks, a compiler of
+  another commit or changed after its record, the variable unset) and runs the hook through `git push`.
+
 ## Checking locally before a push
 
 A session sets up the compiler in its own environment: what bats's composite action does
@@ -367,11 +401,13 @@ commit `.github/repository-version` names. Locally run `bats check --repository 
 or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
 
 * **The command** (quire#751): in the checkout that stays, `bats with-env ~/quire.env bats check`,
-  where the env file sets `BATS_SLOTS=1` (never 2), `BATS_LOCK_DIR`, `BATS_CACHE_DIR` and
-  `BATS_REPOSITORY`. No `timeout` wrapper: the Bash tool's own cap of 600000 ms ends a foreground
-  command, and a wrapper below it kills a cold check for nothing. The first build of a new checkout
-  runs with `run_in_background` and its log is read until it ends, in the same turn. A push is
-  `qsweep push <arguments>`, which holds when `qsweep pressure` does not say `runner pressure: none`.
+  where the env file sets `BATS_SLOTS=1` (never 2), `BATS_LOCK_DIR`, `BATS_CACHE_DIR`,
+  `BATS_REPOSITORY` and `BATS_PATSOPT_MEM_MB=4096` (CI's value; the pre-push hook needs it). No `timeout` wrapper: the Bash tool's own cap of 600000 ms ends a foreground
+  command. A check that takes more than a few minutes, the first build of a new checkout
+  included, is not run locally and CI is its evidence (worker.md, "Where you work, and how long
+  a run is"; the owner's words in quire#911, 2026-10-26: "Short jobs locally, CI for the rest"). A push is
+  `qsweep push <arguments>`, which reads the env file (`QUIRE_ENV`, default `~/quire.env`) for the push, so the hook sees
+  its variables, and holds when `qsweep pressure` does not say `runner pressure: none`.
 * **The affected members (quire#957, keyword: affected).** Before every push, a worker
   runs `python3 scripts/ci-groups.py local $(git merge-base origin/main HEAD)`: the rule of the
   `plan` job (`scripts/affected.py`, #619) at the granularity of a fixture, over the diff against

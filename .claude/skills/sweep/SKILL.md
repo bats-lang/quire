@@ -17,8 +17,9 @@ Install on a machine (the running copy is a copy of these files): `install -m 75
   Then `NEXT FOR A FREE SLOT`: a fix for the PRs above, else a review, else the oldest ticket of the highest priority (pitboss `rules.md`, "Agents and slots").
 * The library PRs, of the repositories `qsweep repositories` prints (the one list the sweep reads; this file does not copy it), with their checks, the review and the gate's own status with its reason. The `NEXT FOR A FREE SLOT` line orders each category oldest first by the PR's creation date across quire and all of them.
 * `STRAY-WORK`: the orchestrator's checkout (`/home/user/<repo>`) that is off main or not clean; `STRAGGLER`: work that exists only on this machine; `REUSABLE WORKTREE`: a finished worktree for the next ticket's branch.
+* `HOOKS-NOT-INSTALLED`: a checkout that has `.githooks/pre-push` and whose `core.hooksPath` is not `.githooks` (its pushes run none of the pre-push checks); `NO-VERIFY`: a transcript of the last two days with a `git push ... --no-verify` command (quire#973).
 * `qsweep pressure`: prints `runner pressure: none` and exits 0, or a hold line and exits 1.
-* `qsweep push <git push arguments>`: the pressure check and the push in one command.
+* `qsweep push <git push arguments>`: the pressure check and the push in one command. The checks of the commits are not here: they are `.githooks/pre-push`, which `git push` runs (quire#973).
 * `qsweep clean`: prune worktrees; at 90 percent disk remove a worktree whose pull request merged and whose tip is in `origin/main`, never the persistent checkout (the one that merged last), a ticket in flight, or the orchestrator's checkout (the orchestrator's own working rule, not the owner's).
 
 ## slots
