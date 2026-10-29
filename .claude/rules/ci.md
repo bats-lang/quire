@@ -435,6 +435,13 @@ reports `the kernel ring did not start (no tracefs, or sudo refused: see the run
   mounted), checks `grep tracefs /proc/mounts`, and runs the spec again. The preflight's message
   (`e2e/flight-tracefs.js`), `worker.md` and the worker brief (`.claude/orchestration.md`, "Briefs
   and the machine") carry the same command. No other `mount` is run.
+* **Who makes the mount (quire#1027).** The platform documents that new sessions run the environment's
+  fixed setup script, and documents nothing about a restart of a container running it again; no agent
+  can see whether it ran. So the mount does not rely on the script: `qsweep` (`.claude/skills/sweep/qsweep`),
+  in every mode, runs the same idempotent line first and says on one stderr line `tracefs: found mounted`,
+  `tracefs: mounted` or `tracefs: NOT MOUNTED (...)`. The tool, not the script, makes the mount; the script's
+  line of quire#785 stays as the first attempt. The copy on a machine is installed from the file
+  (`install -m 755 .claude/skills/sweep/qsweep ...`).
 * **Who runs the specs.** As uid 0, the specs run without any `sudo`. A run as another user
   (comment 6329897260 ran as user `quireci`, `sudo -u quireci -H env CI=true ...`) needs a user
   and a `sudo -n` grant. The ticket records no `useradd` and no `sudoers.d` command for that user,

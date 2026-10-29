@@ -5,6 +5,11 @@
 # as the replacement: that is not bats, so it is not the move (CLAUDE.md, "Pipeline and tooling improvements belong in bats or pwa").
 # Install on a machine: install -m 755 qsweep slots /usr/local/bin/ (the copy that runs is a copy of these files).
 _t0=$(date +%s); _lap(){ echo "[qsweep $(( $(date +%s)-_t0 ))s] $1" >&2; }
+# tracefs-mount (quire#1027): the mount is per boot and the environment's setup script is not documented to run again after a restart,
+# so this tool, which every mode passes through, runs the idempotent line of ci.md (quire#765) and says on one line (stderr, so the stdout of every mode is unchanged) which case it was.
+if grep -q tracefs /proc/mounts 2>/dev/null; then echo "tracefs: found mounted" >&2
+elif mount -t tracefs nodev /sys/kernel/tracing 2>/dev/null; then echo "tracefs: mounted" >&2
+else echo "tracefs: NOT MOUNTED (mount -t tracefs nodev /sys/kernel/tracing failed, rc=$?)" >&2; fi
 # runner pressure: merge_group runs with jobs still queued (no runner) mean: do not push or merge anything that starts CI
 _pressure(){
   local n=0 id
