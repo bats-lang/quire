@@ -596,16 +596,6 @@ test.describe('a single-file book of 5 MB', { tag: '@serial' }, () => {
 
 // ---- deep nesting ----
 
-/** Waits for Read aloud to be pressed or not. The bars hide 5 s after they
-    came up, whatever the click made (keyword: chrome timer, `_chrome_set` in
-    quire.bats), and a hidden bar (display none) has no button for a role
-    query, so the state is read from the button by its id whether the bars
-    are up or not; a tap to bring them up would also turn a page or end the reading
-    (#932, e2e/pathological.spec.js) */
-async function expectReadAloud(page, pressed) {
-  await expect(page.locator('#read-aloud')).toHaveAttribute('aria-pressed', pressed);
-}
-
 test.describe('a thousand nested elements', () => {
   // render, search and the script read aloud are each a walk of the tree
   // (keyword: book memory): a recursion that goes one frame a level, with
@@ -633,7 +623,7 @@ test.describe('a thousand nested elements', () => {
         // the word is reached
         await closeSearch(page);
         await clickControl(page, 'Read aloud');
-        await expectReadAloud(page, 'true');
+        await expect(control(page, 'Read aloud')).toHaveAttribute('aria-pressed', 'true');
         let said = [];
         for (let k = 0; k < 12 && !said.some(text => text.includes(DEEP_WORD)); k++) {
           await expect.poll(async () => (await spoken(page)).length).toBeGreaterThan(k);
@@ -642,7 +632,7 @@ test.describe('a thousand nested elements', () => {
         }
         expect(said.some(text => text.includes(DEEP_WORD)), `chapter ${chapter} read aloud: ${JSON.stringify(said)}`).toBe(true);
         await clickControl(page, 'Read aloud');
-        await expectReadAloud(page, 'false');
+        await expect(control(page, 'Read aloud')).toHaveAttribute('aria-pressed', 'false');
         await page.evaluate(() => { window.spoken.length = 0; });
         if (chapter < 3) {
           // on to the next result, which is in the next chapter

@@ -580,9 +580,8 @@ export async function rawMouse(page, action, ...args) {
 }
 
 /** Opens the reader's bars when they are hidden */
-export async function showChrome(page, { layoutMs = 0, again = true } = {}) {
+export async function showChrome(page, { layoutMs = 0 } = {}) {
   const prev = control(page, 'Previous page');
-  const wasUp = await prev.isVisible();
   // a tap while text is selected only ends the selection (quire#428), so
   // the tap is made again when the bars did not come up; each tap is noted (#600)
   // The note of a tap that did not bring the bars up is made from the read the
@@ -609,16 +608,7 @@ export async function showChrome(page, { layoutMs = 0, again = true } = {}) {
     });
   }
   // the bars come up when the page's task ends, so the wait is the layout's (#600)
-  // Bars that were up when this began hide 5 s after they came up (keyword:
-  // chrome timer, `_chrome_set` in quire.bats), and a wait that began just
-  // before that never sees them again: it taps once more, as a fresh call (#932)
-  try {
-    await attempted(page, 'showChrome', 'wait', () => expect(prev).toBeVisible({ timeout: wasUp && again ? 1000 : stepExpectMs(layoutMs) }));
-  } catch (error) {
-    if (!(wasUp && again)) throw error;
-    noted(page, 'showChrome', 'hidden', { why: 'the bars were up and hid while this waited: tapped again' });
-    await showChrome(page, { layoutMs, again: false });
-  }
+  await attempted(page, 'showChrome', 'wait', () => expect(prev).toBeVisible({ timeout: stepExpectMs(layoutMs) }));
 }
 
 /** The time a step that follows a layout may take: the layout's measured
