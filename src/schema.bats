@@ -1019,6 +1019,7 @@ fn _tag_class {tag:bytes} (tag: !blist(tag, 4)): tagclass(tag) =
   | blist_cons(first_letter, blist_cons(_, blist_cons(_, blist_cons(_, blist_nil())))) =>
     if first_letter >= 97 then IsAnc(ANC_mk() | ) else IsCrit(CRIT_mk() | )
 
+(* fixture: the-tags-dropped-one-list-and *)
 (* The tags dropped, one list and then the other *)
 fun _lostv_cat {first,second:lost}{first_n,second_n:nat} .<first_n>. (first: lostv(first, first_n), second: lostv(second, second_n))
   : [both:lost][both_n:nat] (LOSTCAT(first, second, both, first_n) | lostv(both, both_n)) =

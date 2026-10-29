@@ -169,6 +169,26 @@ else echo "FAIL guidelines:"; cat "$TMP/guidelines.log"; fail=1; fi
 if python3 "$ROOT/tests/static/guidelines_test.py" > "$TMP/guidelines_test.log" 2>&1; then echo "ok   guidelines_test: $(tail -1 "$TMP/guidelines_test.log")"
 else echo "FAIL guidelines_test:"; cat "$TMP/guidelines_test.log"; fail=1; fi
 
+# A fixture anchors on a marker line, not on a comment's prose (anchors.py,
+# quire#983; python because bats fixtures has no option to judge `before`, the
+# move is bats#577, see anchors.py; deleted with it): the fixtures here, and the checker's own, each a tree of
+# fixtures that must pass it (accept/) or fail it with its `expect` (reject/)
+if python3 "$ROOT/tests/static/anchors.py" "$ROOT/tests/static" "$ROOT" > "$TMP/anchors.log" 2>&1; then echo "ok   anchors: $(tail -1 "$TMP/anchors.log")"
+else echo "FAIL anchors:"; cat "$TMP/anchors.log"; fail=1; fi
+for d in "$ROOT"/tests/static/anchors/accept/*/; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  if python3 "$ROOT/tests/static/anchors.py" "$d" "$d" > "$TMP/anchors-$n.log" 2>&1; then echo "ok   anchors/accept/$n"
+  else echo "FAIL anchors/accept/$n: should pass"; cat "$TMP/anchors-$n.log"; fail=1; fi
+done
+for d in "$ROOT"/tests/static/anchors/reject/*/; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  if python3 "$ROOT/tests/static/anchors.py" "$d" "$d" > "$TMP/anchors-$n.log" 2>&1; then echo "FAIL anchors/reject/$n: should be rejected"; fail=1
+  elif grep -qF -- "$(cat "$d/expect")" "$TMP/anchors-$n.log"; then echo "ok   anchors/reject/$n"
+  else echo "FAIL anchors/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/anchors-$n.log"; fail=1; fi
+done
+
 # The solver's 32 bits (literals.py) and the library's keys (keys.py)
 if python3 "$ROOT/tests/static/literals.py" "$ROOT/src" > "$TMP/literals.log" 2>&1; then echo "ok   literals: $(tail -1 "$TMP/literals.log")"
 else echo "FAIL literals:"; cat "$TMP/literals.log"; fail=1; fi

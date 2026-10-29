@@ -138,6 +138,14 @@ that is the one error, in that module, at that line, inside that function; an ac
 A fixture whose memo entry is unchanged costs nothing, else about what its snippet changes (a
 changed `#pub` declaration re-checks what depends on it).
 
+A fixture finds its edit by a marker (keyword: fixture anchors, #983): `before` is a line `(* fixture: <name> *)`
+that exists in the module for that purpose, or a code line such as a function's name, never a comment's prose
+(a reworded comment, or a keyword added to it, would break every fixture that anchors on it). The marker sits
+directly above the place the snippet goes. `tests/static/anchors.py` (in `checkers`, with its own accept and reject
+trees in `tests/static/anchors/`) refuses a `before` that is a comment with no marker, one that is a line inside a block comment (a continuation
+line, found by reading the module's `(* *)` nesting; its tree has a `comment-continuation` reject), and one that no
+line of its `file` equals. It is Python as a stopgap (bats's `fixtures` cannot judge a `before`): bats#577 moves it. An exhaustiveness `expect` naming only the one constructor it is about is quire#984.
+
 ### The solver fixtures written from the sources (keyword: solver fixtures, #837 to #841, pieces of #594)
 
 `tests/static/solver.py` runs the files of `tests/static/solver/{accept,reject}/` with the machine's

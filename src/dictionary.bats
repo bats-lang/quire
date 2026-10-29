@@ -1545,6 +1545,7 @@ fn _name_kind {l:agz}{name_len:nat | name_len <= 16} (tail: !$A.arr(byte, l, 16)
   else if _ends_with(tail, name_len, ".syn") then SynFile()
   else OtherFile()
 
+(* fixture: what-a-file-is-by-its *)
 (* What a file is, by its name's end *)
 fn _file_kind {n:nat} (file: !$BF.infile(n)): dictionary_file =
   case+ $BF.file_name(file) of

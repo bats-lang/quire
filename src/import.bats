@@ -1028,6 +1028,7 @@ implement import_fetched (book_file, file_size, name, name_len) = let
     in _kept_name_put(KeptName(name_bytes, kept_len)) end)
 in _import_file(book_file, file_size) end
 
+(* fixture: where-picked-files-come-from-the *)
 (* Where picked files come from: the file input import-file, or the
    empty library's empty-import-file, or the last drop *)
 datatype import_source = FileInput | EmptyFileInput | Dropped
