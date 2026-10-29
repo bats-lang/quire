@@ -11,11 +11,12 @@ Install on a machine (the running copy is a copy of these files): `install -m 75
 
 * `qsweep` (no argument): each open quire PR on one line: `[mergeable_state]`, `checks=` (the number of check-runs on the head), `pending=`, `fails=[...]`, `statuses-red=[...]` (commit statuses `text-lint` and the like that failed), `review=` (the newest trusted review comment, matched on its first line only: `approved` or `changes-needed`, `-this-head` or `-older-head`), and one of:
   * `FIX-NEEDED`: a check or status of the head is red, the PR has a merge conflict (`dirty`), or the newest review names this head and says changes needed;
+  * `UPDATE-NEEDED`: the branch is behind main (`behind`) and its checks are finished;
   * `WAIT-FOR-CI`: no check-run yet, one not finished, or the aggregate `check` not green. No reviewer starts;
   * `READY-FOR-REVIEW`: at least one check-run, all finished, `check` green, no red status, no review of this head. A reviewer starts;
   * `REVIEWED-approved`.
-  Then `NEXT FOR A FREE SLOT`: a fix for the PRs above, else a review, else the oldest ticket of the highest priority (`.claude/orchestration.md`, "Agents and slots").
-* The library PRs, of the repositories `qsweep repositories` prints (the one list the sweep reads; this file does not copy it), with their checks, the review and the gate's own status with its reason. The `NEXT FOR A FREE SLOT` line orders each category oldest first by the PR's creation date across quire and all of them.
+  Then `NEXT FOR A FREE SLOT`: the PRs above that can be worked on (`FIX-NEEDED`, `UPDATE-NEEDED`, `READY-FOR-REVIEW`, and `REVIEWED-approved` when clean), oldest first, each with its kind of work (`fix`, `update`, `review`, `merge`); a PR that is `WAIT-FOR-CI` is not named; then the oldest ticket of the highest priority (`.claude/orchestration.md`, "Agents and slots").
+* The library PRs, of the repositories `qsweep repositories` prints (the one list the sweep reads; this file does not copy it), with their checks, the review and the gate's own status with its reason. The `NEXT FOR A FREE SLOT` line orders them with quire's, oldest first by the PR's creation date, whatever each needs. A PR listed in `/tmp/claude-0/blocked-prs` (one `<repository>#<number>` per line; the file `QSWEEP_BLOCKED` names replaces that path) is skipped.
 * `STRAY-WORK`: the orchestrator's checkout (`/home/user/<repo>`) that is off main or not clean; `STRAGGLER`: work that exists only on this machine; `REUSABLE WORKTREE`: a finished worktree for the next ticket's branch.
 * `qsweep pressure`: prints `runner pressure: none` and exits 0, or a hold line and exits 1.
 * `qsweep push <git push arguments>`: the pressure check and the push in one command.

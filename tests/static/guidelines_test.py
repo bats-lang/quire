@@ -544,10 +544,9 @@ class GitHub(unittest.TestCase):
 
 
 SLOT_STEPS = [
-    '(1) a fix, by an author (any author, not necessarily the one who wrote the PR), for a review that asked for changes, a red CI, or a merge conflict',
-    '(2) a review of a PR green on its exact head',
-    '(3) the oldest ticket of the highest priority (CLAUDE.md, Priorities)',
-    'Never a new ticket while a changes-needed review, a red CI or a merge conflict waits for its fix, or a green PR waits for its reviewer',
+    'the open pull requests that can be worked on, oldest first',
+    'the oldest ticket of the highest priority (CLAUDE.md, Priorities)',
+    'Never a new ticket while a pull request that can be worked on waits',
 ]
 
 
@@ -676,14 +675,14 @@ class FreeSlotOrder(unittest.TestCase):
     def test_orchestration_qsweep_and_slots_state_the_same_order(self):
         for name, text, steps in (('orchestration.md', read_root('.claude', 'orchestration.md'), SLOT_STEPS),
                                   ('qsweep', read_root('.claude', 'skills', 'sweep', 'qsweep'), SLOT_STEPS),
-                                  ('slots', read_root('.claude', 'skills', 'sweep', 'slots'), SLOT_STEPS[:3])):
+                                  ('slots', read_root('.claude', 'skills', 'sweep', 'slots'), SLOT_STEPS[:2])):
             for step in steps:
                 self.assertIn(step, text, f'{name} does not state: {step}')
 
     def test_the_sweep_reminder_is_the_order_and_nothing_else(self):
         reminder = [line for line in read_root('.claude', 'skills', 'sweep', 'qsweep').split('\n') if 'order for a free slot' in line]
         self.assertEqual(len(reminder), 1, reminder)
-        for step in SLOT_STEPS[:3]:
+        for step in SLOT_STEPS:
             self.assertIn(step, reminder[0])
 
     def test_the_hourly_trigger_reads_the_section_that_states_the_order(self):
@@ -705,10 +704,9 @@ class NextReadsEveryRepository(unittest.TestCase):
         self.assertIsNotNone(listed)
         for repository in ('arith', 'array', 'sha256', 'zip', 'dom', 'bridge', 'gestures', 'bats', 'builder', 'process', 'pwa', 'capacitor-plugins'):
             self.assertIn(repository, listed.group(1).split(), repository)
-        self.assertEqual(text.count('NEXT FOR A FREE SLOT: a fix'), 1)
-        self.assertGreater(text.index('NEXT FOR A FREE SLOT: a fix'), loop.end())
-        self.assertIn('$(_order "$_cand_fix")', text)
-        self.assertIn('$(_order "$_cand_review")', text)
+        self.assertEqual(text.count('NEXT FOR A FREE SLOT: pull requests oldest first'), 1)
+        self.assertGreater(text.index('NEXT FOR A FREE SLOT: pull requests oldest first'), loop.end())
+        self.assertIn('$(_order "$_cand")', text)
 
     def test_the_installed_qsweep_is_this_file(self):
         installed = '/usr/local/bin/qsweep'
@@ -750,7 +748,7 @@ class QsweepLibraries(unittest.TestCase):
             os.chmod(os.path.join(tmp, 'bin', 'gh'), 0o755)
             with open(os.path.join(tmp, 'fixture.json'), 'w', encoding='utf-8') as handle:
                 json.dump(fixture, handle)
-            env = dict(os.environ, PATH=os.path.join(tmp, 'bin') + os.pathsep + os.environ['PATH'], QSWEEP_FIXTURE=os.path.join(tmp, 'fixture.json'))
+            env = dict(os.environ, PATH=os.path.join(tmp, 'bin') + os.pathsep + os.environ['PATH'], QSWEEP_FIXTURE=os.path.join(tmp, 'fixture.json'), QSWEEP_BLOCKED=os.environ.get('QSWEEP_BLOCKED', os.path.join(tmp, 'no-blocked-list')))
             done = subprocess.run(['bash', os.path.join(gl.ROOT, '.claude', 'skills', 'sweep', 'qsweep'), 'prs'], capture_output=True, text=True, env=env, check=True)
         return done.stdout.strip().split('\n')
 
@@ -814,17 +812,56 @@ class QsweepLibraries(unittest.TestCase):
         self.assertIn('REVIEWED-approved READY-TO-MERGE', self.line_of(lines, 'bridge #11 '))
         self.assertIn('FIX-NEEDED', self.line_of(lines, 'bridge #12 '))
 
-    def test_the_next_line_lists_only_what_is_ready_and_in_the_one_order(self):
+    NEXT = 'NEXT FOR A FREE SLOT: pull requests oldest first (kind of work, then the pull request; a fix by any author, a review not by the author):'
+    TICKETS = '; then the oldest ticket of the highest priority (CLAUDE.md, Priorities)'
+
+    def test_the_next_line_lists_what_can_be_worked_on_oldest_first_whatever_each_needs(self):
+        # quire#898: a fix does not come before an older review; a head with checks still running is not named
         lines = self.run_qsweep(self.fixture())
-        self.assertEqual(lines[-1], 'NEXT FOR A FREE SLOT: a fix (an author; any author) for sha256#8 dom#9 bridge#12')
-        without_fixes = self.fixture()
-        for number, repository in ((8, 'sha256'), (9, 'dom'), (12, 'bridge')):
-            without_fixes[f'repos/bats-lang/{repository}/pulls'] = [p for p in without_fixes[f'repos/bats-lang/{repository}/pulls'] if p['number'] != number]
-        lines = self.run_qsweep(without_fixes)
-        self.assertEqual(lines[-1], 'NEXT FOR A FREE SLOT: a review (not by the author) of array#3 array#5 sha256#7')
+        self.assertEqual(lines[-1], self.NEXT + ' review array#3 merge array#4 review array#5 review sha256#7 fix sha256#8 fix dom#9 merge bridge#11 fix bridge#12' + self.TICKETS)
+        for running in ('arith#1', 'arith#2', 'sha256#6'):
+            self.assertNotIn(running, lines[-1])
+
+    def test_an_older_green_pull_request_comes_before_an_older_running_one_and_a_newer_red_one(self):
+        # quire#898, the Done-when: the older green one is first, the oldest of all (checks still running) is not named
+        fixture = {}
+        self.pr(fixture, 'quire', 50, 'blocked', (('build', 'in_progress', None), ('check', 'queued', None)), created='2026-10-01T00:00:00Z')
+        self.pr(fixture, 'bats', 51, 'blocked', self.GREEN, created='2026-10-02T00:00:00Z')
+        self.pr(fixture, 'array', 52, 'unstable', (('build', 'completed', 'failure'), ('check', 'completed', 'failure')), created='2026-10-03T00:00:00Z')
+        self.assertEqual(self.run_qsweep(fixture)[-1], self.NEXT + ' review bats#51 fix array#52' + self.TICKETS)
+
+    def test_a_pull_request_with_nothing_to_do_leaves_the_ticket(self):
+        fixture = {}
+        self.pr(fixture, 'quire', 50, 'blocked', (('check', 'in_progress', None),))
+        self.assertEqual(self.run_qsweep(fixture)[-1], 'NEXT FOR A FREE SLOT: the oldest ticket of the highest priority (CLAUDE.md, Priorities)')
+
+    def test_a_branch_behind_main_with_finished_checks_is_an_update_but_not_while_they_run(self):
+        fixture = {}
+        self.pr(fixture, 'dom', 40, 'behind', self.GREEN)
+        self.pr(fixture, 'bridge', 41, 'behind', (('check', 'in_progress', None),))
+        lines = self.run_qsweep(fixture)
+        self.assertIn('UPDATE-NEEDED', self.line_of(lines, 'dom #40 '))
+        self.assertIn('WAIT-FOR-CI', self.line_of(lines, 'bridge #41 '))
+        self.assertEqual(lines[-1], self.NEXT + ' update dom#40' + self.TICKETS)
+
+    def test_a_pull_request_on_the_blocked_list_is_skipped(self):
+        import tempfile
+        fixture = {}
+        self.pr(fixture, 'array', 3, 'blocked', self.GREEN)
+        self.pr(fixture, 'sha256', 4, 'dirty', self.GREEN)
+        with tempfile.TemporaryDirectory() as tmp:
+            listing = os.path.join(tmp, 'blocked-prs')
+            with open(listing, 'w', encoding='utf-8') as handle:
+                handle.write('array#3\n')
+            os.environ['QSWEEP_BLOCKED'] = listing
+            try:
+                lines = self.run_qsweep(fixture)
+            finally:
+                del os.environ['QSWEEP_BLOCKED']
+        self.assertEqual(lines[-1], self.NEXT + ' fix sha256#4' + self.TICKETS)
 
     def test_the_next_line_is_oldest_first_across_all_repositories(self):
-        # quire#751, row 19: the order inside each category is the PR's creation date, oldest first, not the API's order (newest first) or the repository's place in the list
+        # quire#751, row 19: the order is the PR's creation date, oldest first, not the API's order (newest first) or the repository's place in the list
         fixture = {}
         self.pr(fixture, 'bats', 433, 'blocked', self.GREEN, created='2026-10-21T05:36:39Z')
         self.pr(fixture, 'bats', 429, 'blocked', self.GREEN, created='2026-10-20T19:03:08Z')
@@ -832,14 +869,10 @@ class QsweepLibraries(unittest.TestCase):
         self.pr(fixture, 'arith', 5, 'blocked', self.GREEN, created='2026-10-21T01:00:00Z')
         self.pr(fixture, 'sha256', 60, 'blocked', self.GREEN, created='2026-10-20T14:30:35Z')
         self.pr(fixture, 'quire', 752, 'blocked', self.GREEN, created='2026-10-21T05:04:31Z')
+        self.pr(fixture, 'quire', 700, 'dirty', self.GREEN, created='2026-10-21T03:00:00Z')
+        self.pr(fixture, 'zip', 9, 'dirty', self.GREEN, created='2026-10-19T03:00:00Z')
         lines = self.run_qsweep(fixture)
-        self.assertEqual(lines[-1], 'NEXT FOR A FREE SLOT: a review (not by the author) of sha256#60 bats#423 bats#429 arith#5 quire#752 bats#433')
-        fixes = {}
-        self.pr(fixes, 'quire', 700, 'dirty', self.GREEN, created='2026-10-21T03:00:00Z')
-        self.pr(fixes, 'zip', 9, 'dirty', self.GREEN, created='2026-10-19T03:00:00Z')
-        self.pr(fixes, 'bridge', 8, 'dirty', self.GREEN, created='2026-10-20T03:00:00Z')
-        self.pr(fixes, 'arith', 7, 'dirty', self.GREEN, created='2026-10-22T03:00:00Z')
-        self.assertEqual(self.run_qsweep(fixes)[-1], 'NEXT FOR A FREE SLOT: a fix (an author; any author) for zip#9 bridge#8 quire#700 arith#7')
+        self.assertEqual(lines[-1], self.NEXT + ' fix zip#9 review sha256#60 review bats#423 review bats#429 review arith#5 fix quire#700 review quire#752 review bats#433' + self.TICKETS)
 
     def test_the_repositories_are_listed_once_and_skill_md_points_to_the_list(self):
         import subprocess
