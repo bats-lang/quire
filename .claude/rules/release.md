@@ -11,8 +11,7 @@ paths:
 
 ## The version is the commit's
 
-Quire's version is the date of the commit it is built from, never of the build, so the same
-commit always gives the same version (#219): the committer date in UTC,
+Quire's version (#219) is the committer date of the commit in UTC,
 `YEAR.MONTH.DAY.SECONDS` (seconds since midnight), and the short SHA, `2026.10.2.61373
 (f95ce82)`. bats writes the commit's facts as a module (`build/src/_bats_facts`, from the
 commit `BATS_COMMIT` names, else HEAD) and `src/version.bats` words them (`quire_version`,

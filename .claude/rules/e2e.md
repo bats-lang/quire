@@ -41,8 +41,9 @@ it does not hang on the machine's fonts.
   pages a spec makes itself are not guarded. `releaseClick` is a trial hover
   that moves the pointer to the viewport's centre, so never call it between a
   move and the press, wheel or release that depend on the pointer's place.
-* **A test never waits in real time for a moment of the app's own** (#657: the
-  back button's 10 s, a toast's 2 s, the Nextcloud poll). It
+* **The fake clock** (#657: the back button's 10 s, a toast's 2 s, the Nextcloud
+  poll; the rule that a test never waits in real time for a moment of the app's own
+  is pitboss's `engineering.md`). A test
   installs the fake clock before the page opens (`page.clock.install()`) and
   runs it to the moment: `expectMoment` (`e2e/helpers.js`) asserts the thing is
   there 1.5 s before the moment's end and gone 1.5 s after, `runUntil` runs the
@@ -63,8 +64,8 @@ it does not hang on the machine's fonts.
 
 ## A worker's machine matches CI (#713)
 
-"This machine lacks X" is never a reason for a spec to be skipped or to pass
-here and fail in CI. What CI has, and the one command each takes here:
+What CI has, and the one command each takes here (the rule that a missing tool is
+never a reason to skip a spec is pitboss's `rules.md`, "Briefs and workers"):
 
 * **Speech voices: CI has none, and neither does a worker's machine, and the
   Read aloud tab is built either way.** #713 started from the belief that the
