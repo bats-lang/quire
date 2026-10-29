@@ -203,6 +203,27 @@ first (the mutation check is, below).
 * Where an entry is: the PR timeline (`added_to_merge_queue`,
   `removed_from_merge_queue`); `auto_merge` empty means enqueued or removed.
 
+**Why an entry is removed, and how to read its runs (#879, keyword: queue-removal).** The
+`merge_group` runs of a removed entry that read `skipped` or `cancelled` are never the cause:
+
+* A `skipped` run, every job skipped, `plan` included, is the `destroyed` event's run. It is created
+  seconds after `removed_from_merge_queue`, its jobs carry `github.event.action != 'destroyed'`, and
+  its only work is to cancel, through the concurrency group, the run of the group it ends (run
+  40243573211, created 23:10:49Z, 11 seconds after the removal at 23:10:38Z).
+* A `cancelled` run was cancelled by that `destroyed` run, not by `supersede.yml`: the supersede
+  runs beside it logged `No check.yml run for the requested group ...: nothing is cancelled` (run
+  40241693300) and `No superseded run of pull request #869` (run 40232553071). There is no newer
+  group that superseded it; the only newer groups are the entry's own re-enqueues.
+* Read the cause off the entry's timeline and the group's run, in this order: the minutes between
+  `added_to_merge_queue` and `removed_from_merge_queue` (about 60 means the window, so look for a push
+  run of main beside it and for the queue wait of the group's jobs), then the failed job of the group's
+  run (`failure` in `check`, the job's own log).
+* The causes seen on quire#869, each a shared mechanism fixed in pwa and used here by a call: the window
+  eaten by the push run of main for the commit the queue had just tested (bats-lang/pwa#215, the
+  `queue-passed` action; quire's call is #882) and an emulator install that failed before an emulator
+  started (bats-lang/pwa#214, `android.yml`, in quire's pin 3cace57, which is after pwa PR 216, c84d79b). #869 merged through the
+  queue in run 40246488612. A removal with another cause is a ticket of its own.
+
 The static groups (`tests/groups.json`) are balanced by measured time (#618):
 every group pays the app's cold check and then its members (a reject is
 seconds, an accept a minute or more). A new fixture goes in the group with the
