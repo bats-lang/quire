@@ -140,7 +140,7 @@ export const NATIVE_MOST_MS = FLIGHT_MOST_MS + COMMAND_MS + (3 * COMMAND_MS + CP
 /** The duration of an instrument, not a wait for a step to end (quire#985, keyword: window): the CPU time read over
     CPU_WINDOW_MS, the profile sampled over PROFILE_MS, the probe that asks every PROBE_EVERY_MS. What is measured is
     the time itself, so the span is the thing the timer is for; its callback has a body, as a limit's does. */
-const lasting = (ms) => new Promise((resolve) => { setTimeout(() => { resolve(); }, ms); });
+export const lasting = (ms) => new Promise((resolve) => { setTimeout(() => { resolve(); }, ms); });
 
 /** How a promise ended within `ms`: { answered, ms, value } or { error } or { answered: false }. */
 async function within(promise, ms) {

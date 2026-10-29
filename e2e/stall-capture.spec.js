@@ -26,7 +26,7 @@ import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
 import { gunzipSync } from 'node:zlib';
 import { keepBrowserTrace, keepKernel, ringSeen, serialRun, startBrowserTrace, startKernel, stopKernel, wanted } from './flight-recorder.js';
-import { arm, capture, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
+import { arm, capture, lasting, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
 
 /** Resolves when the child has been started (its program is running). */
 const started = (child) => once(child, 'spawn');
@@ -795,9 +795,10 @@ test('a busy page next to an idle healthy one: nothing is attached, the idle pag
     let capture;
     stallWatch.next(page, 30000).then((found) => { capture = found; });
     while (!capture) {
-      // a frame of the idle page is the answer, and the next question follows it
-      expect(await other.page.evaluate(() => new Promise((frame) => requestAnimationFrame(() => frame(1))))).toBe(1);
+      expect(await other.page.evaluate(() => 1)).toBe(1);
       answered += 1;
+      // the questions are the sampler of this test: one every 100 ms, so that the idle page stays idle (keyword: window)
+      await lasting(100);
     }
     expect(capture.native, 'the busy page is presumed busy, so no renderer is attached to').toBeUndefined();
     expect(capture.presumedBusy).toContain('presumed busy');

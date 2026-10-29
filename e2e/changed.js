@@ -2,17 +2,20 @@
 import { existsSync, watch } from 'node:fs';
 import { dirname } from 'node:path';
 
-/** Resolves when something in `directory` changes (a file made, written or removed), or at the limit `ms`, which is
-    the caller's budget and no part of what is waited for: the caller looks again at what it waits for. */
-export function directoryChanged(directory, ms) {
+/** Resolves when something in `directory` changes (a file made, written or removed), when an event of `also` is emitted
+    (`[[emitter, 'exit'], ...]`: what else ends the wait, as a child that ends), or at the limit `ms`, which is the
+    caller's budget and no part of what is waited for: the caller looks again at what it waits for. */
+export function directoryChanged(directory, ms, also = []) {
   return new Promise((resolve) => {
     let limit = null;
     let watcher = null;
-    const finish = () => {
+    const heard = also.map(([emitter, name]) => { emitter.once(name, finish); return [emitter, name]; });
+    function finish() {
       clearTimeout(limit);
       if (watcher) watcher.close();
+      for (const [emitter, name] of heard) emitter.off(name, finish);
       resolve();
-    };
+    }
     try { watcher = watch(directory, finish); } catch (failure) { /* a directory that cannot be watched is looked at again at the limit */ }
     limit = setTimeout(() => { finish(); }, Math.max(ms, 0));
   });

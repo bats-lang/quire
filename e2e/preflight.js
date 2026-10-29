@@ -156,7 +156,8 @@ async function prove(env, { cwd = process.cwd(), version = '149.0.7827.55', laun
     first = heartbeats(out).find((each) => each.file.startsWith(`heartbeat-${process.pid}-`));
     if (first) break;
     // the watchdog's first heartbeat is a file made in the directory
-    await directoryChanged(out, deadline - Date.now());
+    // (or the watchdog's end, which is looked at at the top of the loop)
+    await directoryChanged(out, deadline - Date.now(), watchdog.child ? [[watchdog.child, 'exit'], [watchdog.child, 'error']] : []);
   }
   if (!first) throw new PreflightFailed('watchdog', `no heartbeat in ${firstHeartbeatMs} ms`);
   if (first.ring && first.ring.on !== '1') throw new PreflightFailed('watchdog', `its first reading of the ring: ${JSON.stringify(first.ring)}`);
