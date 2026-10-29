@@ -282,6 +282,29 @@ class Workflow(unittest.TestCase):
         self.assertNotIn('draft', self.job('android'))
         self.assertIn('types: [opened, synchronize, reopened, ready_for_review]', self.TEXT)
 
+    def test_the_queue_job_calls_queue_passed_by_commit_and_the_groups_read_its_skip(self):
+        """#882: pwa's queue-passed is called by commit in its own job, the static and
+        e2e groups read its `skip` and end after their first step on `true`, `check`
+        needs it and reports its run-url, and the relock moves its pin."""
+        self.assertRegex(self.job('queue'),
+                         r'uses: bats-lang/pwa/\.github/actions/queue-passed@[0-9a-f]{40} # pwa main [0-9a-f]{7}\n')
+        self.assertIn('actions: read', self.job('queue'))
+        self.assertIn("needs.queue.outputs.skip != 'true'", self.job('static'))
+        self.assertIn("needs.queue.outputs.skip == 'true' && 'no'", self.job('e2e'))
+        for name in ('static', 'e2e', 'check'):
+            with self.subTest(name):
+                self.assertIn('queue', re.search(r'(?m)^    needs: .*$', self.job(name)).group(0))
+        self.assertIn('needs.queue.outputs.run_url', self.job('check'))
+        self.assertIn('jobs: plan queue build static e2e', self.job('check'))
+        relock = (ROOT / '.github' / 'workflows' / 'relock.yml').read_text()
+        self.assertIn('bats-lang/pwa/.github/actions/queue-passed\n', relock)
+
+    def test_the_build_the_android_job_and_the_release_do_not_read_the_queue(self):
+        for name in ('build', 'android', 'play-internal'):
+            with self.subTest(name):
+                self.assertNotIn('needs.queue', self.job(name))
+                self.assertNotIn('queue.outputs', self.job(name))
+
     def test_a_merge_group_plans_the_whole_check(self):
         scope = self.job('plan')[self.job('plan').index('id: scope'):]
         self.assertRegex(scope, r'merge_group\) base=\$\(git rev-parse HEAD\^1\); full=full ;;')

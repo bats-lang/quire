@@ -45,6 +45,30 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'merge_group' && github.event.action == 'destroyed') }}
 
 jobs:
+  # Whether the merge queue already passed this very commit (pwa#215, #882): a
+  # push to main of an entry the queue's group tested, the same commit, skips
+  # the static and e2e groups and says why. pwa's action decides by the commit
+  # alone (a merge_group run of this workflow, same head_sha, success) and gives
+  # skip=false for every other event, so a schedule run and a dispatch run
+  # everything. `build`, `android` and `play-internal` never read it: the AAB
+  # that goes to Play is built and signed in this run. Area: queue-passed
+  queue:
+    if: github.event.action != 'destroyed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      skip: ${{ steps.queue.outputs.skip }}
+      run_url: ${{ steps.queue.outputs.run-url }}
+      reason: ${{ steps.queue.outputs.reason }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Did the merge queue pass this commit
+        id: queue
+        # pinned like the other pwa calls; the relock moves it (relock.yml's workflow-pins)
+        uses: bats-lang/pwa/.github/actions/queue-passed@3cace57c2c9dde8923a5eef219a008791a85f54c # pwa main 3cace57
+
   # The groups the tests run in, side by side (tests/groups.json): every
   # e2e spec and every static test in exactly one, or this fails. And what
   # each of them has to run for this change (#619): decided here, once, from
@@ -245,7 +269,7 @@ jobs:
   # each checks only its module again; in groups side by side, each
   # checking the app first
   static:
-    needs: plan
+    needs: [plan, queue]
     runs-on: ubuntu-24.04
     # a mutation group of a change to crc.bats is the longest (keyword: mutation, #594)
     timeout-minutes: 120
@@ -257,8 +281,9 @@ jobs:
     # What the plan selected of this group's members (#619): none ends the job
     # after its first step, and only `checkers` (python) needs no compiler
     env:
-      GROUP_MEMBERS: ${{ fromJSON(needs.plan.outputs.static_run)[matrix.group].members }}
-      GROUP_BATS: ${{ fromJSON(needs.plan.outputs.static_run)[matrix.group].bats && 'yes' || 'no' }}
+      # a commit the merge queue passed runs no member (queue-passed, #882)
+      GROUP_MEMBERS: ${{ needs.queue.outputs.skip != 'true' && fromJSON(needs.plan.outputs.static_run)[matrix.group].members || '' }}
+      GROUP_BATS: ${{ needs.queue.outputs.skip != 'true' && fromJSON(needs.plan.outputs.static_run)[matrix.group].bats && 'yes' || 'no' }}
     steps:
       # A group the plan does not name has no members to run: that fails
       # the job (and so `check`) and is never read as nothing selected (#656)
@@ -347,7 +372,7 @@ jobs:
   # The e2e suite, in groups by area side by side, each on the PWA built
   # once (quire-android)
   e2e:
-    needs: [plan, build]
+    needs: [plan, build, queue]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -362,7 +387,7 @@ jobs:
     # the number 0), so the test is on the JSON text, 'null' is not 'false'
     # (#656): a group with no entry runs
     env:
-      GROUP_RUN: ${{ toJSON(fromJSON(needs.plan.outputs.e2e_run)[matrix.group]) == 'false' && 'no' || 'yes' }}
+      GROUP_RUN: ${{ needs.queue.outputs.skip == 'true' && 'no' || toJSON(fromJSON(needs.plan.outputs.e2e_run)[matrix.group]) == 'false' && 'no' || 'yes' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: env.GROUP_RUN == 'yes'
@@ -548,7 +573,7 @@ jobs:
   # results, with the reason of each path in the plan job's summary
   check:
     if: always() && github.event.action != 'destroyed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    needs: [plan, build, static, e2e]
+    needs: [plan, queue, build, static, e2e]
     runs-on: ubuntu-24.04
     steps:
       # What the plan selected, printed beside the results (as the aggregator
@@ -561,13 +586,26 @@ jobs:
           echo "e2e groups run (false: shown unaffected by the change): $E2E_RUN"
           echo "static members run, by group: $STATIC_RUN"
 
+      # Why the groups did not run again, when they did not: the queue run that
+      # passed this commit (pwa's queue-passed, #882). No compiler is set up in
+      # this job, so the only avenue is the shell that already prints above
+      - name: Why the groups did not run again
+        env:
+          QUEUE_SKIP: ${{ needs.queue.outputs.skip }}
+          QUEUE_RUN_URL: ${{ needs.queue.outputs.run_url }}
+          QUEUE_REASON: ${{ needs.queue.outputs.reason }}
+        run: |
+          echo "queue-passed: skip=$QUEUE_SKIP: $QUEUE_REASON"
+          echo "queue-passed run: $QUEUE_RUN_URL"
+          echo "queue-passed: skip=$QUEUE_SKIP, $QUEUE_REASON ($QUEUE_RUN_URL)" >> "$GITHUB_STEP_SUMMARY"
+
       # Every job in needs must have passed: skipped, cancelled and failed are
       # not a pass, and a job missing from needs fails (repository-prototype's
       # check-aggregate, #328, called by commit)
       - name: Every group passed
         uses: bats-lang/repository-prototype/.github/actions/check-aggregate@c190c73390d21dcf2586c2a452de08122d6608bb # repository-prototype main c190c73
         with:
-          jobs: plan build static e2e
+          jobs: plan queue build static e2e
           results: ${{ toJSON(needs) }}
 
   # The Android app (AAB and APK), built by the pwa package's workflow and
