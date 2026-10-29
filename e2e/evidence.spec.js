@@ -12,19 +12,21 @@ import { createRequire } from 'node:module';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { createGzip, gunzipSync } from 'node:zlib';
+import { createGunzip, createGzip, gunzipSync } from 'node:zlib';
+import { createInterface } from 'node:readline';
 import { test, expect } from './fixtures.js';
 import { arm, capture, CAPTURE_MOST_MS, NATIVE_MOST_MS, stallWatch as makeWatch } from './stall-capture.js';
 import { capabilities, diskEvidence, missingEvidence, pageState, parseBlocked, symbolEvidence } from './evidence.js';
 import { pixelDiff } from './relaunch.js';
 import { missingFields } from './evidence-check.js';
 import { futexAnalysis, ringContent } from './flight-recorder.js';
-import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
+import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, pauseInstance, readSyscall, ringSeen, ringState, ringStats, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { Watchdog } from './flight-watchdog.js';
-import { LOCK_NAME, LOCK_UNREADABLE_MS, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
+import { LOCK_NAME, LOCK_UNREADABLE_MS, lockFailuresIn, segmentsIn, withRingLock } from './flight-tracefs.js';
+import { COST_FILE } from './preflight.js';
 
 function desktopOnly(testInfo) {
   test.skip(testInfo.project.name !== 'desktop', 'the renderer and the machine do not depend on the project: once, in desktop, is enough');
@@ -34,7 +36,7 @@ function desktopOnly(testInfo) {
 async function recorderOn() {
   expect(wanted(), 'run with CI=true or QUIRE_FLIGHT=1 (and sudo): the evidence tests prove what the recorder lands').toBe(true);
   expect(process.env[INSTANCE_VARIABLE], 'the kernel ring started in global setup').toBeTruthy();
-  // no resume here: every capture ends its own pause (quire#575), and a test that needed this line would be hiding a ring left paused
+  // no capture stops the ring (ring snapshot, #910), so there is nothing to start again here
 }
 
 // a ring is read a line at a time (ringSeen): one that recorded a whole run is larger than a string can be
@@ -278,24 +280,29 @@ test('a full disk and a disk that is slow: the free space is in the capture, and
   }
 });
 
-test('a ring larger than a string can be (a whole run recorded) is read a line at a time by every reader', async ({}, testInfo) => {
+test('a ring larger than a string can be (a whole run recorded, as the segments of several captures) is read a line at a time by every reader', async ({}, testInfo) => {
   test.setTimeout(testInfo.timeout + 240000);
   const file = testInfo.outputPath('huge-ring.txt.gz');
   const line = `   Compositor-4242  [001] .... 1000.000001: sys_enter_futex: ${'x'.repeat(900)}\n`;
-  // 640 million characters: past the 0x1fffffe8 a string can hold, which the first CI run met with a ring of a whole run
-  const source = Readable.from((function* () {
-    yield '# entries-in-buffer/entries-written: 700000/700000   #P:4\n# the last 12000000 lines at most; clock: mono\n';
-    for (let i = 0; i < 700000; i += 1) yield line;
-    yield '   Chrome_ChildIOT-4243  [002] .... 1000.5: sched_process_exit: comm=last pid=4243 prio=120\n';
+  // the file of a capture is the gzip members of the segments before it and then its own snapshot (flight-tracefs.js, ring snapshot): two members here.
+  // 640 million characters in all: past the 0x1fffffe8 a string can hold, which the first CI run met with a ring of a whole run
+  const segment = (events, extra) => Readable.from((function* () {
+    yield `# entries-in-buffer/entries-written: ${events}/${events}   #P:4\n# the snapshot of the ring taken for this capture; clock: mono\n`;
+    for (let i = 0; i < events; i += 1) yield line;
+    yield extra;
   })());
-  await pipeline(source, createGzip({ level: 1 }), createWriteStream(file));
+  // the wait of the thread is in the earlier segment, the last event in the later one
+  await pipeline(segment(350000, '   Compositor-4242  [001] .... 999.5: sys_futex(uaddr: 0x7ffe33dd6610, op: 0x189, val: 0x0, utime: 0x0, uaddr2: 0x0, val3: 0x0)\n'), createGzip({ level: 1 }), createWriteStream(file));
+  await pipeline(segment(350000, '   Chrome_ChildIOT-4243  [002] .... 1000.5: sched_process_exit: comm=last pid=4243 prio=120\n'), createGzip({ level: 1 }), createWriteStream(file, { flags: 'a' }));
   expect(() => gunzipSync(readFileSync(file)).toString(), 'the failure of the first run, reproduced: one string of the whole ring').toThrow(/string longer than|Invalid string length|Cannot create a string/);
   const seen = await ringSeen(file, { header: /entries-in-buffer/, last: /sched_process_exit: comm=last/ });
   expect(seen.header).not.toBeNull();
-  expect(seen.last, 'the last line of a ring larger than a string').not.toBeNull();
+  expect(seen.last, 'the last line of a ring larger than a string, in its last member').not.toBeNull();
   expect((await ringContent(file)).ok).toBe(true);
   const analysed = await futexAnalysis(file, { address: '7ffe33dd6610', tid: 4242 });
   expect(analysed && analysed.error, JSON.stringify(analysed).slice(0, 300)).toBeUndefined();
+  expect(analysed.waiter.lastWait && analysed.waiter.lastWait.untimed, 'the wait of the earlier member is read').toBe(true);
+  expect(analysed.ringEnd, 'and the reading goes on to the last member').toBe(1000.5);
 });
 
 test('the ring is read in both forms the kernel prints a futex call in (6.18 with 0x, 7.0 on the runners without)', async ({}, testInfo) => {
@@ -763,13 +770,13 @@ test('a ring lock re-created with the same inode and still unreadable when the f
   expect.soft(lockFailuresIn(dir), 'and no record').toEqual([]);
 });
 
-test('a capture leaves the ring recording on every outcome, the last of two readers resumes it, and a ring left paused is not a record of the next red', async ({}, testInfo) => {
+test('a capture leaves the ring recording on every outcome, and a ring a fault stopped is not the record of the next red (ring snapshot)', async ({}, testInfo) => {
   desktopOnly(testInfo);
   await recorderOn();
-  // a ring of its own, so the captures of the other tests of this run do not pause the one read here
-  const holds = testInfo.outputPath('holds');
-  mkdirSync(holds, { recursive: true });
-  const env = { CI: 'true', [OUT_VARIABLE]: holds };
+  // a ring of its own, so the fault made here does not stop the one the run records into
+  const ring = testInfo.outputPath('ring');
+  mkdirSync(ring, { recursive: true });
+  const env = { CI: 'true', [OUT_VARIABLE]: ring };
   const started = await startKernel(env);
   expect(started.instance, JSON.stringify(started)).toBeTruthy();
   const on = async () => (await ringState(env)).on;
@@ -777,94 +784,96 @@ test('a capture leaves the ring recording on every outcome, the last of two read
     const first = await keepKernel(testInfo.outputPath('first.txt.gz'), env);
     expect(first.file, JSON.stringify(first)).toBeTruthy();
     expect(await on(), 'a capture that was written').toBe('1');
-    expect(first.reach, JSON.stringify(first.reach)).toMatchObject({ reaches: true, others: [] });
-    expect(holdersIn(holds), 'its hold is down').toEqual([]);
-    const lost = await keepKernel(join(holds, 'no-such-directory', 'x.txt.gz'), env);
+    expect(first.reach, JSON.stringify(first.reach)).toMatchObject({ reaches: true });
+    const lost = await keepKernel(join(ring, 'no-such-directory', 'x.txt.gz'), env);
     expect(lost.error, 'a capture that could not be written').toBeTruthy();
     expect(await on(), 'a capture that failed').toBe('1');
-    expect(holdersIn(holds)).toEqual([]);
-    // two readers: the first out leaves the ring paused for the second, the last out starts it
-    markKept(env, 'reader-a');
-    markKept(env, 'reader-b');
-    await pauseInstance(started.instance);
-    await resumeKernel(env, 'reader-a');
-    expect(await on(), 'one reader is still reading').toBe('0');
-    await resumeKernel(env, 'reader-b');
-    expect(await on(), 'the last reader is out').toBe('1');
-    // a ring paused by an earlier capture and never resumed ends before the next red: the file has content and is not evidence
+    expect(readdirSync(ring).filter((name) => /\.tmp$|^ring-lock$/.test(name)), 'a failed capture leaves no lock and no half segment').toEqual([]);
+    // a second capture still holds the events of the first, whose swap emptied the live ring: the later file begins with the earlier segment
+    const second = await keepKernel(testInfo.outputPath('second.txt.gz'), env);
+    expect(second.segments, JSON.stringify(second)).toBeGreaterThanOrEqual(1);
+    expect((await ringSeen(second.file, { early: /sched_/ })).early, 'an event of the first capture is in the second').not.toBeNull();
+    // a ring a fault stopped (the spec's own, as evidence-real.spec.js stops a nested run's) ends before the next red: the file has content and is not evidence
     await pauseInstance(started.instance);
     await new Promise((resolve) => setTimeout(resolve, 1500));
     const stale = await keepKernel(testInfo.outputPath('stale.txt.gz'), env);
     expect(stale.file).toBeTruthy();
     expect(stale.reach.reaches, JSON.stringify(stale.reach)).toBe(false);
-    expect(stale.reach.why).toMatch(/before the red and no other capture held the ring/);
+    expect(stale.reach.why).toMatch(/s before the red$|holds no event/);
     expect(await missingEvidence({ status: 'failed', expectedStatus: 'passed', flight: { kernel: stale, browserTrace: { file: 'x' } } }, env), 'the red-time rule names it').toEqual([expect.stringMatching(/^kernel ring \(does not reach the red/)]);
-    // the same gap with another capture holding the ring is explained by it
-    markKept(env, 'reader-c');
-    await pauseInstance(started.instance);
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    const explained = await keepKernel(testInfo.outputPath('explained.txt.gz'), env);
-    expect(explained.reach, JSON.stringify(explained.reach)).toMatchObject({ reaches: true, others: ['reader-c'] });
-    await resumeKernel(env, 'reader-c');
-    expect(await on()).toBe('1');
-  } finally { await stopKernel(started); }
+  } finally { await stopKernel(started, env); }
+  expect(readdirSync(ring).filter((name) => name.startsWith('ring-segment-')), 'the segments go with the ring').toEqual([]);
 });
 
-test('four captures at once on one ring: no capture sees the ring recording while it holds it, and the last one out resumes it (the ring lock)', async ({}, testInfo) => {
+test('four captures at once on one ring: each reads the snapshot it took and no other, and the lock is given back (the ring lock)', async ({}, testInfo) => {
   desktopOnly(testInfo);
-  // a stand-in for the ring (a directory with a tracing_on file): the sequences are the real ones, so the race does not need a kernel to show
-  const holds = testInfo.outputPath('holds');
+  // a stand-in for the ring (a directory with the snapshot file that the swap writes and cat reads): the sequences are the real ones, so the race does not need a kernel to show.
+  // The swap of a capture writes the snapshot buffer with the capture's own events; a second swap while a capture reads would show that capture another's events
+  const directory = testInfo.outputPath('ring');
   const instance = testInfo.outputPath('instance');
-  mkdirSync(holds, { recursive: true });
+  mkdirSync(directory, { recursive: true });
   mkdirSync(instance, { recursive: true });
-  writeFileSync(join(instance, 'tracing_on'), '1');
+  writeFileSync(join(instance, 'trace_clock'), '[mono] global\n');
   const module = pathToFileURL(join(import.meta.dirname, 'flight-tracefs.js')).href;
-  // each capture: hold the ring, look at it a few times while it holds it (it must read paused), release it
+  const events = 4000;
   const code = `
     const { parentPort, workerData } = require('node:worker_threads');
-    const { readFileSync } = require('node:fs');
-    import(workerData.module).then(({ holdAndPause, release }) => {
-      const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-      let seenRecording = 0;
+    const { readFileSync, writeFileSync } = require('node:fs');
+    const { gunzipSync } = require('node:zlib');
+    import(workerData.module).then(async ({ snapshot }) => {
+      const { instance, dir, holder, events } = workerData;
+      let mixed = 0;
+      let captures = 0;
       for (let round = 0; round < workerData.rounds; round += 1) {
-        holdAndPause({ instance: workerData.instance, dir: workerData.dir, holder: workerData.holder });
-        for (let look = 0; look < 3; look += 1) {
-          if (readFileSync(workerData.instance + '/tracing_on', 'utf8').trim() === '1') seenRecording += 1; // (a file being rewritten reads empty: the kernel's does not)
-          if (look < 2) nap(0);
-        }
-        release({ instance: workerData.instance, dir: workerData.dir, holder: workerData.holder });
+        const tag = holder + '-' + round;
+        // the swap puts this capture's events in the snapshot buffer, as the kernel's swap puts the live ring there
+        const swap = () => {
+          const lines = [];
+          for (let i = 0; i < events; i += 1) lines.push('  ' + holder + '-1 [000] .... ' + round + '.' + String(i).padStart(6, '0') + ': sys_enter_futex: ' + tag);
+          writeFileSync(instance + '/snapshot', '# tracer: nop\\n# entries-in-buffer/entries-written: ' + events + '/' + events + '   #P:4\\n#\\n' + lines.join('\\n') + '\\n');
+          return { swapped: true };
+        };
+        const out = dir + '/' + tag + '.gz';
+        const kept = await snapshot({ instance, out, dir, lines: events * 2, swap, clear: () => ({ cleared: true }) });
+        captures += 1;
+        // the last events of the file are this capture's: it read its own snapshot to the end
+        const text = gunzipSync(readFileSync(out)).toString().split('\\n').filter((line) => line && !line.startsWith('#'));
+        const own = text.slice(-events);
+        if (kept.error || own.length !== events || own.some((line) => !line.endsWith(': sys_enter_futex: ' + tag))) mixed += 1;
       }
-      parentPort.postMessage({ holder: workerData.holder, seenRecording });
+      parentPort.postMessage({ holder, mixed, captures });
     });`;
   const answers = await Promise.all(['a', 'b', 'c', 'd'].map((holder) => new Promise((resolve, reject) => {
-    const worker = new Worker(code, { eval: true, workerData: { module, instance, dir: holds, holder, rounds: 3000 } });
+    const worker = new Worker(code, { eval: true, workerData: { module, instance, dir: directory, holder, rounds: 6, events } });
     worker.on('message', resolve);
     worker.on('error', reject);
   })));
-  expect(answers.map((each) => each.seenRecording), `times a capture found the ring recording while it held it: ${JSON.stringify(answers)}`).toEqual([0, 0, 0, 0]);
-  expect(readFileSync(join(instance, 'tracing_on'), 'utf8').trim(), 'the last one out resumed it').toBe('1');
-  expect(holdersIn(holds), 'no hold is left').toEqual([]);
-  expect(readdirSync(holds), 'the lock is given back').toEqual([]);
+  expect(answers.map((each) => each.mixed), `captures that read another's events or none: ${JSON.stringify(answers)}`).toEqual([0, 0, 0, 0]);
+  expect(readdirSync(directory), 'the lock is given back').not.toContain(LOCK_NAME);
+  expect(readdirSync(directory).filter((name) => name.endsWith('.tmp')), 'no half segment').toEqual([]);
+  expect(lockFailuresIn(directory), 'no capture went without the lock').toEqual([]);
+  expect(segmentsIn(directory).at(-1).seq, 'one segment for each swap: 4 captures of 6 rounds, the newest kept').toBe(24);
 });
 
 test('a capture whose file cannot be written ends at once, with no reader of the ring left behind (a ring too large for the pipes, the sudo call that ran its whole limit)', async ({}, testInfo) => {
   desktopOnly(testInfo);
-  // a stand-in for a ring that holds more than the pipes between tail, gzip and the file can carry (CI's quire-4296 hung its 'lost' capture for the 60 s limit of the root call)
+  // a stand-in for a ring that holds more than the pipes between cat, gzip and the file can carry (CI's quire-4296 hung its 'lost' capture for the 60 s limit of the root call)
   const instance = testInfo.outputPath('instance');
   mkdirSync(instance, { recursive: true });
-  writeFileSync(join(instance, 'tracing_on'), '1');
   writeFileSync(join(instance, 'trace_clock'), '[mono] global\n');
   let state = 12345;
   const lines = [];
   for (let line = 0; line < 60000; line += 1) { state = (state * 1103515245 + 12345) % 2147483648; lines.push(`   node-1 [000] ..... ${line}.${state}: sys_futex(uaddr: ${state.toString(16)}${(state * 7).toString(16)})`); }
-  writeFileSync(join(instance, 'trace'), `# entries-in-buffer/entries-written: 60000/60000   #P:4\n${lines.join('\n')}\n`);
-  const holds = testInfo.outputPath('holds');
-  mkdirSync(holds, { recursive: true });
-  const args = JSON.stringify({ instance, out: join(holds, 'no-such-directory', 'x.txt.gz'), dir: holds, holder: 'lost' });
+  writeFileSync(join(instance, 'snapshot'), `# entries-in-buffer/entries-written: 60000/60000   #P:4\n${lines.join('\n')}\n`);
+  const ring = testInfo.outputPath('ring');
+  mkdirSync(ring, { recursive: true });
+  const args = JSON.stringify({ instance, out: join(ring, 'no-such-directory', 'x.txt.gz'), dir: ring });
   const began = Date.now();
-  // as the recorder calls it (flight-recorder.js asRoot): the caller is done when the process has ended and every pipe it gave is closed, so a reader left alive holds the call
+  // as the recorder calls it (flight-recorder.js asRoot): the caller is done when the process has ended and every pipe it gave is closed, so a reader left alive holds the call.
+  // The swap is the stand-in's (there is no kernel snapshot to swap): the snapshot file is as the swap left it
+  const script = `import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, 'flight-tracefs.js')).href)}).then(async ({ snapshot }) => { const answer = await snapshot({ ...JSON.parse(process.argv[1]), swap: () => ({ swapped: true }), clear: () => ({ cleared: true }) }); process.stdout.write(JSON.stringify(answer) + '\\n'); });`;
   const answer = await new Promise((resolve) => {
-    execFile(process.execPath, [join(import.meta.dirname, 'flight-tracefs.js'), 'snapshot', args], { timeout: 20000, killSignal: 'SIGKILL', encoding: 'utf8' }, (error, stdout) => resolve({ error, stdout, ms: Date.now() - began }));
+    execFile(process.execPath, ['-e', script, args], { timeout: 20000, killSignal: 'SIGKILL', encoding: 'utf8' }, (error, stdout) => resolve({ error, stdout, ms: Date.now() - began }));
   });
   const left = readdirSync('/proc').filter((name) => /^\d+$/.test(name)).filter((name) => { try { return readFileSync(`/proc/${name}/cmdline`, 'utf8').includes(instance); } catch (gone) { return false; } });
   for (const pid of left) { try { process.kill(Number(pid), 'SIGKILL'); } catch (gone) { /* it ended */ } }
@@ -872,8 +881,88 @@ test('a capture whose file cannot be written ends at once, with no reader of the
   expect(JSON.parse(String(answer.stdout).trim().split('\n').pop()).error, 'the capture says why it has no file').toBeTruthy();
   expect(answer.ms, 'it ended at once').toBeLessThan(10000);
   expect(left, 'readers of the ring that outlived the capture').toEqual([]);
-  expect(readFileSync(join(instance, 'tracing_on'), 'utf8').trim(), 'the ring records again').toBe('1');
-  expect(holdersIn(holds), 'no hold is left').toEqual([]);
+  expect(readdirSync(ring), 'no lock and no half segment is left').toEqual([]);
+});
+
+/** The widest silence of a kept ring after `since` (CLOCK_MONOTONIC seconds): { seconds, from }, read a line at a time. A pause of the ring is a silence of its length. */
+async function widestSilence(file, since) {
+  const reader = createInterface({ input: createReadStream(file).pipe(createGunzip()), crlfDelay: Infinity });
+  let previous = null;
+  let widest = { seconds: 0, from: null };
+  for await (const line of reader) {
+    const found = /^\s*.+-\d+\s+\[\d+\]\s+\S+\s+(\d+\.\d+):/.exec(line);
+    if (!found || Number(found[1]) < since) continue;
+    const at = Number(found[1]);
+    if (previous !== null && at - previous > widest.seconds) widest = { seconds: at - previous, from: previous };
+    previous = at;
+  }
+  return widest;
+}
+
+// The ticket's event (#910, run 40313494155): a capture of one worker held the ring paused for 13 s, a renderer in the other worker began its untimed
+// wait in that window, and the ring never held the wait. The capture here is real (keepKernel, the root step and all) and cannot end: its file is a pipe
+// that nobody reads, so it holds the ring lock and has taken its snapshot, and stays in the middle of reading the ring until the test reads the pipe.
+test('a capture is reading the ring while a renderer in another page begins an untimed futex wait: the wait is in the ring (#910)', async ({ playwright, launchOptions }, testInfo) => {
+  desktopOnly(testInfo);
+  await recorderOn();
+  test.setTimeout(testInfo.timeout + CAPTURE_MOST_MS + 60000);
+  const directory = process.env[OUT_VARIABLE];
+  const pipe = testInfo.outputPath('capture.pipe');
+  expect(spawnSync('mkfifo', [pipe]).status, 'mkfifo makes the pipe the capture writes to').toBe(0);
+  const segmentsBegun = () => new Set(readdirSync(directory).filter((name) => /^ring-segment-\d+\.tmp$/.test(name)));
+  const own = await playwright.chromium.launch(launchOptions);
+  let hang = null;
+  let reading = null;
+  let draining = null;
+  try {
+    const page = await (await own.newContext()).newPage();
+    const armed = await arm(page);
+    const before = segmentsBegun();
+    let capturing = true;
+    reading = keepKernel(pipe, process.env).finally(() => { capturing = false; });
+    // the capture has taken its snapshot when its segment is begun (flight-tracefs.js writes the segment's file right after the swap)
+    await expect.poll(() => [...segmentsBegun()].some((name) => !before.has(name)), { timeout: 30000, message: 'the capture took its snapshot' }).toBe(true);
+    const written = (await ringStats(process.env)).written;
+    // the renderer begins its wait now, while the capture is in the middle of reading
+    hang = await hangPage(page, { session: async () => armed.session });
+    let waiting = null;
+    await expect.poll(async () => {
+      for (const renderer of (await processes(own)).filter((each) => each.type === 'renderer')) {
+        const answer = await readSyscall(renderer.id);
+        const call = /^202 (0x[0-9a-f]+) (0x[0-9a-f]+) (0x[0-9a-f]+) (0x[0-9a-f]+)/.exec(answer.syscall || '');
+        if (call && (parseInt(call[2], 16) & 0x7f) === 9 && /^0x0+$/.test(call[4])) { waiting = { pid: renderer.id, address: call[1].slice(2), syscall: answer.syscall }; return true; }
+      }
+      return false;
+    }, { timeout: 30000, message: 'a renderer is in an untimed futex wait' }).toBe(true);
+    expect(capturing, 'the capture is still reading when the wait has begun (else this test shows nothing)').toBe(true);
+    // the ring recorded all the while: events came in during the capture
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    const during = await ringStats(process.env);
+    expect.soft(during.on, 'the ring records while a capture reads it').toBe('1');
+    expect.soft(during.written, 'and takes events').toBeGreaterThan(written);
+    // the capture ends: its pipe is read
+    draining = (async () => { for await (const chunk of createReadStream(pipe)) { void chunk; } })();
+    const first = await reading;
+    await draining;
+    expect(first.file, JSON.stringify(first)).toBeTruthy();
+    // the next capture, whichever worker or watchdog makes it, has the wait: it began after the first one's snapshot, in the live ring
+    const next = await keepKernel(testInfo.outputPath('after.txt.gz'), process.env);
+    expect(next.file, JSON.stringify(next)).toBeTruthy();
+    // no hole: from the first capture's snapshot to the end of the next one the ring has no silence of seconds (a ring paused for the capture has the length of the capture)
+    const silence = await widestSilence(next.file, first.lastAt);
+    expect.soft(silence.seconds, `the widest silence of the ring after the first capture's snapshot began at ${silence.from}`).toBeLessThan(1.5);
+    const history = await futexAnalysis(next.file, { address: waiting.address, tid: waiting.pid });
+    expect(history.waiter.lastWait, `the ring holds the renderer's wait (${waiting.syscall}): ${JSON.stringify(history.waiter)}`).not.toBeNull();
+    expect(history.waiter.lastWait.untimed).toBe(true);
+    expect(history.onAddress.events, 'and the address it waits on').toBeGreaterThan(0);
+    expect(history.waiter.lastWait.at, 'the wait began after the capture took its snapshot').toBeGreaterThan(first.lastAt);
+  } finally {
+    if (hang) hang.release();
+    if (!draining) { draining = (async () => { for await (const chunk of createReadStream(pipe)) { void chunk; } })(); }
+    if (reading) await reading.catch(() => {});
+    await draining.catch(() => {});
+    await own.close().catch(() => {});
+  }
 });
 
 test('the job-level check: a test that ended unexpectedly names a kernel ring or it is missing, a named error is repeated, no report is a failure', async ({}, testInfo) => {
@@ -881,20 +970,19 @@ test('the job-level check: a test that ended unexpectedly names a kernel ring or
   const kept = testInfo.outputPath('flight-1-kernel.txt.gz');
   writeFileSync(kept, 'x');
   const reaching = testInfo.outputPath('flight-1-kernel.txt.gz.reach.json');
-  writeFileSync(reaching, JSON.stringify({ redAt: 100, lastAt: 100.2, others: [], reaches: true }));
+  writeFileSync(reaching, JSON.stringify({ redAt: 100, lastAt: 100.2, reaches: true }));
   const stale = testInfo.outputPath('stale.reach.json');
-  writeFileSync(stale, JSON.stringify({ redAt: 100, lastAt: 40, others: [], reaches: false, why: 'the last event is 60.0 s before the red and no other capture held the ring' }));
+  writeFileSync(stale, JSON.stringify({ redAt: 100, lastAt: 40, reaches: false, why: 'the last event is 60.0 s before the red' }));
   const report = (status, message, attachments = []) => ({ suites: [{ specs: [{ title: 'a test', file: 'a.spec.js', tests: [{ expectedStatus: 'passed', results: [{ status, errors: message ? [{ message }] : [], attachments }] }] }] }] });
   expect(missingFields([report('failed', 'Error: EVIDENCE MISSING: kernel ring (not written)\n at x')])).toEqual(expect.arrayContaining(['kernel ring (not written) (test: a test)']));
   expect(missingFields([report('failed', 'Error: expected 1 to be 2')])[0], 'a plain failure with no record').toMatch(/^kernel ring \(test "a test" ended failed and left no record/);
   expect(missingFields([report('timedOut', 'Test timeout of 90000ms exceeded')])[0]).toMatch(/ended timedOut and left no record/);
   expect(missingFields([report('failed', 'x', [{ name: 'flight-kernel', path: kept }, { name: 'flight-kernel-reach', path: reaching }])]), 'a record named in the report').toEqual([]);
-  expect(missingFields([report('failed', 'x', [{ name: 'flight-kernel', path: kept }, { name: 'flight-kernel-reach', path: stale }])])[0], 'a ring that ends before the red (left paused) is not a record of it').toMatch(/does not reach the red: the last event is 60.0 s before the red/);
+  expect(missingFields([report('failed', 'x', [{ name: 'flight-kernel', path: kept }, { name: 'flight-kernel-reach', path: stale }])])[0], 'a ring that ends before the red (a ring a fault stopped) is not a record of it').toMatch(/does not reach the red: the last event is 60.0 s before the red/);
   expect(missingFields([report('failed', 'x', [{ name: 'flight-kernel', path: kept }])])[0], 'a ring with no reach record').toMatch(/has no reach record/);
   expect(missingFields([report('failed', 'x', [{ name: 'flight-kernel', path: testInfo.outputPath('gone.gz') }])])[0], 'a record named but gone').toMatch(/left no record/);
   expect(missingFields([report('failed', 'x')], [{ source: 'the runner', file: kept, test: 'file > a test', reach: { reaches: true } }]), 'a record the runner wrote').toEqual([]);
   expect(missingFields([report('failed', 'x')], [{ source: 'the runner', file: kept, test: 'file > a test', reach: { reaches: false, why: 'stale' } }])[0], 'a record the runner wrote that stops before the red').toMatch(/does not reach the red: stale/);
-  expect(missingFields([report('passed')], [], { held: ['kernel ring (still held paused by 42-1)'] }), 'a hold nobody released').toEqual(['kernel ring (still held paused by 42-1)']);
   expect(missingFields([report('passed')])).toEqual([]);
   expect(missingFields([])).toEqual([]);
   expect(missingFields([], [], { requireReport: true })[0]).toMatch(/^report \(no Playwright JSON report/);
@@ -1084,41 +1172,16 @@ test('two screens that differ by a pixel (quire#546): where it is, both colours 
   expect(found.dom[0].stack.join(' ')).toContain('div#dot');
 });
 
-test('what the recorder costs: a loop of page cycles with the rings on against off, in this job, and the numbers in the log', async ({ playwright, launchOptions }, testInfo) => {
+test('what the recorder costs: the job\'s own measurement of a loop of page cycles with the rings on against off, made before the first test, and the numbers in the log', async ({}, testInfo) => {
   desktopOnly(testInfo);
   await recorderOn();
-  test.setTimeout(testInfo.timeout + 240000);
-  const cycles = async (browser) => {
-    const started = performance.now();
-    for (let i = 0; i < 12; i += 1) {
-      const context = await browser.newContext();
-      const page = await context.newPage();
-      await page.setContent('<button id="b">x</button>');
-      await page.click('#b');
-      await page.evaluate(() => fetch('data:text/plain,hi').then((answer) => answer.text()));
-      await context.close();
-    }
-    return performance.now() - started;
-  };
-  const off = [];
-  const on = [];
-  for (let round = 0; round < 3; round += 1) {
-    // off: the ring paused (marked as a pause on purpose, for the monitor) and no trace
-    const plain = await playwright.chromium.launch(launchOptions);
-    markKept(process.env, 'cost');
-    await pauseInstance(process.env[INSTANCE_VARIABLE]);
-    off.push(await cycles(plain));
-    await resumeKernel(process.env, 'cost');
-    await plain.close();
-    const traced = await playwright.chromium.launch(launchOptions);
-    await startBrowserTrace(traced);
-    on.push(await cycles(traced));
-    await traced.close();
-  }
-  const median = (list) => [...list].sort((a, b) => a - b)[Math.floor(list.length / 2)];
-  const ratio = median(on) / median(off);
-  console.error(`[cost] 12 page cycles: ${Math.round(median(off))} ms with the rings off, ${Math.round(median(on))} ms with both on (x${ratio.toFixed(2)}); rounds off ${off.map(Math.round)}, on ${on.map(Math.round)}`);
-  expect(ratio, 'both rings together stay under 75% extra on a loop of nothing but IPC').toBeLessThan(1.75);
+  // The measurement needs the kernel ring off, which only the preflight can do: it pauses the ring before any worker records, and no capture ever
+  // stops the ring (ring snapshot). This test reads what it wrote and holds the ratio.
+  const file = join(process.env[OUT_VARIABLE], COST_FILE);
+  expect(existsSync(file), `${file} is written by the preflight's measurement (QUIRE_NO_COST skips it)`).toBe(true);
+  const measured = JSON.parse(readFileSync(file, 'utf8'));
+  console.error(`[cost] ${measured.cycles} page cycles: x${measured.ratio.toFixed(2)} with both rings on against off; rounds off ${measured.off.map(Math.round)}, on ${measured.on.map(Math.round)}`);
+  expect(measured.ratio, 'both rings together stay under 75% extra on a loop of nothing but IPC').toBeLessThan(1.75);
 });
 
 test('what the runner can do that bears on the classes the record cannot see is read each run and a change is a notice', async ({}, testInfo) => {

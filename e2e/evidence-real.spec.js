@@ -139,6 +139,24 @@ test('preflight: a ring that cannot start fails the job before any test, by name
   expect(check.text).toMatch(/EVIDENCE MISSING: /);
 });
 
+test('preflight: a kernel with no snapshot fails the job before any test, as `kernel ring: snapshot`, and capabilities.json records the probe (#910)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  // a tracefs directory whose instances have no `snapshot` file, as a kernel built without CONFIG_TRACER_SNAPSHOT makes them: the files the ring sets are plain files here
+  const fake = testInfo.outputPath('tracefs-without-snapshot');
+  mkdirSync(join(fake, 'instances'), { recursive: true });
+  const run = nested(testInfo, 'quiet', { QUIRE_FLIGHT_TRACEFS: fake });
+  const { code } = await run.finished;
+  expect(code, run.output()).not.toBe(0);
+  expect(run.output()).toMatch(/PREFLIGHT FAILED: kernel ring: snapshot: the instance has no snapshot file: the kernel is built without CONFIG_TRACER_SNAPSHOT/);
+  expect(run.output(), 'no test ran').not.toMatch(/1 passed/);
+  const capabilities = JSON.parse(readFileSync(join(run.directory, 'flight-watchdog', 'capabilities.json'), 'utf8'));
+  expect(capabilities.kernelSnapshot, 'the probe is in capabilities.json').toEqual({ available: false, why: expect.stringMatching(/no snapshot file/) });
+  const check = evidenceCheck(run);
+  expect(check.code, check.text).toBe(1);
+  expect(check.text).toMatch(/EVIDENCE MISSING: /);
+});
+
 test('preflight: a watchdog that exits at start fails the job before any test, with its exit code', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();
@@ -313,7 +331,8 @@ test('a ring lock that is held past its limit leaves a record: the capture goes 
   desktopOnly(testInfo);
   needRecorder();
   test.setTimeout(testInfo.timeout + 60000);
-  const run = nested(testInfo, 'plain', { QUIRE_NESTED_SLEEP: '3000', QUIRE_NESTED_TIMEOUT: '60000', QUIRE_FLIGHT_MONITOR: 'off' });
+  // QUIRE_FLIGHT_LOCK_MOST_MS: the capture's patience for the lock is shortened to 5 s (its real limit is 40 s); the lock and what is done at its end are the real ones
+  const run = nested(testInfo, 'plain', { QUIRE_NESTED_SLEEP: '3000', QUIRE_NESTED_TIMEOUT: '60000', QUIRE_FLIGHT_MONITOR: 'off', QUIRE_FLIGHT_LOCK_MOST_MS: '5000' });
   let holder = null;
   try {
     await run.until(/ring (\/sys\/kernel\/tracing\/instances\/quire-\d+) recording/);
@@ -533,9 +552,6 @@ test('two reds and a third in one run (a crash, a freeze, a plain failure): each
     expect(Object.keys(each.attachments), each.title).toEqual(expect.arrayContaining(['flight-kernel', 'flight-kernel-reach', 'flight-browser-trace']));
     const reach = JSON.parse(readFileSync(each.attachments['flight-kernel-reach'], 'utf8'));
     expect(reach.reaches, `${each.title}: ${JSON.stringify(reach)}`).toBe(true);
-    // not explained by another capture: the reds are seconds apart, so a ring left paused would have ended before this one (the freeze's ring may
-    // overlap the watchdog's own report of it, which holds the ring too)
-    if (!/second/.test(each.title)) expect(reach.others, each.title).toEqual([]);
     expect(reach.lastAt, each.title).toBeGreaterThanOrEqual(reach.redAt - 0.5);
   }
   // the second red is the freeze: its own futex wait is in its ring, after the first red's capture
@@ -548,32 +564,11 @@ test('two reds and a third in one run (a crash, a freeze, a plain failure): each
   const event = JSON.parse(readFileSync(join(run.directory, 'third-event.json'), 'utf8'));
   expect((await ringSeen(third.attachments['flight-kernel'], { signal: new RegExp(`signal_generate: sig=${event.signal} .*pid=${event.pid} `) })).signal, 'the third red\'s signal is in the third ring').not.toBeNull();
   expect((await ringSeen(first.attachments['flight-kernel'], { signal: new RegExp(`signal_generate: sig=${event.signal} .*pid=${event.pid} `) })).signal, 'and not in the first, which ended before it').toBeNull();
-  // no capture still holds the ring, the monitor ran and said so, and the job-level check passes
-  expect(readdirSync(join(run.directory, 'flight-watchdog')).filter((name) => name.startsWith('ring-kept-'))).toEqual([]);
+  // the ring was never stopped (a ring that is not recording ends the run, and nothing did), the monitor ran and said so, and the job-level check passes
   expect(run.output()).toMatch(/\[monitor\] started/);
   expect(run.output()).toMatch(/\[monitor\] stopped: \d+ checks/);
   const check = evidenceCheck(run);
   expect(check.code, check.text).toBe(0);
-});
-
-test('a hold that nobody releases (a capture that died holding the ring) ends the run at that moment, and the job-level check names it', async ({}, testInfo) => {
-  desktopOnly(testInfo);
-  needRecorder();
-  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000' });
-  try {
-    const ok = await run.until(/ring (\/sys\/kernel\/tracing\/instances\/quire-\d+) recording/);
-    await run.until(/\[monitor\] started/);
-    // a capture five minutes ago paused the ring and never came back
-    writeFileSync(join(run.directory, 'flight-watchdog', 'ring-kept-dead-capture'), `${new Date(Date.now() - 300000).toISOString()} dead-capture\n`);
-    await pauseInstance(ok[1]);
-    const stoppedAt = Date.now();
-    const { code } = await run.finished;
-    expect(code, run.output()).not.toBe(0);
-    expect(run.output()).toMatch(/EVIDENCE MISSING: kernel ring: held paused by dead-capture for \d+ s/);
-    expect(Date.now() - stoppedAt).toBeLessThan(30000);
-    expect(run.output(), 'the monitor says what it saw when it ended the run').toMatch(/\[monitor\] ended the run: \d+ checks/);
-    expect(evidenceCheck(run).text).toMatch(/EVIDENCE MISSING: .*held paused by dead-capture/);
-  } finally { run.child.kill('SIGKILL'); }
 });
 
 test('a red in a test tagged @serial, alone in the serial run, has the preflight, the monitor and both rings like any other', async ({}, testInfo) => {

@@ -147,7 +147,7 @@ export async function missingEvidence(state, env = process.env) {
   else {
     const content = await ringContent(kernel.file);
     if (!content.ok) missing.push(`kernel ring (${content.why})`);
-    // a ring that stopped before the red (left paused by an earlier capture) is a file with content and no evidence
+    // a ring that stopped before the red (a ring a fault stopped; no capture stops it) is a file with content and no evidence
     if (kernel.reach && !kernel.reach.reaches) missing.push(`kernel ring (does not reach the red: ${kernel.reach.why})`);
   }
   const trace = flight.browserTrace || {};
