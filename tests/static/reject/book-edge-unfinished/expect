@@ -1,0 +1,3 @@
+function _static_edge_dropped
+line 4
+the linear dynamic variable [mark$_(-1)] needs to be consumed but it is preserved with the type [S2Eapp(S2Ecst(edge_mark_); S2Eintinf(1))] instead.
