@@ -376,8 +376,8 @@ class WorkerLines(unittest.TestCase):
             self.assertIn('`' + line_name.split(' ')[0], read_root('.claude', 'orchestration.md'), line_name)
 
 
-class QuarantineAndRepeat(unittest.TestCase):
-    """quire#976: a failing test is quarantined with its ticket, a race fix is repeated under CI; each class has a case that fails when it occurs."""
+class QuarantineAndRace(unittest.TestCase):
+    """quire#976: a failing test is quarantined with its ticket, a race fix shows its root cause, an injection and a CI run; each class has a case that fails when it occurs."""
     TICKET = Brief.TICKET
     BRIEF = 'Every row has its line.\nThe tests pass.\n'
     RUN = 'https://github.com/bats-lang/quire/actions/runs/123456789'
@@ -392,15 +392,15 @@ class QuarantineAndRepeat(unittest.TestCase):
 
     def test_a_brief_about_a_race_without_the_line_is_refused(self):
         found = gl.lint_brief(self.BRIEF + 'Fix the race in the ring lock.\n', self.TICKET, PHRASES)
-        self.assertTrue(any('Repeat: ...' in line for line in found), found)
-        ok = self.BRIEF + 'Fix the race in the ring lock.\nRepeat: CI runs it with --repeat-each 20 on every project.\n'
+        self.assertTrue(any('Race: ...' in line for line in found), found)
+        ok = self.BRIEF + 'Fix the race in the ring lock.\nRace: the body names the root cause, an injection and one CI run.\n'
         self.assertEqual(gl.lint_brief(ok, self.TICKET, PHRASES), [])
 
     def test_a_review_of_either_without_its_check_is_refused(self):
         found = gl.lint_review(GOOD_REVIEW + '\nThe flaky test is fixed.\n', PHRASES)
         self.assertTrue(any('Quarantine check: ...' in line for line in found), found)
-        self.assertTrue(any('Repeat check: ...' in line for line in found), found)
-        ok = GOOD_REVIEW + '\nThe flaky test is fixed.\nQuarantine check: listed in the body.\nRepeat check: the run shows 20 repeats on every project.\n'
+        self.assertTrue(any('Race check: ...' in line for line in found), found)
+        ok = GOOD_REVIEW + '\nThe flaky test is fixed.\nQuarantine check: listed in the body.\nRace check: the body has the three items.\n'
         self.assertEqual(gl.lint_review(ok, PHRASES), [])
 
     def test_a_quote_in_a_code_span_is_not_a_trigger(self):
@@ -409,20 +409,34 @@ class QuarantineAndRepeat(unittest.TestCase):
     def body(self, extra, evidence=''):
         return GOOD_BODY.replace('ok: 33 phrases\n```', 'ok: 33 phrases\n```\n' + evidence).replace('Head:', extra + '\n\nHead:')
 
-    def test_a_race_fix_body_without_the_repeat_run_is_refused(self):
-        found = gl.lint_pr_body(self.body('Quarantine: none listed.\nRepeat: see Evidence.\nThe race in the ring lock is fixed.'), HEAD, PHRASES)
-        self.assertTrue(any('--repeat-each 20' in line for line in found), found)
-        self.assertTrue(any('URL of the CI run' in line for line in found), found)
+    ITEMS = {
+        'Root cause': 'Root cause: the ring lock was taken before the pause ended; the test now waits for the release event.',
+        'Injection': 'Injection: a 3 s delay at the release step fails the old code and passes the fix.',
+        'CI run': 'CI run: ' + RUN,
+    }
 
-    def test_a_race_fix_body_with_one_repeat_of_five_is_refused(self):
-        evidence = f'\n```\n$ gh workflow run check.yml -f repeat-each=5\n{self.RUN}\n```\n'
-        found = gl.lint_pr_body(self.body('Repeat: see Evidence.\nThe race in the ring lock is fixed.', evidence), HEAD, PHRASES)
-        self.assertTrue(any('--repeat-each 20' in line for line in found), found)
+    def race_body(self, leave_out=None):
+        lines = [text for key, text in self.ITEMS.items() if key != leave_out]
+        return self.body('Quarantine: none listed.\nRace: see the three items.\nThe race in the ring lock is fixed.\n' + '\n'.join(lines))
 
-    def test_a_race_fix_body_with_the_repeat_run_passes(self):
-        evidence = f'\n```\n$ gh workflow run check.yml -f spec=e2e/x.spec.js -f repeat-each=20\n{self.RUN}\n```\n'
-        body = self.body('Repeat: see Evidence.\nThe race in the ring lock is fixed.', evidence)
-        self.assertEqual(gl.lint_pr_body(body, HEAD, PHRASES), [])
+    def test_a_race_fix_body_with_the_three_items_passes(self):
+        self.assertEqual(gl.lint_pr_body(self.race_body(), HEAD, PHRASES), [])
+
+    def test_a_race_fix_body_missing_one_item_is_refused(self):
+        for key in self.ITEMS:
+            found = gl.lint_pr_body(self.race_body(key), HEAD, PHRASES)
+            self.assertEqual(len(found), 1, (key, found))
+            self.assertIn(f'"{key}', found[0])
+
+    def test_an_item_with_nothing_after_it_is_refused(self):
+        body = self.race_body().replace(self.ITEMS['Injection'], 'Injection:')
+        found = gl.lint_pr_body(body, HEAD, PHRASES)
+        self.assertTrue(any('"Injection: ..."' in line for line in found), found)
+
+    def test_a_ci_run_with_no_url_is_refused(self):
+        body = self.race_body().replace(self.RUN, 'green')
+        found = gl.lint_pr_body(body, HEAD, PHRASES)
+        self.assertTrue(any('"CI run: <URL>"' in line for line in found), found)
 
     def mark_tree(self, mark):
         root = tempfile.mkdtemp()
@@ -453,10 +467,10 @@ class QuarantineAndRepeat(unittest.TestCase):
 
     def test_the_rules_are_written_where_the_agents_read_them(self):
         for parts, needle in (
-                (('.claude', 'rules', 'e2e.md'), 'Quarantine and repeat'),
+                (('.claude', 'rules', 'e2e.md'), 'Quarantine and race fixes'),
                 (('.claude', 'orchestration.md'), '`Quarantine: '),
-                (('.claude', 'orchestration.md'), '`Repeat: '),
-                (('.claude', 'agents', 'reviewer.md'), 'Repeat check:'),
+                (('.claude', 'orchestration.md'), '`Race: '),
+                (('.claude', 'agents', 'reviewer.md'), 'Race check:'),
                 (('.claude', 'agents', 'worker.md'), 'test.fixme')):
             self.assertIn(needle, read_root(*parts), parts)
 

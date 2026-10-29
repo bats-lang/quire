@@ -25,7 +25,7 @@ e2e/pagelist.spec.js	1	#985
 e2e/pathological.spec.js	1	#985
 e2e/preflight.js	2	#985
 e2e/publisher-sizes.spec.js	1	#985
-e2e/reader.spec.js	9	#985
+e2e/reader.spec.js	10	#985
 e2e/reading-ruler.spec.js	1	#985
 e2e/relaunch.js	3	#985
 e2e/replace-steps.js	1	#985

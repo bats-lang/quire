@@ -171,9 +171,9 @@ def lint_guidelines(root, phrases):
 
 def lint_pr_body(text, head, phrases, marks=None):
     """marks: {ticket: count} of the test.fixme marks the PR leaves in e2e/ (None: not known, not checked)."""
-    findings = lint_text(text, 'PR body', phrases) + lint_quarantine_repeat(text, 'PR body', QUARANTINE_BRIEF, 'Quarantine: ...', REPEAT_BRIEF, 'Repeat: ...')
+    findings = lint_text(text, 'PR body', phrases) + lint_quarantine_race(text, 'PR body', QUARANTINE_BRIEF, 'Quarantine: ...', RACE_BRIEF, 'Race: ...')
     if RACE.search(strip_code(text)):
-        findings += lint_repeat_evidence(text)
+        findings += lint_race_evidence(text)
     for number in sorted({found.split('#')[-1] for found in FIXES.findall(text)}):
         if marks and marks.get(number):
             findings.append(f'PR body: it fixes #{number} and e2e/ still holds {marks[number]} test.fixme mark(s) that cite it: the ticket\'s close removes the mark (quire#976)')
@@ -223,30 +223,31 @@ def lint_overlap(text, name, line_form, line_name):
     return findings
 
 
-# Quarantine and repeat rules (quire#976, keyword: quarantine, repeat-each).
+# Quarantine and race-fix rules (quire#976, keyword: quarantine, race-fix).
 # A text about a failing test (a brief, a PR body, a review) carries the line "Quarantine:", and a text about a
-# race (a test whose failure depends on the runner's speed, a fixed wait or an order of events) carries "Repeat:"
-# (a review: "Quarantine check:" and "Repeat check:"), as a signature change carries "Overlap:".
+# race (a test whose failure depends on the runner's speed, a fixed wait or an order of events) carries "Race:"
+# (a review: "Quarantine check:" and "Race check:"), as a signature change carries "Overlap:".
 FAILING_TEST = re.compile(r'(?i)(?:\b(?:failing|failed|flaky|red) tests?\b|\btests? (?:fails|failed|failure)\b|\bspec\.js:\d+)')
 RACE = re.compile(r'(?i)\b(?:race|racy|flak(?:e|es|y|iness)|intermittent(?:ly)?|timing (?:race|bug))\b')
 QUARANTINE_BRIEF = re.compile(r'^\s*Quarantine:', re.MULTILINE)
 QUARANTINE_REVIEW = re.compile(r'^\s*Quarantine check:', re.MULTILINE)
-REPEAT_BRIEF = re.compile(r'^\s*Repeat:', re.MULTILINE)
-REPEAT_REVIEW = re.compile(r'^\s*Repeat check:', re.MULTILINE)
-REPEAT_EACH = re.compile(r'--repeat-each[= ]+(\d+)|repeat[-_]each[=: ]+(\d+)')
-RUN_URL = re.compile(r'https://github\.com/[\w.-]+/[\w.-]+/actions/runs/\d+')
+RACE_BRIEF = re.compile(r'^\s*Race:', re.MULTILINE)
+RACE_REVIEW = re.compile(r'^\s*Race check:', re.MULTILINE)
+ROOT_CAUSE = re.compile(r'^\s*Root cause:[ \t]*\S', re.MULTILINE)
+INJECTION = re.compile(r'^\s*Injection:[ \t]*\S', re.MULTILINE)
+CI_RUN = re.compile(r'^\s*CI run:[^\n]*https://github\.com/[\w.-]+/[\w.-]+/actions/runs/\d+', re.MULTILINE)
 FIXME_TICKET = re.compile(r'\.fixme\s*\([^\n]*?#(\d+)')
 
 
-def lint_quarantine_repeat(text, name, quarantine_form, quarantine_name, repeat_form, repeat_name):
+def lint_quarantine_race(text, name, quarantine_form, quarantine_name, race_form, race_name):
     """A text about a failing test names how it is quarantined (a p0 ticket's failing test is test.fixme(ticket) on
-    every project in the commit that files the ticket), and a text about a race how CI repeats it (--repeat-each 20)."""
+    every project in the commit that files the ticket), and a text about a race its three items (root cause, injection, CI run)."""
     plain = strip_code(text)
     findings = []
     if FAILING_TEST.search(plain) and not quarantine_form.search(text):
-        findings.append(f'{name}: it names a failing test and has no line "{quarantine_name}" (the test is test.fixme(#N) on every project from the commit that files its p0 ticket; the line lists it, quire#976; CLAUDE.md-level rule in .claude/rules/e2e.md, "Quarantine and repeat")')
-    if RACE.search(plain) and not repeat_form.search(text):
-        findings.append(f'{name}: it names a race and has no line "{repeat_name}" (a race fix merges after CI ran the test with --repeat-each 20 on every project and it passed every time, quire#976; .claude/rules/e2e.md, "Quarantine and repeat")')
+        findings.append(f'{name}: it names a failing test and has no line "{quarantine_name}" (the test is test.fixme(#N) on every project from the commit that files its p0 ticket; the line lists it, quire#976; CLAUDE.md-level rule in .claude/rules/e2e.md, "Quarantine and race fixes")')
+    if RACE.search(plain) and not race_form.search(text):
+        findings.append(f'{name}: it names a race and has no line "{race_name}" (a race fix merges with its root cause, an injection and one CI run on every project, quire#976; .claude/rules/e2e.md, "Quarantine and race fixes")')
     return findings
 
 
@@ -265,14 +266,17 @@ def marks_left(root):
     return found
 
 
-def lint_repeat_evidence(text):
-    """A body about a race shows the run: --repeat-each of 20 or more, and the URL of the CI run."""
+def lint_race_evidence(text):
+    """A body about a race carries the three items of the rule (quire#976): a line `Root cause: ...` (the cause from the
+    captured evidence of a failing run and the event the test now waits for), `Injection: ...` (the forced losing order, old
+    code fails, fix passes) and `CI run: <URL>` (one run of the spec on every project). No test is repeated to count failures."""
     findings = []
-    counts = [int(a or b) for a, b in REPEAT_EACH.findall(text)]
-    if not counts or max(counts) < 20:
-        findings.append('PR body: it names a race and its Evidence has no `--repeat-each 20` (or more) run: one green run is no evidence for a race (quire#976)')
-    if not RUN_URL.search(text):
-        findings.append('PR body: it names a race and shows no URL of the CI run that repeated the test on every project (https://github.com/<owner>/<repo>/actions/runs/N, quire#976)')
+    if not ROOT_CAUSE.search(text):
+        findings.append('PR body: it names a race and has no line "Root cause: ..." (the cause from the captured evidence of a failing run, and the event the test now waits for, quire#976)')
+    if not INJECTION.search(text):
+        findings.append('PR body: it names a race and has no line "Injection: ..." (a delay or other forcing of the losing order, under which the old code fails and the fix passes, quire#976)')
+    if not CI_RUN.search(text):
+        findings.append('PR body: it names a race and has no line "CI run: <URL>" with the URL of one CI run of the spec on every project (https://github.com/<owner>/<repo>/actions/runs/N, quire#976)')
     return findings
 
 
@@ -298,7 +302,7 @@ def lint_worker_lines(text, name):
 
 def lint_review(text, phrases, gate_form=False):
     findings = (lint_text(text, 'review', phrases) + lint_overlap(text, 'review', OVERLAP_REVIEW, 'Overlap check: ...')
-                + lint_quarantine_repeat(text, 'review', QUARANTINE_REVIEW, 'Quarantine check: ...', REPEAT_REVIEW, 'Repeat check: ...'))
+                + lint_quarantine_race(text, 'review', QUARANTINE_REVIEW, 'Quarantine check: ...', RACE_REVIEW, 'Race check: ...'))
     lines = [line for line in text.split('\n') if line.strip()]
     first = lines[0].strip() if lines else ''
     if gate_form or first == '## Adversarial review':
@@ -321,7 +325,7 @@ def done_when(ticket):
 
 
 def lint_brief(brief, ticket, phrases):
-    findings = lint_text(brief, 'brief', phrases) + lint_overlap(brief, 'brief', OVERLAP_BRIEF, 'Overlap: ...') + lint_worker_lines(brief, 'brief') + lint_quarantine_repeat(brief, 'brief', QUARANTINE_BRIEF, 'Quarantine: ...', REPEAT_BRIEF, 'Repeat: ...')
+    findings = lint_text(brief, 'brief', phrases) + lint_overlap(brief, 'brief', OVERLAP_BRIEF, 'Overlap: ...') + lint_worker_lines(brief, 'brief') + lint_quarantine_race(brief, 'brief', QUARANTINE_BRIEF, 'Quarantine: ...', RACE_BRIEF, 'Race: ...')
     lines = done_when(ticket)
     if lines is None:
         findings.append('ticket: it has no "Done when" section: add it before the brief (the Done-when is what the work is measured by)')
