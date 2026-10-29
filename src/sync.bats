@@ -2348,6 +2348,7 @@ in
       in $P.ret<read_answer>(ReadFile(owner, file, size)) end)
 end
 
+(* fixture: backup-read-answer *)
 (* The backed-up file: the merge as it was last written here, or, after
    a reinstall, as Auto Backup restored it; each outcome of the read is
    its own (keyword: backup-read-answer) *)
