@@ -4,7 +4,7 @@ The standing rules of the orchestrator that hold for any project (agents and slo
 
 ## Priorities
 
-The priorities (p0 to p3), the order of work, the owner's rule on downgrades and the Android-release hold are defined once, in quire's `CLAUDE.md`, section "Priorities". This file does not restate them. The orchestrator works tickets in that order.
+The priorities (p0 to p3), the order of work, the owner's rule on downgrades and the Android-release hold are in pitboss's `rules.md` ("Tickets", "Agents and slots"), and quire's `CLAUDE.md`, section "Priorities", holds the Android-release hold. This file does not restate them. The orchestrator works tickets in that order.
 
 ## Agents and slots
 
@@ -32,7 +32,7 @@ The hourly slot check runs this section: run `ListAgents`, fill each empty row o
   * `Expects: write reject expects with bats fixtures --bless (bats#522) after the last edit of a module, never by hand or by repeated population runs; until bats#522 merges, from the observed error of one run of each changed snippet.`
   * `Affected: before every push, run python3 scripts/ci-groups.py local $(git merge-base origin/main HEAD) --run <repository>, which is CI's affected rule at the granularity of a fixture: it lists the whole selected population, runs the selected fixtures whole, and runs the selected specs whole when they fit the 10-minute cap (--specs N) and otherwise a printed-seed sample of them, CI running the rest; the seeded sample is added to it, not put in its place; the command, its output, the seed and the sample are in the PR's Evidence (.claude/rules/ci.md, keyword: affected).`
 * **A worker brief that runs an e2e spec carries the line** `Tracefs: after a container restart tracefs may be missing; when the preflight says "no tracefs instances directory", run once grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing (the allowed command, ci.md, quire#765, quire#958) and run the spec again; run no other mount.`
-* The setup of a tool a machine lacked is documented in quire's "Check locally" section.
+* The setup of a tool a machine lacked is documented in `.claude/rules/ci.md`, "Checking locally before a push" (quire's `CLAUDE.md` "Check locally before every push" points there).
 * `python3 tests/static/guidelines.py --text <hand-back>` finds the phrases of a hand-back that is no hand-back.
 
 ## Pushing and merging

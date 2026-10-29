@@ -14,7 +14,7 @@ paths:
 
 ## CI is pinned
 
-The pins and the relock are in CLAUDE.md. Specifics:
+The rule that every input is pinned, and the relock, are pitboss's `ci.md`; quire's pin names and its Dependabot and relock split are in CLAUDE.md, "CI is pinned". Specifics:
 
 * **The runner label** (#667): every job runs on `ubuntu-24.04`, written in each
   job's `runs-on` (quire has no reusable workflow to write it once in);
@@ -226,7 +226,7 @@ Both jobs that use Node install it with pwa's `e2e-setup` action (called by
 commit; `npm ci`, retried on a dropped connection, Playwright checked against
 `playwright-minimum`). Quire holds no install logic of its own (CLAUDE.md, "Pipeline and tooling improvements belong in bats or pwa").
 
-The owner ruled that every pin moves from the relock and that no bot opens a pull request (CLAUDE.md, "CI is pinned"); #996 moves these two to the relock and deletes `.github/dependabot.yml`. Until it does, which tool moves which pin here (#760; CLAUDE.md, "CI is pinned"): Dependabot
+The owner ruled that every pin moves from the relock and that no bot opens a pull request (pitboss's `ci.md`); #996 moves these two to the relock and deletes `.github/dependabot.yml`. Until it does, which tool moves which pin here (#760; CLAUDE.md, "CI is pinned"): Dependabot
 (`.github/dependabot.yml`, weekly, `cooldown` 7 days) moves the npm versions and `package-lock.json`
 of the root `package.json`.
 
