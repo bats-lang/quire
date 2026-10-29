@@ -28,6 +28,10 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+# tests/static/run.sh exports GIT_DIR (bats reads the commit's facts from it); the scratch repositories
+# here must not inherit it, or `git init` and `git commit` act on the checkout's own (quire#751, #973)
+for _name in [key for key in os.environ if key.startswith('GIT_')]:
+    del os.environ[_name]
 spec = importlib.util.spec_from_file_location('pre_push', ROOT / 'scripts' / 'pre-push.py')
 pre_push = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pre_push)
