@@ -2729,6 +2729,7 @@ in listeners end
    The stylesheet keeps it inside the window and the safe area (quire#428) *)
 #define TOOLBAR_GAP 8
 #define HANDLE_CLEARANCE 20
+(* selection-menu-band: Android's floating toolbar height, about 48 dp (a dp is a CSS px in a WebView) *)
 #define SELECTION_MENU_BAND 48
 fn _toolbar_place (): void = let
   val () = $DR.get_selection_rect()
