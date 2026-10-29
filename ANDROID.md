@@ -32,8 +32,9 @@ the page, which imports it. Its launcher icon is the PWA's
 The app id is `dev.middlefield.quire`, the one Quire is published under.
 The version name and code come from the commit (CLAUDE.md, "The version
 is the commit's"): the name is `YEAR.MONTH.DAY.SECONDS (sha)`, and the code
-is the commit's time in minutes since 2025, so it grows from release to
-release as Google Play needs.
+is the number of commits reachable from it plus 955000 (above every code
+the earlier minutes scheme gave), so it grows from release to release as
+Google Play needs and no two commits share one.
 
 ## Signing secrets
 

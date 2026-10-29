@@ -8,6 +8,9 @@ them, and nothing refused the text that made them. This checks, without a compil
   tests/static/guidelines/phrases.tsv outside a code span (an exit clause, a rule the
   owner never wrote, a sentence that contradicts the owner's); the reviewer's
   tool list holds no tool that runs anything (row 1);
+* `src/version.bats` (a root run): the Android version code is the commit count plus an offset, never
+  the committer time in minutes (quire#989: two merges a minute apart gave one code and Play refused
+  the second);
 * `--text FILE`: a brief, a ticket, a hand-back, a comment: the same phrases, anywhere;
 * `--pr-body FILE --head SHA`: the above, and the body's form: it starts "Fixes #N" for
   one ticket (one ticket, one PR), names the head it describes (a body that went stale
@@ -156,8 +159,27 @@ def lint_contradictions(texts, contradictions):
     return findings
 
 
+# the minutes scheme: the committer time less the start of 2025 (1735689600), in minutes (quire#989)
+MINUTES_SCHEME = re.compile(r'bats_commit_time|1735689600')
+
+
+def lint_version_code(root):
+    """quire#989 (keyword: version code): src/version.bats gives the Android version code from the commit
+    count, and holds neither the committer time nor the start of 2025 the minutes scheme subtracts."""
+    path = os.path.join(root, 'src', 'version.bats')
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding='utf-8') as handle:
+        text = handle.read()
+    findings = [f'src/version.bats: "{found.group(0)}" is the minutes scheme, which gives two commits merged within a minute one version code and Play refuses the second: the code is bats_commit_count plus a constant offset (quire#989)'
+                for found in [MINUTES_SCHEME.search(text)] if found]
+    if 'bats_commit_count' not in text:
+        findings.append('src/version.bats: quire_version_code does not read bats_commit_count: the Android version code is the commit count plus a constant offset (quire#989)')
+    return findings
+
+
 def lint_guidelines(root, phrases):
-    findings = []
+    findings = lint_version_code(root)
     texts = {}
     for relative in guideline_files(root):
         with open(os.path.join(root, relative), encoding='utf-8') as handle:

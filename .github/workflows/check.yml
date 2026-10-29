@@ -97,11 +97,13 @@ jobs:
     outputs:
       play_signing_sha1: ${{ steps.clients.outputs.play_signing_sha1 }}
     steps:
-      # Two commits deep: a pull request's checkout is the merge, and its
-      # own head (its second parent) is what the version names (#219)
+      # The whole history: the version names a pull request's own head (its
+      # merge's second parent, #219), and the Android version code is the
+      # number of commits reachable from it, which a shallow clone cannot
+      # count (#989; gen-pwa refuses one)
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       # The committed Play app signing SHA-1, which the android job has
       # pwa's script compare with the upload key's
@@ -613,8 +615,9 @@ jobs:
 
   # Every push to main that passed the whole check (the e2e groups and the
   # Android build and smoke test) goes to Google Play's internal testing
-  # track (#308): the AAB this run built and signed, its versionName and
-  # versionCode the commit's (src/version.bats), the commit's subject as
+  # track (#308): the AAB this run built and signed, its versionName the
+  # commit's version and its versionCode the commit count plus an offset
+  # (src/version.bats, #989), the commit's subject as
   # its release notes. Production stays a promotion made in the Play
   # Console (ANDROID.md). The release is pwa's reusable workflow (pwa#90,
   # moved there by quire#623), called by commit like android.yml:

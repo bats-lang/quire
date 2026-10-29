@@ -18,7 +18,11 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
+      # The whole history: gen-pwa counts the commits for the Android version
+      # code and refuses a shallow clone (#989)
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
 
       - name: Set up bats
         uses: bats-lang/bats/.github/actions/setup@110eaa34c4dcbd8f34f534eb681b6fa85b68d100 # bats main 110eaa3

@@ -18,13 +18,29 @@ commit always gives the same version (#219): the committer date in UTC,
 commit `BATS_COMMIT` names, else HEAD) and `src/version.bats` words them (`quire_version`,
 `quire_commit_short`, `quire_version_text`, `quire_version_code`). The app and gen-pwa compile
 them in: About shows the text, a backup records it (`appVersion`), and gen-pwa appends it to
-the Android project's `android-release.gradle` as `versionName`, with `versionCode` the same
-time in minutes since 2025. CI names a pull request's own head (`BATS_COMMIT`, set by bats's
+the Android project's `android-release.gradle` as `versionName`, with `versionCode` the
+commit count plus an offset (next section). CI names a pull request's own head (`BATS_COMMIT`, set by bats's
 setup action: the merge's second parent, hence `fetch-depth: 2`) and for a merge group the
 group's own commit (`github.sha`). Outside a git repository a build fails and says so;
 `tests/static/run.sh` points git at the checkout's repository (`GIT_DIR`).
 `tests/version/same.sh` checks that the facts are the same in other time zones, name the
 commit, and that the Android project carries the version and its code.
+
+## The version code is the commit count plus an offset (#989, #979)
+
+Keyword: version code. `quire_version_code` is `bats_commit_count()` (the commits reachable from the
+built commit, bats#574) plus 955000. The minutes scheme it replaces (the committer time less the
+start of 2025, in minutes) gave two merges a minute apart one code, 955894, and Play refused the
+second (run 7, #889 and #886). A count only grows along main, so the code is above its parent's; the
+offset is above the last minutes code (955894) with the count at its value when it was chosen, and
+never changes afterwards, so one commit always gives one code. A shallow clone cannot count: the facts
+say so (`CommitHistoryShallow`), `quire_version_code` answers `VersionCodeShallow`, and gen-pwa writes
+nothing and exits 1, so a wrong code is never released. Every job that runs gen-pwa to generate
+(check.yml `build`, deploy.yml) checks out with `fetch-depth: 0`; the static and e2e jobs never call
+it. pwa's release script refuses a code not above the highest on Play (pwa#258).
+`tests/version/same.sh` checks the count is git's, the code is above 955894 and above the parent's, and
+the Android project carries it. `tests/static/guidelines.py` (`lint_version_code`) refuses the minutes
+scheme in `src/version.bats` (the committer time or 1735689600) and demands `bats_commit_count`.
 
 ## Main goes to Play's internal testing (#308)
 

@@ -4,8 +4,9 @@
 # src/version.bats words: written again under other clocks' time zones,
 # by a project of its own, they are the same; the version has the form
 # YEAR.MONTH.DAY.SECONDS (SHA); and the Android project gen-pwa wrote
-# carries it as its versionName, and the commit's time in minutes since
-# 2025 as its versionCode.
+# carries it as its versionName, and the number of commits reachable from
+# the commit plus 955000 as its versionCode (#989: above 955894, the last
+# code the minutes scheme gave Play, and above the parent's).
 #
 # Run after `bats build` and gen-pwa, from the checkout, with the
 # BATS_COMMIT the build had (none: HEAD); bats must be on PATH.
@@ -47,8 +48,16 @@ echo "$seconds" | grep -Eq '^[0-9]+$' || { echo "not a commit time: '$seconds'";
 # the commit's, not the checkout's: BATS_COMMIT names a pull request's head
 case $(git rev-parse "${BATS_COMMIT:-HEAD}") in "$short"*) ;; *) false ;; esac || { echo "the facts name $short, not ${BATS_COMMIT:-HEAD}"; exit 1; }
 [ "$seconds" = "$(git log -1 --format=%ct "${BATS_COMMIT:-HEAD}")" ] || { echo "the facts' time $seconds is not ${BATS_COMMIT:-HEAD}'s"; exit 1; }
-# minutes since 2025-01-01T00:00:00Z
-code=$(( (seconds - 1735689600) / 60 ))
+# the commit count the facts hold is git's own, and the code is that plus the offset
+count=$(grep -Eo '^implement bats_commit_count \(\) = CommitCounted \([0-9]+\)$' "$facts" | grep -Eo '[0-9]+' || true)
+[ -n "$count" ] || { echo "the facts hold no commit count (a shallow clone?): $(grep bats_commit_count "$facts")"; exit 1; }
+[ "$count" = "$(git rev-list --count "${BATS_COMMIT:-HEAD}")" ] || { echo "the facts' count $count is not ${BATS_COMMIT:-HEAD}'s"; exit 1; }
+code=$(( count + 955000 ))
+[ "$code" -gt 955894 ] || { echo "version code $code is not above 955894, the last code the minutes scheme gave Play"; exit 1; }
+if git rev-parse -q --verify "${BATS_COMMIT:-HEAD}^" > /dev/null; then
+  parent=$(( $(git rev-list --count "${BATS_COMMIT:-HEAD}^") + 955000 ))
+  [ "$code" -gt "$parent" ] || { echo "version code $code is not above its parent's $parent"; exit 1; }
+fi
 grep -qF "versionName '$version'" dist/android/android-release.gradle || { echo "dist/android/android-release.gradle has no versionName '$version'"; exit 1; }
 grep -qF "versionCode $code" dist/android/android-release.gradle || { echo "dist/android/android-release.gradle has no versionCode $code"; exit 1; }
 echo "version $version, version code $code: the same in every time zone, and the Android project's"
