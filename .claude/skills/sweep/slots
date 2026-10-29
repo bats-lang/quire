@@ -11,7 +11,7 @@
 # The rows are the agents that run, REVIEWERS INCLUDED (orchestrator, 2026-10-18, from the owner's slot ledger; orchestration.md, Agents and slots, step 4): a review takes a slot like any work.
 # Update it at every spawn and at every final hand-back or completion notice. It is never the answer to "what is running" or "is a slot free": that is ListAgents (quire#751, row 14).
 f=${SLOTS_FILE:-/tmp/claude-0/slots.tsv}
-[ -f "$f" ] || : > "$f"
+[ -f "$f" ] || { echo "LEDGER MISSING: $f does not exist. It is authoritative on the slots and the owner creates it; this script makes no ledger of its own (quire#956)" >&2; exit 1; }
 case "$1" in
   set)  [ $# -ge 4 ] || { echo "usage: slots set SLOT AGENT TASK" >&2; exit 2; }
         s=$2; a=$3; shift 3; t="$*"
@@ -24,7 +24,7 @@ case "$1" in
   check) [ $# -eq 2 ] || { echo "usage: slots check N" >&2; exit 2; }
         case "$2" in ''|*[!0-9]*) echo "usage: slots check N (N a whole number)" >&2; exit 2 ;; esac
         rows=$(awk 'NF{n++} END{print n+0}' "$f")
-        if [ "$2" -gt "$rows" ]; then echo "TOO MANY AGENTS: $2 running, the ledger $f has $rows rows (reviewers included): do not start another; wait for a hand-back" >&2; exit 1; fi
+        if [ "$2" -gt "$rows" ]; then echo "TOO MANY AGENTS: $2 running, but the ledger $f has fewer rows ($rows; reviewers included): do not start another; wait for a hand-back" >&2; exit 1; fi
         echo "agents running: $2 (ledger rows: $rows)"; exit 0 ;;
   ""|show) ;;
   *) echo "usage: slots [show|set SLOT AGENT TASK|free SLOT|check N]" >&2; exit 2 ;;

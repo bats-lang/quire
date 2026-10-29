@@ -23,4 +23,4 @@ Install on a machine (the running copy is a copy of these files): `install -m 75
 
 ## slots
 
-`slots` prints a hand-kept ledger with a row for each agent that runs. Only an explicit instruction from the owner changes the rows. It is a note, never the state of the agents: `ListAgents` is. `slots set SLOT AGENT TASK`, `slots free SLOT`, `slots check N` (exits 1 when N is above the number of rows).
+`slots` prints a hand-kept ledger with a row for each agent that runs. `/tmp/claude-0/slots.tsv` is authoritative on how many slots there are; only an explicit instruction from the owner ("Add a slot", "Remove", "Change") changes the rows, and a missing file is the owner's to create. It is a note, never the state of the agents: `ListAgents` is. `slots set SLOT AGENT TASK`, `slots free SLOT`, `slots check N` (exits 1 when N is above the number of rows).
