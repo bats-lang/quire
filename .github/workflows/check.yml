@@ -203,7 +203,7 @@ jobs:
       # pwa's action (quire#637). The WASM smoke tests need no browsers, which
       # are restored from the cache here
       - name: Set up Node.js and Playwright
-        uses: bats-lang/pwa/.github/actions/e2e-setup@3cace57c2c9dde8923a5eef219a008791a85f54c # pwa main 3cace57
+        uses: bats-lang/pwa/.github/actions/e2e-setup@41968970ccf6e3416205d626ed36fc5959b6274b # pwa main 4196897
         with:
           playwright-minimum: "1.58"
 
@@ -397,7 +397,7 @@ jobs:
       # 1.58 is the least Playwright the suite may run on: its fake clock needs it (keyword: the fake clock)
       - name: Set up Node.js and Playwright
         if: env.GROUP_RUN == 'yes'
-        uses: bats-lang/pwa/.github/actions/e2e-setup@3cace57c2c9dde8923a5eef219a008791a85f54c # pwa main 3cace57
+        uses: bats-lang/pwa/.github/actions/e2e-setup@41968970ccf6e3416205d626ed36fc5959b6274b # pwa main 4196897
         with:
           playwright-minimum: "1.58"
           stall-tools: "true"
@@ -584,7 +584,7 @@ jobs:
   android:
     needs: build
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@3cace57c2c9dde8923a5eef219a008791a85f54c # pwa main 3cace57
+    uses: bats-lang/pwa/.github/workflows/android.yml@41968970ccf6e3416205d626ed36fc5959b6274b # pwa main 4196897
     secrets: inherit
     with:
       artifact: quire-android
@@ -594,7 +594,7 @@ jobs:
       # quire#623; replaces sync-identity.yml's own steps). pwa-ref is the
       # pin above (a reusable workflow cannot read the commit it was called
       # at; the relock moves it with the pin, #821); the SHA-1 is the committed one (scripts/sync-clients.env)
-      pwa-ref: 3cace57c2c9dde8923a5eef219a008791a85f54c
+      pwa-ref: 41968970ccf6e3416205d626ed36fc5959b6274b
       play-signing-sha1: ${{ needs.build.outputs.play_signing_sha1 }}
       require-signed: true
       publish: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -626,12 +626,12 @@ jobs:
   play-internal:
     needs: [check, android]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: bats-lang/pwa/.github/workflows/play-release.yml@3cace57c2c9dde8923a5eef219a008791a85f54c # pwa main 3cace57
+    uses: bats-lang/pwa/.github/workflows/play-release.yml@41968970ccf6e3416205d626ed36fc5959b6274b # pwa main 4196897
     permissions:
       contents: read
       id-token: write
     with:
-      pwa-ref: 3cace57c2c9dde8923a5eef219a008791a85f54c
+      pwa-ref: 41968970ccf6e3416205d626ed36fc5959b6274b
       package: dev.middlefield.quire
       workload-identity-provider: projects/162611675413/locations/global/workloadIdentityPools/github/providers/quire
       service-account: quire-play-release@spring-duality-395520.iam.gserviceaccount.com
