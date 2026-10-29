@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up bats
-        uses: bats-lang/bats/.github/actions/setup@d1926f43378b54246e6ab0abba4d7b019cf053db # bats main d1926f4
+        uses: bats-lang/bats/.github/actions/setup@110eaa34c4dcbd8f34f534eb681b6fa85b68d100 # bats main 110eaa3
 
       # The version is the date and short SHA of the commit deployed
       # (#219): HEAD's, which bats writes as the commit's facts

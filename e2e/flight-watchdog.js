@@ -8,7 +8,8 @@
  * Every second it writes `<out>/heartbeat-<root>-<pid>.json` (when it looked, what the ring has taken): the run's monitor
  * (preflight.js) fails the job when that stops, so a dead watchdog is not found by reading a log after a loss.
  * A renderer (or a process matching `match`) whose main thread has been in an untimed wait with no CPU used for `sustainMs` is
- * written out to `<out>/watchdog-<root>-<pid>-<n>.json`; a tick late by more than `gapMs` is kept in `host-stalls-*.json`.
+ * written out to `<out>/watchdog-<root>-<pid>-<n>.json`; a tick late by more than `gapMs` is kept in `host-stalls-*.json`, with what the
+ * machine was doing over it (pressure stall time, swap, major faults, direct reclaim: `activityOf`, quire#909).
  */
 
 import { execFile } from 'node:child_process';
@@ -18,6 +19,7 @@ import { pathToFileURL } from 'node:url';
 import * as tracefs from './flight-tracefs.js';
 import { futexAnalysis, nowSeconds } from './flight-recorder.js';
 import { fdPeers, fdTarget, parseBlocked, parseFutexSyscall } from './evidence.js';
+import { memoryReclaim } from './runner-load.js';
 
 export const SCAN_MS = 1000;
 export const SUSTAIN_MS = 10000;
@@ -117,6 +119,61 @@ export function stealMs(proc = '/proc') {
   return line ? Number(line.trim().split(/\s+/)[8] || 0) * 10 : 0;
 }
 
+/**
+ * What the kernel accumulated, read from `proc` (quire#909, keyword: host-stall): the `total=` microseconds of `some` and `full` of
+ * /proc/pressure/{memory,io,cpu} (PSI, kernel 4.20 or later with CONFIG_PSI; a kernel before 5.13 has no `full` line for cpu), and from
+ * /proc/vmstat the swap-ins and -outs, the major faults and the direct reclaims (`allocstall_*`: a task that had to free memory itself
+ * because the allocation found none). A source that cannot be read is the text `not available: why`, never an exception.
+ */
+export function activityOf(proc = '/proc') {
+  const pressure = {};
+  for (const resource of ['memory', 'io', 'cpu']) {
+    try {
+      const found = {};
+      for (const line of readFileSync(`${proc}/pressure/${resource}`, 'utf8').trim().split('\n')) {
+        const [kind, ...fields] = line.trim().split(/\s+/);
+        const total = fields.find((field) => field.startsWith('total='));
+        if (total && /^\d+$/.test(total.slice(6))) found[kind] = Number(total.slice(6));
+      }
+      if (found.some === undefined) throw new Error('no "some" line with total=');
+      pressure[resource] = { some: found.some, full: found.full === undefined ? null : found.full };
+    } catch (error) { pressure[resource] = `not available: ${error && error.code ? error.code : String(error && error.message || error)}`; }
+  }
+  let vmstat;
+  try {
+    vmstat = {};
+    for (const line of readFileSync(`${proc}/vmstat`, 'utf8').split('\n')) {
+      const [name, value] = line.trim().split(/\s+/);
+      if (/^(pswpin|pswpout|pgmajfault|allocstall_.*)$/.test(name) && /^\d+$/.test(value)) vmstat[name] = Number(value);
+    }
+    if (vmstat.pgmajfault === undefined) throw new Error('no pgmajfault line');
+  } catch (error) { vmstat = `not available: ${error && error.code ? error.code : String(error && error.message || error)}`; }
+  return { steal: stealMs(proc), pressure, vmstat };
+}
+
+/** What `after` accumulated over `before` (both from `activityOf`): microseconds of pressure and the vmstat counters' change. */
+export function activityDuring(before, after) {
+  const pressureUs = {};
+  for (const resource of ['memory', 'io', 'cpu']) {
+    const was = before.pressure[resource];
+    const now = after.pressure[resource];
+    if (typeof was === 'string' || typeof now === 'string') pressureUs[resource] = typeof now === 'string' ? now : was;
+    else pressureUs[resource] = { some: now.some - was.some, full: now.full === null || was.full === null ? null : now.full - was.full };
+  }
+  let vmstat;
+  if (typeof before.vmstat === 'string' || typeof after.vmstat === 'string') vmstat = typeof after.vmstat === 'string' ? after.vmstat : before.vmstat;
+  else vmstat = Object.fromEntries(Object.keys(after.vmstat).filter((name) => name in before.vmstat).map((name) => [name, after.vmstat[name] - before.vmstat[name]]));
+  return { stealMsDuring: after.steal - before.steal, pressureDuringUs: pressureUs, vmstatDuring: vmstat };
+}
+
+/** The sentence that goes with a stall: memory reclaim when the memory pressure (some) covers most of the gap, else what was and was not seen. */
+export function stallReading(gapMs, during) {
+  const memory = during.pressureDuringUs.memory;
+  if (typeof memory === 'string') return `memory pressure ${memory}`;
+  if (memoryReclaim(gapMs, memory.some)) return `memory reclaim: tasks were stalled on memory for ${Math.round(memory.some / 1000)} ms of the ${gapMs} ms gap`;
+  return `memory pressure stalled tasks for ${Math.round(memory.some / 1000)} ms of the ${gapMs} ms gap, not most of it`;
+}
+
 const run = (command, args, ms) => new Promise((resolve) => {
   execFile(command, args, { timeout: ms, killSignal: 'SIGKILL', maxBuffer: 4 << 20, encoding: 'utf8' }, (error, stdout, stderr) => resolve({ ok: !error, stdout: stdout || '', stderr: stderr || '', error: error ? String(error.message).slice(0, 200) : undefined }));
 });
@@ -140,7 +197,7 @@ export class Watchdog {
     this.scans = 0;
     this.lastTick = null;
     this.lastWall = null;
-    this.lastSteal = stealMs(proc);
+    this.lastActivity = activityOf(proc);   // read at every tick, so a stall is compared with the tick before it (quire#909)
     const top = topMissing(out);
     mkdirSync(out, { recursive: true });
     this.own(top || out);
@@ -183,12 +240,13 @@ export class Watchdog {
    * is a stall of the machine or of this process; a wall clock that moved differently from the monotonic one is a jump of the clock.
    */
   tick(now, wall = Date.now()) {
+    const activity = activityOf(this.proc);
     if (this.lastTick !== null) {
       if (now - this.lastTick - TICK_MS > this.gapMs) {
-        const steal = stealMs(this.proc);
-        this.stalls.push({ at: new Date().toISOString(), gapMs: now - this.lastTick - TICK_MS, stealMsDuring: steal - this.lastSteal });
+        const during = activityDuring(this.lastActivity, activity);
+        const gapMs = now - this.lastTick - TICK_MS;
+        this.stalls.push({ at: new Date().toISOString(), gapMs, ...during, reading: stallReading(gapMs, during) });
         if (this.stalls.length > 100) this.stalls.shift();
-        this.lastSteal = steal;
         try { writeFileSync(join(this.out, `host-stalls-${this.root}-${process.pid}.json`), JSON.stringify(this.stalls, null, 2)); this.written = true; } catch (error) { /* the output directory is gone */ }
         this.own();
       }
@@ -201,6 +259,7 @@ export class Watchdog {
     }
     this.lastTick = now;
     this.lastWall = wall;
+    this.lastActivity = activity;
   }
 
   /** What the monitor reads: when this looked last, what the ring has taken, and what was seen. */

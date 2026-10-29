@@ -41,8 +41,9 @@ it does not hang on the machine's fonts.
   pages a spec makes itself are not guarded. `releaseClick` is a trial hover
   that moves the pointer to the viewport's centre, so never call it between a
   move and the press, wheel or release that depend on the pointer's place.
-* **A test never waits in real time for a moment of the app's own** (#657: the
-  back button's 10 s, a toast's 2 s, the Nextcloud poll). It
+* **The fake clock** (#657: the back button's 10 s, a toast's 2 s, the Nextcloud
+  poll; the rule that a test never waits in real time for a moment of the app's own
+  is pitboss's `engineering.md`). A test
   installs the fake clock before the page opens (`page.clock.install()`) and
   runs it to the moment: `expectMoment` (`e2e/helpers.js`) asserts the thing is
   there 1.5 s before the moment's end and gone 1.5 s after, `runUntil` runs the
@@ -63,8 +64,8 @@ it does not hang on the machine's fonts.
 
 ## A worker's machine matches CI (#713)
 
-"This machine lacks X" is never a reason for a spec to be skipped or to pass
-here and fail in CI. What CI has, and the one command each takes here:
+What CI has, and the one command each takes here (the rule that a missing tool is
+never a reason to skip a spec is pitboss's `rules.md`, "Briefs and workers"):
 
 * **Speech voices: CI has none, and neither does a worker's machine, and the
   Read aloud tab is built either way.** #713 started from the belief that the
@@ -289,6 +290,7 @@ only for a red. The design, with the research and what each means cannot find, i
   main thread has been in an untimed futex wait with no CPU used for 10 s is written out to `flight-watchdog/` (the threads, the word and its neighbours, the ring's view of the word,
   stacks), whatever the stall watch does (off, unarmed, dead or stuck). Its output and the ring's holds go to SUDO_UID and SUDO_GID when sudo set them (`ownerOf`, `ownTree`, quire#767), so a root run leaves nothing a non-root run cannot rewrite. It also keeps every tick of its own that came late by 300 ms or more, with the steal time that passed
   (`host-stalls-*.json`): a stall of the machine shows as a gap of everything at once.
+  **What the machine was doing over a stall (host-stall, quire#909)**: the watchdog reads `activityOf` at every tick (the steal time, `total=` microseconds of `some` and `full` of `/proc/pressure/{memory,io,cpu}`, and `pswpin`, `pswpout`, `pgmajfault` and `allocstall_*` of `/proc/vmstat`), so a stall's entry holds the change since the tick before it: `stealMsDuring`, `pressureDuringUs.{memory,io,cpu}.{some,full}`, `vmstatDuring`, and `reading` (`memory reclaim: ...` when the memory `some` time is more than half of the gap, else the numbers). Run 40232296271 (7965 ms, steal 0) could not say why; PSI is the kernel's own accounting of time lost to waiting for memory, io or cpu (docs.kernel.org, accounting/psi), `allocstall_*` counts direct reclaims (a task freeing memory itself) and `pswpin/pswpout/pgmajfault` the swap and disk reads, which is what memory reclaim is made of. `some` is used for the rule because on a machine where one task reclaims and the rest wait, `full` is a subset of it and a 2-core runner rarely has every task stalled. A kernel without PSI (no `CONFIG_PSI`, or `psi=0`) or with no `full` line for cpu (before 5.13) is written as `not available: <code>` or `null`, never an exception. `runnerLoad().summary.reading` (`e2e/runner-load.js`) says `memory reclaim` for a worker sample whose timer was 300 ms late or more (`summary.stalls`) when the memory pressure in its interval covers more than half of the lateness (`memoryReclaim`, the same rule); the sampler's interval is 2 s, so that is a coarser reading than the watchdog's 100 ms ticks. Tested on a /proc of its own (`a stall of the machine names the memory, io and cpu pressure ...`, `the reading of the runner load says memory reclaim ...`, `evidence.spec.js`).
 * **The apparatus fails closed; `EVIDENCE MISSING` is the last net (`e2e/preflight.js`).** Before any test, global setup
   proves every part works, or the job is red with `PREFLIGHT FAILED: <part>: <why>`: `sudo -n` usable; the output directory
   written and read back; the kernel ring made with every required event (futex, sched, signals, read/write/sendmsg/recvmsg/epoll;

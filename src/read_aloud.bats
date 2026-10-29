@@ -209,6 +209,7 @@ fn _script_index_at (script: !script, node: Int, offset: Int): Nat =
   | NoScript() => 0
   | Script(_, _, sentences, _, _) => _sentence_at(sentences, node, offset, 0, 0)
 
+(* fixture: the-chapter-shown-from-0-or *)
 (* The chapter shown (from 0), or -1 before one is *)
 fn _chapter_shown (): Int =
   case+ reading_get() of

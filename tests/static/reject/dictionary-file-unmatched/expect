@@ -1,4 +1,4 @@
 function _static_kept
 line 4
 pattern match is nonexhaustive:
-SynFile()
+among SynFile()

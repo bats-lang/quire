@@ -1,1 +1,1 @@
-(* A result as "sync-state" stores it, and back: decoded once, as it is
+(* fixture: a-result-as-sync-state-stores *)
