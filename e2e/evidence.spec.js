@@ -21,10 +21,10 @@ import { arm, capture, CAPTURE_MOST_MS, NATIVE_MOST_MS, stallWatch as makeWatch 
 import { capabilities, diskEvidence, missingEvidence, pageState, parseBlocked, symbolEvidence } from './evidence.js';
 import { pixelDiff } from './relaunch.js';
 import { missingFields } from './evidence-check.js';
-import { futexAnalysis, ringContent, ringReaches } from './flight-recorder.js';
+import { futexAnalysis, ringContent, ringReach } from './flight-recorder.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
-import { RING_LINES, Watchdog } from './flight-watchdog.js';
-import { LOCK_NAME, LOCK_UNREADABLE_MS, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
+import { RING_LINES, Watchdog, stoppedUnheld } from './flight-watchdog.js';
+import { LINES_KEPT, LOCK_NAME, LOCK_UNREADABLE_MS, holdAndPause, release, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
 
 function desktopOnly(testInfo) {
   test.skip(testInfo.project.name !== 'desktop', 'the renderer and the machine do not depend on the project: once, in desktop, is enough');
@@ -370,6 +370,8 @@ test('the watchdog, outside every worker and browser, sees a renderer frozen in 
   test.setTimeout(testInfo.timeout + NATIVE_MOST_MS + 120000);
   const out = testInfo.outputPath('watchdog');
   const watchdog = startWatchdog(process.env[INSTANCE_VARIABLE], process.env, out, 4000);
+  // the watchdog has looked at the tree once before the renderer freezes, so the wait's entry has a scan before it (ring reach)
+  await expect.poll(() => existsSync(out) && readdirSync(out).some((name) => /^heartbeat-/.test(name)), { timeout: 30000 }).toBe(true);
   const hang = await hangPage(page, stallWatch);
   try {
     // a report is whole when it parses (the file is written again once the stacks are in)
@@ -382,11 +384,14 @@ test('the watchdog, outside every worker and browser, sees a renderer frozen in 
     expect(report.threads.length).toBeGreaterThan(1);
     expect(report.threads.some((thread) => /\b202 0x[0-9a-f]+ 0x189\b/.test(thread.syscall))).toBe(true);
     expect(report.kernelRing.file, JSON.stringify(report.kernelRing)).toBeTruthy();
-    // the wait is in the ring when the ring reaches back to where the hold began; a ring that does not says so by where it begins (quire#993)
+    // what the ring file proves of the wait decides what is asserted of it (quire#993, ring reach): found when the file holds every CPU's buffer from before the wait, absent when
+    // even its oldest event is later than the wait, and nothing between, where the file proves neither
     const ring = report.futex.ring;
     expect(ring.error, JSON.stringify(ring)).toBeUndefined();
-    if (ringReaches({ ringStart: ring.ringStart, ringEnd: ring.ringEnd, heldMs: report.heldMs })) expect(ring.waiter.lastWait.untimed, JSON.stringify(ring)).toBe(true);
-    else expect(ring.waiter.lastWait, `the ring begins ${ring.ringEnd - ring.ringStart} s before its end and the hold was ${report.heldMs} ms`).toBeNull();
+    const reach = ringReach({ ringStart: ring.ringStart, ringCompleteFrom: ring.ringCompleteFrom, waitBegan: report.waitBegan });
+    testInfo.annotations.push({ type: 'ring reach', description: `${reach}; ring ${ring.ringStart}..${ring.ringEnd} (every CPU from ${ring.ringCompleteFrom}); wait entered ${JSON.stringify(report.waitBegan)}; held ${report.heldMs} ms; ${JSON.stringify(report.timings)}` });
+    if (reach === 'reaches') expect(ring.waiter.lastWait.untimed, JSON.stringify(ring)).toBe(true);
+    else if (reach === 'misses') expect(ring.waiter.lastWait, JSON.stringify(ring)).toBeNull();
     expect(report.processes.some((each) => /--type=renderer/.test(each.cmdline))).toBe(true);
     // the stall watch sees the same freeze (its capture begins about 5 s into the hang, in the Playwright worker) and is not cut short by this
     // test ending: the hang is held until that capture has read the renderer, as the test above does (a loaded run ended the test under it, quire#575)
@@ -1166,17 +1171,85 @@ test('a futex wait older than the tail of the ring a watchdog report keeps is lo
   const { gzipSync } = await import('node:zlib');
   // 484203 events a second, as the outer watchdog's report of run 40705566021 had it: a wait 4 s before the end, then the noise of four busy workers
   const rate = 484203;
+  const OLD_TAIL_LINES = 600000;
   const wait = '  chrome-headless-3289    [003] .....   100.000000: sys_futex(uaddr: 0x7ffe33dd6610, op: 0x189, val: 0, utime: 0, uaddr2: 0, val3: 0xffffffff)';
-  const lines = [wait];
+  // every CPU has taken events before the wait: the ring holds it only if it begins before it
+  const lines = [0, 1, 2, 3].map((cpu) => `  libuv-worker-4372    [00${cpu}] .....   ${(99 + cpu / 100).toFixed(6)}: sys_futex -> 0x0`);
+  lines.push(wait);
   const total = 4 * rate;
-  for (let i = 1; i <= total; i++) lines.push(`  libuv-worker-4372    [001] .....   ${(100 + i / rate).toFixed(6)}: sys_futex -> 0x0`);
+  for (let i = 1; i <= total; i++) lines.push(`  libuv-worker-4372    [00${i % 4}] .....   ${(100 + i / rate).toFixed(6)}: sys_futex -> 0x0`);
   const write = (name, kept) => { const file = testInfo.outputPath(name); writeFileSync(file, gzipSync(['# entries-in-buffer/entries-written: x/x   #P:4', ...kept].join('\n'))); return file; };
-  const tail = await futexAnalysis(write('tail.txt.gz', lines.slice(-600000)), { address: '7ffe33dd6610', tid: 3289 });
+  const tail = await futexAnalysis(write('tail.txt.gz', lines.slice(-OLD_TAIL_LINES)), { address: '7ffe33dd6610', tid: 3289 });
   const whole = await futexAnalysis(write('whole.txt.gz', lines), { address: '7ffe33dd6610', tid: 3289 });
+  const began = { notBefore: 99.5, notAfter: 100.2 }; // the scans before and after the wait's entry at 100.000000
   expect(tail.waiter.lastWait, 'the old tail of 600000 lines loses the wait').toBeNull();
-  expect(ringReaches({ ringStart: tail.ringStart, ringEnd: tail.ringEnd, heldMs: 4000 }), 'and says it does not reach').toBe(false);
+  expect(ringReach({ ringStart: tail.ringStart, ringCompleteFrom: tail.ringCompleteFrom, waitBegan: began }), 'and says so: it begins after the wait').toBe('misses');
   expect(whole.waiter.lastWait, 'the whole ring has it').toMatchObject({ untimed: true, kind: 'wait' });
-  expect(ringReaches({ ringStart: whole.ringStart, ringEnd: whole.ringEnd, heldMs: 4000 })).toBe(true);
-  expect(ringReaches({ ringStart: null, ringEnd: 0, heldMs: 0 }), 'a ring of no events reaches nothing').toBe(false);
-  expect(RING_LINES, 'a watchdog report keeps the whole ring').toBeGreaterThanOrEqual(4903415);
+  expect(ringReach({ ringStart: whole.ringStart, ringCompleteFrom: whole.ringCompleteFrom, waitBegan: began })).toBe('reaches');
+  expect(ringReach({ ringStart: null, ringCompleteFrom: null, waitBegan: began }), 'a ring of no events holds nothing').toBe('misses');
+  expect(RING_LINES, 'a watchdog report keeps the whole ring, as the stall capture does').toBe(LINES_KEPT);
+});
+
+test('a ring that begins between the wait and the scan that saw it, or on one CPU only, proves nothing of the wait (quire#993, ring reach)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const { gzipSync } = await import('node:zlib');
+  const call = 'sys_futex(uaddr: 0x7ffe33dd6610, op: 0x189, val: 0, utime: 0, uaddr2: 0, val3: 0xffffffff)';
+  const read = async (name, rows) => {
+    const file = testInfo.outputPath(`${name}.txt.gz`);
+    writeFileSync(file, gzipSync(['# entries-in-buffer/entries-written: x/x   #P:4', ...rows.map(([cpu, at, text]) => `  ${text === call ? 'chrome-headless-3289' : 'libuv-worker-4372'}    [00${cpu}] .....   ${at.toFixed(6)}: ${text}`)].join('\n')));
+    return futexAnalysis(file, { address: '7ffe33dd6610', tid: 3289 });
+  };
+  // the wait was entered at 95.0 on CPU 3, after the scan at 94.0 and before the scan at 96.0 that saw it blocked (the hold was measured from 96.0)
+  const began = { notBefore: 94.0, notAfter: 96.0 };
+  // the old rule (ringStart <= ringEnd - heldMs, the hold measured from the scan that saw it) said 'reaches' for both rings below, and the wait is in neither
+  const heldMs = 4000;
+  const old = (found) => found.ringStart <= found.ringEnd - heldMs / 1000;
+  // 1. the ring begins at 95.5: after the wait (95.0), before the hold's measured start (96.0, ring end 100)
+  const late = await read('late', [[1, 95.5, 'sys_futex -> 0x0'], [3, 95.6, 'sys_futex -> 0x0'], [3, 100.0, 'sys_futex -> 0x0']]);
+  expect(old(late), 'the old rule asserts the wait of a ring that begins after it').toBe(true);
+  expect(late.waiter.lastWait).toBeNull();
+  expect(ringReach({ ringStart: late.ringStart, ringCompleteFrom: late.ringCompleteFrom, waitBegan: began }), 'now the ring may still miss it, and the file does not claim it holds it').not.toBe('reaches');
+  // 2. CPU 1's buffer begins at 90.0 and CPU 3's, the waiter's, at 98.0 (it overwrote more): the merged text begins at 90.0, the wait on CPU 3 is gone
+  const other = await read('other-cpu', [[1, 90.0, 'sys_futex -> 0x0'], [3, 98.0, 'sys_futex -> 0x0'], [3, 100.0, 'sys_futex -> 0x0']]);
+  expect(old(other), 'the old rule asserts the wait of a ring whose waiter CPU begins after it').toBe(true);
+  expect(other.waiter.lastWait).toBeNull();
+  expect(other.ringStart).toBe(90.0);
+  expect(other.ringCompleteFrom, 'every CPU is complete only from the latest first event').toBe(98.0);
+  expect(ringReach({ ringStart: other.ringStart, ringCompleteFrom: other.ringCompleteFrom, waitBegan: began })).toBe('unknown');
+  // 3. the ring holds the wait: every CPU begins before the scan that did not see the thread blocked
+  const whole = await read('whole', [[1, 90.0, 'sys_futex -> 0x0'], [3, 91.0, 'sys_futex -> 0x0'], [3, 95.0, call], [3, 100.0, 'sys_futex -> 0x0']]);
+  expect(whole.waiter.lastWait).toMatchObject({ untimed: true });
+  expect(ringReach({ ringStart: whole.ringStart, ringCompleteFrom: whole.ringCompleteFrom, waitBegan: began })).toBe('reaches');
+  // 4. no scan before: nothing bounds the wait from below, so a ring never reaches; a ring that begins after the scan that saw it misses
+  expect(ringReach({ ringStart: 90.0, ringCompleteFrom: 91.0, waitBegan: { notBefore: null, notAfter: 96.0 } })).toBe('unknown');
+  expect(ringReach({ ringStart: 96.5, ringCompleteFrom: 96.5, waitBegan: began })).toBe('misses');
+});
+
+test('the monitor judges a stopped ring by the holders its heartbeat read with the state, not by those of a later look (quire#993, ring hold)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const instance = testInfo.outputPath('instance');
+  const out = testInfo.outputPath('out');
+  mkdirSync(join(instance, 'per_cpu', 'cpu0'), { recursive: true });
+  mkdirSync(out, { recursive: true });
+  writeFileSync(join(instance, 'tracing_on'), '1\n');
+  writeFileSync(join(instance, 'per_cpu', 'cpu0', 'stats'), 'entries: 5\noverrun: 0\n');
+  const dog = new Watchdog({ root: process.pid, out, instance, stacks: false });
+  const beat = () => JSON.parse(readFileSync(join(out, `heartbeat-${process.pid}-${process.pid}.json`), 'utf8'));
+  // a capture holds the ring paused; the heartbeat is written in that time
+  holdAndPause({ instance, dir: out, holder: 'capture-b' });
+  writeFileSync(join(instance, 'tracing_on'), '0\n'); // the fake instance is a directory: pause() wrote the same
+  dog.heartbeat();
+  const during = beat();
+  // the capture ends before the monitor's look: the old look read the holders then, found none, and took the heartbeat's stopped ring for a stop nobody caused
+  writeFileSync(join(instance, 'tracing_on'), '1\n');
+  release({ instance, dir: out, holder: 'capture-b' });
+  expect(holdersIn(out), 'at the monitor\'s look no capture holds the ring').toEqual([]);
+  expect(during.ring.on, 'the heartbeat saw it paused').toBe('0');
+  expect(during.holders, 'and saw who paused it').toEqual(['capture-b']);
+  expect(stoppedUnheld(during), 'so it is not a stop').toBe(false);
+  expect(during.ring.on !== '1' && !holdersIn(out).length, 'the look of the monitor before this change called it one').toBe(true);
+  // a ring off with nobody holding it is a stop
+  writeFileSync(join(instance, 'tracing_on'), '0\n');
+  dog.heartbeat();
+  expect(stoppedUnheld(beat())).toBe(true);
 });

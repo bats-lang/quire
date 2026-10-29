@@ -16,7 +16,7 @@ import { chownSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,
 import { dirname, join, resolve as absolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as tracefs from './flight-tracefs.js';
-import { futexAnalysis } from './flight-recorder.js';
+import { futexAnalysis, nowSeconds } from './flight-recorder.js';
 import { fdPeers, fdTarget, parseBlocked, parseFutexSyscall } from './evidence.js';
 
 export const SCAN_MS = 1000;
@@ -27,6 +27,12 @@ export const CLOCK_JUMP_MS = 500;
 export const HEARTBEAT_STALE_MS = 6000;
 const STACK_MS = 15000;
 const RINGS_MOST = 3;       // reports that keep the ring (each is up to tens of MB); later ones keep the rest
+/** Whether the ring is stopped with nobody holding it paused, by one heartbeat's own reading (ring hold: the state and the holders were read in one step). */
+export function stoppedUnheld(beat) {
+  const ring = beat.ring || {};
+  return ring.on !== '1' && (beat.holders || []).length === 0;
+}
+
 export const RING_LINES = tracefs.LINES_KEPT; // a report keeps the whole ring, not its tail: 600000 lines were 1.2 s under load and lost the wait (quire#993, keyword: ring reach)
 
 const text = (path) => { try { return readFileSync(path, 'utf8'); } catch (error) { return ''; } };
@@ -124,7 +130,8 @@ export class Watchdog {
     this.ownFailures = [];      // the first 100 paths that could not be given to the owner (owner)
     this.failedPaths = new Set(); // every such path, so each is logged once
     this.match = new RegExp(match || '--type=renderer\\b');
-    this.seen = new Map();      // pid -> { since, ticks }
+    this.seen = new Map();      // pid -> { since, ticks, began } (began: the bound on the wait's entry in the ring's clock, ring reach)
+    this.lastScan = null;       // the ring's clock at the start of the scan before this one (ring reach)
     this.reported = new Set();
     this.stalls = [];
     this.clockJumps = [];
@@ -199,8 +206,10 @@ export class Watchdog {
   /** What the monitor reads: when this looked last, what the ring has taken, and what was seen. */
   heartbeat() {
     this.scans += 1;
-    const ring = this.instance ? tracefs.stats({ instance: this.instance }) : { unavailable: 'no ring' };
-    const body = { at: Date.now(), pid: process.pid, scans: this.scans, ring, stalls: this.stalls.length, clockJumps: this.clockJumps.length, reports: this.count };
+    // the ring's state and its holders are read in one step to the captures (their lock), so the monitor judges a stopped ring by the holders of that moment (ring hold)
+    const looked = this.instance ? tracefs.withRingLock(this.holdDir, () => ({ ring: tracefs.stats({ instance: this.instance }), holders: tracefs.holdersIn(this.holdDir).map((each) => each.holder) })) : { ring: { unavailable: 'no ring' }, holders: [] };
+    const { ring, holders } = looked;
+    const body = { at: Date.now(), pid: process.pid, scans: this.scans, ring, holders, stalls: this.stalls.length, clockJumps: this.clockJumps.length, reports: this.count };
     // written whole or not at all: the monitor reads this file while it is written, and a half-written one must not look like a missing one
     try {
       const file = join(this.out, `heartbeat-${this.root}-${process.pid}.json`);
@@ -217,6 +226,8 @@ export class Watchdog {
 
   /** One look at the tree; resolves with the reports it wrote (their file names). */
   async scan(now) {
+    const before = this.lastScan;
+    this.lastScan = nowSeconds();
     const table = processTable(this.proc);
     const below = tree(table, this.root);
     const written = [];
@@ -228,16 +239,17 @@ export class Watchdog {
       if (!blocked || !blocked.untimed) { this.seen.delete(pid); continue; }
       const seen = this.seen.get(pid);
       const ticks = mainThreadTicks(pid, this.proc) ?? entry.ticks;
-      if (!seen || seen.ticks !== ticks) { this.seen.set(pid, { since: now, ticks }); continue; }
+      // the wait was entered after the scan before this one (which did not see the thread in it, or saw it use CPU) and before this read of its syscall
+      if (!seen || seen.ticks !== ticks) { this.seen.set(pid, { since: now, ticks, began: { notBefore: before, notAfter: nowSeconds() } }); continue; }
       if (now - seen.since >= this.sustainMs && !this.reported.has(pid)) {
         this.reported.add(pid);
-        written.push(await this.report(pid, table, below, blocked, syscall, now - seen.since));
+        written.push(await this.report(pid, table, below, blocked, syscall, now - seen.since, seen.began));
       }
     }
     return written;
   }
 
-  async report(pid, table, below, blocked, syscall, heldMs) {
+  async report(pid, table, below, blocked, syscall, heldMs, waitBegan = { notBefore: null, notAfter: nowSeconds() }) {
     this.count += 1;
     const name = `watchdog-${this.root}-${process.pid}-${this.count}`;
     const threads = (() => {
@@ -250,7 +262,7 @@ export class Watchdog {
     })();
     const futex = parseFutexSyscall(syscall);
     const body = {
-      heldMs,
+      heldMs, waitBegan,
       reason: `process ${pid}: the main thread has been in an untimed wait (${blocked.name}) with no CPU used for ${heldMs} ms (seen by the watchdog, outside the run)`,
       at: new Date().toISOString(), blocked,
       target: blocked.fd === null ? null : fdTarget(pid, blocked.fd, this.proc),
@@ -266,9 +278,12 @@ export class Watchdog {
       // the snapshot holds the ring paused while it reads (its hold file is down first, so the monitor never sees a pause without it) and releases it on
       // every outcome: the ring records again for the reds after this one
       // the ring's file and the hold and lock files it makes are owned too, whatever the snapshot does (finally)
+      const snapshotBegan = Date.now();
       const kept = await tracefs.snapshot({ instance: this.instance, out: ring, lines: RING_LINES, dir: this.holdDir, holder: `watchdog-${process.pid}-${this.rings}` }).finally(() => { this.written = true; this.own(); });
       body.kernelRing = kept;
+      const analysisBegan = Date.now();
       if (kept.file && futex) body.futex.ring = await futexAnalysis(ring, { address: futex.address, tid: pid }).catch((error) => ({ error: String(error && error.message || error) }));
+      body.timings = { snapshotMs: analysisBegan - snapshotBegan, analysisMs: Date.now() - analysisBegan }; // the cost of keeping the whole ring (ring reach)
     } else body.kernelRing = { unavailable: 'no ring was started' };
     // written now and again with the stacks, which take up to STACK_MS: what is known is not held back by them
     writeFileSync(join(this.out, `${name}.json`), JSON.stringify(body, null, 2));
@@ -293,6 +308,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const origin = performance.now();
   const ticker = setInterval(() => dog.tick(performance.now() - origin, Date.now()), TICK_MS);
   // on a timer of its own: a report that takes seconds (the ring written, the stacks) must not look like a dead watchdog
+  // a look at the tree comes before the first heartbeat, so a wait seen at the next scan is known to have begun after this look (ring reach, quire#993)
+  await dog.scan(performance.now() - origin).catch((error) => console.error(`[watchdog] ${error && error.stack || error}`));
   dog.heartbeat();
   const beater = setInterval(() => dog.heartbeat(), SCAN_MS);
   let busy = false;
