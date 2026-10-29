@@ -353,7 +353,8 @@ jobs:
       fail-fast: false
       matrix:
         group: ${{ fromJSON(needs.plan.outputs.e2e) }}
-    name: e2e (${{ matrix.group }})
+        shard: [1, 2, 3, 4, 5, 6]
+    name: e2e (${{ matrix.group }} ${{ matrix.shard }}/6)
     # Whether the plan selected a spec of this group (#619); if not, the job
     # ends here: every step below is skipped and the job still passes, as the
     # change was shown not to reach any of the group's specs. Only the plan
@@ -366,6 +367,13 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: env.GROUP_RUN == 'yes'
+
+      # THROWAWAY (quire#985, never merged): only the specs of e2e-scope-985.txt, so a group
+      # with none in scope ends here
+      - name: Scope to the changed specs
+        if: env.GROUP_RUN == 'yes'
+        run: |
+          scripts/ci-groups.py members e2e ${{ matrix.group }} | grep -Fxf e2e-scope-985.txt > "$RUNNER_TEMP/scoped-specs" || echo "GROUP_RUN=no" >> "$GITHUB_ENV"
 
       - name: Download the PWA
         if: env.GROUP_RUN == 'yes'
@@ -414,7 +422,7 @@ jobs:
         id: tests
         if: env.GROUP_RUN == 'yes'
         run: |
-          specs=$(scripts/ci-groups.py members e2e ${{ matrix.group }})
+          specs=$(cat "$RUNNER_TEMP/scoped-specs")
           listed=$(npx playwright test --list $specs | tail -1)
           echo "$listed"
           echo "$listed" | grep -q " in $(echo "$specs" | wc -l) files$" || { echo "::error::the group's filters do not name exactly its $(echo "$specs" | wc -l) specs"; exit 1; }
@@ -423,7 +431,7 @@ jobs:
           # alone on one worker first, then the others; each run's JSON
           # report in the timings directory (serial.json, parallel.json)
           mkdir -p "$RUNNER_TEMP/e2e-timings"
-          ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/e2e-timings" -- --reporter=list,html,json,./e2e/evidence-reporter.js $specs
+          ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/e2e-timings" -- --repeat-each 20 --shard=${{ matrix.shard }}/6 --reporter=list,html,json,./e2e/evidence-reporter.js $specs
         env:
           PLAYWRIGHT_HTML_OPEN: never
 
@@ -438,7 +446,7 @@ jobs:
       # the app's first screen: a memory error in the browser is named where a release build hangs or dies later
       # (#575). A STOPGAP with the rest of the evidence tooling: it belongs in pwa's e2e-setup (bats-lang/pwa#132)
       - name: Download Chromium's AddressSanitizer build
-        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools' && matrix.shard == 1
         run: |
           curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/asan.zip" https://storage.googleapis.com/chromium-browser-asan/linux-release/asan-linux-release-1625077.zip
           echo "1e4744f206e8a2eca53b3184ff673e1dbed7cdcad146a0f2efc42bdde65749bc  $RUNNER_TEMP/asan.zip" | sha256sum -c -
@@ -448,7 +456,7 @@ jobs:
 
       - name: Run the app's first screen under AddressSanitizer
         id: sanitizer
-        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools' && matrix.shard == 1
         run: |
           mkdir -p "$QUIRE_SANITIZER_LOGS"
           ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/sanitizer-timings" -- --output=test-results-sanitizer --reporter=list,json,./e2e/evidence-reporter.js e2e/sanitizer.spec.js
@@ -460,17 +468,17 @@ jobs:
           QUIRE_RUNNER_EVIDENCE: test-results-sanitizer/runner-evidence
 
       - name: Sanitizer reports
-        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools' && matrix.shard == 1
         run: node e2e/evidence-check.js --sanitizer "$QUIRE_SANITIZER_LOGS"
         env:
           QUIRE_SANITIZER_LOGS: ${{ runner.temp }}/sanitizer-reports
 
       - name: Evidence check of the sanitizer run
-        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools' && matrix.shard == 1
         run: node e2e/evidence-check.js "$RUNNER_TEMP/sanitizer-timings" --results test-results-sanitizer --require-report
 
       - name: Upload sanitizer reports
-        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools' && matrix.shard == 1
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2e-sanitizer-reports
@@ -485,7 +493,7 @@ jobs:
         if: always() && env.GROUP_RUN == 'yes'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: e2e-timings-${{ matrix.group }}
+          name: e2e-timings-${{ matrix.group }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/e2e-timings/
           if-no-files-found: ignore
           retention-days: 30
@@ -494,7 +502,7 @@ jobs:
         if: failure() && env.GROUP_RUN == 'yes'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: e2e-report-${{ matrix.group }}
+          name: e2e-report-${{ matrix.group }}-${{ matrix.shard }}
           path: playwright-report/
           retention-days: 14
 
@@ -505,7 +513,7 @@ jobs:
         if: always() && env.GROUP_RUN == 'yes'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: e2e-stall-captures-${{ matrix.group }}
+          name: e2e-stall-captures-${{ matrix.group }}-${{ matrix.shard }}
           path: |
             test-results/**/stall-capture-*.json
             test-results/**/runner-load-*.json
@@ -525,7 +533,7 @@ jobs:
         if: always() && env.GROUP_RUN == 'yes'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: e2e-stall-cores-${{ matrix.group }}
+          name: e2e-stall-cores-${{ matrix.group }}-${{ matrix.shard }}
           path: test-results/**/stall-core-*.core.gz
           if-no-files-found: ignore
           retention-days: 7
@@ -534,7 +542,7 @@ jobs:
         if: always() && env.GROUP_RUN == 'yes'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: e2e-screenshots-${{ matrix.group }}
+          name: e2e-screenshots-${{ matrix.group }}-${{ matrix.shard }}
           path: |
             test-results/
             test-results-sanitizer/
