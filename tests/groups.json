@@ -228,11 +228,13 @@
     ],
     "accepts-reader": [
       "accept/aloud-placement-matched",
+      "accept/book-edge-ended",
       "accept/codec-any-order",
       "accept/crc-loop-step-of-the-byte",
       "accept/dictionary-files-deleted-in-library",
       "accept/page-turn-ended",
       "reject/back-kept-nothing",
+      "reject/book-edge-unfinished",
       "reject/codec-absent-needs-defaults",
       "reject/codec-cut-claims-unread-chunk",
       "reject/codec-cut-read-unmatched",
