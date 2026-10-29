@@ -65,12 +65,16 @@ function nested(testInfo, name, environment = {}, args = [], prepare = null) {
     },
     /** Resolves with the match when the run's output has the pattern; fails with the output when it does not within `ms`. */
     async until(pattern, ms = 60000) {
-      const started = Date.now();
+      const deadline = Date.now() + ms;
       for (;;) {
         const found = pattern.exec(output);
         if (found) return found;
-        if (Date.now() - started > ms) throw new Error(`the nested run did not print ${pattern} within ${ms} ms:\n${output.slice(-3000)}`);
-        await new Promise((resolve) => { listeners.push(resolve); setTimeout(resolve, 250); });
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new Error(`the nested run did not print ${pattern} within ${ms} ms:\n${output.slice(-3000)}`);
+        // woken by the run's next output; the limit is the budget
+        let limit = null;
+        await new Promise((resolve) => { listeners.push(resolve); limit = setTimeout(() => { resolve(); }, remaining); });
+        clearTimeout(limit);
       }
     },
     report() { try { return JSON.parse(readFileSync(join(directory, 'report.json'), 'utf8')); } catch (error) { return null; } },
@@ -234,7 +238,7 @@ test('preflight: a browser whose trace ring cannot start fails the test before i
 test('heartbeat: a watchdog killed in the middle of the run fails the job at that moment, not at the end', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();
-  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000' });
+  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_GO: '1', QUIRE_NESTED_TIMEOUT: '120000' });
   try {
     const ok = await run.until(/watchdog (\d+) beating/);
     const killedAt = Date.now();
@@ -250,7 +254,7 @@ test('heartbeat: a watchdog killed in the middle of the run fails the job at tha
 test('heartbeat: a ring that is stopped in the middle of the run fails the job at that moment', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();
-  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000' });
+  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_GO: '1', QUIRE_NESTED_TIMEOUT: '120000' });
   try {
     const ok = await run.until(/ring (\/sys\/kernel\/tracing\/instances\/quire-\d+) recording/);
     const killedAt = Date.now();
@@ -268,7 +272,7 @@ test('heartbeat: a ring that is stopped in the middle of the run fails the job a
 test('heartbeat: a watchdog that is alive and stops beating fails the job at that moment, by name', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();
-  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000', QUIRE_FLIGHT_BEAT_STALE_MS: '3000' });
+  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_GO: '1', QUIRE_NESTED_TIMEOUT: '120000', QUIRE_FLIGHT_BEAT_STALE_MS: '3000' });
   let watchdog = null;
   let parent = null;
   try {
@@ -295,7 +299,7 @@ test('heartbeat: a watchdog that is alive and stops beating fails the job at tha
 test('heartbeat: a ring that is on and takes no events fails the job at that moment, by name', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();
-  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000', QUIRE_FLIGHT_RING_QUIET_MS: '4000' });
+  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_GO: '1', QUIRE_NESTED_TIMEOUT: '120000', QUIRE_FLIGHT_RING_QUIET_MS: '4000' });
   try {
     const ok = await run.until(/ring (\/sys\/kernel\/tracing\/instances\/quire-\d+) recording/);
     const silencedAt = Date.now();
@@ -313,13 +317,15 @@ test('a ring lock that is held past its limit leaves a record: the capture goes 
   desktopOnly(testInfo);
   needRecorder();
   test.setTimeout(testInfo.timeout + 60000);
-  const run = nested(testInfo, 'plain', { QUIRE_NESTED_SLEEP: '3000', QUIRE_NESTED_TIMEOUT: '60000', QUIRE_FLIGHT_MONITOR: 'off' });
+  const run = nested(testInfo, 'plain', { QUIRE_NESTED_GO: '1', QUIRE_NESTED_TIMEOUT: '60000', QUIRE_FLIGHT_MONITOR: 'off' });
   let holder = null;
   try {
     await run.until(/ring (\/sys\/kernel\/tracing\/instances\/quire-\d+) recording/);
     // another capture that never lets go: the lock's time is renewed every 200 ms, so it is never stale
     const lock = join(run.directory, 'flight-watchdog', 'ring-lock');
     holder = setInterval(() => { try { writeFileSync(lock, `${new Date().toISOString()} holder-in-the-test\n`); } catch (gone) { /* the run ended */ } }, 200);
+    // and now the case may fail: its capture finds the lock held
+    writeFileSync(join(run.directory, 'go'), 'go\n');
     const { code } = await run.finished;
     expect(code, run.output()).toBe(1);
     expect(run.output(), 'the line the capture printed').toMatch(/\[ring lock\] .* did not get the ring lock in \d+ ms \(limit 5000 ms; the lock said: .*holder-in-the-test\)/);
@@ -384,10 +390,12 @@ test('a plain failed test, the browser alive, leaves both rings, and the job-lev
 test('a plain failed test whose ring is gone is EVIDENCE MISSING in the report Playwright wrote, and in the job-level check', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();
-  const run = nested(testInfo, 'plain', { QUIRE_FLIGHT_MONITOR: 'off', QUIRE_NESTED_SLEEP: '6000' });
+  const run = nested(testInfo, 'plain', { QUIRE_FLIGHT_MONITOR: 'off', QUIRE_NESTED_GO: '1' });
   try {
     const ok = await run.until(/ring (\/sys\/kernel\/tracing\/instances\/quire-\d+) recording/);
     await removeInstance(ok[1]);
+    // the ring is gone: now the case may fail
+    writeFileSync(join(run.directory, 'go'), 'go\n');
     const { code } = await run.finished;
     expect(code, run.output()).toBe(1);
     const text = JSON.stringify(run.report());
@@ -433,7 +441,7 @@ test('a real timeout with the apparatus whole: the record is complete and nothin
 test('a runner that is killed leaves no report, and the job-level check fails instead of saying nothing is missing', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();
-  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000' });
+  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_GO: '1', QUIRE_NESTED_TIMEOUT: '120000' });
   try {
     await run.until(/watchdog (\d+) beating/);
     run.child.kill('SIGKILL');
@@ -448,19 +456,19 @@ test('a runner that is killed leaves no report, and the job-level check fails in
 test('a worker that is killed leaves no teardown, and the runner writes the ring for the test', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();
-  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000', QUIRE_FLIGHT_MONITOR: 'off' });
+  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_GO: '1', QUIRE_NESTED_TIMEOUT: '120000', QUIRE_FLIGHT_MONITOR: 'off' });
   try {
     await run.until(/watchdog (\d+) beating/);
     // the worker is the parent of the browser it launched
-    let worker = null;
-    for (let tries = 0; tries < 100 && !worker; tries += 1) {
+    const workerOf = () => {
       const table = processTable();
       const mine = tree(table, run.child.pid);
       const browser = [...table].find(([pid, entry]) => mine.has(pid) && /chrome-headless-shell|chrome\b/.test(entry.cmdline) && /--remote-debugging-pipe/.test(entry.cmdline) && !/--type=/.test(entry.cmdline));
-      worker = browser ? browser[1].ppid : null;
-      if (!worker) await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-    expect(worker, 'the nested worker was found by its browser').toBeTruthy();
+      return browser ? browser[1].ppid : null;
+    };
+    // until the browser the worker launched is in the process table
+    await expect.poll(workerOf, { message: 'the nested worker was found by its browser', timeout: 20000 }).toBeTruthy();
+    const worker = workerOf();
     process.kill(worker, 'SIGKILL');
     const { code } = await run.finished;
     expect(code, run.output()).toBe(1);
@@ -559,7 +567,7 @@ test('two reds and a third in one run (a crash, a freeze, a plain failure): each
 test('a hold that nobody releases (a capture that died holding the ring) ends the run at that moment, and the job-level check names it', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();
-  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '90000', QUIRE_NESTED_TIMEOUT: '120000' });
+  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_GO: '1', QUIRE_NESTED_TIMEOUT: '120000' });
   try {
     const ok = await run.until(/ring (\/sys\/kernel\/tracing\/instances\/quire-\d+) recording/);
     await run.until(/\[monitor\] started/);

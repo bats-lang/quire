@@ -16,7 +16,7 @@
 import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, chapters, bookPage, dialog, control, showChrome, fixedLayoutBook, readFixed, fixedPlace,
-  openReadingSettings, readingSettings, japaneseChapters,
+  openReadingSettings, readingSettings, japaneseChapters, framesPassed,
 } from './helpers.js';
 
 const book = { title: 'Keyed', author: 'Keys', rawChapters: chapters(1, 60) };
@@ -104,7 +104,7 @@ test('keys are not the page\'s while a dialog, a panel or a text field has the f
   await page.keyboard.type(' ab');
   await page.keyboard.press('PageDown');
   await page.keyboard.press('ArrowRight');
-  await page.waitForTimeout(300);
+  await framesPassed(page);
   expect(await place(page)).toEqual(at);
   expect(await field.inputValue()).toBe(' ab');
   await page.keyboard.press('Escape');
@@ -113,7 +113,7 @@ test('keys are not the page\'s while a dialog, a panel or a text field has the f
   await control(page, 'Contents').click();
   await expect(dialog(page, 'Contents')).toBeVisible();
   await press(page, 'MediaTrackNext');
-  await page.waitForTimeout(300);
+  await framesPassed(page);
   expect(await place(page)).toEqual(at);
   await page.keyboard.press('Escape');
 });
@@ -133,7 +133,7 @@ test('a volume key is the volume\'s while a dialog or panel is open, with the sw
   await control(page, 'Contents').click();
   await expect(dialog(page, 'Contents')).toBeVisible();
   const prevented = await press(page, 'AudioVolumeDown');
-  await page.waitForTimeout(300);
+  await framesPassed(page);
   expect((await place(page)).p).toBe(at.p + 1);
   expect(prevented).toBe(false);
 });

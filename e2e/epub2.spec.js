@@ -115,8 +115,12 @@ for (const [name, text] of [['dtbook', 'DTBook paragraph'], ['oeb1', 'OEB1 parag
     const errors = await start(page);
     await readBook(page, epub2Books[name].opts);
     for (let k = 0; k < 8 && !(await visibleText(page)).includes(text); k++) {
+      // the next screen is the page's text changing (the item after the
+      // last chapter has the title of the contents entry before it, so the
+      // indicator can stay the same)
+      const before = await visibleText(page);
       await page.keyboard.press('ArrowRight');
-      await page.waitForTimeout(300);
+      await expect.poll(() => visibleText(page)).not.toBe(before);
     }
     expect(await visibleText(page)).toContain(text);
     await expect(page.getByRole('alert')).toBeHidden();

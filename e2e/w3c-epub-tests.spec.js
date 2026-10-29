@@ -9,7 +9,7 @@
 import { test, expect } from './fixtures.js';
 import { w3cBooks, W3C_TEXT } from './w3c-books.js';
 import {
-  start, rawFile, importFiles, importInput, openBook, bookPage, cards, visibleText, expectBannerSaysWhatToDo, clickControl, dialog, openReadingSettings, readingSettings, card,
+  start, rawFile, importFiles, importInput, openBook, bookPage, cards, visibleText, expectBannerSaysWhatToDo, clickControl, dialog, openReadingSettings, readingSettings, card, quiet,
 } from './helpers.js';
 
 /** Imports the book of that name from w3c-books.js (what makes it the
@@ -24,10 +24,18 @@ async function readW3cBook(page, name, title) {
     book's card is opened when there is one */
 async function tryW3cBook(page, name) {
   await importInput(page).setInputFiles(rawFile(`${name}.epub`, w3cBooks[name].bytes()));
-  await page.waitForTimeout(2000);
-  if (await cards(page).count() > 0) await cards(page).first().click();
-  await page.waitForTimeout(2000);
+  await importOutcome(page);
+  if (await cards(page).count() > 0) {
+    await cards(page).first().click();
+    await openOutcome(page);
+  }
 }
+
+/** The import has ended: the book's card is in the library, or the banner says why not (quire#985) */
+const importOutcome = page => expect.poll(async () => (await cards(page).count()) > 0 || await page.getByRole('alert').isVisible()).toBe(true);
+
+/** The book was opened: its page is shown, or the banner says it could not be (quire#985) */
+const openOutcome = page => expect.poll(async () => await bookPage(page).isVisible() || await page.getByRole('alert').isVisible()).toBe(true);
 
 /** As readW3cBook, for a book that may be scrolled (the page indicator then says a percentage, not pages) */
 async function readW3cBookScrolled(page, name, title) {
@@ -110,10 +118,10 @@ test('pub-foreign_bad-fallback (must): an item that cannot be shown, with a fall
   const crashed = watchCrash(page);
   await start(page);
   await importInput(page).setInputFiles(rawFile('unsupported-fallback.epub', w3cBooks['unsupported-fallback'].bytes()));
-  await page.waitForTimeout(2000);
+  await importOutcome(page);
   if (await cards(page).count() > 0) {
     await cards(page).first().click();
-    await page.waitForTimeout(2000);
+    await openOutcome(page);
     // the book may refuse to open (the banner says so) or go on to the page after the item
     if (await bookPage(page).isVisible()) expect(await bookPage(page).innerText()).not.toContain('BINARYMARK');
   }
@@ -278,7 +286,7 @@ test('pss-support_ignore-title (must): a title marked as a footnote is no note: 
   await start(page);
   await readW3cBook(page, 'title-as-note', 'A title marked as a note');
   await bookPage(page).getByRole('link', { name: 'this link' }).click();
-  await page.waitForTimeout(1500);
+  await quiet(page);
   await expect(dialog(page, 'Footnote')).toBeHidden();
 });
 

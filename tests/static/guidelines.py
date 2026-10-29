@@ -169,8 +169,14 @@ def lint_guidelines(root, phrases):
     return findings + lint_contradictions(texts, load_contradictions())
 
 
-def lint_pr_body(text, head, phrases):
-    findings = lint_text(text, 'PR body', phrases)
+def lint_pr_body(text, head, phrases, marks=None):
+    """marks: {ticket: count} of the test.fixme marks the PR leaves in e2e/ (None: not known, not checked)."""
+    findings = lint_text(text, 'PR body', phrases) + lint_quarantine_race(text, 'PR body', QUARANTINE_BRIEF, 'Quarantine: ...', RACE_BRIEF, 'Race: ...')
+    if RACE.search(strip_code(text)):
+        findings += lint_race_evidence(text)
+    for number in sorted({found.split('#')[-1] for found in FIXES.findall(text)}):
+        if marks and marks.get(number):
+            findings.append(f'PR body: it fixes #{number} and e2e/ still holds {marks[number]} test.fixme mark(s) that cite it: the ticket\'s close removes the mark (quire#976)')
     lines = [line for line in text.split('\n') if line.strip()]
     if not lines or not FIXES.match(lines[0]):
         findings.append('PR body: the first line is "Fixes #N" for the ticket; a PR that does not meet its Done-when as written is not opened as Refs (rows 2, 3)')
@@ -217,6 +223,63 @@ def lint_overlap(text, name, line_form, line_name):
     return findings
 
 
+# Quarantine and race-fix rules (quire#976, keyword: quarantine, race-fix).
+# A text about a failing test (a brief, a PR body, a review) carries the line "Quarantine:", and a text about a
+# race (a test whose failure depends on the runner's speed, a fixed wait or an order of events) carries "Race:"
+# (a review: "Quarantine check:" and "Race check:"), as a signature change carries "Overlap:".
+FAILING_TEST = re.compile(r'(?i)(?:\b(?:failing|failed|flaky|red) tests?\b|\btests? (?:fails|failed|failure)\b|\bspec\.js:\d+)')
+RACE = re.compile(r'(?i)\b(?:race|racy|flak(?:e|es|y|iness)|intermittent(?:ly)?|timing (?:race|bug))\b')
+QUARANTINE_BRIEF = re.compile(r'^\s*Quarantine:', re.MULTILINE)
+QUARANTINE_REVIEW = re.compile(r'^\s*Quarantine check:', re.MULTILINE)
+RACE_BRIEF = re.compile(r'^\s*Race:', re.MULTILINE)
+RACE_REVIEW = re.compile(r'^\s*Race check:', re.MULTILINE)
+ROOT_CAUSE = re.compile(r'^\s*Root cause:[ \t]*\S', re.MULTILINE)
+INJECTION = re.compile(r'^\s*Injection:[ \t]*\S', re.MULTILINE)
+CI_RUN = re.compile(r'^\s*CI run:[^\n]*https://github\.com/[\w.-]+/[\w.-]+/actions/runs/\d+', re.MULTILINE)
+FIXME_TICKET = re.compile(r'\.fixme\s*\([^\n]*?#(\d+)')
+
+
+def lint_quarantine_race(text, name, quarantine_form, quarantine_name, race_form, race_name):
+    """A text about a failing test names how it is quarantined (a p0 ticket's failing test is test.fixme(ticket) on
+    every project in the commit that files the ticket), and a text about a race its three items (root cause, injection, CI run)."""
+    plain = strip_code(text)
+    findings = []
+    if FAILING_TEST.search(plain) and not quarantine_form.search(text):
+        findings.append(f'{name}: it names a failing test and has no line "{quarantine_name}" (the test is test.fixme(#N) on every project from the commit that files its p0 ticket; the line lists it, quire#976; CLAUDE.md-level rule in .claude/rules/e2e.md, "Quarantine and race fixes")')
+    if RACE.search(plain) and not race_form.search(text):
+        findings.append(f'{name}: it names a race and has no line "{race_name}" (a race fix merges with its root cause, an injection and one CI run on every project, quire#976; .claude/rules/e2e.md, "Quarantine and race fixes")')
+    return findings
+
+
+def marks_left(root):
+    """{ticket number: how many test.fixme marks cite it} in the e2e/ of root."""
+    found = {}
+    base = os.path.join(root, 'e2e')
+    for directory, names, files in os.walk(base):
+        names[:] = [name for name in names if name != 'node_modules']
+        for name in files:
+            if name.endswith(('.js', '.mjs', '.cjs')):
+                with open(os.path.join(directory, name), encoding='utf-8') as handle:
+                    for line in handle:
+                        for number in FIXME_TICKET.findall(line):
+                            found[number] = found.get(number, 0) + 1
+    return found
+
+
+def lint_race_evidence(text):
+    """A body about a race carries the three items of the rule (quire#976): a line `Root cause: ...` (the cause from the
+    captured evidence of a failing run and the event the test now waits for), `Injection: ...` (the forced losing order, old
+    code fails, fix passes) and `CI run: <URL>` (one run of the spec on every project). No test is repeated to count failures."""
+    findings = []
+    if not ROOT_CAUSE.search(text):
+        findings.append('PR body: it names a race and has no line "Root cause: ..." (the cause from the captured evidence of a failing run, and the event the test now waits for, quire#976)')
+    if not INJECTION.search(text):
+        findings.append('PR body: it names a race and has no line "Injection: ..." (a delay or other forcing of the losing order, under which the old code fails and the fix passes, quire#976)')
+    if not CI_RUN.search(text):
+        findings.append('PR body: it names a race and has no line "CI run: <URL>" with the URL of one CI run of the spec on every project (https://github.com/<owner>/<repo>/actions/runs/N, quire#976)')
+    return findings
+
+
 # A worker brief (it names worker.md) carries each of these lines (quire#866, #995), as a signature change carries Overlap.
 WORKER_BRIEF = re.compile(r'worker\.md')
 WORKER_LINES = (
@@ -239,7 +302,8 @@ def lint_worker_lines(text, name):
 
 
 def lint_review(text, phrases, gate_form=False):
-    findings = lint_text(text, 'review', phrases) + lint_overlap(text, 'review', OVERLAP_REVIEW, 'Overlap check: ...')
+    findings = (lint_text(text, 'review', phrases) + lint_overlap(text, 'review', OVERLAP_REVIEW, 'Overlap check: ...')
+                + lint_quarantine_race(text, 'review', QUARANTINE_REVIEW, 'Quarantine check: ...', RACE_REVIEW, 'Race check: ...'))
     lines = [line for line in text.split('\n') if line.strip()]
     first = lines[0].strip() if lines else ''
     if gate_form or first == '## Adversarial review':
@@ -262,7 +326,7 @@ def done_when(ticket):
 
 
 def lint_brief(brief, ticket, phrases):
-    findings = lint_text(brief, 'brief', phrases) + lint_overlap(brief, 'brief', OVERLAP_BRIEF, 'Overlap: ...') + lint_worker_lines(brief, 'brief')
+    findings = lint_text(brief, 'brief', phrases) + lint_overlap(brief, 'brief', OVERLAP_BRIEF, 'Overlap: ...') + lint_worker_lines(brief, 'brief') + lint_quarantine_race(brief, 'brief', QUARANTINE_BRIEF, 'Quarantine: ...', RACE_BRIEF, 'Race: ...')
     lines = done_when(ticket)
     if lines is None:
         findings.append('ticket: it has no "Done when" section: add it before the brief (the Done-when is what the work is measured by)')
@@ -347,6 +411,20 @@ def all_pages(api, path):
         page += 1
 
 
+def marks_after(api, repository, number, root=ROOT):
+    """The test.fixme marks e2e/ holds once the PR is merged: those of the checkout (the default branch, as the
+    workflow runs) plus the PR's added lines minus its removed ones (quire#976, keyword: quarantine)."""
+    marks = marks_left(root)
+    if not marks:
+        return marks
+    for changed in all_pages(api, f'repos/{repository}/pulls/{number}/files'):
+        for line in (changed.get('patch') or '').split('\n'):
+            if line[:1] in '+-' and line[:3] not in ('+++', '---'):
+                for ticket in FIXME_TICKET.findall(line):
+                    marks[ticket] = marks.get(ticket, 0) + (1 if line[0] == '+' else -1)
+    return marks
+
+
 def github(event_name, event, repository, api, phrases, run_url=''):
     """Lint what the event is about and report it; the exit code is 1 when something is wrong."""
     if event_name == 'issues':
@@ -377,7 +455,7 @@ def github(event_name, event, repository, api, phrases, run_url=''):
         findings = []
         description = 'exempt: a bot or a relock branch'
     else:
-        findings = lint_pr_body(pull.get('body') or '', head, phrases)
+        findings = lint_pr_body(pull.get('body') or '', head, phrases, marks_after(api, repository, number))
         review = newest_review(all_pages(api, f'repos/{repository}/issues/{number}/comments'))
         if review:
             findings += [f'{finding} (the review comment {review["html_url"]})' for finding in lint_review(review['body'], phrases)]
@@ -412,7 +490,7 @@ def main(arguments):
     elif '--text' in arguments:
         findings = lint_text(read(option(arguments, '--text')), 'text', phrases)
     elif '--pr-body' in arguments:
-        findings = lint_pr_body(read(option(arguments, '--pr-body')), option(arguments, '--head'), phrases)
+        findings = lint_pr_body(read(option(arguments, '--pr-body')), option(arguments, '--head'), phrases, marks_left(ROOT))
     elif '--review' in arguments:
         findings = lint_review(read(option(arguments, '--review')), phrases, '--gate-form' in arguments)
     elif '--brief' in arguments:

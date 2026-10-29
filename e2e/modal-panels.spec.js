@@ -5,7 +5,7 @@
 // opened it, and Escape closes it.
 
 import { test, expect } from './fixtures.js';
-import { start, readBook, chapters, bookPage, dialog, place, clickControl, control, showChrome, rawMouse } from './helpers.js';
+import { start, readBook, chapters, bookPage, dialog, place, clickControl, control, showChrome, rawMouse, framesPassed, touchPath, straight } from './helpers.js';
 
 // Each panel the bars open: its button (the bottom bar's, or the top
 // bar's Search) and its dialog's name
@@ -52,17 +52,7 @@ async function outside(page, sheet) {
 // A drag of touch pointer events on the page itself, as the gestures
 // recognizer gets them (dispatched to the page, so past the scrim: what
 // stops it is the reader's own check)
-const touchDrag = (page, x0, x1, y) =>
-  bookPage(page).evaluate(async (el, [x0, x1, y]) => {
-    const ev = (type, x) => el.dispatchEvent(new PointerEvent(type, {
-      bubbles: true, pointerId: 41, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y,
-    }));
-    const wait = (t) => new Promise((r) => setTimeout(r, t));
-    ev('pointerdown', x0);
-    for (let i = 1; i <= 4; i++) { await wait(16); ev('pointermove', x0 + ((x1 - x0) * i) / 4); }
-    await wait(16);
-    ev('pointerup', x1);
-  }, [x0, x1, y]);
+const touchDrag = (page, x0, x1, y) => touchPath(bookPage(page), straight(x0, x1, y), 16, { id: 41 });
 
 async function reading(page, title) {
   const errors = await start(page);
@@ -87,7 +77,7 @@ for (const panel of panels) {
     const mid = pageBox.x + pageBox.width / 2;
     await touchDrag(page, mid + 80, mid - 80, pageBox.y + pageBox.height / 2);
     await touchDrag(page, mid - 80, mid + 80, pageBox.y + pageBox.height / 2);
-    await page.waitForTimeout(500);
+    await framesPassed(page);
     expect(await place(page)).toEqual(before);
     await expect(sheet).toBeVisible();
 
@@ -99,7 +89,7 @@ for (const panel of panels) {
     await rawMouse(page, 'down');
     await rawMouse(page, 'move', point.x + 40, point.y, { steps: 4 });
     await rawMouse(page, 'up');
-    await page.waitForTimeout(500);
+    await framesPassed(page);
     expect(await place(page)).toEqual(before);
 
     // a tap on the scrim, in a side's tap zone: the panel closes, the
@@ -109,7 +99,7 @@ for (const panel of panels) {
     await expect(sheet).toBeHidden();
     await expect(page.locator('#panel-scrim')).toBeHidden();
     await expect(opener(page, panel)).toBeFocused();
-    await page.waitForTimeout(500);
+    await framesPassed(page);
     expect(await place(page)).toEqual(before);
 
     // Escape closes it too, the focus back on its button

@@ -5,7 +5,7 @@
 import { test, expect, onAndroid } from './fixtures.js';
 import {
   expectBannerSaysWhatToDo, start, readBook, importFiles, epubFile, card, place, chapterTitle, expectChapter, showChrome, control, dialog,
-  librarySearch, selectText, selectionButton, bookPage, chapters, libraryShown, clockNow, expectMoment,
+  librarySearch, selectText, selectionButton, bookPage, chapters, libraryShown, clockNow, expectMoment, framesPassed,
 } from './helpers.js';
 
 const alert = page => page.getByRole('alert');
@@ -20,12 +20,16 @@ const notCopied = testInfo => `The text could not be copied: the ${onAndroid(tes
 
 /** Every IndexedDB put fails from now on, as when storage is full: its
     transaction aborts (the one failure event the bridge listens for).
-    window.putsFailed counts them */
+    window.putsFailed counts them, window.putsAborted their aborts as they have been told */
 async function failPuts(page) {
   await page.evaluate(() => {
     window.putsFailed = 0;
+    window.putsAborted = 0;
     IDBObjectStore.prototype.put = function () {
       window.putsFailed++;
+      // counted after the app's own listener of the abort, which was
+      // added when its transaction was made, has run
+      this.transaction.addEventListener('abort', () => { window.putsAborted++; });
       this.transaction.abort();
       return {};
     };
@@ -33,6 +37,7 @@ async function failPuts(page) {
 }
 
 const putsFailed = page => page.evaluate(() => window.putsFailed);
+const putsAborted = page => page.evaluate(() => window.putsAborted);
 
 test('a chapter that cannot be read leaves the reader on its page, with the banner', async ({ page }, testInfo) => {
   const errors = await start(page);
@@ -96,12 +101,15 @@ test('a failed save shows the storage message once a session', async ({ page }, 
   await expect(alert(page)).toBeHidden();
   // later saves fail too, and are not said again
   const before = await putsFailed(page);
+  const abortedBefore = await putsAborted(page);
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowRight');
   await expect.poll(() => putsFailed(page)).toBeGreaterThan(before);
   // a failed put is told when its transaction aborts, a task after the
-  // put: past that, the banner would be up
-  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 500)));
+  // put: once the abort has been told (the event the app listens to, which
+  // our listener follows) and a frame is drawn, the banner would be up
+  await expect.poll(() => putsAborted(page)).toBeGreaterThan(abortedBefore);
+  await framesPassed(page);
   await expect(alert(page)).toBeHidden();
 });
 

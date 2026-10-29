@@ -73,7 +73,7 @@ export async function stopKernel(started) {
 }
 
 let holds = 0;
-const nowSeconds = () => Number(process.hrtime.bigint()) / 1e9; // CLOCK_MONOTONIC, the clock of the ring
+export const nowSeconds = () => Number(process.hrtime.bigint()) / 1e9; // CLOCK_MONOTONIC, the clock of the ring
 // a ring that reaches the red ends no earlier than the red: the pause comes after it, and the snapshot's own process adds events. The slack is for the
 // clock reads that differ by a few thousand cycles, not for a ring left paused (that one ends seconds before the next red)
 export const REACH_SLACK_S = 0.5;
@@ -83,14 +83,16 @@ export const REACH_SLACK_S = 0.5;
  * a record on disk needs the ring no longer, and a ring left paused hides every later red (the four EVIDENCE MISSING of quire#575's reading-tools job).
  * The answer has `reach` (the red's time, the last event's time, whether the file reaches the red; a hold of another capture explains a gap).
  * `resume` is the old form's third argument, kept for one release and ignored: the ring always records again.
+ * `clock` is the time the red is taken at, in the ring's seconds (a test of a ring left paused gives a clock later than the
+ * ring's last event, so that no time is waited for the gap, quire#985).
  */
-export async function keepKernel(out, env = process.env, resume = false) {
+export async function keepKernel(out, env = process.env, resume = false, clock = nowSeconds) {
   const instance = env[INSTANCE_VARIABLE];
   if (!instance) return { unavailable: wanted(env) ? 'the kernel ring did not start (no tracefs, or sudo refused: see the run\'s first lines)' : 'not recording (neither CI nor QUIRE_FLIGHT=1, or QUIRE_NO_RECORDER)' };
   const dir = env[OUT_VARIABLE];
   holds += 1;
   const holder = `${process.pid}-${holds}`;
-  const redAt = nowSeconds();
+  const redAt = clock();
   let kept;
   try { kept = await asRoot('snapshot', { instance, out, dir, holder }); } catch (error) { kept = { error: String((error && error.message) || error) }; }
   // the root side releases in its own finally; a root process killed at its limit cannot, so the hold is ended here as well (ending twice is harmless)

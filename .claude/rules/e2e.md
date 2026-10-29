@@ -62,6 +62,64 @@ it does not hang on the machine's fonts.
   `chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell` links to
   the installed `headless_shell`; it does not downgrade Playwright.
 
+## Quarantine and race fixes (#976, keywords: quarantine, race-fix, fixed-wait)
+
+Nine reds from three known-bad tests (the gdb teardown, the ring lock, Escape after a click)
+each blocked an unrelated PR while their p0 tickets were open. Three rules:
+
+* **A test failure that gets a p0 ticket is quarantined in the commit that files the ticket**
+  (or the fix worker's first commit): the test becomes `test.fixme('#N what fails', ...)`, or
+  `test.fixme(true, '#N ...')` as the first line of its body, with no condition but `true`, so it
+  holds on every project (desktop, mobile-portrait and the rest of `playwright.config.js`).
+  `tests/static/e2e_waits.py` refuses a `.fixme(` that names no ticket or holds a project
+  condition. The ticket's close requires the mark's removal: the fix PR deletes the mark, and
+  `guidelines.py --pr-body` (the text-lint workflow reads the PR's files) refuses a body that says
+  `Fixes #N` while a mark citing #N is left. The fix PR's body has a line `Quarantine: ...` listing
+  each quarantined test (spec, test title, ticket) and saying the mark is removed in the PR.
+  A brief, a body or a review that names a failing test and lacks its `Quarantine:` line
+  (`Quarantine check:` in a review) is refused.
+* **A fix for a race merges only when its PR body (1) names the root cause from the captured
+  evidence of a failing run (log, trace, probes), and the event the test now waits for; (2) shows
+  an injection that forces the losing order, such as a delay at the racing step, under which the
+  old code fails and the fix passes; (3) cites one CI run of the spec on every project. No test
+  is repeated to count failures.** A race is any test whose failure depends on the runner's speed,
+  a fixed wait or an order of events. The body has a line `Race: ...` and the
+  three items as lines of their own: `Root cause: ...`, `Injection: ...` and `CI run: <URL>` (the
+  URL is of one run, `https://github.com/<owner>/<repo>/actions/runs/N`, of the check that ran the
+  spec on every project); the injection's raw output is in Evidence. `guidelines.py` refuses a
+  body that names a race and lacks the `Race:` line or any of the three, and a brief or a review
+  that names a race and lacks its `Race:` (`Race check:`) line.
+* **No fixed wait for a step whose duration depends on the runner** (`45 s for gdb`). A wait is for
+  an event (the capture's native step ended), with a limit that is the test's budget, not its
+  expectation. `e2e_waits.py` refuses `waitForTimeout` and a sleep (`setTimeout(resolve, ms)`)
+  in `e2e/`, and `tests/static/e2e_waits_allowed.tsv` is empty (#985 migrated the 126 that existed
+  when the lint was added; the count of a line stays exact, so a new wait fails). A zero delay
+  (`setTimeout(spin, 0)`) is a yield, not a wait. A helper that wraps a sleep
+  (`const wait = (t) => new Promise((r) => setTimeout(r, t))`) is counted where it is defined.
+  What replaced them (keyword: event-wait), the kinds:
+  * **A frame** (`framesPassed`), **fonts** (`fontsReady`), **the app's own short timers**
+    (`e2e/quiet.js`: `timersDrained` waits until none is due in under a second, kept from the first
+    moment of a page by an init script; under a fake clock the clock is run over the span of the
+    longest chain, `_settle`'s 12 x 250 ms), **requests** (`requestsDone`), **IndexedDB writes**
+    (`writesDone`), a poll of the DOM or of a stored value, and `fs.watch` for a file
+    (`e2e/changed.js`).
+  * **A gesture's speed is an input, not a wait**: pointer events carry an explicit `timeStamp`
+    (bridge reads `e.timeStamp`), so a swipe is slow or quick by what the event says, not by when
+    Node sent it.
+  * **A command that is not answered while a long press is decided** (`fingerOn`): the page is
+    asked, with a listener installed first (`expectEvent`, `arrived`), when the press and the
+    release reached it.
+  * **A window or a cadence is the instrument's own duration** (keyword: window): the renderers'
+    CPU read over `CPU_WINDOW_MS`, the profile sampled over `PROFILE_MS`, the probe that asks
+    every `PROBE_EVERY_MS` (`lasting` in `e2e/stall-capture.js`, a timer with a body, as a limit
+    is). The time is what is measured, so no event can stand for it.
+  * **A clock handed in** where a test needs time to have passed: `keepKernel(out, env, false,
+    clock)` takes the time the red is taken at, so a ring left paused is shown to be old by a
+    clock three seconds later, not by sleeping three seconds.
+  * **A nested run says when** (`e2e/nested/*.case.js`): `QUIRE_NESTED_GO` makes a case wait for
+    the file `go` in its directory (`fileAppears`), which the run that holds it makes after it has
+    acted; a hung case waits for the request to reach its server.
+
 ## A worker's machine matches CI (#713)
 
 What CI has, and the one command each takes here (the rule that a missing tool is

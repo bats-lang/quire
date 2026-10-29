@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import {
   start, readBook, openBook, toLibrary, bookPage, dialog, reload, rawFile, showChrome, control,
   readingSettings, openReadingSettings, librarySettings, exportedBackup, restoreInput, settingsButton,
-  onPage,
+  onPage, framesPassed,
 } from './helpers.js';
 import { sizeBooks } from './size-books.js';
 
@@ -188,7 +188,7 @@ test('the line height, paragraph spacing and margins follow the setting, and the
   const second = 'Body text of the second paragraph';
   for (let turns = 0; turns < 40 && !(await onPage(page, second)); turns++) {
     await page.keyboard.press('ArrowRight');
-    await page.waitForTimeout(350);
+    await framesPassed(page);
   }
   expect(await onPage(page, second)).toBe(true);
   await setSize(page, 20);

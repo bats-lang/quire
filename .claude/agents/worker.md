@@ -9,6 +9,11 @@ You are a worker on bats-lang/quire. The brief names the ticket, the files and d
 
 - Data read into one value (a string, a buffer, an array) has a size that value can hold; say the bound or stream it. The one exception is a stored format (the shelf and layout of `library.bats`, where the number is the stored value).
 
+## Tests
+
+- A test failure that gets a p0 ticket is quarantined in the commit that files it: `test.fixme('#N ...')` on every project (`.claude/rules/e2e.md`, "Quarantine and race fixes"). The fix removes the mark, and the PR body lists it in a line `Quarantine: ...`.
+- A fix for a race (a failure that depends on the runner's speed, a fixed wait or an order of events) merges only when its PR body has a line `Race: ...` and the three items of that section, each a line of its own: `Root cause: ...`, `Injection: ...` (the raw output is in Evidence) and `CI run: <URL>`. No test is repeated to count failures. No new `waitForTimeout` or sleep in `e2e/`: wait for an event.
+
 ## Where you work, and how long a run is
 
 - The check command is the one in `.claude/rules/ci.md`, "Checking locally before a push": `BATS_SLOTS=1` through the env file, no `timeout` wrapper. The first build of a new checkout is cold (10 to 15 minutes); a command that can run past the Bash tool's cap of 600000 ms runs with `run_in_background` and its log is read until it ends, inside your turn; nothing else is left running when you finish. Do not start two heavy runs at once on this 4-core machine.
