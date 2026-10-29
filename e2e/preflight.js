@@ -24,6 +24,10 @@ const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 const FIRST_HEARTBEAT_MS = 20000;
 const MONITOR_EVERY_MS = 2000;
 const RING_QUIET_MS = 60000;
+// A watchdog in uninterruptible sleep (state D) may be silent this long before the run is ended (keyword: blocked watchdog, quire#972): 3 of the
+// 10 s probe periods that Kubernetes' liveness default (periodSeconds 10, failureThreshold 3) takes to give up on a container, 3 times the longest
+// block measured (9580 ms), and a quarter of the 120 s after which the kernel's hung-task detector reports a task stuck in D.
+const BLOCKED_BEAT_STALE_MS = 30000;
 // The specs' way to see an end condition without waiting for its real limit (evidence-real.spec.js; nothing else sets these): the limit, in ms,
 // that the variable names, in place of the constant. The condition and the code that ends the run are the real ones.
 const limit = (env, name, fallback) => (Number(env[name]) > 0 ? Number(env[name]) : fallback);
@@ -173,12 +177,35 @@ export function fatal(part, why, out) {
   process.exit(1);
 }
 
+/**
+ * The state letter of a process (R, S, D, T, Z ...) from `<proc>/<pid>/stat`, or null when it cannot be read (keyword: blocked watchdog). The name in
+ * the file may hold spaces and brackets: the state follows its last bracket. /proc/<pid>/stat is readable by every user, root's processes too.
+ */
+export function processStateLetter(pid, proc = '/proc') {
+  try {
+    const text = readFileSync(`${proc}/${pid}/stat`, 'utf8');
+    const state = text[text.lastIndexOf(')') + 2];
+    return /^[A-Za-z]$/.test(state) ? state : null;
+  } catch (error) { return null; }
+}
+
+/**
+ * How long a watchdog's heartbeat may be silent before it is a watchdog gone quiet (keyword: blocked watchdog, quire#972). A watchdog in state D is
+ * blocked in the kernel, on the disk or on the lock every tracefs instance of the host shares (wchan `submit_bio_wait`, `folio_wait_bit_common`,
+ * `tracing_check_open_get_tr`), at the heartbeat's own write or ring reading: it has no beat to write and is not dead, so it gets `blockedStaleMs`; one
+ * that is asleep, stopped or gone gets `staleMs`, and one that stays in D past `blockedStaleMs` is still ended. Numbers in, a number out.
+ */
+export function heartbeatLimitMs({ watchdogState, staleMs, blockedStaleMs }) {
+  return watchdogState === 'D' ? Math.max(staleMs, blockedStaleMs) : staleMs;
+}
+
 /** Watches the parts while the run goes on. Returns a function that ends the watching. Logs a line at its start and a summary at its end (or at its fatal). */
-export function startMonitor(started, env = process.env) {
+export function startMonitor(started, env = process.env, stateOf = processStateLetter) {
   if (!started || env.QUIRE_FLIGHT_MONITOR === 'off') return () => {};
   const { watchdog, out } = started;
   const staleMs = limit(env, 'QUIRE_FLIGHT_BEAT_STALE_MS', HEARTBEAT_STALE_MS);
   const ringQuietMs = limit(env, 'QUIRE_FLIGHT_RING_QUIET_MS', RING_QUIET_MS);
+  const blockedStaleMs = limit(env, 'QUIRE_FLIGHT_BLOCKED_STALE_MS', BLOCKED_BEAT_STALE_MS);
   const began = Date.now();
   let lastWritten = null;
   let lastMoved = Date.now();
@@ -199,7 +226,9 @@ export function startMonitor(started, env = process.env) {
     unreadable = 0;
     seen.beats.add(beat.at);
     seen.lastScans = beat.scans;
-    if (Date.now() - beat.at > staleMs) return die('watchdog', `no heartbeat for ${Date.now() - beat.at} ms`);
+    const beatAgeMs = Date.now() - beat.at;
+    const watchdogState = beatAgeMs > staleMs ? stateOf(beat.pid) : null; // read only when the beat is old
+    if (beatAgeMs > heartbeatLimitMs({ watchdogState, staleMs, blockedStaleMs })) return die('watchdog', `no heartbeat for ${beatAgeMs} ms (the watchdog's state: ${watchdogState === null ? 'not read or gone' : watchdogState})`);
     const ring = beat.ring || {};
     if (ring.error) return die('kernel ring', `unreadable by the watchdog: ${ring.error}`);
     if (ring.written !== undefined) seen.lastRing = ring.written;
