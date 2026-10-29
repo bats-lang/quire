@@ -381,6 +381,36 @@ test('a plain failed test, the browser alive, leaves both rings, and the job-lev
   expect(check.code, check.text).toBe(0);
 });
 
+test('a failed test keeps its trace, screenshot, DOM and history, and the job-level check names them in the summary; with the trace off it is EVIDENCE MISSING: failure capture (#1008)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  const run = nested(testInfo, 'plain', { QUIRE_NESTED_CAPTURE: 'on' });
+  const { code } = await run.finished;
+  expect(code, run.output()).toBe(1);
+  const names = attachmentsOf(run.report()).map((each) => each.name);
+  for (const part of ['trace', 'screenshot', 'page-dom', 'page-history']) expect(names, `${part} among ${names}`).toContain(part);
+  const check = evidenceCheck(run, ['--require-capture', '--summary', 'e2e-screenshots-nested,e2e-report-nested', '--group', 'nested']);
+  expect(check.code, check.text).toBe(0);
+  expect(check.text).toMatch(/failed tests and what was kept of each/);
+  expect(check.text).toMatch(/plain\.case\.js:\d+` plain failure/);
+  expect(check.text).toMatch(/trace: `test-results\/nested\/[^`]*trace\.zip`/);
+  expect(check.text).toMatch(/e2e-screenshots-nested/);
+  // the DOM is the page's, and the trace is a zip
+  const dom = attachmentsOf(run.report()).find((each) => each.name === 'page-dom');
+  // the JSON report carries a body attachment as base64, not as a file
+  expect(Buffer.from(dom.body, 'base64').toString('utf8')).toContain('<p>plain</p>');
+  const zip = attachmentsOf(run.report()).find((each) => each.name === 'trace');
+  expect(readFileSync(zip.path).subarray(0, 2).toString('latin1')).toBe('PK');
+  // the same failure with the trace and screenshot off: the job names what is missing and fails
+  const bare = nested(testInfo, 'plain');
+  expect((await bare.finished).code, bare.output()).toBe(1);
+  const missing = evidenceCheck(bare, ['--require-capture']);
+  expect(missing.code, missing.text).toBe(1);
+  expect(missing.text).toMatch(/EVIDENCE MISSING: failure capture \(test "plain failure" failed and left no trace, no screenshot\)/);
+  const without = evidenceCheck(bare);
+  expect(without.code, 'without the flag the check is as it was').toBe(0);
+});
+
 test('a plain failed test whose ring is gone is EVIDENCE MISSING in the report Playwright wrote, and in the job-level check', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();

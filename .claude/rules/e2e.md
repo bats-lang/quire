@@ -349,3 +349,41 @@ only for a red. The design, with the research and what each means cannot find, i
   Chrome's trace, and the module and offset of each frame to resolve against a build that has symbols if one appears (`QUIRE_SYMBOLS_DIR`).
 * **A stopgap**: the recorder, the watchdog, the evidence check, the sanitizer step and the gdb install are what a second Playwright app would copy; they belong in pwa's
   `e2e-setup` and `gen-pwa test` (bats-lang/pwa#132 for the evidence, #109 for the tools), and this is quire's until they move.
+
+## The capture of a failed test (#1008, keyword: failure capture)
+
+Why: `vertical.spec.js:238` (the Search in book dialog not appearing after `/`) failed once and was never seen
+again; none of the logs of the 26 failed check.yml runs since 2026-10-22 failed at that line (#932 item 5, PR #969),
+so there was nothing to root-cause. The flake is still #932 item 5's; this is the capture, so a failure brings its data.
+
+* **What is kept for a test that failed** (an unexpected `failed` result, a retried attempt included): Playwright's
+  `trace` (`trace.zip`: the DOM snapshots before and after every action, the console, the network, the source) and
+  `screenshot` (`playwright.config.js`: `trace: 'on'`, `screenshot: 'on'`, which hold for every project), and the page
+  fixture's `page-dom` (the HTML as it is when the test ended) and `page-history` (the page's last 100 console messages,
+  page errors and requests, `e2e/page-history.js`, kept in node), next to the existing `page-state` (focus, dialogs, overlays).
+  A page that cannot answer gives the reason as the text of `page-dom`, so the file always exists.
+* **Where it goes**: `test-results/` is uploaded by `Upload test screenshots` as `e2e-screenshots-<group>` (every run, 14 days); the
+  HTML report, with the same traces, as `e2e-report-<group>` when the job failed; the stall and flight files as
+  `e2e-stall-captures-<group>`. The job's `Evidence check` step runs `e2e/evidence-check.js --require-capture --summary ...`:
+  a failed test with a part missing is `EVIDENCE MISSING: failure capture (test "<title>" failed and left no <part>)` and fails the
+  job, and the job's summary lists each failed test as `file:line`, project, status and error, with the file of each part and the
+  names of the three artifacts. Open a trace with `npx playwright show-trace <trace.zip>`.
+* **Tested**: `evidence.spec.js` (`--require-capture`: each part left out, a trace named in the report whose file is gone, the
+  summary) and, on the real path, `evidence-real.spec.js` (a nested run that fails an assertion with the repository's settings
+  keeps the four parts and the check exits 0 with the summary; the same failure with trace and screenshot off exits 1 naming
+  both). `--require-capture` checks `failed` only: a timeout or a killed worker is the flight recorder's (`EVIDENCE MISSING: kernel ring`).
+* **Research** (read 2026-10-29: playwright.dev/docs/api/class-testoptions, /docs/trace-viewer-intro, /docs/ci-intro). The
+  documented `trace` values: `'on'` ("Record and keep a trace for every run"), `'retain-on-failure'` ("Record a trace for every run,
+  but keep it only for runs that failed"), `'on-first-retry'` ("only for the first retry of a test"; the trace viewer page's example
+  with `retries: 2` on CI), `'retain-on-first-failure'`, `'retain-on-failure-and-retries'`; `screenshot` `'on'` or
+  `'only-on-failure'`; `video` the same set as `trace`. This suite has no retries, so `'on-first-retry'` would never record, and the
+  config already has `trace: 'on'` and `screenshot: 'on'`, which keep what a failure needs: the capture was there, but nothing
+  checked it and nothing named it. The settings stay. `'retain-on-failure'` would record the same and keep fewer files (the
+  artifact holds the trace of every passing test today); that saving is a separate change. `video` was not added: the trace's
+  snapshots hold the DOM at every action (searchable, with the console), a video holds pixels only. Playwright's CI guide uploads
+  the HTML report with `actions/upload-artifact` under `if: ${{ !cancelled() }}`, 30 days; this job does the same with its own
+  artifacts. The guide has no check that a failure left its trace, and Playwright has no option that fails a run for a missing one, so
+  that check is ours.
+* **Where it belongs**: the check and the summary are what every app running its suite through `gen-pwa test` would copy, so
+  they move to pwa's evidence check with the rest of this tooling (bats-lang/pwa#260, after #233); the `upload-artifact` steps are
+  workflow steps and stay in the app's `check.yml`.

@@ -15,6 +15,8 @@ export default defineConfig({
   reporter: [['list'], ['json'], ['../evidence-reporter.js']],
   use: {
     headless: true,
+    // the repository's own settings for the failure capture (playwright.config.js, #1008), when a case asks for them
+    ...(process.env.QUIRE_NESTED_CAPTURE === 'on' ? { screenshot: 'on', trace: 'on' } : {}),
     launchOptions: {
       args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-software-rasterizer'],
       env: { ...process.env, FC_FONTATIONS: '1' },

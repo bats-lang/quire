@@ -20,7 +20,7 @@ import { test, expect } from './fixtures.js';
 import { arm, capture, CAPTURE_MOST_MS, NATIVE_MOST_MS, stallWatch as makeWatch } from './stall-capture.js';
 import { capabilities, diskEvidence, missingEvidence, pageState, parseBlocked, symbolEvidence } from './evidence.js';
 import { pixelDiff } from './relaunch.js';
-import { missingFields } from './evidence-check.js';
+import { captureSummary, missingFields } from './evidence-check.js';
 import { futexAnalysis, ringContent } from './flight-recorder.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { Watchdog } from './flight-watchdog.js';
@@ -874,6 +874,30 @@ test('a capture whose file cannot be written ends at once, with no reader of the
   expect(left, 'readers of the ring that outlived the capture').toEqual([]);
   expect(readFileSync(join(instance, 'tracing_on'), 'utf8').trim(), 'the ring records again').toBe('1');
   expect(holdersIn(holds), 'no hold is left').toEqual([]);
+});
+
+test('the job-level check with --require-capture: a failed test names each part of its capture that is missing, and the summary lists them (#1008)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const file = (name) => { const path = testInfo.outputPath(name); writeFileSync(path, 'x'); return path; };
+  const kept = file('flight-1-kernel.txt.gz');
+  writeFileSync(`${kept}.reach.json`, JSON.stringify({ redAt: 100, lastAt: 100.2, others: [], reaches: true }));
+  const whole = [{ name: 'flight-kernel', path: kept }, { name: 'flight-kernel-reach', path: `${kept}.reach.json` }, { name: 'trace', path: file('trace.zip') }, { name: 'screenshot', path: file('shot.png') }, { name: 'page-dom', path: file('dom.html') }, { name: 'page-history', path: file('history.json') }];
+  const report = (status, attachments) => ({ suites: [{ specs: [{ title: 'the Search dialog opens', file: 'vertical.spec.js', line: 238, tests: [{ projectName: 'desktop', expectedStatus: 'passed', results: [{ status, errors: [{ message: 'Error: expect(locator).toBeVisible()\n at x' }], attachments }] }] }] }] });
+  expect(missingFields([report('failed', whole)], [], { requireCapture: true }), 'a whole capture').toEqual([]);
+  for (const part of ['trace', 'screenshot', 'page-dom', 'page-history']) {
+    const found = missingFields([report('failed', whole.filter((each) => each.name !== part))], [], { requireCapture: true });
+    expect(found, `without ${part}`).toEqual([`failure capture (test "the Search dialog opens" failed and left no ${part})`]);
+  }
+  expect(missingFields([report('failed', whole.filter((each) => each.name !== 'trace' && each.name !== 'screenshot'))], [], { requireCapture: true })[0], 'two parts').toMatch(/left no trace, no screenshot\)$/);
+  expect(missingFields([report('failed', [...whole.filter((each) => each.name !== 'trace'), { name: 'trace', path: testInfo.outputPath('gone.zip') }])], [], { requireCapture: true })[0], 'a trace named in the report whose file is gone').toMatch(/left no trace\)/);
+  expect(missingFields([report('failed', whole.filter((each) => each.name !== 'trace'))]), 'not asked for: as it was').toEqual([]);
+  const summary = captureSummary([report('failed', whole.filter((each) => each.name !== 'page-dom'))], { artifacts: ['e2e-screenshots-g'], relativeTo: testInfo.outputDir, group: 'g' });
+  expect(summary).toContain('### e2e (g): failed tests and what was kept of each');
+  expect(summary).toContain('`vertical.spec.js:238` the Search dialog opens (project `desktop`, failed): Error: expect(locator).toBeVisible()');
+  expect(summary).toContain('e2e-screenshots-g');
+  expect(summary).toContain('  * trace: `trace.zip`');
+  expect(summary).toContain('  * page-dom: **missing**');
+  expect(captureSummary([report('passed', whole)]), 'nothing failed, nothing said').toBe('');
 });
 
 test('the job-level check: a test that ended unexpectedly names a kernel ring or it is missing, a named error is repeated, no report is a failure', async ({}, testInfo) => {

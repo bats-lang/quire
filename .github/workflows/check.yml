@@ -428,10 +428,13 @@ jobs:
           PLAYWRIGHT_HTML_OPEN: never
 
       # A red whose evidence is missing is its own failure, named, and the one to fix first (#575): a test
-      # that failed with EVIDENCE MISSING (the stall watch's check), or a timeout that left no kernel ring
+      # that failed with EVIDENCE MISSING (the stall watch's check), or a timeout that left no kernel ring.
+      # A failed test also owes its trace, screenshot, DOM and console, and the job's summary names them and
+      # the artifacts that hold them (#1008, keyword: failure capture). A STOPGAP with the rest of the evidence
+      # tooling: the check and the summary move to gen-pwa test's evidence check with bats-lang/pwa#260
       - name: Evidence check
         if: always() && env.GROUP_RUN == 'yes'
-        run: node e2e/evidence-check.js "$RUNNER_TEMP/e2e-timings" --results test-results --require-report
+        run: node e2e/evidence-check.js "$RUNNER_TEMP/e2e-timings" --results test-results --require-report --require-capture --group "${{ matrix.group }}" --summary "e2e-screenshots-${{ matrix.group }},e2e-report-${{ matrix.group }},e2e-stall-captures-${{ matrix.group }}"
 
       # Chromium's public AddressSanitizer build (pinned by file and SHA-256; position 1625077, Chromium 149.0.7827.0, the
       # branch of the headless shell the suite runs; the server's md5 of the file was checked against the download), run on
