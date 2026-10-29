@@ -110,16 +110,11 @@ const book = { title: 'Shared Book', author: 'Sync Tests', chapters: 4, rawChapt
 const offer = (page, chapter) =>
   page.getByRole('button', { name: `Go to where you were on another device (chapter ${chapter})` });
 
-/** The offer of chapter's place, clicked (or its Dismiss, when dismiss): the bars it lives in hide
-    themselves 5 s after they are shown, so on a loaded machine a slow step can see them up and then
-    lose them. Bringing them up, seeing the button and pressing it are tried again together until the
-    press lands (quire#520; clickControl's way) */
+/** The offer of chapter's place, clicked (or its Dismiss, when dismiss), with the bars it lives in brought up (reader acts) */
 async function offerPressed(page, chapter, dismiss = false) {
-  await expect(async () => {
-    await showChrome(page);
-    await expect(offer(page, chapter)).toBeVisible({ timeout: 2000 });
-    await (dismiss ? page.getByRole('button', { name: 'Dismiss' }) : offer(page, chapter)).click({ timeout: 2000 });
-  }).toPass({ timeout: 30000 });
+  await showChrome(page);
+  await expect(offer(page, chapter)).toBeVisible();
+  await (dismiss ? page.getByRole('button', { name: 'Dismiss' }) : offer(page, chapter)).click();
 }
 
 /** Whether any place is offered: the offer's button there, its row not

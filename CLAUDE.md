@@ -50,21 +50,29 @@ may stay short within a few lines.
 * **p0:** anything that makes CI faster or more reliable, or makes development
   faster or more reliable. A wrong cache is p0: it is what makes people run a
   clean build "just in case". So is a cost of the agent sessions that lowers
-  what the work costs.
+  what the work costs. A speed ticket is p0 only at a better big O or a factor of two
+  or more (owner, 2026-10-23T13:12:21Z, transcript line 78273: "For a ticket to count as p0 for Ci speed it should be either big o or a factor of two or more. Otherwise, there's infinite work on p0"); a smaller gain is p2. Correctness is never
+  gated on speed (owner, 2026-10-22T10:28:07Z, line 70965: "correctness can never be gated on speed"), so no
+  correctness ticket, brief or review carries a timing measurement, a speed budget or a net-cost clause.
 * **p1: correctness.** Missing proofs, tests or coverage, wrong behaviour, audit
-  gaps, violations of the safety rules.
+  gaps, violations of the safety rules, and a statement that is no longer true
+  (owner, 2026-10-22T13:55:25Z, line 71648: "Stale is correctness").
 * **p2:** quire's user-visible features, and the developer experience of other
   bats app developers. Shell tools count under this rule, since changing them
-  means scripting shell instead of implementing bats.
+  means scripting shell instead of implementing bats. Moving a pin automatically is
+  developer experience (owner, 2026-10-20T13:44:43Z, line 55321: "It's p2, because it's devex (pinning itself is p0, but automatically repinning is devex)");
+  so is removing an old form kept for compatibility, and a ticket that only comments on a
+  measurement is no ticket (owner, 2026-10-22T22:02:54Z, line 73778: "I don't need tickets that comment on something with measurement.").
 * **p3:** everything else; a session may file p3 issues but does not work on
   them.
 
-Order: p0 first, then p1, then p2, and within a priority the oldest
-opened ticket first, so none starves. All open p0s, in flight or not, come
-before any p1: a p1 is not started while a p0 is open, whether or not a
-worker has the p0 in hand. Within one priority, a PR already started finishes
-before a new one is started, so a started p1 PR finishes, and no new p1 starts
-while a p0 is open.
+Order of work. The owner's words (owner, 2026-10-22T11:51:04Z, transcript line 71275): "Worker in progress first", "Open pr second", then "P0", "P1", "P2", and "Within a category, oldest wins." So:
+
+1. A worker in progress is never stopped for a new priority, unless it is an emergency (owner, 2026-10-20T00:50:04Z, line 47690: "If a worker works on it, unless it's an emergency, it should be allowed to finish.") "Prioritize" means jump the queue, not interrupt, unless the owner says to stop a worker (owner, 2026-10-22T02:13:24Z, line 68885: "unless I explicitly say to stop a worker, "prioritize" means jump the queue, not interrupt").
+2. An open pull request is finished, whatever its priority (owner, 2026-10-20T00:50:04Z, line 47690: "If a PR is open and no worker is working on it, and it's still relevant, regardless of priority, it should be finished."), oldest first, with nothing else ranking them: a fix does not come before an older review (owner, 2026-10-26T13:57:38Z, line 105684: "No, among them oldest first."). A pull request that is neither green nor red cannot be worked on (owner, 2026-10-26T14:05:11Z, line 105788: "if it is not green and not red, it can't be worked on").
+3. A pull request that is ready to merge is merged before anything else, still within the pressure rules (owner, 2026-10-26T19:34:21Z, line 109484: "merging PRs that are ready to be merged takes priority over everything else"; 2026-10-26T19:37:01Z, line 109557: "first, but still respectful of pressure rules").
+4. Then tickets: p0, then p1, then p2, oldest opened first. A p1 is not started while a p0 can be worked; a p0 that a worker has in hand, or that is blocked, cannot be, and an agent row is never left empty for the order (owner, 2026-10-26T03:03:00Z, line 100831: "THE RULES SAY SLOTS ARE NEVER EMPTY"; 2026-10-21T10:45:34Z, line 61554: "I said explicitly that PRs in flight trump everything else").
+5. A blocked ticket has no priority while it is blocked, and its blockers inherit its priority and its age (owner, 2026-10-22T11:52:56Z, line 71296: "A blocker inherits age from what it blocks."; 2026-10-26T04:49:16Z, line 103163: "while it's blocked, it has NO priority. Something from 120BCE with priority 0 is not worked on if it has blockers. The blockers inherit the priority."). A blocked ticket is not started, not even for a piece of it (owner, 2026-10-24T04:51:42Z, line 82652: "DON'T START THE AGENT").
 
 No downgrades without the owner's word. Downgrading a ticket to p3 on
 judgement (minor impact, high cost), or to any other priority, needs the
@@ -119,7 +127,7 @@ The owner's standing rule (2026-10-19T03:28:04Z, transcript line 46303): "OK. I'
 * 2026-10-21T16:57:11Z (transcript line 64396): "I have said this like five times in the conversation. If it's not somewhere you keep add it NOW."
 
 
-A pull request that changes a published signature (of a package, in its repository) does what that section's rule says: a breaking change to a published signature is made in two steps, never one. The new form is added beside the old one, named by what it adds (as `_proved` is); the old one is marked deprecated in a one-line comment that names its area by keyword and its removal ticket; a test calls the old form, so an edit cannot drop it. One published version holds both. The ticket that removes the old form is filed with the change, as p2: removing an old form is cleanup, not a correctness defect, and a higher priority would put it ahead of every p2 feature.
+A pull request that changes a published signature (of a package, in its repository) does what that section's rule says: a breaking change to a published signature is made in two steps, never one. The new form is added beside the old one, named by what it adds (as `_proved` is); the old one is marked deprecated in a one-line comment that names its area by keyword and its removal ticket; a test calls the old form, so an edit cannot drop it. One published version holds both. The ticket that removes the old form is filed with the change, as p2, with a p2 ticket for each dependent's move to the new form, and the removal is blocked on them (owner, 2026-10-27T15:31:29Z, transcript line 119703: "File the tickets against the dependents as p2 right now though, and mark it blocked on them"): removing an old form is cleanup, not a correctness defect, and a higher priority would put it ahead of every p2 feature. When it was filed is never a finding (owner, 2026-10-25T05:27:02Z, transcript line 92487: "it wasn't even a rule, it was being "fence around the torah" for no good reason"; 2026-10-25T00:11:51Z, line 91136: "Who cares when it was filed").
 
 The review of such a pull request checks both steps, each one: the old form is still there, beside the new one; a test calls the old form; the old form has a deprecation comment that names the area by keyword and the removal ticket; the removal ticket exists, is p2, and is cited in the deprecation comment. A pull request that changes a published signature in place gets `Verdict: changes needed`. The brief templates carry the line (`.claude/orchestration.md`, "Briefs and the machine"), and `tests/static/guidelines.py` refuses a brief or a review of a signature change that lacks it.
 
@@ -136,7 +144,7 @@ reviewed PR that runs the same CI; the daily relock is one such PR. The build ca
 key, the merge queue, the Node packages, the mutation check and which groups a change runs
 are in `.claude/rules/ci.md`, which loads when CI files are touched.
 
-Which tool moves which pin (`.github/dependabot.yml`, weekly, a 7-day cooldown, one pull request
+The owner's ruling is that pins move from the relock alone and that no bot opens a pull request (owner, 2026-10-23T01:15:16Z, transcript line 74799: "I don't want these bots opening PRs. I want to do everything from relock"); the relock moves actions, npm packages and the Gradle wrapper from the command line (repository-prototype#392, #414 to #416). Quire still has `.github/dependabot.yml`, which #996 removes once quire's `relock.yml` uses those moves. Until then, which tool moves which pin (`.github/dependabot.yml`, weekly, a 7-day cooldown, one pull request
 for all the updates of both ecosystems, from one `multi-ecosystem-groups` group with `patterns:
 ["*"]`: "Define groups that span multiple package ecosystems to get a single Dependabot pull
 request", https://docs.github.com/en/code-security/concepts/supply-chain-security/multi-ecosystem-updates;
