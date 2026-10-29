@@ -77,6 +77,47 @@ class Phrases(unittest.TestCase):
                 done = subprocess.run(['sh', script, 'check', str(number)], env={**os.environ, 'SLOTS_FILE': ledger}, capture_output=True, text=True)
                 self.assertEqual((rows, number, done.returncode), (rows, number, status), done.stderr)
 
+    def test_slots_check_says_the_ledger_has_fewer_rows_and_a_missing_ledger_is_not_made(self):
+        """quire#956: N equal to the rows passes, one more exits 1 and says fewer rows (ledgers of two and of three rows); no default ledger."""
+        import subprocess
+        import tempfile
+        script = os.path.join(gl.ROOT, '.claude', 'skills', 'sweep', 'slots')
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = os.path.join(directory, 'slots.tsv')
+            for rows in (2, 3):
+                with open(ledger, 'w', encoding='utf-8') as handle:
+                    handle.write(''.join(f'agent{i}\t-\t-\n' for i in range(rows)))
+                env = {**os.environ, 'SLOTS_FILE': ledger}
+                same = subprocess.run(['sh', script, 'check', str(rows)], env=env, capture_output=True, text=True)
+                more = subprocess.run(['sh', script, 'check', str(rows + 1)], env=env, capture_output=True, text=True)
+                self.assertEqual((same.returncode, more.returncode), (0, 1), (same.stderr, more.stderr))
+                self.assertIn(f'agents running: {rows} (ledger rows: {rows})', same.stdout)
+                self.assertIn(f'has fewer rows ({rows};', more.stderr)
+            os.remove(ledger)
+            missing = subprocess.run(['sh', script, 'check', '1'], env={**os.environ, 'SLOTS_FILE': ledger}, capture_output=True, text=True)
+            self.assertEqual(missing.returncode, 1, missing.stderr)
+            self.assertIn('does not exist', missing.stderr)
+            self.assertIn('the owner creates it', missing.stderr)
+            self.assertFalse(os.path.exists(ledger))
+
+    def test_a_count_of_slots_added_to_a_guideline_is_refused(self):
+        """quire#956: the checkers group fails when a count of slots or agents is written into .claude/orchestration.md; slots.tsv is authoritative."""
+        clean = read_root('.claude', 'orchestration.md')
+        self.assertEqual(gl.lint_text(clean, '.claude/orchestration.md', PHRASES, guide=True), [])
+        for count in ('At most two agents run at any time.', 'Run one sonnet and one haiku.', 'Never a third agent beside two busy slots.',
+                      'There is one running agent.', 'Reviewers run one at a time as agents.', 'The limit: two agents at once.', 'Keep 3 slots.'):
+            with self.subTest(count=count):
+                found = gl.lint_text(clean + '\n' + count + '\n', '.claude/orchestration.md', PHRASES, guide=True)
+                self.assertTrue(found and all('row 14' in line for line in found), found)
+        quoted = gl.lint_text(clean + '\nThe history: `At most two agents run at any time.`\n', '.claude/orchestration.md', PHRASES, guide=True)
+        self.assertEqual(quoted, [])
+
+    def test_the_guidelines_name_the_ledger_as_authoritative_and_the_owner_as_the_only_one_who_changes_it(self):
+        # the rule itself is pitboss's (rules.md, "Agents and slots"); quire's sweep skill states it where the ledger script is
+        text = read_root('.claude', 'skills', 'sweep', 'SKILL.md')
+        self.assertIn('/tmp/claude-0/slots.tsv', text)
+        self.assertIn('only an explicit instruction from the owner', text)
+
     def test_a_guideline_quotes_a_phrase_in_a_code_span_or_a_block(self):
         self.assertEqual(gl.lint_text('Never write `it passed alone`.', 'x', PHRASES, guide=True), [])
         self.assertEqual(gl.lint_text('```\nit passed alone\n```\n', 'x', PHRASES, guide=True), [])
