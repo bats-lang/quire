@@ -10,7 +10,7 @@
 // raises no banner.
 
 import { test, expect } from './fixtures.js';
-import { start, importFiles, epubFile, openBook, openSettings, bookPage, reload } from './helpers.js';
+import { start, importFiles, epubFile, openBook, openSettings, bookPage, reload, fontsReady } from './helpers.js';
 import { fontBooks } from './font-books.js';
 
 const MARKER_WIDTHS_EM = 1.7;
@@ -86,8 +86,8 @@ async function degrades(page, key) {
   await chooseBookFont(page);
   await expect(bookPage(page).getByText('Plain words follow the marker.')).toBeVisible();
   await expect(page.locator('#error-banner')).toBeHidden();
-  // given time to be wrong: the face does not arrive
-  await page.waitForTimeout(500);
+  // the page's fonts have finished loading, and the face did not arrive
+  await fontsReady(page);
   expect(await inBookFace(page)).toBe(false);
   expect(await faces(page)).not.toContain('loaded');
   await expect(page.locator('#error-banner')).toBeHidden();

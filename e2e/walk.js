@@ -10,7 +10,7 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, bookPage,
   libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, topBar,
-  readingSettings, openReadingSettings, selectText, rawFile, openSortMenu, shelfTitle, openShelf, emptyTrashDialog, toLibrary, openBook,
+  readingSettings, openReadingSettings, selectText, rawFile, openSortMenu, shelfTitle, openShelf, emptyTrashDialog, toLibrary, openBook, visibleText,
 } from './helpers.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
@@ -198,8 +198,9 @@ export async function walkEveryScreen(page, { look, back }) {
     return r.width > 0 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;
   }));
   for (let turn = 0; turn < 60 && !(await shown()); turn++) {
+    const shown = await visibleText(page);
     await page.keyboard.press('ArrowRight');
-    await page.waitForTimeout(400);
+    await expect.poll(() => visibleText(page)).not.toBe(shown);
   }
   await expect(map).toBeInViewport();
   await bookPage(page).getByRole('link', { name: '1', exact: true }).click();

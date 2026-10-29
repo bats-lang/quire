@@ -38,7 +38,7 @@ class FixedWaits(unittest.TestCase):
     def test_the_repository_is_clean(self):
         found, total, _ = ew.lint(ROOT)
         self.assertEqual(found, [])
-        self.assertGreater(total, 0)
+        self.assertEqual(total, 0, 'quire#985 migrated every wait: the allowance list holds none')
 
     def test_injected_wait_for_timeout_is_refused(self):
         found = findings({'a.spec.js': "await page.waitForTimeout(45000);\n"})
@@ -55,6 +55,7 @@ class FixedWaits(unittest.TestCase):
         text = ("test.setTimeout(300000);\n"
                 "const timer = setTimeout(() => resolve({ answered: false }), ms);\n"
                 "await startLoop(page, `setTimeout(() => spin(), 0)`);\n"
+                "await startLoop(page, 'setTimeout(spinForever, 0)');\n"
                 "// await page.waitForTimeout(500) was here\n"
                 " * a sleep, setTimeout(resolve, 5), is refused\n")
         self.assertEqual(findings({'a.spec.js': text}), [])

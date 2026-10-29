@@ -10,7 +10,7 @@ import {
   showChrome, chapters, card, bookPage, chapterTitle, expectChapter, control, jumpBack, librarySearch, openSettings, reload, dialog,
   importFiles, indicator, chapterBody, oneColumn, selectText, selectionButton, selectionPick,
   readingSettings, openReadingSettings, expectBarFollows, libraryShown,
-  rawMouse, clockNow, expectMoment,
+  rawMouse, clockNow, expectMoment, touchPath, straight, scrollRested, quiet,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -86,7 +86,8 @@ test('the mouse wheel turns pages', async ({ page }) => {
   await rawMouse(page, 'move', box.x + box.width / 2, box.y + box.height / 2);
   await rawMouse(page, 'wheel', 0, 120);
   await expect.poll(async () => (await place(page)).p).toBe(2);
-  await page.waitForTimeout(400);
+  // the scroll to the page has come to rest before the wheel goes back
+  await scrollRested(bookPage(page));
   await rawMouse(page, 'wheel', 0, -120);
   await expect.poll(async () => (await place(page)).p).toBe(1);
 });
@@ -514,8 +515,9 @@ test('a Hebrew book whose spine does not say reads right to left: its text, its 
   // on to the story (past its title page and contents), to the left
   // (the title page and the contents are named alike: turned, then waited for)
   for (let k = 0; k < 6 && (await place(page)).t < 4; k++) {
+    const shown = await visibleText(page);
     await page.keyboard.press('ArrowLeft');
-    await page.waitForTimeout(400);
+    await expect.poll(() => visibleText(page)).not.toBe(shown);
   }
   expect(await place(page)).toMatchObject({ p: 1 });
   expect((await place(page)).t).toBeGreaterThanOrEqual(4);
@@ -877,7 +879,7 @@ test('the volume keys turn the page when the reader chooses, and are the volume\
   await expect(vol).toHaveAttribute('aria-pressed', 'false');
   await page.keyboard.press('Escape');
   await press('AudioVolumeDown');
-  await page.waitForTimeout(200);
+  await quiet(page);
   expect(await place(page)).toEqual(at);
 });
 
@@ -1031,18 +1033,7 @@ test.describe('on a touch screen', () => {
 
   // A pointer's path, as touch pointer events, one move per step, ms
   // apart: the gestures recognizer classifies them in the app
-  const drag = (page, points, ms, { cancel = false, id = 7 } = {}) =>
-    bookPage(page).evaluate(async (el, [points, ms, cancel, id]) => {
-      const ev = (type, [x, y]) => el.dispatchEvent(new PointerEvent(type, {
-        bubbles: true, pointerId: id, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y,
-      }));
-      const wait = (t) => new Promise((r) => setTimeout(r, t));
-      ev('pointerdown', points[0]);
-      for (const p of points.slice(1)) { await wait(ms); ev('pointermove', p); }
-      await wait(ms);
-      ev(cancel ? 'pointercancel' : 'pointerup', points[points.length - 1]);
-      await wait(50);
-    }, [points, ms, cancel, id]);
+  const drag = (page, points, ms, { cancel = false, id = 7 } = {}) => touchPath(bookPage(page), points, ms, { cancel, id });
   const across = (x0, x1, y, n) =>
     Array.from({ length: n + 1 }, (_, i) => [x0 + ((x1 - x0) * i) / n, y]);
 
@@ -1066,7 +1057,7 @@ test.describe('on a touch screen', () => {
     await drag(page, across(5, 205, y, 4), 16);
     // cancelled by the system mid-drag
     await drag(page, across(mid + 100, mid - 100, y, 4), 16, { cancel: true });
-    await page.waitForTimeout(300);
+    await quiet(page);
     expect((await place(page)).p).toBe(1);
   });
 
@@ -1135,7 +1126,7 @@ test('a mouse drag over the page selects text and does not turn it', async ({ pa
   await rawMouse(page, 'down');
   await rawMouse(page, 'move', box.x + box.width / 2 - 100, y, { steps: 8 });
   await rawMouse(page, 'up');
-  await page.waitForTimeout(300);
+  await quiet(page);
   expect((await place(page)).p).toBe(1);
   expect(await page.evaluate(() => window.getSelection().toString().length)).toBeGreaterThan(0);
 });
@@ -1264,16 +1255,7 @@ for (const route of ['a tap on the side', 'a swipe', 'the Next page button', 'Pa
     const y = box.y + box.height / 2;
     if (route === 'a tap on the side') await rawMouse(page, 'click', box.x + box.width - 10, y);
     else if (route === 'a swipe') {
-      await bookPage(page).evaluate(async (el, [x0, x1, yy]) => {
-        const ev = (type, x) => el.dispatchEvent(new PointerEvent(type, {
-          bubbles: true, pointerId: 31, pointerType: 'touch', isPrimary: true, clientX: x, clientY: yy,
-        }));
-        const wait = t => new Promise(r => setTimeout(r, t));
-        ev('pointerdown', x0);
-        for (let i = 1; i <= 4; i++) { await wait(16); ev('pointermove', x0 + ((x1 - x0) * i) / 4); }
-        await wait(16);
-        ev('pointerup', x1);
-      }, [box.x + box.width * 0.8, box.x + box.width * 0.2, y]);
+      await touchPath(bookPage(page), straight(box.x + box.width * 0.8, box.x + box.width * 0.2, y), 16);
     } else if (route === 'the Next page button') {
       await showChrome(page);
       await expect(hint).toBeVisible();
@@ -1472,7 +1454,8 @@ test('read aloud reads the page from its top, the sentence read marked, turning 
   let before = 0;
   for (let k = 0; k < 40 && (await place(page)).p === first.p; k++) {
     before = await page.evaluate(() => { const n = window.spoken.length; window.sentenceSpoken(); return n; });
-    await page.waitForTimeout(50);
+    // the sentence that follows is said, or the page is turned for it
+    await expect.poll(async () => (await spoken(page)).length > before || (await place(page)).p !== first.p).toBe(true);
   }
   expect((await place(page)).p).toBe(first.p + 1);
   // the sentence the turn was for, said once the page has turned
@@ -1490,7 +1473,7 @@ test('read aloud reads the page from its top, the sentence read marked, turning 
   expect(await page.evaluate(() => CSS.highlights.has('bats-mark-5'))).toBe(false);
   const n = (await spoken(page)).length;
   await page.evaluate(() => window.sentenceSpoken());
-  await page.waitForTimeout(200);
+  await quiet(page);
   expect((await spoken(page)).length).toBe(n);
   // and goes on where it was
   await readAloud(page).click();
@@ -1564,7 +1547,7 @@ test('read aloud says the sentences in order, each marked, without a ruby\'s rea
   await expect(readAloud(page)).toHaveAttribute('aria-pressed', 'false');
   expect(await spokenMark(page)).toEqual([]);
   await page.evaluate(() => window.sentenceSpoken());
-  await page.waitForTimeout(200);
+  await quiet(page);
   expect((await spoken(page)).length).toBe(2);
   // on again: the sentence it was saying, then the next block's
   await readAloud(page).click();

@@ -12,6 +12,8 @@ import {
   start, importFiles, openBook, toLibrary, dialog, clickControl, librarySearch, librarySettings,
   settingsButton, settingsScreen, bookPage, selectText, selectionButton, reload, pageShown,
 } from './helpers.js';
+import { ioDone } from './relaunch.js';
+import { observe } from './quiet.js';
 import {
   webdav, folder, USER, PASSWORD, drive, CLIENT, capacitorPlayed,
 } from './sync-stores.js';
@@ -72,6 +74,7 @@ export async function hide(page) {
     page; routes (a function of the context) are set before the page */
 async function started(browser, time, routes = async () => {}) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
+  await observe(context);
   await routes(context);
   const page = await context.newPage();
   await page.clock.install({ time });
@@ -279,7 +282,8 @@ export async function sync(store, server, d) {
     await panel(d.page).getByRole('button', { name: 'Sync now' }).click();
     await expect.poll(() => store.writes(server, d)).toBeGreaterThan(before);
     await expect(status(d.page)).toHaveText(/^Last synced on /);
-    await d.page.waitForTimeout(300);
+    // the merge is taken: the requests have ended and the writes reached the store
+    await ioDone(d.page);
     await closeSync(d.page);
   } else {
     await hiddenSync(store, server, d);
@@ -291,7 +295,7 @@ export async function hiddenSync(store, server, d) {
   const before = store.writes(server, d);
   await hide(d.page);
   await expect.poll(() => store.writes(server, d)).toBeGreaterThan(before);
-  await d.page.waitForTimeout(300);
+  await ioDone(d.page);
 }
 
 // ---- annotations, on the page and in the list ----

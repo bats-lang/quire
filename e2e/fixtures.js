@@ -9,6 +9,7 @@ import { stallWatch } from './stall-capture.js';
 import { pageState } from './evidence.js';
 import { MARGIN_PROJECTS, checkPageMargins } from './page-margins.js';
 import { keepRealMouse } from './helpers.js';
+import { trackTimers, trackRequests } from './quiet.js';
 
 /** Google's sign-in script, stubbed with one that defines nothing: the
     build has a Google client (scripts/sync-clients.env), so the Sync
@@ -158,6 +159,9 @@ export const test = base.extend({
     context.on('page', refuseRawMouse);
     for (const page of context.pages()) refuseRawMouse(page);
     await googleStubbed(context);
+    // the app's short timers and the page's requests are kept, so a step waits for them to end (e2e/quiet.js, #985)
+    await trackTimers(context);
+    trackRequests(context);
     if (onAndroid(testInfo)) await context.addInitScript(androidApp);
     await use(context);
     // the stall watch's captures finish while the renderers are still there: a context that closes first takes them (quire#575, capture before close)

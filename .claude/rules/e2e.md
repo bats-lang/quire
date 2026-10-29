@@ -96,11 +96,33 @@ each blocked an unrelated PR while their p0 tickets were open. Three rules:
 * **No fixed wait for a step whose duration depends on the runner** (`45 s for gdb`). A wait is for
   an event (the capture's native step ended), with a limit that is the test's budget, not its
   expectation. `e2e_waits.py` refuses `waitForTimeout` and a sleep (`setTimeout(resolve, ms)`)
-  in `e2e/`. The 126 that existed when the lint was added are listed in
-  `tests/static/e2e_waits_allowed.tsv`, each line citing the ticket that migrates them (#985);
-  the count of a line is exact, so a new wait fails and a migrated one lowers the count.
-  A helper that wraps a sleep (`const wait = (t) => new Promise((r) => setTimeout(r, t))`) is
-  counted where it is defined, and its calls are the migration's to find.
+  in `e2e/`, and `tests/static/e2e_waits_allowed.tsv` is empty (#985 migrated the 126 that existed
+  when the lint was added; the count of a line stays exact, so a new wait fails). A zero delay
+  (`setTimeout(spin, 0)`) is a yield, not a wait. A helper that wraps a sleep
+  (`const wait = (t) => new Promise((r) => setTimeout(r, t))`) is counted where it is defined.
+  What replaced them (keyword: event-wait), the kinds:
+  * **A frame** (`framesPassed`), **fonts** (`fontsReady`), **the app's own short timers**
+    (`e2e/quiet.js`: `timersDrained` waits until none is due in under a second, kept from the first
+    moment of a page by an init script; under a fake clock the clock is run over the span of the
+    longest chain, `_settle`'s 12 x 250 ms), **requests** (`requestsDone`), **IndexedDB writes**
+    (`writesDone`), a poll of the DOM or of a stored value, and `fs.watch` for a file
+    (`e2e/changed.js`).
+  * **A gesture's speed is an input, not a wait**: pointer events carry an explicit `timeStamp`
+    (bridge reads `e.timeStamp`), so a swipe is slow or quick by what the event says, not by when
+    Node sent it.
+  * **A command that is not answered while a long press is decided** (`fingerOn`): the page is
+    asked, with a listener installed first (`expectEvent`, `arrived`), when the press and the
+    release reached it.
+  * **A window or a cadence is the instrument's own duration** (keyword: window): the renderers'
+    CPU read over `CPU_WINDOW_MS`, the profile sampled over `PROFILE_MS`, the probe that asks
+    every `PROBE_EVERY_MS` (`lasting` in `e2e/stall-capture.js`, a timer with a body, as a limit
+    is). The time is what is measured, so no event can stand for it.
+  * **A clock handed in** where a test needs time to have passed: `keepKernel(out, env, false,
+    clock)` takes the time the red is taken at, so a ring left paused is shown to be old by a
+    clock three seconds later, not by sleeping three seconds.
+  * **A nested run says when** (`e2e/nested/*.case.js`): `QUIRE_NESTED_GO` makes a case wait for
+    the file `go` in its directory (`fileAppears`), which the run that holds it makes after it has
+    acted; a hung case waits for the request to reach its server.
 
 ## A worker's machine matches CI (#713)
 

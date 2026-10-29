@@ -28,7 +28,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ALLOWED = 'tests/static/e2e_waits_allowed.tsv'
 WAIT_FOR_TIMEOUT = re.compile(r'\bwaitForTimeout\s*\(')
 # setTimeout( not preceded by a dot (test.setTimeout is a budget), its first argument a name or an arrow that only resolves
-SLEEP = re.compile(r'(?<![.\w])setTimeout\s*\(\s*(?:[A-Za-z_$][\w$]*\s*,|\(\s*\)\s*=>\s*(?:r|res|resolve|done|ok|fulfill)\s*\(\s*\)\s*,)')
+# a delay of 0 is a yield to the event loop, not a wait (`setTimeout(spinForever, 0)` in the page code of a fixture)
+SLEEP = re.compile(r'(?<![.\w])setTimeout\s*\(\s*(?:[A-Za-z_$][\w$]*\s*,|\(\s*\)\s*=>\s*(?:r|res|resolve|done|ok|fulfill)\s*\(\s*\)\s*,)(?!\s*0\s*[,)])')
 FIXME = re.compile(r'\.fixme\s*\(')
 FIXME_GOOD = re.compile(r'\.fixme\s*\(\s*(?:true\s*,\s*)?([\'"`])[^\n]*#\d+')
 TICKET = re.compile(r'(?:[\w.-]+/[\w.-]+)?#\d+')

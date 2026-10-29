@@ -22,7 +22,7 @@ import { capabilities, diskEvidence, missingEvidence, pageState, parseBlocked, s
 import { pixelDiff } from './relaunch.js';
 import { missingFields } from './evidence-check.js';
 import { futexAnalysis, ringContent } from './flight-recorder.js';
-import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
+import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, nowSeconds, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { Watchdog } from './flight-watchdog.js';
 import { LOCK_NAME, LOCK_UNREADABLE_MS, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
 
@@ -47,14 +47,17 @@ const processes = async (browser) => {
 /** A synchronous request to a server that never answers: the main thread is blocked in an untimed futex wait, as in #575. */
 async function hangPage(page, stallWatch) {
   const held = new Set();
+  let reach;
+  const reached = new Promise((resolve) => { reach = resolve; });
   const server = createServer(() => { /* never answers */ });
-  server.on('connection', (socket) => held.add(socket));
+  server.on('connection', (socket) => { held.add(socket); reach(); });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
   await page.setContent('<!doctype html><title>Hung</title><p>Hung</p>');
   const session = await stallWatch.session(page);
   await session.send('Runtime.evaluate', { expression: `setTimeout(() => { const request = new XMLHttpRequest(); request.open('GET', 'http://127.0.0.1:${port}/never', false); request.send(); }, 0)` });
-  return { release() { for (const socket of held) socket.destroy(); server.close(); } };
+  // `reached` is the page's synchronous request arriving: the renderer is inside the hang from then on
+  return { reached, release() { for (const socket of held) socket.destroy(); server.close(); } };
 }
 
 test('an untimed futex wait in the renderer\'s main thread: the word, its neighbours, the waker candidates, the kernel ring, the trace and the symbols land', async ({ page, stallWatch }, testInfo) => {
@@ -216,7 +219,7 @@ test('a service worker that never answers a fetch: its state is in the capture a
   const server = createServer((request, response) => {
     if (request.url === '/sw.js') {
       response.writeHead(200, { 'content-type': 'text/javascript' });
-      response.end("self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim())); self.addEventListener('fetch', (event) => { if (event.request.url.endsWith('/hang')) event.respondWith(new Promise(() => {})); });");
+      response.end("self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim())); self.addEventListener('fetch', (event) => { if (event.request.url.endsWith('/hang')) { event.respondWith(new Promise(() => {})); event.waitUntil(self.clients.matchAll().then((all) => all.forEach((each) => each.postMessage('hang seen')))); } });");
     } else {
       response.writeHead(200, { 'content-type': 'text/html' });
       response.end('<!doctype html><title>sw</title><p>sw</p>');
@@ -231,8 +234,11 @@ test('a service worker that never answers a fetch: its state is in the capture a
     await page.reload();
     await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
     const armed = await arm(page);
-    await page.evaluate(() => { fetch('/hang').catch(() => {}); });
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    // the worker has the request (it says so) and does not answer it
+    await page.evaluate(() => new Promise((seen) => {
+      navigator.serviceWorker.addEventListener('message', () => seen(), { once: true });
+      fetch('/hang').catch(() => {});
+    }));
     const found = await capture(page, armed, 'induced: a fetch the service worker never answers', browser);
     expect(found.serviceWorker.controller.state).toBe('activated');
     expect(found.serviceWorker.registrations[0].active).toBe('activated');
@@ -400,8 +406,8 @@ test('a page closed while the stall watch is still capturing its frozen renderer
   const hang = await hangPage(page, stallWatch);
   try {
     await stallWatch.started(page, 20000);
-    // past the capture's questions to the page (they are answered or timed out within 4 s, the renderers' CPU read in 1 s more): it is in the rings now, and the test ends under it
-    await new Promise((resolve) => setTimeout(resolve, 5500));
+    // past the capture's questions to the page: it is in the rings now, and the test ends under it
+    await stallWatch.ringing(page, 40000);
   } finally { hang.release(); }
 });
 
@@ -422,7 +428,7 @@ test('a renderer gone when the capture has finished its rings: what /proc held o
         await expect.poll(() => (processes(own).then((list) => list.filter((process) => process.type === 'renderer' && existsSync(`/proc/${process.id}`)).length)), { timeout: 20000 }).toBe(0);
         return { rings: 'killed' };
       };
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await hang.reached;
       const found = await capture(page, armed, 'induced: a renderer gone after the rings', own, () => {}, undefined, null, rings);
       const word = (found.futex || []).find((each) => each.untimed);
       expect(word, `a renderer waited in an untimed futex: ${JSON.stringify(found.futex)}`).toBeTruthy();
@@ -451,10 +457,12 @@ test('a stall of the machine, seen from inside: a tick that comes late is kept w
   expect(file[0].gapMs).toBe(1800);
   // and a real one: a loop that keeps this process from its timers for 1.2 s is seen by a timer of the same process
   const real = new Watchdog({ root: process.pid, out: testInfo.outputPath('real'), gapMs: 300 });
-  const timer = setInterval(() => real.tick(Date.now()), 100);
-  await new Promise((resolve) => setTimeout(resolve, 400));
+  let ticks = 0;
+  const timer = setInterval(() => { ticks += 1; real.tick(Date.now()); }, 100);
+  // the ticks are coming in time, then the loop keeps this process from its timer, then the late tick is kept
+  await expect.poll(() => ticks, { timeout: 20000 }).toBeGreaterThanOrEqual(3);
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200);
-  await new Promise((resolve) => setTimeout(resolve, 400));
+  await expect.poll(() => real.stalls.length, { timeout: 20000 }).toBeGreaterThan(0);
   clearInterval(timer);
   expect(real.stalls.some((each) => each.gapMs >= 900)).toBe(true);
 });
@@ -793,8 +801,8 @@ test('a capture leaves the ring recording on every outcome, the last of two read
     expect(await on(), 'the last reader is out').toBe('1');
     // a ring paused by an earlier capture and never resumed ends before the next red: the file has content and is not evidence
     await pauseInstance(started.instance);
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    const stale = await keepKernel(testInfo.outputPath('stale.txt.gz'), env);
+    const later = () => nowSeconds() + 3;   // the red comes 3 s after the pause, on the clock handed to keepKernel: no time is waited
+    const stale = await keepKernel(testInfo.outputPath('stale.txt.gz'), env, false, later);
     expect(stale.file).toBeTruthy();
     expect(stale.reach.reaches, JSON.stringify(stale.reach)).toBe(false);
     expect(stale.reach.why).toMatch(/before the red and no other capture held the ring/);
@@ -802,8 +810,7 @@ test('a capture leaves the ring recording on every outcome, the last of two read
     // the same gap with another capture holding the ring is explained by it
     markKept(env, 'reader-c');
     await pauseInstance(started.instance);
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    const explained = await keepKernel(testInfo.outputPath('explained.txt.gz'), env);
+    const explained = await keepKernel(testInfo.outputPath('explained.txt.gz'), env, false, later);
     expect(explained.reach, JSON.stringify(explained.reach)).toMatchObject({ reaches: true, others: ['reader-c'] });
     await resumeKernel(env, 'reader-c');
     expect(await on()).toBe('1');
@@ -995,11 +1002,12 @@ test('a jump of the wall clock: the watchdog keeps the jump, against the monoton
   const set = (milliseconds) => asRootCommand('date', ['-s', `@${(milliseconds / 1000).toFixed(3)}`]);
   const wall = Date.now();
   const mono = performance.now();
-  expect(set(wall + 700).status, 'the clock can be set').toBe(0);
-  await new Promise((resolve) => setTimeout(resolve, 400));
-  expect(set(wall + (performance.now() - mono)).status).toBe(0);
   const out = process.env[OUT_VARIABLE];
   const jumps = () => readdirSync(out).filter((name) => /^clock-jumps-/.test(name)).flatMap((name) => JSON.parse(readFileSync(join(out, name), 'utf8')));
+  expect(set(wall + 700).status, 'the clock can be set').toBe(0);
+  // the clock is put back when the watchdog has kept the jump forward (its tick wrote it), not after a time
+  await expect.poll(() => jumps().some((each) => each.jumpMs > 400 && each.jumpMs < 1000), { timeout: 20000 }).toBe(true);
+  expect(set(wall + (performance.now() - mono)).status).toBe(0);
   await expect.poll(() => { const seen = jumps().map((each) => each.jumpMs); return seen.some((jump) => jump > 400 && jump < 1000) && seen.some((jump) => jump < -400 && jump > -1000); }, { timeout: 20000 }).toBe(true);
   // and the unit: a wall clock that moves 5 s while the monotonic one moves 100 ms
   const dog = new Watchdog({ root: process.pid, out: testInfo.outputPath('jumps') });
@@ -1023,7 +1031,8 @@ test('a network stall (a fetch to a server that never answers, the page free): t
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     const armed = await arm(page);
     await page.evaluate((target) => { fetch(target, { mode: 'no-cors' }).catch(() => {}); }, url);
-    await new Promise((resolve) => setTimeout(resolve, 2500));
+    // the request is in flight for 2 s (the age the capture is to say): the history, which is the page's own, says when it is
+    await expect.poll(() => armed.history.snapshot().inFlight.some((each) => each.url === url && each.ageMs >= 2000), { timeout: 20000 }).toBe(true);
     const found = await capture(page, armed, 'induced: a fetch nobody answers', browser);
     expect(found.answers.task.answered, 'the page is free').toBe(true);
     expect(found.history.inFlight.some((each) => each.url === url && each.ageMs >= 2000)).toBe(true);
@@ -1045,7 +1054,8 @@ test('a page that is slow, not frozen (quire#600): the long task, the page\'s at
   const armed = await arm(page);
   // 1.5 s of script on the main thread, as a heavy layout is
   await page.evaluate(() => new Promise((resolve) => setTimeout(() => { const start = performance.now(); while (performance.now() - start < 1500) { /* a long task */ } resolve(1); }, 0)));
-  await new Promise((resolve) => setTimeout(resolve, 1200));
+  // the page's observer has the long task (it is delivered after the task, not with it)
+  await expect.poll(() => page.evaluate(() => (globalThis.__quireStall || []).some((each) => each.ms >= 1000)), { timeout: 20000 }).toBe(true);
   const found = await capture(page, armed, 'induced: a slow page', browser);
   expect(found.answers.task.answered).toBe(true);
   // the page's tasks are taken by whichever session harvests first (the test's own, here, and the watch's probe every 2 s): between them they hold the task
