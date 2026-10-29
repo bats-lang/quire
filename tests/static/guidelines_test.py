@@ -384,11 +384,10 @@ class Rulings(unittest.TestCase):
         self.assertNotIn('whether or not a worker has the p0', text + read_root('.claude', 'orchestration.md'))
 
     def test_a_ticket_is_split_only_for_a_reason_that_is_not_size(self):
-        for parts in (('.claude', 'orchestration.md'), ('.claude', 'agents', 'worker.md')):
-            text = read_root(*parts)
-            self.assertIn("STOP SPLITTING TICKETS WITHOUT A GOOD REASON", text, parts)
-            self.assertNotRegex(text, r'(?i)broken up BEFORE work starts', parts)
-        self.assertIn('minimum amount of pieces', read_root('.claude', 'orchestration.md'))
+        self.assertNotRegex(read_root('.claude', 'orchestration.md'), r'(?i)broken up BEFORE work starts')
+        text = read_root('.claude', 'agents', 'worker.md')
+        self.assertIn("STOP SPLITTING TICKETS WITHOUT A GOOD REASON", text)
+        self.assertNotRegex(text, r'(?i)broken up BEFORE work starts')
 
     def test_a_brief_without_the_no_split_line_or_without_the_compiler_line_is_named(self):
         brief = 'Follow the worker.md rules.\nDesign check: a.\nPush: b.\nExpects: c.\nSample: d.\nThe tests pass.\n'
@@ -406,8 +405,6 @@ class Rulings(unittest.TestCase):
     def test_the_owners_rulings_of_the_audit_are_in_the_files_that_carry_them(self):
         for parts, needle in ((('.claude', 'orchestration.md'), 'Always have a bats in flight is also a rule'),
                               (('.claude', 'orchestration.md'), 'paused-owner'),
-                              (('.claude', 'orchestration.md'), 'start an opus worker with the request to predict'),
-                              (('.claude', 'orchestration.md'), 'we fix it with a script'),
                               (('.claude', 'agents', 'reviewer.md'), 'Reviewers have no right to object'),
                               (('.claude', 'agents', 'worker.md'), 'Runner pressure should cause hand back'),
                               (('CLAUDE.md',), 'Stale is correctness')):
@@ -674,8 +671,7 @@ class FreeSlotOrder(unittest.TestCase):
     """quire#751, row 14 and finding 3: the order a free slot is filled in is the same words in every file that states it."""
 
     def test_orchestration_qsweep_and_slots_state_the_same_order(self):
-        for name, text, steps in (('orchestration.md', read_root('.claude', 'orchestration.md'), SLOT_STEPS),
-                                  ('qsweep', read_root('.claude', 'skills', 'sweep', 'qsweep'), SLOT_STEPS),
+        for name, text, steps in (('qsweep', read_root('.claude', 'skills', 'sweep', 'qsweep'), SLOT_STEPS),
                                   ('slots', read_root('.claude', 'skills', 'sweep', 'slots'), SLOT_STEPS[:3])):
             for step in steps:
                 self.assertIn(step, text, f'{name} does not state: {step}')
@@ -685,13 +681,6 @@ class FreeSlotOrder(unittest.TestCase):
         self.assertEqual(len(reminder), 1, reminder)
         for step in SLOT_STEPS[:3]:
             self.assertIn(step, reminder[0])
-
-    def test_the_hourly_trigger_reads_the_section_that_states_the_order(self):
-        text = read_root('.claude', 'orchestration.md')
-        section = text.split('## Agents and slots', 1)[1].split('\n## ', 1)[0]
-        self.assertIn('ListAgents', section)
-        for step in SLOT_STEPS:
-            self.assertIn(step, section)
 
 
 class NextReadsEveryRepository(unittest.TestCase):
@@ -894,7 +883,6 @@ class PersistentCheckout(unittest.TestCase):
             self.assertNotIn('removes a finished worktree only when the disk', text, parts)
         self.assertIn('nobody\ndeletes it', read_root('CLAUDE.md'))
         self.assertIn('never the one that merged last', read_root('CLAUDE.md'))
-        self.assertIn('Nobody deletes the persistent checkout', read_root('.claude', 'orchestration.md'))
         self.assertIn('never the persistent checkout', read_root('.claude', 'skills', 'sweep', 'SKILL.md'))
 
 
@@ -934,14 +922,14 @@ class OwnerAttribution(unittest.TestCase):
             self.assertNotIn('the maintainer decided', read_root(*parts), '/'.join(parts))
             self.assertNotIn('as the maintainer decided', read_root(*parts), '/'.join(parts))
 
-    def test_the_reviewers_included_rule_is_the_orchestrators_in_both_files(self):
-        for parts in (('.claude', 'orchestration.md'), ('.claude', 'skills', 'sweep', 'slots')):
-            text = read_root(*parts)
-            hit = [line for line in text.split('\n') if re.search(r'reviewers? included', line, re.I) and 'owner' in line]
-            self.assertTrue(hit, parts)
-            for line in hit:
-                self.assertIn('orchestrator', line, parts)
-                self.assertNotRegex(line, r'\(owner, 2026-10-18\)')
+    def test_the_reviewers_included_rule_is_the_orchestrators_in_the_ledger(self):
+        # the rule itself is in pitboss's rules.md, Agents and slots 4; the ledger's comment states it as the orchestrator's
+        text = read_root('.claude', 'skills', 'sweep', 'slots')
+        hit = [line for line in text.split('\n') if re.search(r'reviewers? included', line, re.I) and 'owner' in line]
+        self.assertTrue(hit)
+        for line in hit:
+            self.assertIn('orchestrator', line)
+            self.assertNotRegex(line, r'\(owner, 2026-10-18\)')
 
 
 TRANSCRIPT = '/root/.claude/projects/-home-user/470579b5-e357-55fb-95b6-0b0f548219ea.jsonl'

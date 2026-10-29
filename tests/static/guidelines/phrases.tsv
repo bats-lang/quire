@@ -53,7 +53,7 @@ text	3	\bin part\b	done in part	The word part is not used: the Done-when is met 
 text	3	\bthe part (that|of|which)\b	the part that is left	The word part is not used: the Done-when is met as written or the work goes on (owner, 2026-10-25T18:20:21Z).
 text	3	\bparts? (is|are) (done|left|owed|not done)\b	two parts are done	The word part is not used: the Done-when is met as written or the work goes on (owner, 2026-10-25T18:20:21Z).
 guide	1	whether or not a worker has the p0	a p1 is not started while a p0 is open, whether or not a worker has the p0 in hand	A worker in progress and an open pull request come before any ticket, and a p0 in a worker's hand or blocked is passed over (CLAUDE.md, Priorities; owner, 2026-10-22T11:51:04Z).
-guide	13	broken up before work starts	A ticket that should be several is broken up BEFORE work starts	A ticket is split only for a reason that justifies it, and then into the fewest tickets (orchestration.md, Tickets; owner, 2026-10-28T14:57:01Z).
+guide	13	broken up before work starts	A ticket that should be several is broken up BEFORE work starts	A ticket is split only for a reason that justifies it, and then into the fewest tickets (pitboss sweep rules.md, Tickets; owner, 2026-10-28T14:57:01Z).
 guide	14	\b(one|two|three|\d+) (sonnet|haiku|opus)s?\b	go down to one sonnet	The rows of the ledger file are the agents that run; no text names a count (quire#897).
 guide	14	\b(sonnet|haiku)\d*\b	most conflicts are haiku-level	No text names a model of an agent; the ledger's rows are the agents (quire#897).
 guide	14	\b(at most|no more than|limit of|limit is|limit) (two|three|\d+) (agents|workers|slots)\b	at most two agents run	The rows of the ledger file are the agents that run; no text names a count (quire#897).

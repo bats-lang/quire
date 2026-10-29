@@ -69,7 +69,7 @@ _judge_pr(){  # sets _ready from what _read_pr read
   else _ready=READY-FOR-REVIEW; fi
 }
 # the candidates of the NEXT line, one per line "<created_at> <repository>#<number>", for quire and the libraries together: the line is ordered oldest first by the
-# PR's creation date across all repositories (orchestration.md, Agents and slots: "As always inside each category, go by oldest"), not by the API's order or by repository
+# PR's creation date across all repositories (pitboss sweep rules.md, Agents and slots: "As always inside each category, go by oldest"), not by the API's order or by repository
 _cand_fix=""; _cand_review=""
 _order(){ printf '%s' "$1" | sort | awk '{printf " %s",$2}'; }
 _quire_numbers=$(_gh "repos/bats-lang/quire/pulls?state=open&per_page=50" --jq '.[].number') || { echo "quire ERROR reading the open pull requests: $(_why)"; _unread="$_unread quire"; }
@@ -103,7 +103,7 @@ done
 # a repository or a PR whose call failed was not read: the NEXT line below is incomplete and says so (it never lists a PR it could not read as if nothing were there)
 [ -n "$_unread" ] && echo "UNREAD (the NEXT line is incomplete; look at these by hand):$_unread"
 rm -f "$_errfile"
-# the one NEXT line: the quire PRs and the library PRs together, a fix before a review before a new ticket (orchestration.md, Agents and slots), each category oldest first
+# the one NEXT line: the quire PRs and the library PRs together, a fix before a review before a new ticket (pitboss sweep rules.md, Agents and slots), each category oldest first
 if [ -n "$_cand_fix" ]; then echo "NEXT FOR A FREE SLOT: a fix (an author; any author) for$(_order "$_cand_fix")"
 elif [ -n "$_cand_review" ]; then echo "NEXT FOR A FREE SLOT: a review (not by the author) of$(_order "$_cand_review")"
 else echo "NEXT FOR A FREE SLOT: the oldest ticket of the highest priority (CLAUDE.md, Priorities)"; fi
@@ -208,6 +208,6 @@ echo "SWEEP REMINDER: check whether any ticket is closeable (its work merged: re
 echo "SWEEP REMINDER: the rows of the slot ledger are the agents that run, each always filled; a free slot is refilled the same turn. Run slots set at every spawn and slots free at every hand-back, in the same turn"
 echo "SWEEP REMINDER: check whether any open ticket holds genuinely several unrelated changes, or pieces in another repository, or a split the owner approved: only then break it up, before work, into the fewest tickets that reason forces (original closed with Broken into #a #b, pieces inherit priority); size, call sites and the number of Done-when items are never a reason (quire/.claude/orchestration.md, Tickets)"
 echo "SWEEP REMINDER: check whether any blocked ticket is unblocked (read the PR or ticket it says it waits for; if that merged or closed, say so on the ticket and make it workable)"
-echo "SWEEP REMINDER: order for a free slot (orchestration.md, Agents and slots): (1) a fix, by an author (any author, not necessarily the one who wrote the PR), for a review that asked for changes, a red CI, or a merge conflict; (2) a review of a PR green on its exact head; (3) the oldest ticket of the highest priority (CLAUDE.md, Priorities); oldest first inside each step. Never a new ticket while a changes-needed review, a red CI or a merge conflict waits for its fix, or a green PR waits for its reviewer"
+echo "SWEEP REMINDER: order for a free slot (pitboss sweep rules.md, Agents and slots): (1) a fix, by an author (any author, not necessarily the one who wrote the PR), for a review that asked for changes, a red CI, or a merge conflict; (2) a review of a PR green on its exact head; (3) the oldest ticket of the highest priority (CLAUDE.md, Priorities); oldest first inside each step. Never a new ticket while a changes-needed review, a red CI or a merge conflict waits for its fix, or a green PR waits for its reviewer"
 echo "SWEEP REMINDER: workers never wait for CI (owner, 2026-10-20T04:22:32Z: \"Standing rule: agents don't wait for check. They hand back, and trust you to continue the process.\"): every brief says push, then hand back at once with PR, head sha and local runs. The orchestrator watches the checks and continues; a worker found waiting is told to hand back"
 slots show
