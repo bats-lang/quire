@@ -367,7 +367,7 @@ class WorkerLines(unittest.TestCase):
 
     def test_a_brief_with_every_line_passes(self):
         brief, ticket, _ = self.fixture()
-        brief += 'Design check: first.\nPush: after every commit.\nExpects: blessed.\nSample: seeded.\nAffected: ran it.\n'
+        brief += 'Design check: first.\nPush: after every commit.\nExpects: blessed.\nSample: seeded.\nAffected: ran it.\nNo split: whole.\nCompiler: /home/user/bats-pinned/bin/bats.\n'
         self.assertEqual(gl.lint_brief(brief, ticket, PHRASES), [])
 
     def test_orchestration_md_carries_the_lines(self):
@@ -376,15 +376,15 @@ class WorkerLines(unittest.TestCase):
 
 
 class AffectedLine(unittest.TestCase):
-    """The reject fixture tests/static/guidelines/reject/worker-brief-lacks-affected: a brief with the other four lines and no Affected line is refused for that line alone (quire#957)."""
+    """The reject fixture tests/static/guidelines/reject/worker-brief-lacks-affected: a brief with the other lines and no Affected line is refused for that line alone (quire#957)."""
     DIR = os.path.join(HERE, 'guidelines', 'reject', 'worker-brief-lacks-affected')
 
     def fixture(self):
         return [open(os.path.join(self.DIR, name)).read() for name in ('brief.txt', 'ticket.txt', 'expect')]
 
-    def test_the_fixture_has_the_other_four_lines_and_not_this_one(self):
+    def test_the_fixture_has_the_other_lines_and_not_this_one(self):
         brief, _, _ = self.fixture()
-        for label in ('Design check:', 'Push:', 'Expects:', 'Sample:'):
+        for label in ('Design check:', 'Push:', 'Expects:', 'Sample:', 'No split:', 'Compiler:'):
             self.assertIn(label, brief)
         self.assertNotIn('Affected:', brief)
 
@@ -401,6 +401,51 @@ class AffectedLine(unittest.TestCase):
         finally:
             gl.WORKER_LINES = original
         self.assertNotEqual(found, expect)
+
+
+class Rulings(unittest.TestCase):
+    """quire#995: the rules say the owner's latest rulings, with the line and time of the message."""
+
+    def test_the_order_of_work_is_workers_then_open_prs_then_p0_p1_p2(self):
+        text = read_root('CLAUDE.md')
+        self.assertIn('"Worker in progress first", "Open pr second"', text)
+        self.assertNotIn('whether or not a worker has the p0', text + read_root('.claude', 'orchestration.md'))
+
+    def test_a_ticket_is_split_only_for_a_reason_that_is_not_size(self):
+        for parts in (('.claude', 'orchestration.md'), ('.claude', 'agents', 'worker.md')):
+            text = read_root(*parts)
+            self.assertIn("STOP SPLITTING TICKETS WITHOUT A GOOD REASON", text, parts)
+            self.assertNotRegex(text, r'(?i)broken up BEFORE work starts', parts)
+        self.assertIn('minimum amount of pieces', read_root('.claude', 'orchestration.md'))
+
+    def test_a_brief_without_the_no_split_line_or_without_the_compiler_line_is_named(self):
+        brief = 'Follow the worker.md rules.\nDesign check: a.\nPush: b.\nExpects: c.\nSample: d.\nThe tests pass.\n'
+        ticket = '## Done when\n\nThe tests pass.\n'
+        both = '\n'.join(gl.lint_brief(brief, ticket, PHRASES))
+        self.assertIn('no line "No split: ..."', both)
+        self.assertIn('no line "Compiler: ..."', both)
+        only_compiler = '\n'.join(gl.lint_brief(brief + 'No split: whole.\n', ticket, PHRASES))
+        self.assertNotIn('No split', only_compiler)
+        self.assertIn('no line "Compiler: ..."', only_compiler)
+        only_split = '\n'.join(gl.lint_brief(brief + 'Compiler: /bats.\n', ticket, PHRASES))
+        self.assertIn('no line "No split: ..."', only_split)
+        self.assertNotIn('Compiler', only_split)
+
+    def test_the_owners_rulings_of_the_audit_are_in_the_files_that_carry_them(self):
+        for parts, needle in ((('.claude', 'orchestration.md'), 'Always have a bats in flight is also a rule'),
+                              (('.claude', 'orchestration.md'), 'paused-owner'),
+                              (('.claude', 'orchestration.md'), 'start an opus worker with the request to predict'),
+                              (('.claude', 'orchestration.md'), 'we fix it with a script'),
+                              (('.claude', 'agents', 'reviewer.md'), 'Reviewers have no right to object'),
+                              (('.claude', 'agents', 'worker.md'), 'Runner pressure should cause hand back'),
+                              (('CLAUDE.md',), 'Stale is correctness')):
+            self.assertIn(needle, read_root(*parts), parts)
+
+    def test_the_words_the_owner_banned_are_refused_in_a_text(self):
+        for text in ("I haven't looked yet", "I didn't check the PR", "I've not verified it", 'done in part', 'the part that is left', 'two parts are done'):
+            self.assertTrue(gl.lint_text(text, 'text', PHRASES), text)
+        for text in ('I looked at it and it passes', 'the particular case'):
+            self.assertEqual(gl.lint_text(text, 'text', PHRASES), [], text)
 
 
 class FakeApi:
@@ -925,6 +970,38 @@ class OwnerAttribution(unittest.TestCase):
             for line in hit:
                 self.assertIn('orchestrator', line, parts)
                 self.assertNotRegex(line, r'\(owner, 2026-10-18\)')
+
+
+TRANSCRIPT = '/root/.claude/projects/-home-user/470579b5-e357-55fb-95b6-0b0f548219ea.jsonl'
+LINE_PAIR = re.compile(r'(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ),? (?:transcript )?line (\d+)')
+
+
+def wrong_pairs(text, time_of_line):
+    """The (time, line) pairs of a text whose time is not the time of that line (quire#995, finding 3 of the review of 1e3b8a4)."""
+    return [(found.group(1), int(found.group(2))) for found in LINE_PAIR.finditer(text)
+            if time_of_line(int(found.group(2))) != found.group(1)]
+
+
+class OwnerTimes(unittest.TestCase):
+    FILES = OwnerAttribution.FILES + (('.claude', 'rules', 'ci.md'),)
+
+    def test_a_pair_with_the_wrong_time_is_found_and_a_right_one_is_not(self):
+        times = {59493: '2026-10-21T04:39:10Z'}.get
+        self.assertEqual(wrong_pairs('(owner, 2026-10-21T04:39:00Z, transcript line 59493: "x")', times), [('2026-10-21T04:39:00Z', 59493)])
+        self.assertEqual(wrong_pairs('(owner, 2026-10-21T04:39:10Z, transcript line 59493: "x")', times), [])
+
+    def test_every_time_and_line_of_the_rules_is_the_time_of_that_line_of_the_transcript(self):
+        if not os.path.exists(TRANSCRIPT):
+            self.skipTest('the session transcript is not on this machine')
+        import json
+        text = ''.join(read_root(*parts) for parts in self.FILES)
+        wanted = {int(found.group(2)) for found in LINE_PAIR.finditer(text)}
+        times = {}
+        with open(TRANSCRIPT, encoding='utf-8') as handle:
+            for number, line in enumerate(handle, 1):
+                if number in wanted:
+                    times[number] = json.loads(line)['timestamp'][:19] + 'Z'
+        self.assertEqual(wrong_pairs(text, times.get), [])
 
 
 class SweepFiles(unittest.TestCase):
