@@ -3,5 +3,3 @@
 fn _static_shelf_label (shelf: shelf): string =
   case+ shelf of
   | OnShelf() => "Library"
-  | Hidden() => "Hidden"
-  | Archived() => "Archived"

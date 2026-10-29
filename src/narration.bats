@@ -184,6 +184,7 @@ fn _sync (): renewal =
       val () = _put(Unnarrated())
     in _renewal_of(replaced) end
 
+(* fixture: whether-page-numbers-and-notes-are *)
 (* Whether page numbers and notes are passed over *)
 fn _skipping (): bool = (case+ set_narration_notes_get() of NotesSkipped() => true | NotesRead() => false)
 

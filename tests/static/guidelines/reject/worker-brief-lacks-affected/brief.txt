@@ -1,0 +1,10 @@
+Follow the worker.md rules; finish inside the turn; do not merge; do not write the review.
+
+The tests pass.
+
+Design check: push the declarations first.
+Push: after every commit.
+Expects: blessed.
+Sample: seeded.
+No split: whole.
+Compiler: /home/user/bats-pinned/bin/bats.

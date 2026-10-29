@@ -1,4 +1,4 @@
 function _static_theme_class
 line 4
 pattern match is nonexhaustive:
-Fixed(Grey())
+among Fixed(Grey())

@@ -47,7 +47,7 @@ in close(sheet) end
    dark ones it is weaker (Night's highlight is 4.70:1 at rest, so
    there no shade at all leaves it at 4.5:1), and the shadow and the
    slide carry the turn *)
-#pub fn page_turn_rules {left:nat | left >= 3600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 3600] sheet(after, false, false)
+#pub fn page_turn_rules {left:nat | left >= 4200} (sheet: sheet(left, false, false)): [after:nat | after >= left - 4200] sheet(after, false, false)
 
 implement page_turn_rules (sheet) = let
   val sheet = rule(sheet, ".shade")
@@ -95,6 +95,43 @@ implement page_turn_rules (sheet) = let
   val sheet = close(sheet)
   val sheet = rule(sheet, ".turn.blank .tgap")
   val sheet = fill(sheet, RoleGround())
+  val sheet = close(sheet)
+  (* the book's edge (book-edge keyword, reader.md): a bar of role edge
+     along the side the refused turn pushed against, 6px wide in the
+     page's margin, a ground with no text, over none (e2e/page-turn.spec.js
+     expectNoTextUnder measures it in every project); no motion at all, so reduced motion changes nothing,
+     and the status toast says the same in words *)
+  val sheet = rule(sheet, ".edge")
+  val sheet = lay(sheet, Position(), "absolute")
+  val sheet = lay(sheet, ZIndex(), "3")
+  val sheet = lay(sheet, PointerEvents(), "none")
+  val sheet = fill(sheet, RoleEdge())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".edge-right,.edge-left")
+  val sheet = lay(sheet, Top(), "0")
+  val sheet = lay(sheet, Bottom(), "0")
+  val sheet = lay(sheet, Width(), "6px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".edge-top,.edge-bottom")
+  val sheet = lay(sheet, Left(), "0")
+  val sheet = lay(sheet, Right(), "0")
+  val sheet = lay(sheet, Height(), "6px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".edge-right")
+  val sheet = lay(sheet, Right(), "0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".edge-left")
+  val sheet = lay(sheet, Left(), "0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".edge-top")
+  val sheet = lay(sheet, Top(), "0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".edge-bottom")
+  val sheet = lay(sheet, Bottom(), "0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".toast.tedge")
+  val sheet = lay(sheet, Bottom(), "calc(env(safe-area-inset-bottom) + 168px)")
+  val sheet = spaced_pair(sheet, Padding(), SpaceMedium(), SpaceLarge())
   val sheet = close(sheet)
   val sheet = shade_rule(V_light_6 | sheet, Light(), 1, 6)
   val sheet = shade_rule(V_light_12 | sheet, Light(), 2, 12)

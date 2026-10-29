@@ -160,6 +160,7 @@ fun _id_is {l:agz}{n:nat}{id_len:nat}{i:nat | i <= id_len} .<id_len - i>.
   else if byte2int0($A.get<byte>(event_bytes, 10 + i)) <> char2int0(string_get_at(id, i)) then false
   else _id_is(event_bytes, n, id, id_len, i + 1)
 
+(* fixture: the-toast-s-listener-its-undo *)
 (* The toast's listener: its Undo button, and Dismiss *)
 #pub fn undo_listen {count:nat} (listeners: regs(count)): regs(count + 1)
 implement undo_listen (listeners) = RCons(listeners, OnEl("undo-toast"), "click", llam(h) =>
