@@ -40,9 +40,13 @@ implement quire_commit_short () = $F.bats_commit_short()
 
 #pub fn quire_version_code (): version_code
 
+(* The offset as a number: its type is the stadef above, so the compiler
+   holds the two literals equal (keyword: version code) *)
+fn _version_code_offset (): int(VERSION_CODE_OFFSET) = 955000
+
 implement quire_version_code () =
   case+ $F.bats_commit_count() of
-  | ~$F.CommitCounted(count) => VersionCode(count + 955000)
+  | ~$F.CommitCounted(count) => VersionCode(count + _version_code_offset())
   | ~$F.CommitHistoryShallow() => VersionCodeShallow()
 
 (* The longest version text: a version under 32 bytes, " (", the short

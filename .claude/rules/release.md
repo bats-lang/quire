@@ -29,16 +29,21 @@ commit, and that the Android project carries the version and its code.
 ## The version code is the commit count plus an offset (#989, #979)
 
 Keyword: version code. `quire_version_code` is `bats_commit_count()` (the commits reachable from the
-built commit, bats#574) plus 955000. The minutes scheme it replaces (the committer time less the
+built commit, bats#574) plus `VERSION_CODE_OFFSET` (955000, the one literal of `src/version.bats`: the
+private `_version_code_offset` is typed by it, so the compiler holds the two equal). The minutes scheme it replaces (the committer time less the
 start of 2025, in minutes) gave two merges a minute apart one code, 955894, and Play refused the
 second (run 7, #889 and #886). A count only grows along main, so the code is above its parent's; the
 offset is above the last minutes code (955894) with the count at its value when it was chosen, and
 never changes afterwards, so one commit always gives one code. A shallow clone cannot count: the facts
-say so (`CommitHistoryShallow`), `quire_version_code` answers `VersionCodeShallow`, and gen-pwa writes
-nothing and exits 1, so a wrong code is never released. Every job that runs gen-pwa to generate
+say so (`CommitHistoryShallow`), `quire_version_code` answers `VersionCodeShallow`, and gen-pwa appends
+no versionCode block and exits 1. `dist/pwa` and `dist/android` are already written by then (pwa's
+`create_pwa_opening` and `create_android_locked` run first), and the Android project keeps pwa's
+fallback `versionCode Integer.parseInt(System.getenv('ANDROID_VERSION_CODE') ?: '1')`; the job fails
+before anything is built or released, so a wrong code is never released. The ticket asks only that the
+versionCode block be refused, so the statement is what changed, not the order of the writes. Every job that runs gen-pwa to generate
 (check.yml `build`, deploy.yml) checks out with `fetch-depth: 0`; the static and e2e jobs never call
 it. pwa's release script refuses a code not above the highest on Play (pwa#258).
-`tests/version/same.sh` checks the count is git's, the code is above 955894 and above the parent's, and
+`tests/version/same.sh` reads the offset from `src/version.bats`, checks the count is git's, the code is above 955894 and above the parent's, and
 the Android project carries it. `tests/static/guidelines.py` (`lint_version_code`) refuses the minutes
 scheme in `src/version.bats` (the committer time or 1735689600) and demands `bats_commit_count`.
 

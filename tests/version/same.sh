@@ -5,8 +5,9 @@
 # by a project of its own, they are the same; the version has the form
 # YEAR.MONTH.DAY.SECONDS (SHA); and the Android project gen-pwa wrote
 # carries it as its versionName, and the number of commits reachable from
-# the commit plus 955000 as its versionCode (#989: above 955894, the last
-# code the minutes scheme gave Play, and above the parent's).
+# the commit plus the offset of src/version.bats as its versionCode (#989:
+# above 955894, the last code the minutes scheme gave Play, and above the
+# parent's).
 #
 # Run after `bats build` and gen-pwa, from the checkout, with the
 # BATS_COMMIT the build had (none: HEAD); bats must be on PATH.
@@ -52,10 +53,12 @@ case $(git rev-parse "${BATS_COMMIT:-HEAD}") in "$short"*) ;; *) false ;; esac |
 count=$(grep -Eo '^implement bats_commit_count \(\) = CommitCounted \([0-9]+\)$' "$facts" | grep -Eo '[0-9]+' || true)
 [ -n "$count" ] || { echo "the facts hold no commit count (a shallow clone?): $(grep bats_commit_count "$facts")"; exit 1; }
 [ "$count" = "$(git rev-list --count "${BATS_COMMIT:-HEAD}")" ] || { echo "the facts' count $count is not ${BATS_COMMIT:-HEAD}'s"; exit 1; }
-code=$(( count + 955000 ))
+offset=$(sed -n 's/^#pub stadef VERSION_CODE_OFFSET = \([0-9][0-9]*\)$/\1/p' src/version.bats)
+echo "$offset" | grep -Eq '^[0-9]+$' || { echo "src/version.bats has no VERSION_CODE_OFFSET: '$offset'"; exit 1; }
+code=$(( count + offset ))
 [ "$code" -gt 955894 ] || { echo "version code $code is not above 955894, the last code the minutes scheme gave Play"; exit 1; }
 if git rev-parse -q --verify "${BATS_COMMIT:-HEAD}^" > /dev/null; then
-  parent=$(( $(git rev-list --count "${BATS_COMMIT:-HEAD}^") + 955000 ))
+  parent=$(( $(git rev-list --count "${BATS_COMMIT:-HEAD}^") + offset ))
   [ "$code" -gt "$parent" ] || { echo "version code $code is not above its parent's $parent"; exit 1; }
 fi
 grep -qF "versionName '$version'" dist/android/android-release.gradle || { echo "dist/android/android-release.gradle has no versionName '$version'"; exit 1; }

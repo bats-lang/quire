@@ -49,8 +49,9 @@ end
    versionCode the commit count plus an offset (#989), so it grows from
    release to release and is the same for the same commit. Set after pwa's
    run-number version code, it is the one Gradle takes. A shallow clone
-   cannot count: nothing is written and the answer is false, so no wrong
-   code is ever released *)
+   cannot count: no versionCode block is appended and the answer is false
+   (_generate then exits 1; the project pwa wrote before keeps its fallback
+   code), so no wrong code is ever released *)
 fn _android_version (): bool =
   case+ quire_version_code() of
   | ~VersionCodeShallow() => let
