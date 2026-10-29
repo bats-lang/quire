@@ -25,4 +25,4 @@ Install on a machine (the running copy is a copy of these files): `install -m 75
 
 ## slots
 
-`slots` prints a hand-kept ledger of the two worker slots. It is a note, never the state of the agents: `ListAgents` is. `slots set SLOT AGENT TASK`, `slots free SLOT`, `slots check N`.
+`slots` prints a hand-kept ledger with a row for each agent that runs. Only an explicit instruction from the owner changes the rows. It is a note, never the state of the agents: `ListAgents` is. `slots set SLOT AGENT TASK`, `slots free SLOT`, `slots check N` (exits 1 when N is above the number of rows).

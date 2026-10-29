@@ -217,13 +217,15 @@ def lint_overlap(text, name, line_form, line_name):
     return findings
 
 
-# A worker brief (it names worker.md) carries each of these lines (quire#866), as a signature change carries Overlap.
+# A worker brief (it names worker.md) carries each of these lines (quire#866, #995), as a signature change carries Overlap.
 WORKER_BRIEF = re.compile(r'worker\.md')
 WORKER_LINES = (
     (re.compile(r'^\s*Design check:', re.MULTILINE), 'Design check: ...', 'the ticket\'s declarations are pushed and read before the worker builds on them'),
     (re.compile(r'^\s*Push:', re.MULTILINE), 'Push: ...', 'the branch is pushed after every commit'),
     (re.compile(r'^\s*Expects:', re.MULTILINE), 'Expects: ...', 'reject expects are blessed, not written by hand'),
     (re.compile(r'^\s*Sample:', re.MULTILINE), 'Sample: ...', 'a local population run is a seeded sample'),
+    (re.compile(r'^\s*No split:', re.MULTILINE), 'No split: ...', 'the whole ticket is done in one PR and a split needs a reason that is not size (owner, 2026-10-28T14:57:01Z)'),
+    (re.compile(r'^\s*Compiler:', re.MULTILINE), 'Compiler: ...', 'the brief names the path of the pinned bats (owner, 2026-10-27T02:36:57Z)'),
 )
 
 
