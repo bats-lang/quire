@@ -348,10 +348,11 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
 * **The command** (quire#751): in the checkout that stays, `bats with-env ~/quire.env bats check`,
   where the env file sets `BATS_SLOTS=1` (never 2), `BATS_LOCK_DIR`, `BATS_CACHE_DIR` and
   `BATS_REPOSITORY`. No `timeout` wrapper: the Bash tool's own cap of 600000 ms ends a foreground
-  command, and a wrapper below it kills a cold check for nothing. The first build of a new checkout
-  runs with `run_in_background` and its log is read until it ends, in the same turn. A push is
+  command. A check that takes more than a few minutes, the first build of a new checkout
+  included, is not run locally and CI is its evidence (worker.md, "Where you work, and how long
+  a run is"; the owner's words in quire#911, 2026-10-26: "Short jobs locally, CI for the rest"). A push is
   `qsweep push <arguments>`, which holds when `qsweep pressure` does not say `runner pressure: none`.
-* **A run over a population is a sample** (quire#751): about 10 minutes, the members drawn at random
+* **A run over a population is a sample** (quire#751): one that fits in a few minutes, the members drawn at random
   with a seed that is printed (`python3 -c 'import random; r = random.Random(SEED); ...'`), and the
   PR says the sample, its seed and size and why it suffices; the whole population is CI's.
 * Two bats in one checkout take turns (a lock on `bats.toml`). Two checkouts take turns by

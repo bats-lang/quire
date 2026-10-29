@@ -1034,5 +1034,37 @@ class SweepFiles(unittest.TestCase):
             self.assertIn('STRAY-WORK ' + repo, run())
 
 
+class NoBackgroundNoSleep(unittest.TestCase):
+    """quire#911: a brief, and a line of a brief template, that tells an agent to run a command in the background or to loop with sleep is refused."""
+    DIR = os.path.join(HERE, 'guidelines', 'reject', 'brief-runs-in-background')
+
+    def test_the_fixture_is_refused_exactly_as_its_expect_says(self):
+        brief, ticket, expect = [open(os.path.join(self.DIR, name)).read() for name in ('brief.txt', 'ticket.txt', 'expect')]
+        self.assertEqual('\n'.join(gl.lint_brief(brief, ticket, PHRASES)) + '\n', expect)
+        self.assertEqual(len(expect.strip().split('\n')), 2)
+
+    def test_the_brief_without_the_instruction_passes(self):
+        brief, ticket, _ = [open(os.path.join(self.DIR, name)).read() for name in ('brief.txt', 'ticket.txt', 'expect')]
+        brief = brief.replace('Start the static suite with run_in_background and poll it with sleep 60 until it ends.', 'Hand back at once after the push.')
+        self.assertEqual(gl.lint_brief(brief, ticket, PHRASES), [])
+
+    def test_a_template_line_in_a_code_span_is_refused(self):
+        line = 'Sample: a local run over a population is a seeded sample; run the rest in the background and read its log.'
+        found = gl.lint_brief_templates('* `' + line + '`\n', 'orchestration.md', PHRASES)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn('brief template line "Sample:"', found[0])
+        self.assertEqual(gl.lint_brief_templates('* `' + line.replace('run the rest in the background and read its log', 'CI runs the rest') + '`\n', 'orchestration.md', PHRASES), [])
+
+    def test_the_templates_of_orchestration_md_pass(self):
+        self.assertEqual(gl.lint_brief_templates(read_root('.claude', 'orchestration.md'), '.claude/orchestration.md', PHRASES), [])
+        self.assertTrue(gl.TEMPLATE_LINE.findall(read_root('.claude', 'orchestration.md')))
+
+    def test_worker_md_states_the_rule_with_the_owners_words_and_date(self):
+        text = read_root('.claude', 'agents', 'worker.md')
+        for needle in ('filed 2026-10-26T17:49:33Z', 'Short jobs locally, CI for the rest', 'left to CI', 'nothing is left running at hand-back'):
+            self.assertIn(needle, text)
+        self.assertNotIn('about 10 minutes', read_root('CLAUDE.md'))
+
+
 if __name__ == '__main__':
     unittest.main(argv=[sys.argv[0], '-q'])

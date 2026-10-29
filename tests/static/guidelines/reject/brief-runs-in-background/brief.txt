@@ -1,0 +1,11 @@
+Follow the worker.md rules; finish inside the turn; do not merge; do not write the review.
+Design check: first.
+Push: after every commit.
+Expects: blessed.
+Sample: seeded.
+No split: whole.
+Compiler: /home/user/bats-pinned/bin/bats.
+
+Start the static suite with run_in_background and poll it with sleep 60 until it ends.
+
+The tests pass.

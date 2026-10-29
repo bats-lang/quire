@@ -156,6 +156,17 @@ def lint_contradictions(texts, contradictions):
     return findings
 
 
+TEMPLATE_LINE = re.compile(r'`([A-Z][A-Za-z ]+: [^`\n]{40,})`')
+
+
+def lint_brief_templates(text, name, phrases):
+    """The lines of the worker and reviewer brief templates (orchestration.md, "Briefs and the machine") are code spans, which a guideline's lint skips as quotations; they are what a brief is made of (quire#911), so each is held to the `text` phrases as a brief is."""
+    findings = []
+    for found in TEMPLATE_LINE.finditer(text):
+        findings += lint_text(found.group(1), f'{name} (brief template line "{found.group(1).split(":")[0]}:")', phrases)
+    return findings
+
+
 def lint_guidelines(root, phrases):
     findings = []
     texts = {}
@@ -166,6 +177,8 @@ def lint_guidelines(root, phrases):
         findings += lint_text(text, relative, phrases, guide=True, notes=relative.startswith('.claude/rules/'))
         if relative == '.claude/agents/reviewer.md':
             findings += lint_reviewer_tools(text, relative)
+        if relative == '.claude/orchestration.md':
+            findings += lint_brief_templates(text, relative, phrases)
     return findings + lint_contradictions(texts, load_contradictions())
 
 
