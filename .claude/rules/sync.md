@@ -115,6 +115,17 @@ sheet each time and is not used).
   Undo; made final it takes the grant back (`_google_revoke`:
   `google_revoke_access`, or with no account Google's revocation endpoint,
   `drive_grant_revoke`).
+* **The Auto Backup file's read** (#935, keyword: backup-read-answer) asks bridge's
+  `backup_file_read_answer` (`backup_read_answer`) and matches every constructor with `case+`:
+  `BackupReadFound` is the file, `BackupReadNone` (no file) and `BackupReadEmpty` (a file holding nothing) are
+  each an answer of their own (`ReadBackupNone`, `ReadBackupEmpty` of `read_answer`, matched in `_read`, both
+  merging an empty file today but visibly and apart from `ReadNothing`, which a store's read of nothing stays),
+  and `BackupReadNotHere` (`BackupReadUnavailable`), `BackupReadRejected` and
+  `BackupReadThrown` are results of their own, said in the banner (bridge's text of the last two is freed,
+  not shown); `BackupReadUnexpected` (a code JS never gives) goes through `notice_unexpected`.
+  `tests/static/reject/backup-read-answer-<outcome>-unmatched` (none, empty, not-here, rejected, thrown,
+  unexpected) are the match without that constructor, and `accept/backup-read-answer-matched` is the whole
+  match. Independent of #933 and #934 (the write): each adds its own constructors to `sync_result`.
 * **Google Drive's sign-in in a browser** (#933, keyword: google-token-answer) asks bridge's
   `google_token_get_answer` (`token_answer`), and matches every constructor with `case+`:
   `TokenGiven` is the token, `TokenCanceled` the reader's cancel (`SignInCanceled`), `TokenNotHere`
