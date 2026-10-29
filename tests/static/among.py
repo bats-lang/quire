@@ -37,7 +37,7 @@ def problem(expect):
     lines = expect.rstrip('\n').split('\n')
     rest = lines[2:]
     amongs = [line for line in rest if line.startswith('among ')]
-    listed = [line for line in rest if line != HEADER and not line.startswith('among ') and line != '']
+    listed = [line for line in rest if not line.startswith(('pattern match is nonexhaustive', 'among ')) and line != '']
     if len(amongs) > 1:
         return f'{len(amongs)} `among` lines: a fixture is about one constructor'
     if listed:
