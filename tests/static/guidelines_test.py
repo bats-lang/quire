@@ -540,14 +540,16 @@ class Rulings(unittest.TestCase):
 
 
 class FakeApi:
-    def __init__(self, comments=()):
-        self.comments, self.calls = list(comments), []
+    def __init__(self, comments=(), runs=({'id': 1, 'name': 'check', 'status': 'completed', 'conclusion': 'success'},)):
+        self.comments, self.calls, self.runs = list(comments), [], list(runs)
 
     def __call__(self, path, method='GET', fields=None):
         self.calls.append((method, path, fields))
         if method == 'GET' and path.split('?')[0].endswith('/comments'):
             page = int(path.rsplit('page=', 1)[1])
             return self.comments if page == 1 else []
+        if method == 'GET' and '/check-runs' in path:
+            return {'check_runs': self.runs if path.endswith('page=1') else []}
         if method == 'GET' and '/pulls/' in path:
             return PULL
         return None
@@ -616,6 +618,59 @@ class GitHub(unittest.TestCase):
         code = '\n'.join(line for line in text.split('\n') if not line.lstrip().startswith('#'))
         self.assertNotIn('draft', code.lower())
         self.assertIn('pull_request_target', code)
+
+    def approval_status(self, runs, review=GOOD_REVIEW, head=HEAD):
+        api = FakeApi([{'author_association': 'OWNER', 'body': review, 'html_url': 'u'}], runs)
+        pull = dict(PULL, head={'sha': head, 'ref': 'x'}, body=GOOD_BODY.replace(HEAD, head))
+        return self.run_event('pull_request_target', {'pull_request': pull}, api), self.status(api)
+
+    def test_an_approval_of_a_head_with_no_completed_check_run_is_refused(self):
+        # quire#978 (keyword: draft): the injected failure is each way a head can lack a completed green check
+        green = {'id': 1, 'name': 'check', 'status': 'completed', 'conclusion': 'success'}
+        self.assertEqual(self.approval_status([green])[0], [])
+        for runs, wording in (([], 'no `check` run'),
+                              ([{'id': 1, 'name': 'plan', 'status': 'completed', 'conclusion': 'success'}], 'no `check` run'),
+                              ([dict(green, status='in_progress', conclusion=None)], 'in_progress'),
+                              ([dict(green, status='queued', conclusion=None)], 'queued'),
+                              ([dict(green, conclusion='failure')], 'ended failure'),
+                              ([dict(green, conclusion='skipped')], 'ended skipped')):
+            findings, status = self.approval_status(runs)
+            self.assertEqual(len(findings), 1, runs)
+            self.assertIn(wording, findings[0])
+            self.assertIn('waiting for CI at this head', findings[0])
+            self.assertEqual(status['state'], 'failure')
+
+    def test_the_newest_check_run_decides(self):
+        # a draft run and the run of the ready transition share a head (quire#978): the older green one does not stand in
+        old = {'id': 1, 'name': 'check', 'status': 'completed', 'conclusion': 'success'}
+        self.assertEqual(len(self.approval_status([old, dict(old, id=2, status='in_progress', conclusion=None)])[0]), 1)
+        self.assertEqual(self.approval_status([dict(old, id=2, conclusion='failure'), dict(old, id=1)])[0] != [], True)
+        self.assertEqual(self.approval_status([dict(old, id=1, conclusion='failure'), dict(old, id=2)])[0], [])
+
+    def test_the_gated_form_and_a_review_of_an_older_head_are_read_too(self):
+        findings, _ = self.approval_status([], GATE_REVIEW)
+        self.assertEqual(len(findings), 1)
+        self.assertIn('no `check` run', findings[0])
+        self.assertEqual(self.approval_status([], GOOD_REVIEW, OTHER)[0], [])  # the review names another head: no claim about this one
+        changes = GOOD_REVIEW.replace(': approved', ': changes needed')
+        self.assertEqual(self.approval_status([], changes)[0], [])  # a verdict of changes needed claims nothing
+
+    def test_a_draft_runs_plan_build_and_check_and_skips_the_rest(self):
+        # quire#978 (keyword: draft): the jobs of check.yml and which of them carry the draft condition
+        text = read_root('.github', 'workflows', 'check.yml')
+        jobs = text.split('\njobs:\n', 1)[1]
+        blocks = {}
+        for block in re.split(r'\n(?=  [a-z0-9-]+:\n)', '\n' + jobs):
+            name = block.strip().split(':', 1)[0]
+            blocks[name] = '\n'.join(line for line in block.split('\n') if not line.lstrip().startswith('#'))
+        draft = 'github.event.pull_request.draft'
+        for name in ('plan', 'build'):
+            self.assertNotIn(draft, blocks[name], name)
+        for name in ('queue', 'static', 'e2e', 'android'):
+            self.assertIn(draft, blocks[name], name)
+        self.assertIn('jobs: plan build\n', blocks['check'])
+        self.assertIn('jobs: plan queue build static e2e\n', blocks['check'])
+        self.assertEqual(blocks['check'].count('github.event.pull_request.draft'), 3)
 
     def test_an_ordinary_comment_is_not_linted(self):
         ordinary = {'author_association': 'OWNER', 'body': 'Use Refs instead of Fixes. It passed alone.', 'html_url': 'u'}

@@ -3,12 +3,13 @@ name: check
 on:
   push:
     branches: [main]
-  # A draft pull request runs no job (#939, keyword: draft): `plan`, `build` and
-  # `check` carry the condition below, the rest need them, and the transition
-  # to ready starts the check on the head, so `ready_for_review` is added to the
-  # default types (GitHub: "By default, a workflow only runs when a
-  # `pull_request` event's activity type is `opened`, `synchronize`, or
-  # `reopened`")
+  # A draft pull request runs the cheap jobs only (#939, #978, keyword: draft):
+  # `plan` and `build` (the grouping check and `bats check` of the app) and
+  # `check`, which then asks for those two; `static`, `e2e` and `android` carry the
+  # condition below and are skipped. The transition to ready starts the whole
+  # check on the head, so `ready_for_review` is added to the default types
+  # (GitHub: "By default, a workflow only runs when a `pull_request` event's
+  # activity type is `opened`, `synchronize`, or `reopened`")
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
@@ -41,7 +42,7 @@ on:
 # sha. A cancelled run's `check` belongs to a head or group that is gone; the
 # required status of the live one is its own run's.
 concurrency:
-  group: check-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'merge_group' && github.ref) || github.sha }}
+  group: check-${{ github.event_name }}-${{ github.event.pull_request.draft && 'draft-' || '' }}${{ github.event.pull_request.number || (github.event_name == 'merge_group' && github.ref) || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'merge_group' && github.event.action == 'destroyed') }}
 
 jobs:
@@ -74,7 +75,7 @@ jobs:
   # each of them has to run for this change (#619): decided here, once, from
   # the pull request's own diff, so the reason of each skip is in one place
   plan:
-    if: github.event.action != 'destroyed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    if: github.event.action != 'destroyed'
     runs-on: ubuntu-24.04
     outputs:
       e2e: ${{ steps.groups.outputs.e2e }}
@@ -116,7 +117,7 @@ jobs:
   # artifact, and the Android job is never skipped by the plan (below), so a missing or
   # malformed plan entry cannot make it skip (#656)
   build:
-    if: github.event.action != 'destroyed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    if: github.event.action != 'destroyed'
     runs-on: ubuntu-24.04
     outputs:
       play_signing_sha1: ${{ steps.clients.outputs.play_signing_sha1 }}
@@ -270,6 +271,8 @@ jobs:
   # checking the app first
   static:
     needs: [plan, queue]
+    # a draft runs plan and build only (#978, keyword: draft)
+    if: github.event.action != 'destroyed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     # a mutation group of a change to crc.bats is the longest (keyword: mutation, #594)
     timeout-minutes: 120
@@ -373,6 +376,8 @@ jobs:
   # once (quire-android)
   e2e:
     needs: [plan, build, queue]
+    # a draft runs plan and build only (#978, keyword: draft)
+    if: github.event.action != 'destroyed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -572,7 +577,7 @@ jobs:
   # passes as itself, and the plan's selection is printed here, beside the
   # results, with the reason of each path in the plan job's summary
   check:
-    if: always() && github.event.action != 'destroyed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    if: always() && github.event.action != 'destroyed'
     needs: [plan, queue, build, static, e2e]
     runs-on: ubuntu-24.04
     steps:
@@ -599,10 +604,26 @@ jobs:
           echo "queue-passed run: $QUEUE_RUN_URL"
           echo "queue-passed: skip=$QUEUE_SKIP, $QUEUE_REASON ($QUEUE_RUN_URL)" >> "$GITHUB_STEP_SUMMARY"
 
+      # A draft pull request ran `plan` and `build` only (#978, keyword: draft):
+      # `check` asks for those two and says so, so a draft head has a completed
+      # `check` run that a reviewer can read, and the summary says what it was
+      - name: A draft ran plan and build only
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft
+        run: |
+          echo "### Draft: plan and build only" >> "$GITHUB_STEP_SUMMARY"
+          echo "static, e2e and android are not run for a draft; marking the pull request ready runs the whole check on this head." >> "$GITHUB_STEP_SUMMARY"
+      - name: Plan and build passed
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft
+        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@c190c73390d21dcf2586c2a452de08122d6608bb # repository-prototype main c190c73
+        with:
+          jobs: plan build
+          results: ${{ toJSON(needs) }}
+
       # Every job in needs must have passed: skipped, cancelled and failed are
       # not a pass, and a job missing from needs fails (repository-prototype's
       # check-aggregate, #328, called by commit)
       - name: Every group passed
+        if: github.event_name != 'pull_request' || !github.event.pull_request.draft
         uses: bats-lang/repository-prototype/.github/actions/check-aggregate@c190c73390d21dcf2586c2a452de08122d6608bb # repository-prototype main c190c73
         with:
           jobs: plan queue build static e2e
@@ -621,6 +642,8 @@ jobs:
   # "avoid requiring workflows that can be skipped"; #656)
   android:
     needs: build
+    # a draft runs plan and build only (#978, keyword: draft); the contexts of a ready pull request are all reported (#656)
+    if: github.event.action != 'destroyed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     # Pinned by commit; the relock workflow moves it (#203)
     uses: bats-lang/pwa/.github/workflows/android.yml@59d426b1130f62b3f6c82fe98fa53d87dd7789f2 # pwa main 59d426b
     secrets: inherit
