@@ -240,7 +240,7 @@ test('a mark over the text of a vertical heading with digits in it covers the te
   await readBook(page, verticalBook('縦書き検索'));
   await page.keyboard.press('/');
   const panel = dialog(page, 'Search in book');
-  await expect(panel).toBeVisible();
+  await expect(panel).toBeHidden();
   await panel.getByRole('searchbox', { name: 'Search in book' }).fill('第1章');
   await expect(panel.getByRole('status')).toHaveText('1 result');
   await panel.getByRole('region', { name: 'Results' }).getByRole('button').first().click();
