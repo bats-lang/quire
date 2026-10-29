@@ -1,4 +1,4 @@
 function _static_is_link
 line 4
 pattern match is nonexhaustive:
-OutOfBook(_, _)
+among OutOfBook(_, _)

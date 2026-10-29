@@ -3,4 +3,3 @@
 fn _static_unhandled (found: $IDB.lookup): void =
   case+ lookup_content(found) of
   | ~NoStoredContent() => ()
-  | ~StoredContent(owner, piece, _) => piece_free(owner, piece)
