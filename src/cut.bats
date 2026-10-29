@@ -315,6 +315,7 @@ fun _pieces_find {l:agz}{n:pos}{cs:$A.cells}{offset,text_len:nat | offset + text
     val (rest | count) = _pieces_find(bytes, offset + cut, text_len - cut)
   in (PIECES_more(cut_proof, rest) | count + 1) end
 
+(* fixture: how-many-pieces-the-text-is *)
 (* How many pieces the text is: the one count render, search and read
    aloud all take *)
 #pub fun pieces_find {l:agz}{n:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_len <= n}

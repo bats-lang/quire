@@ -554,6 +554,8 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
   | DetailsNotCopied
   | HighlightNotSelected
   | SelectionNotEnded
+  | WordsNotStored
+  | WordsFull
 
 (* What failed to a file or book that has a name *)
 #pub datatype named_failure =
@@ -595,6 +597,7 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
   | SelectByHand
   | TapToEndSelection
   | ReadWhereItCameFrom
+  | DeleteSomeWords
 
 fn remedy_of (failed: failure): remedy =
   case+ failed of
@@ -627,6 +630,8 @@ fn remedy_of (failed: failure): remedy =
   | DetailsNotCopied() => CopyByHand()
   | HighlightNotSelected() => SelectByHand()
   | SelectionNotEnded() => TapToEndSelection()
+  | WordsNotStored() => ReopenQuire()
+  | WordsFull() => DeleteSomeWords()
 
 fn named_remedy_of (failed: named_failure): remedy =
   case+ failed of
@@ -691,6 +696,8 @@ fn detail_source_of (failed: failure): detail_source =
   | DetailsNotCopied() => NothingToReport()
   | HighlightNotSelected() => NothingToReport()
   | SelectionNotEnded() => NothingToReport()
+  | WordsNotStored() => FromFailureAlone()
+  | WordsFull() => NothingToReport()
 
 (* The failure's name in the details: the constructor's, as an issue can
    search it *)
@@ -725,6 +732,8 @@ fn _failure_name (failed: failure): [n:pos | n < 64] string n =
   | DetailsNotCopied() => "DetailsNotCopied"
   | HighlightNotSelected() => "HighlightNotSelected"
   | SelectionNotEnded() => "SelectionNotEnded"
+  | WordsNotStored() => "WordsNotStored"
+  | WordsFull() => "WordsFull"
 
 fn _named_failure_name (failed: named_failure): [n:pos | n < 64] string n =
   case+ failed of
@@ -818,6 +827,8 @@ fn _what_put {l:agz}{at:nat | at <= 512}
     | InApp() => _put_text(out, 512, at, "The details could not be copied: the device did not allow it"))
   | HighlightNotSelected() => _put_text(out, 512, at, "That highlight could not be selected, so its range is unchanged")
   | SelectionNotEnded() => _put_text(out, 512, at, "The highlight was saved, but the selection could not be cleared")
+  | WordsNotStored() => _put_text(out, 512, at, "This word could not be kept in your words")
+  | WordsFull() => _put_text(out, 512, at, "This word was not kept: your words are full")
 
 (* What happened to the file or book named, after its name *)
 fn _named_what_put {l:agz}{at:nat | at <= 512}
@@ -866,6 +877,7 @@ fn _remedy_put {l:agz}{at:nat | at <= 512}
   | TryNextPhrase() => _put_text(out, 512, at, ". Try Next phrase, or read the book without the narration.")
   | SelectByHand() => _put_text(out, 512, at, ". Press and hold the text to select it yourself, then use the toolbar.")
   | TapToEndSelection() => _put_text(out, 512, at, ". Tap elsewhere on the page to end the selection.")
+  | DeleteSomeWords() => _put_text(out, 512, at, ". Delete words you no longer need in Words, then look it up again.")
   | ReadWhereItCameFrom() => _put_text(out, 512, at, ". Quire opens books without DRM only: read this one in the app it came from, or get a copy without DRM.")
 
 fn _reopens (next: remedy): bool =
@@ -889,6 +901,7 @@ fn _reopens (next: remedy): bool =
   | SelectByHand() => false
   | TapToEndSelection() => false
   | ReadWhereItCameFrom() => false
+  | DeleteSomeWords() => false
 
 fn _put_counted {l:agz}{at:nat | at <= DETAILS_MAX}{n:nat}
   (out: !$A.arr(byte, l, DETAILS_MAX), at: int at, label: string n, count: int, shown: bool): [stop:nat | at <= stop; stop <= DETAILS_MAX] int stop =
@@ -996,6 +1009,7 @@ implement notice_say_named (name, name_len, failed) = let
   val at = _remedy_put(out, at, next, where_)
 in _error_buf_with(out, at, _reopens(next), reported) end
 
+(* fixture: the-error-banner-goes-its-dismiss *)
 (* The error banner goes (its Dismiss button, or a new import) *)
 #pub fn notice_dismiss (): void
 

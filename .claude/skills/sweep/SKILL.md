@@ -14,7 +14,7 @@ Install on a machine (the running copy is a copy of these files): `install -m 75
   * `WAIT-FOR-CI`: no check-run yet, one not finished, or the aggregate `check` not green. No reviewer starts;
   * `READY-FOR-REVIEW`: at least one check-run, all finished, `check` green, no red status, no review of this head. A reviewer starts;
   * `REVIEWED-approved`.
-  Then `NEXT FOR A FREE SLOT`: a fix for the PRs above, else a review, else the oldest ticket of the highest priority (`.claude/orchestration.md`, "Agents and slots").
+  Then `NEXT FOR A FREE SLOT`: a fix for the PRs above, else a review, else the oldest ticket of the highest priority (pitboss `rules.md`, "Agents and slots").
 * The library PRs, of the repositories `qsweep repositories` prints (the one list the sweep reads; this file does not copy it), with their checks, the review and the gate's own status with its reason. The `NEXT FOR A FREE SLOT` line orders each category oldest first by the PR's creation date across quire and all of them.
 * `STRAY-WORK`: the orchestrator's checkout (`/home/user/<repo>`) that is off main or not clean; `STRAGGLER`: work that exists only on this machine; `REUSABLE WORKTREE`: a finished worktree for the next ticket's branch.
 * `qsweep pressure`: prints `runner pressure: none` and exits 0, or a hold line and exits 1.
@@ -23,4 +23,4 @@ Install on a machine (the running copy is a copy of these files): `install -m 75
 
 ## slots
 
-`slots` prints a hand-kept ledger of the two worker slots. It is a note, never the state of the agents: `ListAgents` is. `slots set SLOT AGENT TASK`, `slots free SLOT`, `slots check N`.
+`slots` prints a hand-kept ledger with a row for each agent that runs. Only an explicit instruction from the owner changes the rows. It is a note, never the state of the agents: `ListAgents` is. `slots set SLOT AGENT TASK`, `slots free SLOT`, `slots check N` (exits 1 when N is above the number of rows).

@@ -58,6 +58,7 @@ fn _bytes_of {text_len:pos | text_len < 256} (text: string text_len): [l:agz] @(
   val _ = _put_from(bytes, 0, text, text_len, 0)
 in @(bytes, text_len) end
 
+(* fixture: how-a-text-s-share-ended *)
 (* How a text's share ended, each outcome its own (keyword: share-text-answer):
    the sheet took it or the reader closed it, which need no word; the others
    are said with their outcome as the code, and the unexpected as such *)
@@ -104,6 +105,37 @@ in
       $P.and_then<$SH.text_share_answer><share_end>(sharing, llam(answer) => let
         val () = _text_share_said(answer)
       in $P.ret<share_end>(ShareOver()) end)
+    end
+end
+
+(* The words as a CSV file, shared as a file or as its text; the promise says whether it was refused as a file (keyword: vocabulary) *)
+#pub fn share_csv {l:agz}{len:pos} (bytes: !$A.borrow(byte, l, len), len: int len, way: share_as): $P.promise(share_end, $P.Chained)
+
+implement share_csv (bytes, len, way) = let
+  val @(name, name_len) = _bytes_of("quire-words.csv")
+  val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
+in
+  case+ way of
+  | AsFile() => let
+      val @(mime, mime_len) = _bytes_of("text/csv")
+      val @(mime_frozen, mime_bytes) = $A.freeze<byte>(mime)
+      val sharing = $SH.share_file(name_bytes, name_len, bytes, len, mime_bytes, mime_len)
+      val () = release_bytes(mime_frozen, mime_bytes)
+      val () = release_bytes(name_frozen, name_bytes)
+    in
+      $P.and_then<$SH.file_share_outcome><share_end>(sharing, llam(outcome) =>
+        case+ outcome of
+        | $SH.FilesNotShareable() => $P.ret<share_end>(RefusedAsFile())
+        | $SH.FileShared() => $P.ret<share_end>(ShareOver())
+        | $SH.FileShareCancelled() => $P.ret<share_end>(ShareOver())
+        | $SH.FileShareFailed() => $P.ret<share_end>(ShareOver()))
+    end
+  | AsText() => let
+      val sharing = $SH.share_text(name_bytes, name_len, bytes, len)
+      val () = release_bytes(name_frozen, name_bytes)
+    in
+      (* how it ended is the share sheet's to show *)
+      $P.and_then<$SH.share_outcome><share_end>(sharing, llam(_) => $P.ret<share_end>(ShareOver()))
     end
 end
 

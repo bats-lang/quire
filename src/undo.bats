@@ -51,6 +51,7 @@ implement $P.dispose<settled>(_) = ()
   | BookHidden(UntilDismissed) of ()
   | BookUnhidden(UntilDismissed) of ()
   | BackupRestored(UntilDismissed) of ()
+  | WordDeleted(UntilDismissed) of ()
   | PlainMessage(Brief) of ()
 
 (* "'" title "' moved to Trash", the title cut when it is long *)
@@ -86,6 +87,7 @@ fn _offered_show {life:offer_life} (what: offered(life)): void =
   | ~BookHidden() => ui_text("undo-text", "Book hidden")
   | ~BookUnhidden() => ui_text("undo-text", "Book unhidden")
   | ~BackupRestored() => ui_text("undo-text", "Backup restored")
+  | ~WordDeleted() => ui_text("undo-text", "Word deleted")
   | ~PlainMessage() => ui_text("undo-text", "Done")
 
 (* The offer shown: the resolver of the promise undo_offer returned. An action that can be undone is done at once
@@ -158,6 +160,7 @@ fun _id_is {l:agz}{n:nat}{id_len:nat}{i:nat | i <= id_len} .<id_len - i>.
   else if byte2int0($A.get<byte>(event_bytes, 10 + i)) <> char2int0(string_get_at(id, i)) then false
   else _id_is(event_bytes, n, id, id_len, i + 1)
 
+(* fixture: the-toast-s-listener-its-undo *)
 (* The toast's listener: its Undo button, and Dismiss *)
 #pub fn undo_listen {count:nat} (listeners: regs(count)): regs(count + 1)
 implement undo_listen (listeners) = RCons(listeners, OnEl("undo-toast"), "click", llam(h) =>

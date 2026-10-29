@@ -296,6 +296,52 @@ fn _dictionaries (): void = let
   val () = ui_role("dictionaries-status", RStatus)
 in _hide("dictionaries-panel") end
 
+(* The words looked up: a screen of the ones kept, with tabs, a book filter and rows (keyword: vocabulary) *)
+fn _words_screen (): void = let
+  val () = ui_el("bats-root", "words-screen", TDiv, "info")
+  val () = ui_labelled("words-screen", NDialog, "words-title")
+  val () = ui_screen_bar("words-screen", "words-bar", "words-back", "words-title", "Words")
+  val () = ui_el("words-screen", "words-box", TDiv, "info-in")
+  val () = ui_el("words-box", "words-tabs", TDiv, "seg")
+  val () = ui_named("words-tabs", NGroup, "Words shown")
+  val () = ui_text_btn("words-tabs", "words-tab-learning", "sbtn", "Learning")
+  val () = ui_text_btn("words-tabs", "words-tab-mastered", "sbtn", "Mastered")
+  val () = ui_el("words-box", "words-book-row", TDiv, "srow")
+  val () = ui_el("words-book-row", "words-book-label", TSpan, "slabel")
+  val () = ui_text("words-book-label", "Book")
+  val () = ui_field("words-book-row", "words-book", FChoice, "ssel", "Book")
+  val () = ui_el("words-box", "words-actions", TDiv, "srow")
+  val () = ui_named("words-actions", NGroup, "Words actions")
+  val () = ui_text_btn("words-actions", "words-review", "btn btn-p", "Review")
+  val () = ui_text_btn("words-actions", "words-share", "btn", "Share as CSV")
+  val () = ui_el("words-box", "words-status", TDiv, "sabout")
+  val () = ui_role("words-status", RStatus)
+  val () = ui_el("words-box", "words-none", TDiv, "cnone")
+  val () = ui_text_long("words-none", "No words yet. Select a word in a book and use Look up; it is kept here with its sentence.")
+  val () = ui_el("words-box", "words-list", TDiv, "sgroup")
+  val () = ui_el("words-box", "words-more", TDiv, "sabout")
+  val () = ui_text_long("words-more", "More words are not shown here. Choose a book to see them.")
+in _hide("words-screen") end
+
+(* The review of the words that are due (keyword: vocabulary) *)
+fn _review_screen (): void = let
+  val () = ui_el("bats-root", "review-screen", TDiv, "info")
+  val () = ui_labelled("review-screen", NDialog, "review-title")
+  val () = ui_screen_bar("review-screen", "review-bar", "review-back", "review-title", "Review")
+  val () = ui_el("review-screen", "review-box", TDiv, "info-in")
+  val () = ui_el("review-box", "review-progress", TDiv, "sabout")
+  val () = ui_role("review-progress", RStatus)
+  val () = ui_el("review-box", "review-card", TDiv, "sgroup")
+  val () = ui_el("review-card", "review-word", TDiv, "mtitle")
+  val () = ui_el("review-card", "review-sentence", TDiv, "snip")
+  val () = ui_el("review-box", "review-empty", TDiv, "cnone")
+  val () = ui_text_long("review-empty", "Nothing is due. Words come back to be reviewed on the schedule Got it and Forgot set.")
+  val () = ui_el("review-box", "review-buttons", TDiv, "mbtns")
+  val () = ui_text_btn("review-buttons", "review-show", "btn btn-p", "Show definition")
+  val () = ui_text_btn("review-buttons", "review-forgot", "btn", "Forgot")
+  val () = ui_text_btn("review-buttons", "review-known", "btn btn-p", "Got it")
+in _hide("review-screen") end
+
 (* A word looked up in a dictionary, over the page: the headword, its
    article (as text), the dictionary's name, the same word looked up
    online, and Close *)
@@ -367,6 +413,8 @@ fn _library_menu (): void = let
   val () = ui_menuitem("library-menu-box", "menu-about", "About Quire")
   val () = ui_menuitem("library-menu-box", "menu-catalogues", "Catalogues")
   val () = ui_menuitem("library-menu-box", "menu-stats", "Reading statistics")
+  (* the words looked up, kept with their sentence (keyword: vocabulary) *)
+  val () = ui_menuitem("library-menu-box", "menu-words", "Words")
   (* the shelves apart from the library, each a screen of its own (#404) *)
   val () = ui_menuitem("library-menu-box", "menu-hidden", "Hidden")
   val () = ui_menuitem("library-menu-box", "menu-archived", "Archived")
@@ -403,6 +451,28 @@ fn _sort_menu (): void = let
   val () = ui_menuitem("sort-menu-box", "sort-menu-done", "Close")
 in _hide("sort-menu") end
 
+(* A switch, a row of its own (in parent): a button named by its label
+   alone (a toggle, aria-pressed off at first), holding a drawn track and
+   its knob (decorative, hidden from assistive technology; the stylesheet
+   moves the knob and fills the track when it is pressed), and the text
+   that describes it (quire#300), which the button points to and which
+   is drawn only when the row's note says NoteFooter (quire#592, keyword
+   switch-note) *)
+fn _switch_row {parent_len,row_len,button_len,track_len,knob_len,about_len:pos | parent_len < 256; row_len < 256; button_len < 256; track_len < 256; knob_len < 256; about_len < 256}
+  {label_len,text_len:pos | label_len < 256; text_len < 256}
+  (parent: string parent_len, row: string row_len, button: string button_len, track: string track_len,
+   knob: string knob_len, about: string about_len, label: string label_len, text: string text_len,
+   note: switch_note): void = let
+  val () = ui_el(parent, row, TDiv, "srow stack")
+  val () = ui_text_btn(row, button, "sbtn switch", label)
+  val () = ui_attr(button, APressed, "false")
+  val () = ui_el(button, track, TSpan, "track")
+  val () = ui_attr(track, AHidden, "true")
+  val () = ui_el(track, knob, TSpan, "knob")
+  val () = ui_el(row, about, TSpan, switch_note_class(note))
+  val () = ui_text(about, text)
+in ui_attr(button, ADescribedBy, about) end
+
 (* The collection menu (the library's Collection button, library-screen):
    which collection is shown, with the current one checked, and the
    Rename and Delete of the one shown *)
@@ -420,6 +490,7 @@ fn _collection_menu (): void = let
   val () = ui_menuitem("collection-menu-box", "collection-menu-done", "Close")
 in _hide("collection-menu") end
 
+(* fixture: the-settings-screen-opened-from-the *)
 (* The Settings screen, opened from the library menu:
    one screen of groups, each complex area a screen of its own opened
    from a row that says its state (Android's settings pattern). Sync
@@ -444,6 +515,9 @@ fn _settings_screen (): void = let
   (* the dictionaries' screen *)
   val () = ui_nav_row("settings-data", "settings-dictionaries-row", "settings-dictionaries", "settings-dictionaries-about",
     "Dictionaries", "Offline lookup for the words you select")
+  (* the words looked up are kept, with their sentence, in Words (keyword: vocabulary) *)
+  val () = _switch_row("settings-data", "settings-words-row", "settings-words-keep", "settings-words-keep-track",
+    "settings-words-keep-knob", "settings-words-keep-about", "Keep the words I look up", "Saves each word with its sentence, to review in Words", NoteHidden())
   (* the backup *)
   val () = ui_el("settings-box", "settings-data-about", TDiv, "sabout")
   val () = ui_text_long("settings-data-about", "Moving to a new phone? Sync keeps your places, shelves and notes the same on your devices; a backup below holds them in a file. Neither holds the books' files: keep your EPUB files.")
@@ -576,6 +650,10 @@ fn _notices (): void = let
   val () = _hide("error-reopen")
   val () = ui_icon_btn("error-banner", "error-dismiss", "ibtn", IcClose, "Dismiss")
   val () = _hide("error-banner")
+  (* and the same in words, read out (book-edge) *)
+  val () = ui_el("bats-root", "edge-status", TDiv, "toast tedge")
+  val () = ui_role("edge-status", RStatus)
+  val () = _hide("edge-status")
   val () = ui_el("bats-root", "copy-status", TDiv, "toast tcopy")
   val () = ui_role("copy-status", RStatus)
   val () = _hide("copy-status")
@@ -670,6 +748,10 @@ fn _reader (): void = let
   val () = ui_el("reader", "turn-shade", TDiv, "shade")
   val () = ui_attr("turn-shade", AHidden, "true")
   val () = _hide("turn-shade")
+  (* a turn refused at the book's first or last page (reader.bats, book-edge): a bar on the edge pushed against *)
+  val () = ui_el("reader", "book-edge", TDiv, "edge")
+  val () = ui_attr("book-edge", AHidden, "true")
+  val () = _hide("book-edge")
   (* page-turn is laid out even while no page turns (idle: hidden), so
      the copy kept in it is ready for a turn (reader.bats) *)
   val () = ui_el("reader", "page-turn", TDiv, "turn idle")
@@ -837,28 +919,6 @@ fn _toc (): void = let
   val () = ui_labelled("pages-list", NTabpanel, "pages-tab")
   val () = _hide("pages-list")
 in _hide("contents-panel") end
-
-(* A switch, a row of its own (in parent): a button named by its label
-   alone (a toggle, aria-pressed off at first), holding a drawn track and
-   its knob (decorative, hidden from assistive technology; the stylesheet
-   moves the knob and fills the track when it is pressed), and the text
-   that describes it (quire#300), which the button points to and which
-   is drawn only when the row's note says NoteFooter (quire#592, keyword
-   switch-note) *)
-fn _switch_row {parent_len,row_len,button_len,track_len,knob_len,about_len:pos | parent_len < 256; row_len < 256; button_len < 256; track_len < 256; knob_len < 256; about_len < 256}
-  {label_len,text_len:pos | label_len < 256; text_len < 256}
-  (parent: string parent_len, row: string row_len, button: string button_len, track: string track_len,
-   knob: string knob_len, about: string about_len, label: string label_len, text: string text_len,
-   note: switch_note): void = let
-  val () = ui_el(parent, row, TDiv, "srow stack")
-  val () = ui_text_btn(row, button, "sbtn switch", label)
-  val () = ui_attr(button, APressed, "false")
-  val () = ui_el(button, track, TSpan, "track")
-  val () = ui_attr(track, AHidden, "true")
-  val () = ui_el(track, knob, TSpan, "knob")
-  val () = ui_el(row, about, TSpan, switch_note_class(note))
-  val () = ui_text(about, text)
-in ui_attr(button, ADescribedBy, about) end
 
 (* A choice of where taps turn pages, a line of its own: its button,
    holding a drawing of the page's zones (decorative, hidden from
@@ -1231,6 +1291,8 @@ implement app_build () = let
   val () = _note()
   val () = _image_viewer()
   val () = _dictionaries()
+  val () = _words_screen()
+  val () = _review_screen()
   val () = _dictionary()
   val () = _focus_wrap_end()
   val () = _catalogues()

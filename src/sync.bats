@@ -26,6 +26,8 @@ staload "book.sats"
 staload "library.sats"
 staload "stored_key.sats"
 staload "annot.sats"
+staload "wordsjson.sats"
+staload "wordstore.sats"
 staload "stats.sats"
 staload "backup.sats"
 staload "jsonio.sats"
@@ -166,10 +168,12 @@ datatype sync_result =
   | GoogleSignInFailed | GoogleAccountNeeded | GoogleUnreachable | GoogleConsentShowing | GoogleUnexpected
   | GoogleNoAnswer | GoogleAsking
   | GoogleNoToken | GoogleScriptNotLoaded | GoogleRequestThrew | GoogleAnswerUnread
+  | BackupReadUnavailable | BackupReadRejected | BackupReadThrown | BackupReadUnexpected
 
+(* fixture: a-result-as-sync-state-stores *)
 (* A result as "sync-state" stores it, and back: decoded once, as it is
    read (an unknown number is not synced yet) *)
-fn _result_code (result: sync_result): [code:nat | code <= 37] int code =
+fn _result_code (result: sync_result): [code:nat | code <= 41] int code =
   case+ result of
   | NotSyncedYet() => 0
   | Synced() => 1
@@ -205,6 +209,10 @@ fn _result_code (result: sync_result): [code:nat | code <= 37] int code =
   | GoogleUnexpected() => 27
   | GoogleNoAnswer() => 28
   | GoogleAsking() => 29
+  | BackupReadUnavailable() => 38
+  | BackupReadRejected() => 39
+  | BackupReadThrown() => 40
+  | BackupReadUnexpected() => 41
   | GoogleNoToken() => 30
   | GoogleScriptNotLoaded() => 31
   | GoogleRequestThrew() => 32
@@ -244,6 +252,10 @@ fn _result_of_code (code: int): sync_result =
   else if code = 27 then GoogleUnexpected()
   else if code = 28 then GoogleNoAnswer()
   else if code = 29 then GoogleAsking()
+  else if code = 38 then BackupReadUnavailable()
+  else if code = 39 then BackupReadRejected()
+  else if code = 40 then BackupReadThrown()
+  else if code = 41 then BackupReadUnexpected()
   else if code = 30 then GoogleNoToken()
   else if code = 31 then GoogleScriptNotLoaded()
   else if code = 32 then GoogleRequestThrew()
@@ -626,6 +638,10 @@ fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte
   | BackupThrown() => _put_literal(out, position, "Writing the backup file Quire keeps for a reinstall failed. Try again.")
   | BackupUnexpected() => _put_literal(out, position, "The backup file Quire keeps for a reinstall gave an answer Quire does not know.")
   | NoAddress() => _put_literal(out, position, "Enter the folder's address, starting with https://.")
+  | BackupReadUnavailable() => _put_literal(out, position, "This build of Quire can't read the backup file Android restores after a reinstall.")
+  | BackupReadRejected() => _put_literal(out, position, "Android refused to read the backup file Quire keeps for a reinstall. Try again.")
+  | BackupReadThrown() => _put_literal(out, position, "Reading the backup file Quire keeps for a reinstall failed. Try again.")
+  | BackupReadUnexpected() => _put_literal(out, position, "The backup file Quire keeps for a reinstall gave an answer Quire does not know.")
   | SignInAgain() => _put_literal(out, position, "Sync paused: tap Sync now to sign in to Google again. What changes here meanwhile is kept.")
   | NoGoogleAccount() => _put_literal(out, position, "Android sync needs a Google account on this device.")
   | NotSetUp() =>
@@ -710,6 +726,10 @@ fn _said_when_off (result: sync_result): bool =
   | GoogleUnexpected() => true
   | GoogleNoAnswer() => true
   | GoogleAsking() => true
+  | BackupReadUnavailable() => true
+  | BackupReadRejected() => true
+  | BackupReadThrown() => true
+  | BackupReadUnexpected() => true
   | DropboxNotSetUp() => true
   | DropboxSignInRefused() => true
   | DropboxSignInCanceled() => true
@@ -740,6 +760,7 @@ fn _google_refusal (result: sync_result): bool =
   | GoogleUnexpected() => true
   | GoogleNoAnswer() => false
   | GoogleAsking() => false
+  | BackupReadUnavailable() => false | BackupReadRejected() => false | BackupReadThrown() => false | BackupReadUnexpected() => false
   | SignInCanceled() => false
   | NotSyncedYet() => false | Synced() => false | Unreachable() => false | WrongCredentials() => false
   | FolderNotFound() => false | KeptChanging() => false | ServerError() => false | TooLarge() => false
@@ -760,6 +781,8 @@ fn _told_in_banner (result: sync_result): bool =
   | DropboxSignInCanceled() => false
   | GoogleUnexpected() => false
   | GoogleAsking() => false
+  | BackupReadUnavailable() => true | BackupReadRejected() => true | BackupReadThrown() => true
+  | BackupReadUnexpected() => false
   | GoogleNoAnswer() => true
   | Unreachable() => true | WrongCredentials() => true | FolderNotFound() => true | KeptChanging() => true
   | ServerError() => true | TooLarge() => true | Damaged() => true | NoMemory() => true | Blocked() => true
@@ -849,6 +872,10 @@ in
     | TooLarge() => _tried(out, result)
     | Damaged() => _tried(out, result)
     | NoMemory() => _tried(out, result)
+    | BackupReadUnavailable() => _tried(out, result)
+    | BackupReadRejected() => _tried(out, result)
+    | BackupReadThrown() => _tried(out, result)
+    | BackupReadUnexpected() => _tried(out, result)
     | BackupUnavailable() => _tried(out, result)
     | BackupRejected() => _tried(out, result)
     | BackupThrown() => _tried(out, result)
@@ -894,6 +921,10 @@ fn _result_short {l:agz}{position:nat | position + 64 <= 512} (out: !$A.arr(byte
   | BackupThrown() => _put_literal(out, position, "Backup file failed")
   | BackupUnexpected() => _put_literal(out, position, "Backup file: unknown answer")
   | NoAddress() => _put_literal(out, position, "No folder address")
+  | BackupReadUnavailable() => _put_literal(out, position, "No backup file here")
+  | BackupReadRejected() => _put_literal(out, position, "Backup file refused")
+  | BackupReadThrown() => _put_literal(out, position, "Backup file failed")
+  | BackupReadUnexpected() => _put_literal(out, position, "Backup file: unknown answer")
   | SignInAgain() => _put_literal(out, position, "paused, tap Sync now")
   | GoogleNotRegistered() => _put_literal(out, position, "Google sign-in failed")
   | GoogleSignInFailed() => _put_literal(out, position, "Google sign-in failed")
@@ -973,6 +1004,10 @@ in
     | BackupThrown() => _result_short(out, 0, result, !_last_status)
     | BackupUnexpected() => _result_short(out, 0, result, !_last_status)
     | NoAddress() => _result_short(out, 0, result, !_last_status)
+    | BackupReadUnavailable() => _result_short(out, 0, result, !_last_status)
+    | BackupReadRejected() => _result_short(out, 0, result, !_last_status)
+    | BackupReadThrown() => _result_short(out, 0, result, !_last_status)
+    | BackupReadUnexpected() => _result_short(out, 0, result, !_last_status)
     (* paused, not failed: said after the store's name *)
     | SignInAgain() => _result_short(out, after, result, !_last_status)
     | NoGoogleAccount() => _result_short(out, 0, result, !_last_status)
@@ -1127,6 +1162,10 @@ fn _row_show (service: sync_service): void =
       | NoMemory() => ui_text(_row_state_id(service), "Not syncing")
       | Blocked() => ui_text(_row_state_id(service), "Not syncing")
       | NoAddress() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupReadUnavailable() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupReadRejected() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupReadThrown() => ui_text(_row_state_id(service), "Not syncing")
+      | BackupReadUnexpected() => ui_text(_row_state_id(service), "Not syncing")
       | BackupUnavailable() => ui_text(_row_state_id(service), "Not syncing")
       | BackupRejected() => ui_text(_row_state_id(service), "Not syncing")
       | BackupThrown() => ui_text(_row_state_id(service), "Not syncing")
@@ -1444,6 +1483,8 @@ in cross end
 datavtype read_answer =
   | {owner,l:agz}{n:pos | n <= 268435456} ReadFile of (piece_owner(n, owner), $A.arrx(byte, l, n, owner), int n)
   | ReadNothing of ()
+  | ReadBackupNone of ()   (* the backup file is not there (bridge's BackupReadNone) *)
+  | ReadBackupEmpty of ()  (* the backup file is there and holds nothing (bridge's BackupReadEmpty) *)
   | ReadFailed of (sync_result, Int)
 
 (* What a write gives: written, a conflict (another device wrote the
@@ -1455,6 +1496,8 @@ implement $P.dispose<read_answer>(answer) =
   case+ answer of
   | ~ReadFile(owner, file, _) => piece_free(owner, file)
   | ~ReadNothing() => ()
+  | ~ReadBackupNone() => ()
+  | ~ReadBackupEmpty() => ()
   | ~ReadFailed(_, _) => ()
 
 (* a Dropbox read, made in this module when no token is held *)
@@ -2286,30 +2329,52 @@ fn _backup_name (): [l:agz] $A.arr(byte, l, 15) = let
   val () = $A.write_text(name, 0, $A.text_lit("quire-sync.json"), 15)
 in name end
 
-(* The backed-up file: the merge as it was last written here, or, after
-   a reinstall, as Auto Backup restored it *)
-fn _backup_read (): $P.promise(read_answer, $P.Chained) = let
-  val @(name_frozen, name_bytes) = $A.freeze<byte>(_backup_name())
-  val pending = $BACKUP.backup_file_read(name_bytes, 15)
-  val () = release_bytes(name_frozen, name_bytes)
+(* The text bridge kept of a refused or thrown backup read is not shown: the banner names the outcome (keyword: backup-read-answer) *)
+fn _backup_read_text_free (text: $R.option([n:nat] $BD.dblob(n))): void =
+  case+ text of
+  | ~$R.some(blob) => $BD.blob_free(blob)
+  | ~$R.none() => ()
+
+(* The blob of a backed-up file as the sync file, or why it is not one *)
+fn _backup_blob_taken {size:pos} (blob: $BD.dblob(size)): $P.promise(read_answer, $P.Chained) = let
+  val size = $BD.blob_len(blob)
 in
-  $P.and_then<$BACKUP.backup_found><read_answer>(pending, llam(found) =>
-    case+ found of
-    | ~$BACKUP.BackupNone() => $P.ret<read_answer>(ReadNothing())
-    | ~$BACKUP.BackupUnreadable() => $P.ret<read_answer>(ReadFailed(Damaged(), 0))
-    | ~$BACKUP.BackupFound(blob) => let
-        val size = $BD.blob_len(blob)
-      in
-        if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(TooLarge(), 0)) end
-        else (case+ piece_new(size) of
-          | ~NoPiece() => let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(NoMemory(), 0)) end
-          | ~Piece(owner, file) => let
-              val () = $BD.blob_read(blob, 0, file, size)
-              val () = $BD.blob_free(blob)
-            in $P.ret<read_answer>(ReadFile(owner, file, size)) end)
-      end)
+  if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(TooLarge(), 0)) end
+  else (case+ piece_new(size) of
+    | ~NoPiece() => let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(NoMemory(), 0)) end
+    | ~Piece(owner, file) => let
+        val () = $BD.blob_read(blob, 0, file, size)
+        val () = $BD.blob_free(blob)
+      in $P.ret<read_answer>(ReadFile(owner, file, size)) end)
 end
 
+(* fixture: backup-read-answer *)
+(* The backed-up file: the merge as it was last written here, or, after
+   a reinstall, as Auto Backup restored it; each outcome of the read is
+   its own (keyword: backup-read-answer) *)
+fn _backup_read (): $P.promise(read_answer, $P.Chained) = let
+  val @(name_frozen, name_bytes) = $A.freeze<byte>(_backup_name())
+  val pending = $BACKUP.backup_file_read_answer(name_bytes, 15)
+  val () = release_bytes(name_frozen, name_bytes)
+in
+  $P.and_then<$BACKUP.backup_read_answer><read_answer>(pending, llam(found) =>
+    case+ found of
+    | ~$BACKUP.BackupReadNone() => $P.ret<read_answer>(ReadBackupNone())
+    | ~$BACKUP.BackupReadEmpty() => $P.ret<read_answer>(ReadBackupEmpty())
+    | ~$BACKUP.BackupReadNotHere() => $P.ret<read_answer>(ReadFailed(BackupReadUnavailable(), 0))
+    | ~$BACKUP.BackupReadRejected(text) => let
+        val () = _backup_read_text_free(text)
+      in $P.ret<read_answer>(ReadFailed(BackupReadRejected(), 0)) end
+    | ~$BACKUP.BackupReadThrown(text) => let
+        val () = _backup_read_text_free(text)
+      in $P.ret<read_answer>(ReadFailed(BackupReadThrown(), 0)) end
+    | ~$BACKUP.BackupReadUnexpected(code) => let
+        val () = notice_unexpected("reading the backup file", "backup_file_read_answer", CaseNumbered("BackupReadUnexpected", code), NoAnswer())
+      in $P.ret<read_answer>(ReadFailed(BackupReadUnexpected(), 0)) end
+    | ~$BACKUP.BackupReadFound(blob) => _backup_blob_taken(blob))
+end
+
+(* fixture: the-text-bridge-kept-of-a *)
 (* The text bridge kept of a refused or thrown backup write is not shown: the banner names the outcome (keyword: backup-write-answer) *)
 fn _backup_text_free (text: $R.option([n:nat] $BD.dblob(n))): void =
   case+ text of
@@ -3089,6 +3154,18 @@ fn _content_free (content: content_bytes): void =
   | ~NoContentBytes() => ()
   | ~ContentBytes(owner, stored, _) => piece_free(owner, stored)
 
+(* The words of the file written, merged into those stored here (keyword: vocabulary), and then the sync is over *)
+fn _words_take (): void =
+  case+ _held_swap(_written, NoHeld()) of
+  | ~NoHeld() => _done()
+  | ~Held(owner, file, n, names_at, books, devices) => let
+      val parsed = words_from_file(file, n)
+      val () = _held_free(_held_swap(_written, Held(owner, file, n, names_at, books, devices)))
+    in
+      (* ignored: how many words were put; one that was not stays as it was, and is merged by the next sync (keyword: vocabulary) *)
+      $P.finish<Int>(words_restore(parsed, WordsMerge()), llam(_) => _done())
+    end
+
 (* The file's books' annotations from the k-th on, each merged with
    those stored here (read from storage) *)
 fun _annotations_take {left:nat} .<left>. (k: int, left: int left): void =
@@ -3098,8 +3175,8 @@ fun _annotations_take {left:nat} .<left>. (k: int, left: int left): void =
       val @(id_high, id_low, start) = _span_at(books, k)
       val () = _held_free(_held_swap(_written, Held(owner, file, n, names_at, books, devices)))
     in
-      if start < 0 then _done()
-      else if left <= 0 then _done()
+      if start < 0 then _words_take()
+      else if left <= 0 then _words_take()
       else let
         val @(key_frozen, key_bytes) = $A.freeze<byte>(lib_key(97, id_high, id_low))
         val pending = $IDB.idb_get(key_bytes, 15)
@@ -3357,20 +3434,8 @@ fun _remote_books {l:agz}{owner:addr}{n:nat | n <= 268435456}{count:nat} .<count
       val () = _push(jchunk_copy(file, start, stop))
     in _remote_books(file, rest, false) end
 
-(* The file's end: its books this device does not have, then the
-   closing brackets; then it is written *)
-fn _tail (): void = let
-  val written = !_books_written
-  val () = (if written then _push(_text_chunk("}")) else ())
-  val () = (case+ _held_swap(_remote, NoHeld()) of
-    | ~NoHeld() => ()
-    | ~Held(owner, file, n, names_at, books, devices) => let
-        val in_order = _reversed(books, SpansNil())
-        val () = _remote_books(file, in_order, ~written)
-        val () = _spans_free(in_order)
-      in _held_free(Held(owner, file, n, names_at, books, devices)) end)
-  val () = _push(_text_chunk("]}"))
-in
+(* The file joined, held and written (keyword: vocabulary) *)
+fn _finish_file (): void =
   case+ jfile_join(_out_take()) of
   | ~JNoWhole() => _fail(NoMemory(), 0)
   | ~JWhole(owner, file, n) =>
@@ -3379,6 +3444,26 @@ in
      | ~Held(file_owner, bytes, size, names_at, books, devices) => let
          val () = _held_free(_held_swap(_written, Held(file_owner, bytes, size, names_at, books, devices)))
        in _write() end)
+
+(* The file's end: the books this device lacks, the words of both devices merged, then it is written (keyword: vocabulary) *)
+fn _tail (): void = let
+  val written = !_books_written
+  val () = (if written then _push(_text_chunk("}")) else ())
+  val remote_words = (case+ _held_swap(_remote, NoHeld()) of
+    | ~NoHeld() => WordsRead(StoredWordsNone(), 0)
+    | ~Held(owner, file, n, names_at, books, devices) => let
+        val in_order = _reversed(books, SpansNil())
+        val () = _remote_books(file, in_order, ~written)
+        val () = _spans_free(in_order)
+        val parsed = words_from_file(file, n)
+        val () = _held_free(Held(owner, file, n, names_at, books, devices))
+      in parsed end): words_read
+  val () = _push(_text_chunk("]"))
+in
+  $P.finish<jchunk>(words_sync_chunk(remote_words), llam(words) => let
+    val () = _push(words)
+    val () = _push(_text_chunk("}"))
+  in _finish_file() end)
 end
 
 (* This device's books from book_index on, each merged with the file's
@@ -3439,6 +3524,8 @@ fn _merge_held (file: held): void =
 fn _read (): void = $P.finish<read_answer>(store_read(), llam(answer) =>
   case+ answer of
   | ~ReadNothing() => _merge_held(_empty())
+  | ~ReadBackupNone() => _merge_held(_empty())
+  | ~ReadBackupEmpty() => _merge_held(_empty())
   | ~ReadFailed(kind, status) => _fail(kind, status)
   | ~ReadFile(owner, file, size) =>
     (case+ _hold(owner, file, size) of
@@ -3499,6 +3586,7 @@ fn _paused (): bool =
   else if _authorize_present() then false
   else case+ !_last_result of
     | SignInAgain() => true
+    | BackupReadUnavailable() => false | BackupReadRejected() => false | BackupReadThrown() => false | BackupReadUnexpected() => false
     | BackupUnavailable() => false | BackupRejected() => false | BackupThrown() => false | BackupUnexpected() => false
     | NotSyncedYet() => false | Synced() => false | Unreachable() => false | WrongCredentials() => false
     | FolderNotFound() => false | KeptChanging() => false | ServerError() => false | TooLarge() => false
@@ -3573,6 +3661,7 @@ fn _fastmail_fields_make (): void = let
   val () = ui_form_field("fastmail-fields", "fastmail-user-label", "fastmail-user", FormUser, "mname", "Fastmail address", "you@fastmail.com")
 in ui_form_field("fastmail-fields", "fastmail-password-label", "fastmail-password", FormPassword, "mname", "Fastmail app password", "An app password") end
 
+(* fixture: a-service-s-row-its-name *)
 (* A service's row: its name, a button that opens its step, and its
    state beside it *)
 fn _row_make {row_len,button_len,state_len,hint_len:pos | row_len < 256; button_len < 256; state_len < 256; hint_len < 256}
@@ -3985,6 +4074,7 @@ fn _token_failed {code_len:pos | code_len < 64}
   val () = _refusal_free(_refusal_swap(TokenFailureKept(code, answer)))
 in result end
 
+(* fixture: in-a-browser-a-token-for *)
 (* In a browser: a token for drive.appdata from Google Identity
    Services, its window opened at the reader's tap *)
 fn _identity_ask {client_loc:agz}{client_len:pos | client_len <= 256}

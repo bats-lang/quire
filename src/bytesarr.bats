@@ -116,6 +116,7 @@ implement blist_of_array {l}{origin}{size,from,count} (array, from, count) = let
     in blist_cons(byte_value, bytes_from(array, i + 1)) end
 in bytes_from(array, 0) end
 
+(* fixture: a-byte-string-in-an-array *)
 (* A byte string in an array: the array holds the bytes octets, one cell longer
    than they are *)
 #pub datavtype bstr(bytes) =

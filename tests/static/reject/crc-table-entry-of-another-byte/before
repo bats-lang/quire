@@ -1,1 +1,1 @@
-(* The CRC-32 (high and low 16 bits) of the n bytes the cells of an array
+(* fixture: the-crc-32-high-and-low *)

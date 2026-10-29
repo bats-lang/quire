@@ -49,3 +49,14 @@ def tables(name):
     if name == "book":
         return BOOK_GROUPS, BOOK_KIND
     return INDEX_GROUPS, INDEX_KIND
+WORD_GROUPS = [
+  ("BOOK", "req", [("book_high", "i"), ("book_low", "i")]),
+  ("COUN", "opt", [("lookups", "i"), ("first_minute", "i"), ("last_minute", "i")]),
+  ("LANG", "req", [("language", "s")]),
+  ("MODF", "opt", [("modified", "i"), ("deleted", "i")]),
+  ("PLCE", "opt", [("chapter", "i"), ("node", "i"), ("offset", "i")]),
+  ("SENT", "opt", [("sentence_head", "s"), ("sentence_tail", "s")]),
+  ("STAT", "opt", [("mastered", "i"), ("streak", "i"), ("due", "i")]),
+  ("WORD", "req", [("word", "s")]),
+]
+WORD_KIND = 3

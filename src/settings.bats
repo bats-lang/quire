@@ -431,6 +431,22 @@ implement set_fullscreen_get () = !_fullscreen
 #pub fn set_fullscreen_set (choice: fullscreen_choice): void
 implement set_fullscreen_set (choice) = !_fullscreen := choice
 
+(* Whether the words looked up are kept, to be reviewed (keyword: vocabulary): on at first, as Kindle's and KOReader's are *)
+#pub datatype words_keeping = WordsKept | WordsNotKept
+
+fn _words_code (choice: words_keeping): [code:nat | code <= 1] int code =
+  case+ choice of WordsKept() => 0 | WordsNotKept() => 1
+
+fn _words_of_code (code: int): words_keeping =
+  if code = 1 then WordsNotKept() else WordsKept()
+
+val _words = ref<words_keeping>(WordsKept())
+
+#pub fn set_words_get (): words_keeping
+implement set_words_get () = !_words
+#pub fn set_words_set (choice: words_keeping): void
+implement set_words_set (choice) = !_words := choice
+
 (* The voice chosen for each language a book was read aloud in: its
    primary subtag ("en", lower case) and the voice's name; a language
    with none is read in its automatic voice *)
@@ -738,6 +754,19 @@ fn _fullscreen_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int 
   else if byte2int0($A.get<byte>(record, at)) <> 70 then !_fullscreen := FullscreenOff()
   else !_fullscreen := _fullscreen_of_code(byte2int0($A.get<byte>(record, at + 1)))
 
+(* "K" and the byte of whether the words looked up are kept at record[at, at + 2) (keyword: vocabulary) *)
+fn _words_write {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 2 > n then ()
+  else let
+    val () = $A.write_byte(record, at, 75)
+  in $A.write_byte(record, at + 1, _words_code(!_words)) end
+
+(* The words' byte after "K" at record[at]: checked here, once; kept when there is none (a record written before it) (keyword: vocabulary) *)
+fn _words_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 2 > n then !_words := WordsKept()
+  else if byte2int0($A.get<byte>(record, at)) <> 75 then !_words := WordsKept()
+  else !_words := _words_of_code(byte2int0($A.get<byte>(record, at + 1)))
+
 (* "P" and the sizes' byte at record[at, at + 2) *)
 fn _sizes_write {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
   if at + 2 > n then ()
@@ -948,6 +977,7 @@ fn _night (): bool = local_night()
    system asks for dark, else Light *)
 val _shown_theme = ref<theme>(Light())
 
+(* fixture: the-theme-auto-shows-now *)
 (* The theme auto shows now *)
 fn _auto_theme (): theme = if _night() then Night() else if !_system_dark then Dark() else Light()
 
@@ -1075,7 +1105,8 @@ in ui_text_buf("word-value", buf, next) end
    Storage: key "set"
    ============================================================ *)
 
-(* "S2", then size, line height, margin, font, theme, the library's
+(* "K" and whether the words looked up are kept comes after the sizes' byte (keyword: vocabulary).
+   "S2", then size, line height, margin, font, theme, the library's
    sort order, align, hyphens, paragraph, letter and word spacing, dim
    images, tap zones, volume keys, readout, scrolled, columns and ruby,
    a byte each; then the device's own: reading aloud's speed, the
@@ -1092,7 +1123,7 @@ fn _save (sort: int): void = let
   val voices = _voices_take()
   val+ @VoicesCell(choices, voice_count) = voices
   val voices_size = _voices_size(choices)
-  val record_size = 24 + voices_size + 3 + 2 + 2 + 3
+  val record_size = 24 + voices_size + 3 + 2 + 2 + 3 + 2
   val record = $A.alloc<byte>(record_size)
   val () = _voices_write(choices, record, record_size, 24)
   val () = $A.write_byte(record, 23, voice_count)
@@ -1100,6 +1131,7 @@ fn _save (sort: int): void = let
   val () = _fullscreen_write(record, record_size, 24 + voices_size + 3)
   val () = _sizes_write(record, record_size, 24 + voices_size + 5)
   val () = _ruler_write(record, record_size, 24 + voices_size + 7)
+  val () = _words_write(record, record_size, 24 + voices_size + 10)
   prval () = fold@(voices)
   val () = _voices_put(voices)
   val () = $A.write_byte(record, 20, _rate_code(!_speech_rate))
@@ -1193,6 +1225,9 @@ implement set_save (sort) = _save(sort)
 implement set_show () = let
   val () = _apply_type()
   val () = _apply_theme()
+  val () = (case+ !_words of
+    | WordsKept() => ui_attr("settings-words-keep", APressed, "true")
+    | WordsNotKept() => ui_attr("settings-words-keep", APressed, "false"))
 in set_sliders() end
 
 #pub fn set_size_set (value: set_size): void
@@ -1352,6 +1387,7 @@ fn _reset (): void = let
   val () = !_brightness_level := 50
   val () = !_rotation := RotationFree()
   val () = !_fullscreen := FullscreenOff()
+  val () = !_words := WordsKept()
   val () = !_sizes := SizesInProportion()
   val () = !_ruler := RulerOff()
   val () = !_ruler_lines := RulerOneLine()
@@ -1376,6 +1412,7 @@ implement set_reset_undoable (how) = let
   val brightness_level_before = !_brightness_level
   val rotation_before = !_rotation
   val fullscreen_before = !_fullscreen
+  val words_before = !_words
   val sizes_before = !_sizes
   val ruler_before = !_ruler
   val ruler_lines_before = !_ruler_lines
@@ -1394,6 +1431,7 @@ in
         val () = !_brightness_level := brightness_level_before
         val () = !_rotation := rotation_before
         val () = !_fullscreen := fullscreen_before
+        val () = !_words := words_before
         val () = !_sizes := sizes_before
         val () = !_ruler := ruler_before
         val () = !_ruler_lines := ruler_lines_before
@@ -1519,6 +1557,7 @@ in
         val () = _fullscreen_read(record, n, voices_end + 3)
         val () = _sizes_read(record, n, voices_end + 5)
         val () = _ruler_read(record, n, voices_end + 7)
+        val () = _words_read(record, n, voices_end + 10)
         val () = _voices_put(VoicesCell(voices_read, voices_read_count))
         val () = $A.free<byte>(record)
         val () = !_set := @{ size = size, line_height = line_height, margin = margin, font = font,
