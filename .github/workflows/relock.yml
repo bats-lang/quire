@@ -27,6 +27,7 @@ jobs:
         bats-lang/pwa/.github/workflows/android.yml
         bats-lang/pwa/.github/workflows/play-release.yml
         bats-lang/pwa/.github/actions/e2e-setup
+        bats-lang/pwa/.github/actions/queue-passed
         bats-lang/repository-prototype/.github/workflows/relock-pins.yml
         bats-lang/bats/.github/actions/setup
         bats-lang/repository-prototype/.github/actions/check-aggregate
