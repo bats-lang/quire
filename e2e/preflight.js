@@ -180,6 +180,31 @@ export function fatal(part, why, out) {
  */
 export function heartbeatQuiet({ beatAgeMs, monitorLateMs, staleMs }) { return beatAgeMs - Math.max(0, monitorLateMs) > staleMs; }
 
+/** The state letter of a process from /proc/<pid>/stat (readable for every user, root's processes too), or null when there is no such process. */
+export function processState(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
+  } catch (gone) { return null; }
+}
+
+/**
+ * Continues processes that were stopped until none is stopped, and says which still are (quire#908, run 40705566021). One SIGCONT is not enough for a
+ * `sudo` that wraps a stopped command: sudo stops itself when it sees its command stopped (job control), and it may see that after the SIGCONT it was
+ * sent, so it stays stopped, keeps the run's output pipe and the run never closes (the stopped-alone test kills it for the same reason, quire#749).
+ * `pids` is in the order to continue first; `send(pid)` signals one, `stateOf(pid)` is its state letter or null.
+ */
+export async function resumeUntilRunning(pids, { send, stateOf = processState, rounds = 40, everyMs = 250 }) {
+  let stopped = [...pids];
+  for (let round = 0; round < rounds; round += 1) {
+    for (const pid of round === 0 ? pids : stopped) { try { send(pid); } catch (gone) { /* it ended */ } }
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
+    stopped = pids.filter((pid) => /^[Tt]$/.test(stateOf(pid) || ''));
+    if (!stopped.length) return [];
+  }
+  return stopped;
+}
+
 /** Watches the parts while the run goes on. Returns a function that ends the watching. Logs a line at its start and a summary at its end (or at its fatal). */
 export function startMonitor(started, env = process.env) {
   if (!started || env.QUIRE_FLIGHT_MONITOR === 'off') return () => {};

@@ -24,7 +24,7 @@ import { missingFields } from './evidence-check.js';
 import { futexAnalysis, ringContent } from './flight-recorder.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { Watchdog } from './flight-watchdog.js';
-import { heartbeatQuiet } from './preflight.js';
+import { heartbeatQuiet, processState, resumeUntilRunning } from './preflight.js';
 import { LOCK_NAME, LOCK_UNREADABLE_MS, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
 
 function desktopOnly(testInfo) {
@@ -1162,4 +1162,22 @@ test('the monitor does not take a stop of the whole machine for a watchdog gone 
   expect(heartbeatQuiet({ beatAgeMs: 7846, monitorLateMs: 7900, staleMs: 6000 }), 'the monitor was as late as the beat is old').toBe(false);
   expect(heartbeatQuiet({ beatAgeMs: 7846, monitorLateMs: 0, staleMs: 6000 }), 'a watchdog quiet while the monitor was on time').toBe(true);
   expect(heartbeatQuiet({ beatAgeMs: 14000, monitorLateMs: 7900, staleMs: 6000 }), 'quiet for longer than the monitor was late').toBe(true);
+});
+
+test('a process that stops itself again after its first SIGCONT (a sudo that saw its command stopped) is continued until it runs (quire#908, run 40705566021: the nested run never closed)', async () => {
+  // the stand-in stops itself the first time it is continued, as sudo does on seeing its command stopped; a second SIGCONT runs it
+  const standIn = spawn(process.execPath, ['-e', "let again = true; process.on('SIGCONT', () => { if (again) { again = false; process.kill(process.pid, 'SIGSTOP'); } }); setInterval(() => {}, 1000); console.log('up');"], { stdio: ['ignore', 'pipe', 'ignore'] });
+  try {
+    await new Promise((resolve) => standIn.stdout.once('data', resolve));
+    process.kill(standIn.pid, 'SIGSTOP');
+    await expect.poll(() => processState(standIn.pid)).toBe('T');
+    // the first SIGCONT (the one the test used to send) leaves it stopped again; the helper sends more
+    const left = await resumeUntilRunning([standIn.pid], { send: (pid) => process.kill(pid, 'SIGCONT'), everyMs: 200 });
+    expect(left, 'continued until it runs').toEqual([]);
+    expect(processState(standIn.pid)).not.toBe('T');
+    // a process that is never continued is named, not waited for for ever
+    process.kill(standIn.pid, 'SIGSTOP');
+    await expect.poll(() => processState(standIn.pid)).toBe('T');
+    expect(await resumeUntilRunning([standIn.pid], { send: () => {}, rounds: 3, everyMs: 50 }), 'a process that stays stopped is named').toEqual([standIn.pid]);
+  } finally { try { process.kill(standIn.pid, 'SIGCONT'); } catch (gone) { /* ended */ } standIn.kill('SIGKILL'); }
 });

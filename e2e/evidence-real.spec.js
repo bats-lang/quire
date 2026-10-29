@@ -15,6 +15,7 @@ import { gunzipSync } from 'node:zlib';
 import { test, expect } from './fixtures.js';
 import { OUT_VARIABLE, INSTANCE_VARIABLE, isRoot, pauseInstance, removeInstance, ringSeen, silenceInstance, wanted } from './flight-recorder.js';
 import { processTable, tree } from './flight-watchdog.js';
+import { resumeUntilRunning } from './preflight.js';
 
 test.describe.configure({ mode: 'parallel' });
 
@@ -341,7 +342,9 @@ test('heartbeat: the runner and the watchdog stopped together, for longer than t
     const resume = (pid) => { try { kill(pid, 'SIGCONT'); } catch (gone) { /* it ended with the run */ } };
     resume(run.child.pid);
     await new Promise((resolve) => setTimeout(resolve, 600));
-    for (const pid of pids()) resume(pid);
+    // the watchdog before its `sudo` (CI's user), and each until it is running: a sudo that saw its command stopped stops itself and one SIGCONT may come before that
+    const stillStopped = await resumeUntilRunning([run.child.pid, watchdog, parent].filter((pid) => owned.includes(pid)), { send: (pid) => kill(pid, 'SIGCONT') });
+    expect(stillStopped, 'every process stopped for the test is running again').toEqual([]);
     // the run goes on to its own end, which prints the monitor's stopped line: the stall is counted in it
     const { code } = await run.done(60000);
     expect(run.output(), 'a stop of the whole machine is not a quiet watchdog').not.toMatch(/EVIDENCE MISSING/);
