@@ -296,6 +296,46 @@ class Workflow(unittest.TestCase):
         self.assertEqual(members, non_mutation_members())
 
 
+class Local(unittest.TestCase):
+    """`scripts/ci-groups.py local` (#1006): the command it runs is bats's own `--list-affected`
+    over the paths the change touched, with a stand-in for git given as `run`."""
+
+    @staticmethod
+    def module():
+        spec = importlib.util.spec_from_file_location('ci_groups_local', ROOT / 'scripts' / 'ci-groups.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    @staticmethod
+    def git(diff, untracked):
+        def run(command, **_):
+            out = diff if command[1] == 'diff' else untracked
+            return subprocess.CompletedProcess(command, 0, out, '')
+        return run
+
+    def test_it_calls_bats_fixtures_list_affected_over_the_changed_paths(self):
+        found = self.module().local_affected(
+            'origin/main', {'BATS_REPOSITORY': '/repo', 'QUIRE_STATIC_WORK': '/work'},
+            self.git('src/a.bats\ntests/static/accept/x/snippet.bats\n', 'src/new.bats\nsrc/a.bats\n'))
+        self.assertEqual(found[0], ['bats', 'fixtures', 'tests/static', '--work', '/work', '--memo', '/work/memo',
+                                    '--repository', '/repo', '--list-affected',
+                                    'src/a.bats', 'tests/static/accept/x/snippet.bats', 'src/new.bats'])
+
+    def test_no_change_lists_nothing(self):
+        self.assertIsNone(self.module().local_affected('origin/main', {'BATS_REPOSITORY': '/r'}, self.git('', '')))
+
+    def test_no_repository_is_refused(self):
+        with self.assertRaises(RuntimeError):
+            self.module().local_affected('origin/main', {}, self.git('a\n', ''))
+
+    def test_a_failing_git_is_refused(self):
+        def failing(command, **_):
+            return subprocess.CompletedProcess(command, 128, '', 'bad revision')
+        with self.assertRaises(RuntimeError):
+            self.module().local_affected('nope', {'BATS_REPOSITORY': '/r'}, failing)
+
+
 class Diff(unittest.TestCase):
     """The paths a change touched, as git says them (-z: any name).
 

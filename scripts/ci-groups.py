@@ -55,6 +55,15 @@ usage:
                                        members run only the lemmas the change can have made
                                        vacuous (#594), the others what scripts/affected.py
                                        selects
+  scripts/ci-groups.py local [<base>]  the static fixtures the working tree's change since the git
+                                       revision <base> (default origin/main) can affect, one
+                                       `accept/<name>` or `reject/<name>` a line, as
+                                       `bats fixtures tests/static --list-affected <paths>` lists
+                                       them (bats#570): a worker runs those with
+                                       tests/static/run.sh, not the whole population (#1006). Needs
+                                       BATS_REPOSITORY and bats on PATH; the work directory is
+                                       $QUIRE_STATIC_WORK (the one run.sh uses), else
+                                       ~/.cache/quire-static
   scripts/ci-groups.py members <kind> <group>
                                        check, then print that group's
                                        members, one per line (e2e specs
@@ -63,6 +72,7 @@ usage:
 import json
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -222,6 +232,33 @@ def group_affected(groups, group, base):
     return 'yes' if result['static'][group]['members'] else 'no'
 
 
+def changed_paths(base, run=subprocess.run):
+    """The paths the working tree differs in from <base>, committed or not (a deleted path
+    included, which names what a fixture read), and the untracked ones git does not ignore."""
+    paths = []
+    for command in (['git', 'diff', '--name-only', base], ['git', 'ls-files', '--others', '--exclude-standard']):
+        done = run(command, cwd=ROOT, capture_output=True, text=True)
+        if done.returncode != 0:
+            raise RuntimeError(f"{' '.join(command)} failed: {done.stderr.strip()}")
+        paths += [line for line in done.stdout.splitlines() if line and line not in paths]
+    return paths
+
+
+def local_affected(base, environment, run=subprocess.run):
+    """The command line and the paths of `local`: `bats fixtures tests/static --list-affected`
+    over the paths changed since <base>, with the memo that tests/static/run.sh keeps."""
+    repository = environment.get('BATS_REPOSITORY')
+    if not repository:
+        raise RuntimeError('BATS_REPOSITORY (the package repository) is not set')
+    work = environment.get('QUIRE_STATIC_WORK') or os.path.join(
+        environment.get('XDG_CACHE_HOME') or os.path.join(os.path.expanduser('~'), '.cache'), 'quire-static')
+    paths = changed_paths(base, run)
+    if not paths:
+        return None
+    return (['bats', 'fixtures', 'tests/static', '--work', work, '--memo', os.path.join(work, 'memo'),
+             '--repository', repository, '--list-affected'] + paths, paths)
+
+
 def main(arguments):
     with open(os.path.join(ROOT, 'tests', 'groups.json')) as groups_file:
         groups = json.load(groups_file)
@@ -262,6 +299,18 @@ def main(arguments):
                 summary_file.write('\n'.join(report) + '\n')
         print('\n'.join(lines + report))
         return 0
+    if arguments[:1] == ['local'] and len(arguments) in (1, 2):
+        try:
+            found = local_affected(arguments[1] if len(arguments) == 2 else 'origin/main', os.environ)
+        except RuntimeError as error:
+            print(f'error: {error}', file=sys.stderr)
+            return 1
+        if found is None:
+            print('no change since the base: no fixture is affected', file=sys.stderr)
+            return 0
+        command, paths = found
+        print(f'{len(paths)} changed paths; {" ".join(command[:3])} --list-affected:', file=sys.stderr)
+        return subprocess.run(command, cwd=ROOT).returncode
     if len(arguments) == 3 and arguments[0] == 'affected' \
             and (arguments[1] in groups['static'] or arguments[1] in groups['e2e']):
         print(group_affected(groups, arguments[1], arguments[2]))

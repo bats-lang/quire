@@ -278,6 +278,17 @@ mutants, too long for the required `check` and for a merge queue window. So:
 * `timeout-minutes` 120 (the nightly's 150) is a backstop under the patsopt
   caps, so a runaway proof fails with its module named.
 
+### Locally, only the fixtures a change reaches (#1006)
+
+`scripts/ci-groups.py local [<base>]` (default `origin/main`) is the worker's list: it calls
+`bats fixtures tests/static --list-affected <paths>` (bats#570) over the paths the working tree
+differs in from the base (committed, uncommitted and untracked) and prints the fixtures that
+reach, one `accept/<name>` or `reject/<name>` a line; run those with `tests/static/run.sh`
+instead of the whole population. The selection is bats's (the memo's recorded reads, fail closed
+for a fixture with no entry); quire adds only the call. It needs `BATS_REPOSITORY`, and keeps its
+work directory and memo in `$QUIRE_STATIC_WORK` (run.sh's) or `~/.cache/quire-static`.
+`tests/static/affected_test.py` (`Local`) tests the command line it builds.
+
 ### Only the groups a change can affect run (#619)
 
 The `plan` job decides, once, from the PR's diff, which e2e groups and static
