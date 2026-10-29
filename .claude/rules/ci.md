@@ -289,6 +289,16 @@ for a fixture with no entry); quire adds only the call. It needs `BATS_REPOSITOR
 work directory and memo in `$QUIRE_STATIC_WORK` (run.sh's) or `~/.cache/quire-static`.
 `tests/static/affected_test.py` (`Local`) tests the command line it builds.
 
+The git half (`changed_paths`, about 25 lines of Python, and the `Local` tests) is a stopgap
+(keyword: list-affected), not an exhausted avenue: bats can run git (`src/affected.bats`, `bats
+affected`, runs `git diff --name-only -z` through the process package), and bats#570 left
+`--changed-since <rev>` out, so every caller passes the paths. Searched in bats: its
+subcommands (`src/bin/bats.bats` usage), `src/affected.bats`, `src/fixtures.bats` and
+`.claude/rules/fixtures.md` and `affected.md`; none reads the working tree's change. A second
+app would copy it, so it belongs in bats: bats#582 (p2, filed first) adds `--changed-since`, and
+the PR that moves quire to it deletes `changed_paths` and its tests. Waiting for it would hold
+the p0 #1006, whose Done-when is the call in this script.
+
 ### Only the groups a change can affect run (#619)
 
 The `plan` job decides, once, from the PR's diff, which e2e groups and static

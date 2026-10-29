@@ -234,7 +234,9 @@ def group_affected(groups, group, base):
 
 def changed_paths(base, run=subprocess.run):
     """The paths the working tree differs in from <base>, committed or not (a deleted path
-    included, which names what a fixture read), and the untracked ones git does not ignore."""
+    included, which names what a fixture read), and the untracked ones git does not ignore.
+    Stopgap (keyword: list-affected): bats#582 gives `bats fixtures --changed-since <rev>`, and
+    this function and its tests are deleted when quire calls that."""
     paths = []
     for command in (['git', 'diff', '--name-only', base], ['git', 'ls-files', '--others', '--exclude-standard']):
         done = run(command, cwd=ROOT, capture_output=True, text=True)
