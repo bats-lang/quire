@@ -8,7 +8,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, chmodSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
@@ -113,8 +113,13 @@ const statusesOf = (report) => {
 
 /** The job's own check, as check.yml runs it, on a nested run's files. */
 function evidenceCheck(run, extra = []) {
-  const result = spawnSync(process.execPath, [join(here, 'evidence-check.js'), run.directory, '--results', join(run.directory, 'test-results'), '--require-report', ...extra], { encoding: 'utf8', cwd: run.directory });
-  return { code: result.status, text: `${result.stdout}${result.stderr}` };
+  // the check writes its summary to $GITHUB_STEP_SUMMARY when that is set, as it is in CI (and then to standard output only when it is not):
+  // the nested check gets a file of its own, whose text is part of what the case reads, so the same case holds on a developer's machine and in a job (#1008, keyword: failure capture)
+  const summaryFile = join(run.directory, 'step-summary.md');
+  rmSync(summaryFile, { force: true });
+  const result = spawnSync(process.execPath, [join(here, 'evidence-check.js'), run.directory, '--results', join(run.directory, 'test-results'), '--require-report', ...extra], { encoding: 'utf8', cwd: run.directory, env: { ...process.env, GITHUB_STEP_SUMMARY: summaryFile } });
+  const summary = existsSync(summaryFile) ? readFileSync(summaryFile, 'utf8') : '';
+  return { code: result.status, text: `${result.stdout}${result.stderr}${summary}` };
 }
 
 const kill = (pid, signal = 'SIGKILL') => (isRoot ? process.kill(pid, signal) : spawnSync('sudo', ['-n', 'kill', `-${signal.replace('SIG', '')}`, String(pid)]));

@@ -372,6 +372,13 @@ so there was nothing to root-cause. The flake is still #932 item 5's; this is th
   summary) and, on the real path, `evidence-real.spec.js` (a nested run that fails an assertion with the repository's settings
   keeps the four parts and the check exits 0 with the summary; the same failure with trace and screenshot off exits 1 naming
   both). `--require-capture` checks `failed` only: a timeout or a killed worker is the flight recorder's (`EVIDENCE MISSING: kernel ring`).
+* **The summary goes where `$GITHUB_STEP_SUMMARY` says** (root cause of the red `evidence-real.spec.js:384` in run 40820463902): the
+  check appends the summary to that file when the variable is set, and prints it only when it is not. A job sets it, so the nested
+  check inherited the job's variable, wrote the summary into the job's own step summary, and the case saw only `evidence: nothing
+  missing in 1 report(s)`; on a developer's machine the variable is unset and the case passed. `evidenceCheck` in `evidence-real.spec.js`
+  now gives each nested check a summary file of its own and reads it, so the case is the same in both places. A test that uses no `page`
+  fixture (the evidence specs) has no screenshot, `page-dom` or `page-history` when it fails, so `--require-capture` names them
+  missing for it; the job is red for the failed test in any case.
 * **Research** (read 2026-10-29: playwright.dev/docs/api/class-testoptions, /docs/trace-viewer-intro, /docs/ci-intro). The
   documented `trace` values: `'on'` ("Record and keep a trace for every run"), `'retain-on-failure'` ("Record a trace for every run,
   but keep it only for runs that failed"), `'on-first-retry'` ("only for the first retry of a test"; the trace viewer page's example
