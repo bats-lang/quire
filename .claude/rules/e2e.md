@@ -356,7 +356,7 @@ only for a red. The design, with the research and what each means cannot find, i
 
 Why: `vertical.spec.js:238` (the Search in book dialog not appearing after `/`) failed once and was never seen
 again; none of the logs of the 26 failed check.yml runs since 2026-10-22 failed at that line (#932 item 5, PR #969),
-so there was nothing to root-cause. The flake is still #932 item 5's; this is the capture, so a failure brings its data.
+so there was nothing to root-cause. Its root cause is quire#1041 (it was #932 item 5 until #932 was split); this is the capture, so a failure brings its data.
 
 * **What is kept for a test that failed** (an unexpected `failed` result, a retried attempt included): Playwright's
   `trace` (`trace.zip`: the DOM snapshots before and after every action, the console, the network, the source) and
