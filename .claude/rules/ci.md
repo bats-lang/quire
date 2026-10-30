@@ -316,27 +316,6 @@ mutants, too long for the required `check` and for a merge queue window. So:
 * `timeout-minutes` 120 (the nightly's 150) is a backstop under the patsopt
   caps, so a runaway proof fails with its module named.
 
-### Locally, only the fixtures a change reaches (#1006)
-
-`scripts/ci-groups.py local-listed [<base>]` (default `origin/main`) is the list of bats's own selection (`local` is the source-derived run of #957, which keeps its name and use; this is the call that replaces its derivation once the workers move to it): it calls
-`bats fixtures tests/static --list-affected <paths>` (bats#570) over the paths the working tree
-differs in from the base (committed, uncommitted and untracked) and prints the fixtures that
-reach, one `accept/<name>` or `reject/<name>` a line; run those with `tests/static/run.sh`
-instead of the whole population. The selection is bats's (the memo's recorded reads, fail closed
-for a fixture with no entry); quire adds only the call. It needs `BATS_REPOSITORY`, and keeps its
-work directory and memo in `$QUIRE_STATIC_WORK` (run.sh's) or `~/.cache/quire-static`.
-`tests/static/affected_test.py` (`Local`) tests the command line it builds.
-
-The git half (`changed_paths`, about 25 lines of Python, and the `Local` tests) is a stopgap
-(keyword: list-affected), not an exhausted avenue: bats can run git (`src/affected.bats`, `bats
-affected`, runs `git diff --name-only -z` through the process package), and bats#570 left
-`--changed-since <rev>` out, so every caller passes the paths. Searched in bats: its
-subcommands (`src/bin/bats.bats` usage), `src/affected.bats`, `src/fixtures.bats` and
-`.claude/rules/fixtures.md` and `affected.md`; none reads the working tree's change. A second
-app would copy it, so it belongs in bats: bats#582 (p2, filed first) adds `--changed-since`, and
-the PR that moves quire to it deletes `changed_paths` and its tests. Waiting for it would hold
-the p0 #1006, whose Done-when is the call in this script.
-
 ### Only the groups a change can affect run (#619)
 
 The `plan` job decides, once, from the PR's diff, which e2e groups and static
@@ -421,31 +400,42 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   command, and a wrapper below it kills a cold check for nothing. The first build of a new checkout
   runs with `run_in_background` and its log is read until it ends, in the same turn. A push is
   `qsweep push <arguments>`, which holds when `qsweep pressure` does not say `runner pressure: none`.
-* **The affected members (quire#957, keyword: affected).** Before every push, a worker
+* **The affected members (quire#957 and #1006, keyword: affected).** Before every push, a worker
   runs `python3 scripts/ci-groups.py local $(git merge-base origin/main HEAD)`: the rule of the
-  `plan` job (`scripts/affected.py`, #619) at the granularity of a fixture, over the diff against
-  the merge base, tracked files of the working tree included (commit new files first). It lists
-  the whole selected population on standard output in every case, one member a line (`check`,
-  `checkers`, `accept/<name>`, `reject/<name>`, `e2e/<spec>`), and the reason of each on standard
-  error. A source module (`src/**`) selects `check`, `checkers`, and each fixture that reads it:
-  the module the fixture is put into (`file`), a module that one staloads, however far
-  (`staload "x.sats"` is `src/x.bats`), and any repository path a fixture's `before`, `expect`,
-  `file` or `snippet.bats` spells out. Every other path selects what CI's table says (a note, a
-  spec, a fixture's directory); a path for which CI runs the whole static population (the CI
-  files, the pins, an unknown path, `assets/**`) is said (`CI runs the whole static population
-  for: ...`) and left to the sample. A spec reads the built app, so a source change selects every
-  spec. **One relation between the list and the run** (the ruling recorded on the ticket, until the
-  owner says otherwise): the static members run whole; the specs run whole when they are at most
-  `--specs N` (default 12, about 10 minutes of e2e), else a sample of N of the selected specs is
-  drawn with a printed seed; CI runs the rest. `--run <repository>` does both: `tests/static/run.sh`,
-  then `./dist/debug/gen-pwa test -- <specs>` (the build steps and the env file below come first).
-  The worker writes the seed, the sample and why it suffices in the PR. `--sample N` adds N other
-  fixtures with the printed `--seed`, beside the affected ones and never in their place. The stopgap
-  carries its ticket in a comment on each piece (keyword: affected, bats-lang/bats#570, deleted when it
-  lands): the list is an over-approximation of what `bats fixtures` knows exactly (the files patsopt read
-  for each fixture, kept by its memo), and the exact form replaces the staload walk. The PR's Evidence has
-  the command and its output; a reviewer sends back a PR without it. Tested: `LocalRun` and `LocalCommand`
-  in `tests/static/affected_test.py`; the brief line: `tests/static/guidelines.py` (`WORKER_LINES`).
+  `plan` job (`scripts/affected.py`, #619) for what the table decides, and **the fixtures from
+  bats's own selection** (keyword: list-affected): it calls `bats fixtures tests/static
+  --list-affected <paths>` (bats#570) over the paths of the diff against the merge base, tracked
+  files of the working tree included (commit new files first), and takes the fixtures it prints,
+  one `accept/<name>` or `reject/<name>` a line. bats lists a fixture when a path is its module
+  (`file`) or one of its own files, when the memo's entry for it records a file patsopt read that
+  is a path (so a module it staloads, however far, and the lock), and when it has no usable entry
+  (no memo, a `.key` or `.res` missing: it cannot be known, so it is listed; a `--memo` that is no
+  memo lists every fixture); it copies the app and checks it whole first, as a run does, reusing
+  the `--work` build. quire adds only the call (`listed_fixtures` in `scripts/ci-groups.py`): the
+  work directory and the memo are those of `$QUIRE_STATIC_WORK`, which `tests/static/run.sh` keeps
+  (set it in the env file; run.sh with none keeps nothing, and then the first list is every
+  fixture, from `~/.cache/quire-static`), and the package repository is `--run <repository>` or
+  `BATS_REPOSITORY`. A bats that is not on PATH, that fails, or that prints a line that is no
+  fixture makes the command fail with `error:` and list nothing: the list is never made up.
+  It lists the whole selected population on standard output in every case, one member a line
+  (`check`, `checkers`, `accept/<name>`, `reject/<name>`, `e2e/<spec>`), and the reasons on standard
+  error. Beside bats's fixtures, a source module (`src/**`) selects `check` and `checkers`; every
+  other path selects what CI's table says (a note, a spec, a fixture's directory); a path for
+  which CI runs the whole static population (the CI files, the pins, an unknown path, `assets/**`)
+  is said (`CI runs the whole static population for: ...`) and left to the sample. A spec reads
+  the built app, so a source change selects every spec. **One relation between the list and the
+  run** (the ruling recorded on the ticket, until the owner says otherwise): the static members
+  run whole; the specs run whole when they are at most `--specs N` (default 12, about 10 minutes of
+  e2e), else a sample of N of the selected specs is drawn with a printed seed; CI runs the rest.
+  `--run <repository>` does both: `tests/static/run.sh`, then `./dist/debug/gen-pwa test --
+  <specs>` (the build steps and the env file below come first). The worker writes the seed, the
+  sample and why it suffices in the PR. `--sample N` adds N other fixtures with the printed
+  `--seed`, beside the affected ones and never in their place. The PR's Evidence has the command
+  and its output; a reviewer sends back a PR without it. Tested: `LocalRun`, `LocalCommand` and
+  `ListedFixtures` in `tests/static/affected_test.py`, with a stand-in for bats (the list is
+  bats's, tested in bats: `tests/fixtures/list.sh`); the brief line: `tests/static/guidelines.py`
+  (`WORKER_LINES`). The derivation this replaces (the staload walk and the fixtures' texts, #957's
+  stopgap) is deleted.
 * Two bats in one checkout take turns (a lock on `bats.toml`). Two checkouts take turns by
   bats's opt-in machine-wide slots: with `BATS_SLOTS=N` (1 to 64) `check`, `build`, `test` and
   `run`'s build each hold one of N `flock` files in `BATS_LOCK_DIR`. `gen-pwa test` uses the
