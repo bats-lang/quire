@@ -820,7 +820,7 @@ class ListedFixtures(unittest.TestCase):
 
     def test_the_work_directory_defaults_to_the_cache(self):
         command, _ = self.module().listed_fixtures(['a'], '/r', {'XDG_CACHE_HOME': '/cache'}, self.bats(''))
-        self.assertEqual(command[4:8], ['--work', '/cache/quire-static', '--memo', '/cache/quire-static/memo'])
+        self.assertEqual(command[3:7], ['--work', '/cache/quire-static', '--memo', '/cache/quire-static/memo'])
 
     def test_no_fixture_is_an_empty_list(self):
         self.assertEqual(self.module().listed_fixtures(['a'], '/r', {}, self.bats(''))[1], [])
@@ -832,7 +832,7 @@ class ListedFixtures(unittest.TestCase):
     def test_a_failing_bats_is_refused_with_its_words(self):
         with self.assertRaises(RuntimeError) as raised:
             self.module().listed_fixtures(['a'], '/r', {}, self.bats('accept/x\n', 2, 'usage'))
-        self.assertIn('status 2: usage', str(raised.exception))
+        self.assertIn('failed (status 2): usage', str(raised.exception))
 
     def test_a_missing_bats_is_refused(self):
         def run(command, **_):
