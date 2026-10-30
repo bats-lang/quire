@@ -260,8 +260,10 @@ Read the cause from the PR timeline first: the minutes between the two events (a
 failed job of the group's run (`failure` in `check`). A removal with another cause is a ticket of its own.
 
 The static groups (`tests/groups.json`) are balanced by measured time (#618):
-every group pays the app's cold check and then its members (a reject is
-seconds, an accept a minute or more). A new fixture goes in the group with the
+`build` pays the app's cold check once, and every group that needs the compiler
+starts from the `build/` it made (keyword: checked app, #974), so a group pays
+its members (a reject is seconds, an accept a minute or more) and what bats
+checks again of that `build/`. A new fixture goes in the group with the
 least member time; `scripts/ci-groups.py` fails a spec or fixture in no group
 (or two), so a new one that is not in a group fails CI instead of never
 running.
@@ -356,7 +358,8 @@ each kind selects) and prints each path's reason in its summary. Rules:
   proved: a spec that builds a path from pieces is not seen.
 * The rule is Python in `scripts/` because it runs in the plan job, before any
   compiler exists.
-* **`build` and `android` run for every PR, by decision (#656).** The plan has no
+* **The plan never skips `build` or `android`, by decision (#656).** `build` runs for every
+  PR, and `android` for every PR whose app passed its check. The plan has no
   entry for them and they read none, so a missing or malformed entry cannot
   skip them. `android` is a call of pwa's reusable workflow, and a skipped
   caller starts none of that workflow's jobs: the required contexts
@@ -365,8 +368,11 @@ each kind selects) and prints each path's reason in its summary. Rules:
   skipped by a condition reports success, but "avoid requiring workflows that
   can be skipped"; community discussion 29825 has the nested context left
   unfulfilled). `android` needs the `build` artifact, so `build` runs too.
-  Skipping them waits for the required checks to be `check` alone, and for
-  `check` to need `android` (today it needs `plan`, `build`, `static` and
+  Its one `if` is `needs.build.outputs.app == 'success'` (keyword: checked app, #974):
+  when the app's check failed, `build` uploaded nothing for it, and the contexts
+  it leaves unreported hold nothing back, because `check`, the required status,
+  fails in that run. Letting the plan skip them waits for the required checks to be `check` alone, and for
+  `check` to need `android` (today it needs `plan`, `queue`, `build`, `static` and
   `e2e`; only `play-internal` needs `android`), a change of the branch
   protection that is an admin's;
   tested: `Workflow` in `tests/static/affected_test.py`.
@@ -378,7 +384,7 @@ each kind selects) and prints each path's reason in its summary. Rules:
   `android` need them and are skipped with them. `check` is skipped, which a required check
   counts as passed, so it is reported, not missing; the draft cannot merge in any case, and
   the ready run reports every context (`android / ...` included, which #656 keeps unskipped
-  for a ready PR). Push, `workflow_dispatch`, `schedule` and `merge_group` are unchanged.
+  for a ready PR whose app passes its check, #974). Push, `workflow_dispatch`, `schedule` and `merge_group` are unchanged.
   Libraries: the condition is repository-prototype#525, their callers' types the tickets of #939.
 * **A push of a commit the merge queue passed skips the static and e2e groups (#882, keyword:
   queue-passed; pwa#215).** `check.yml`'s `queue` job calls pwa's `queue-passed` action by commit

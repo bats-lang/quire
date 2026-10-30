@@ -154,10 +154,11 @@ jobs:
           name: build
           path: build
 
-      # The app checked once, first: a module that fails `bats check` fails
-      # this job, in about a minute, and the static groups (which need this
-      # job) never start; they take this build/ instead of each checking the
-      # app again (keyword: checked app, #974). run.sh's `check` member is the
+      # The app checked once, first: a module that fails `bats check` ends
+      # this step, in about a minute; every later step of this job is skipped
+      # and the static groups, e2e and android (which need this job) do not
+      # start. The groups take this build/ instead of each checking the app
+      # again (keyword: checked app, #974). run.sh's `check` member is the
       # copy of the checkout the groups work in and its `bats check`
       - name: Restore the checked app's cache
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
@@ -672,16 +673,18 @@ jobs:
           results: ${{ toJSON(needs) }}
 
   # The Android app (AAB and APK), built by the pwa package's workflow and
-  # signed with this repository's secrets; see ANDROID.md. Every run, a
-  # branch's or a pull request's too, builds and signs them the same way
-  # and checks that both are signed with the release key; only a push to
-  # main uploads them as downloadable artifacts.
+  # signed with this repository's secrets; see ANDROID.md. Every run whose
+  # app passed its check, a branch's or a pull request's too, builds and
+  # signs them the same way and checks that both are signed with the release
+  # key; only a push to main uploads them as downloadable artifacts.
   #
-  # It reads nothing of the plan and has no `if`: a skipped job that calls a
-  # reusable workflow starts none of that workflow's jobs, so the required
-  # contexts `android / build-android` and `android / smoke-test` would never
-  # be reported and the pull request would wait for them for ever (GitHub:
-  # "avoid requiring workflows that can be skipped"; #656)
+  # It reads nothing of the plan, and its one `if` is the app's check, never
+  # the plan: a skipped job that calls a reusable workflow starts none of that
+  # workflow's jobs, so the required contexts `android / build-android` and
+  # `android / smoke-test` would never be reported and the pull request would
+  # wait for them for ever (GitHub: "avoid requiring workflows that can be
+  # skipped"; #656). When the app's check failed, that wait holds nothing back:
+  # `check`, the required status, fails in the same run (keyword: checked app, #974)
   android:
     needs: build
     # not when the app's check failed: `build` is a success then (its step
