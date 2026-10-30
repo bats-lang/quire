@@ -6,7 +6,8 @@
 
 import { test as base, expect } from '@playwright/test';
 import { stallWatch } from './stall-capture.js';
-import { pageState } from './evidence.js';
+import { pageDom, pageState } from './evidence.js';
+import { keepHistory } from './page-history.js';
 import { MARGIN_PROJECTS, checkPageMargins } from './page-margins.js';
 import { keepRealMouse } from './helpers.js';
 
@@ -170,8 +171,16 @@ export const test = base.extend({
   // in the phone-sized projects: no spec has to remember to
   page: async ({ page }, use, testInfo) => {
     refuseRawMouse(page);
+    // the page's console, errors and requests, kept in node for a red's capture (#1008)
+    const history = keepHistory(page);
     if (onAndroid(testInfo)) await androidInsets(page);
     await use(page);
+    // a test that did not end as expected keeps the page's DOM and its console, errors and requests beside Playwright's trace and
+    // screenshot (#1008, keyword: failure capture): always attached, a reason as the text when the page cannot answer
+    if (testInfo.status && !['passed', 'skipped'].includes(testInfo.status) && testInfo.status !== testInfo.expectedStatus) {
+      await testInfo.attach('page-dom', { body: await pageDom(page), contentType: 'text/html' }).catch(() => {});
+      await testInfo.attach('page-history', { body: JSON.stringify(history.snapshot(), null, 2), contentType: 'application/json' }).catch(() => {});
+    }
     // a test that did not end as expected leaves what the page shows (a banner or toast over a control, #556; the focus,
     // the scroll, the dialogs): the fixture's page is closed before the stall watch's teardown, so it is read here
     if (testInfo.status && !['passed', 'skipped'].includes(testInfo.status) && testInfo.status !== testInfo.expectedStatus && !page.isClosed()) {
