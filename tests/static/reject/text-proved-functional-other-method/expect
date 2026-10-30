@@ -1,0 +1,9 @@
+function _static_other_method
+line 5
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(INFLATES); S2Eapp(S2Ecst(inflate_stored); ), S2Evar(compressed(_)), S2EVar(_))].
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(inflate_deflated); )
+The needed term is: S2Eapp(S2Ecst(inflate_stored); )
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(INFLATES); S2Eapp(S2Ecst(inflate_deflated); ), S2Evar(compressed(_)), S2Evar(second(_)))
+The needed term is: S2Eapp(S2Ecst(INFLATES); S2Eapp(S2Ecst(inflate_stored); ), S2Evar(compressed(_)), S2EVar(_->S2Evar(second(_))))

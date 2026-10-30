@@ -502,6 +502,9 @@
     ],
     "mutation-text-codes": [
       "mutation/text_codes"
+    ],
+    "mutation-text-proved": [
+      "mutation/text_proved"
     ]
   }
 }

@@ -17,3 +17,4 @@ src/wordrec.bats 1
 src/text_relation.bats 4
 src/text_labels.bats 5
 src/text_codes.bats
+src/text_proved.bats
