@@ -284,6 +284,7 @@ primplement encodes_decodes {spec_list}{kind}{record_value}{octets} (encoded) =
     in DECODES_body(magic, header, chains_seq(chains), FIN_body(specn, count, senc_canon(count, TAILOF_refl(), specs_ok, senc), count, senc_sdec(count, senc), JOIN_ok())) end
 
 
+(* fixture: a-record-read-at-run-time *)
 (* A record read, at run time *)
 #pub datavtype recread(recres, specs) =
   | {spec_list:specs}{format_version,least_version:int | 0 <= format_version; format_version < 256; 0 <= least_version; least_version <= READER}{vals:gvals}{kept_extras:extras}{missing:absent}{spec_count,value_count,extra_count:nat}
@@ -320,6 +321,7 @@ fn _not_quire {spec_list:specs}{kind:int}{octets,magic_bytes,rest:bytes}{rest_le
   val () = blist_free(rest)
 in (DECODES_magic(magic_take, magic_diff) | RR_notquire()) end
 
+(* fixture: a-record-read-with-the-proof *)
 (* A record read, with the proof of what it comes to *)
 #pub fun record_read {spec_list:specs}{kind:int | 0 <= kind; kind < 256}{spec_count:nat}{octets:bytes}{byte_count:nat}
   (specs: !specsv(spec_list, spec_count), kind: int kind, list: blist(octets, byte_count))

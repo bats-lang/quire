@@ -194,12 +194,10 @@ the conflict); `src/web_request.bats` holds the requests it shares with
 ## Every outcome is said, and the unexpected as such (#334)
 
 A Google error that ended the consent screen once reached quire as the reader
-backing out. Now:
+backing out. The rule that an error is an outcome of its own, never folded into
+another, and that what is not recognised is explicit, is pitboss's
+(`engineering.md`, "Failures and outcomes are said"). Now:
 
-* The plugin and bridge report every error and unexpected condition as an
-  outcome of its own, never folded into another; what they do not recognise is
-  an explicit `...Unexpected` constructor carrying the case and the answer as
-  bridge's JS wrote it.
 * Quire matches every answer with `case+` and handles every constructor
   visibly: `AuthorizeRefused` by each `google_status` (`_refusal_result`), a
   cancel the reader made is noted on the Sync screen, every other end of a
