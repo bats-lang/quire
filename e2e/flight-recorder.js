@@ -11,13 +11,12 @@ import { execFile, spawn } from 'node:child_process';
 import { createGunzip, createGzip } from 'node:zlib';
 import { createReadStream, existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
-import { createWriteStream, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createWriteStream, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import * as tracefs from './flight-tracefs.js';
-import { HOLD_PREFIX } from './flight-tracefs.js';
 
 export const INSTANCE_VARIABLE = 'QUIRE_FLIGHT_INSTANCE';
 const ROOT_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'flight-tracefs.js');
@@ -67,53 +66,41 @@ export async function startKernel(env = process.env) {
   return started;
 }
 
-export async function stopKernel(started) {
+export async function stopKernel(started, env = process.env) {
   if (!started || !started.instance) return null;
-  return asRoot('stop', { instance: started.instance });
+  return asRoot('stop', { instance: started.instance, dir: env[OUT_VARIABLE] });
 }
 
-let holds = 0;
 export const nowSeconds = () => Number(process.hrtime.bigint()) / 1e9; // CLOCK_MONOTONIC, the clock of the ring
-// a ring that reaches the red ends no earlier than the red: the pause comes after it, and the snapshot's own process adds events. The slack is for the
-// clock reads that differ by a few thousand cycles, not for a ring left paused (that one ends seconds before the next red)
+// a ring that reaches the red ends no earlier than the red: the snapshot is taken after it, and the snapshot's own process adds events. The slack is for the
+// clock reads that differ by a few thousand cycles
 export const REACH_SLACK_S = 0.5;
 
 /**
- * Pauses the kernel ring, writes its last lines to `out` (gzipped) and records again, whatever the outcome (ring hold, flight-tracefs.js):
- * a record on disk needs the ring no longer, and a ring left paused hides every later red (the four EVIDENCE MISSING of quire#575's reading-tools job).
- * The answer has `reach` (the red's time, the last event's time, whether the file reaches the red; a hold of another capture explains a gap).
- * `resume` is the old form's third argument, kept for one release and ignored: the ring always records again.
+ * Writes the kernel ring's record to `out` (gzipped): a snapshot of the live ring, which goes on recording (ring snapshot, flight-tracefs.js). A capture
+ * stops nothing, so a freeze that begins in another worker while this one reads is in the ring.
+ * The answer has `reach` (the red's time, the last event's time, whether the file reaches the red).
+ * QUIRE_FLIGHT_LOCK_MOST_MS: the spec's way to see a lock that is not had without waiting its whole limit; nothing else sets it.
  */
-export async function keepKernel(out, env = process.env, resume = false) {
+export async function keepKernel(out, env = process.env) {
   const instance = env[INSTANCE_VARIABLE];
   if (!instance) return { unavailable: wanted(env) ? 'the kernel ring did not start (no tracefs, or sudo refused: see the run\'s first lines)' : 'not recording (neither CI nor QUIRE_FLIGHT=1, or QUIRE_NO_RECORDER)' };
   const dir = env[OUT_VARIABLE];
-  holds += 1;
-  const holder = `${process.pid}-${holds}`;
+  const lockMost = Number(env.QUIRE_FLIGHT_LOCK_MOST_MS) > 0 ? Number(env.QUIRE_FLIGHT_LOCK_MOST_MS) : null;
   const redAt = nowSeconds();
   let kept;
-  try { kept = await asRoot('snapshot', { instance, out, dir, holder }); } catch (error) { kept = { error: String((error && error.message) || error) }; }
-  // the root side releases in its own finally; a root process killed at its limit cannot, so the hold is ended here as well (ending twice is harmless)
-  const released = await asRoot('release', { instance, dir, holder }).catch((error) => ({ error: String((error && error.message) || error) }));
-  if (released.error) kept.releaseError = released.error;
+  try { kept = await asRoot('snapshot', { instance, out, dir, ...(lockMost ? { lockMost } : {}) }); } catch (error) { kept = { error: String((error && error.message) || error) }; }
   if (kept.file) {
     try { kept.bytes = statSync(kept.file).size; } catch (gone) { /* kept.file is not there */ }
-    const others = kept.others || [];
     const lastAt = typeof kept.lastAt === 'number' ? kept.lastAt : null;
-    kept.reach = { redAt, lastAt, others, reaches: lastAt !== null && (lastAt >= redAt - REACH_SLACK_S || others.length > 0) };
-    if (!kept.reach.reaches) kept.reach.why = lastAt === null ? 'the file holds no event' : `the last event is ${(redAt - lastAt).toFixed(1)} s before the red and no other capture held the ring`;
+    kept.reach = { redAt, lastAt, reaches: lastAt !== null && lastAt >= redAt - REACH_SLACK_S };
+    if (!kept.reach.reaches) kept.reach.why = lastAt === null ? 'the snapshot holds no event since the capture before it' : `the last event is ${(redAt - lastAt).toFixed(1)} s before the red`;
     try { writeFileSync(`${out}.reach.json`, JSON.stringify(kept.reach)); kept.reachFile = `${out}.reach.json`; } catch (error) { /* the directory is gone */ }
   }
   return kept;
 }
 
 export const OUT_VARIABLE = 'QUIRE_FLIGHT_OUT';
-const holderOf = (holder) => holder || `${process.pid}-manual`;
-/** The file that says this process holds the ring paused (the monitor reads the holders of the output directory). */
-export function keptMarker(env = process.env, holder) { return env[OUT_VARIABLE] ? join(env[OUT_VARIABLE], `${HOLD_PREFIX}${holderOf(holder)}`) : null; }
-export function markKept(env = process.env, holder) { tracefs.hold({ dir: env[OUT_VARIABLE], holder: holderOf(holder) }); }
-export function unmarkKept(env = process.env, holder) { const file = keptMarker(env, holder); if (file) { try { unlinkSync(file); } catch (error) { /* it was not there */ } } }
-
 const within = (promise, ms) => new Promise((resolve) => {
   const timer = setTimeout(() => resolve({ timedOut: true }), ms);
   promise.then((value) => { clearTimeout(timer); resolve({ value }); }, (error) => { clearTimeout(timer); resolve({ error: String((error && error.message) || error) }); });
@@ -171,12 +158,9 @@ export async function keepBrowserTrace(browser, out) {
   } catch (error) { return { unavailable: `reading the trace failed: ${String((error && error.message) || error).slice(0, 300)}` }; }
 }
 
-/**
- * Both records for one capture, kernel first (its ring is paused at once); each says why when it cannot.
- * `resume` (the old form's fourth argument) is ignored: after every capture, a freeze or a crash or a failure, both rings record again.
- */
-export async function keepBoth(browser, pathFor, env = process.env, resume = false) {
-  const kernel = await keepKernel(pathFor('kernel.txt.gz'), env, resume);
+/** Both records for one capture, kernel first (its snapshot is taken at once); each says why when it cannot. Neither ring stops. */
+export async function keepBoth(browser, pathFor, env = process.env) {
+  const kernel = await keepKernel(pathFor('kernel.txt.gz'), env);
   const browserTrace = await keepBrowserTrace(browser, pathFor('browser-trace.json.gz'));
   // the trace starts again for the tests that follow (the first record is kept; a later failure has a record of its own)
   if (typeof browser.isConnected === 'function' && browser.isConnected()) { traces.delete(browser); startBrowserTrace(browser, env); }
@@ -193,6 +177,9 @@ export function serialRun(argv = process.argv) {
 
 /** Memory of a process (root reads /proc/<pid>/mem): { address, bytes: hex } or { address, error }. */
 export function readMemory(pid, address, length = 64) { return asRoot('readmem', { pid, address, length }); }
+
+/** The system call the main thread of a process is in (root reads /proc/<pid>/task/<pid>/syscall): { syscall: '202 0xaddress 0x189 ...' } or { error }. */
+export function readSyscall(pid) { return asRoot('readsyscall', { pid }); }
 
 // FUTEX_WAIT 0, WAKE 1, REQUEUE 3, WAKE_OP 5, WAIT_BITSET 9, WAKE_BITSET 10 (flags 0x80 private and 0x100 realtime are masked off)
 const FUTEX_WAITS = new Set([0, 9, 11, 13]);
@@ -321,16 +308,6 @@ export function stopWatchdog(started) {
   if (started && started.child) { started.stopping = true; try { started.child.kill('SIGTERM'); } catch (gone) { /* already gone */ } }
 }
 
-/**
- * Ends this process's hold of the kernel ring (`holder`, default the one `markKept` makes) and starts it recording again unless another capture
- * still holds it. Every capture does this itself; a test that paused the ring by hand uses it.
- */
-export async function resumeKernel(env = process.env, holder) {
-  const instance = env[INSTANCE_VARIABLE];
-  if (!instance) { unmarkKept(env, holder); return { unavailable: 'no ring' }; }
-  return asRoot('release', { instance, dir: env[OUT_VARIABLE], holder: holderOf(holder) });
-}
-
 /** The ring's readings: { on, written } (the heartbeat), and the probe of the preflight. */
 export function ringStats(env = process.env) {
   const instance = env[INSTANCE_VARIABLE];
@@ -375,6 +352,8 @@ export function pendingRequests(text) {
 
 /** Stops the recording of a ring by its instance path (what a fault in the run does; the spec's way to kill a ring mid-run). */
 export function pauseInstance(instance) { return asRoot('pause', { instance }); }
+/** Starts a ring recording again after `pauseInstance` (the cost measurement before the tests; a capture never pauses a ring). */
+export function resumeInstance(instance) { return asRoot('resume', { instance }); }
 /** Removes a ring by its instance path (the spec's way to make the red-time snapshot fail). */
 export function removeInstance(instance) { return asRoot('stop', { instance }); }
 /** Disables every event of the ring while it stays on (a test's: the ring then takes no events). */

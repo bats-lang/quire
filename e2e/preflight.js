@@ -16,19 +16,18 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync
 import { request } from 'node:https';
 import { join } from 'node:path';
 import { capabilities } from './evidence.js';
-import { INSTANCE_VARIABLE, OUT_VARIABLE, WATCHDOG_DIRECTORY, markKept, pauseInstance, resumeKernel, ringStats, serialRun, settleOutstanding, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
-import { HEARTBEAT_STALE_MS, stoppedUnheld } from './flight-watchdog.js';
-import { LOCK_FAILED_PREFIX, holdersIn, lockFailuresIn } from './flight-tracefs.js';
+import { INSTANCE_VARIABLE, OUT_VARIABLE, WATCHDOG_DIRECTORY, pauseInstance, resumeInstance, ringStats, serialRun, settleOutstanding, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
+import { HEARTBEAT_STALE_MS } from './flight-watchdog.js';
+import { LOCK_FAILED_PREFIX, lockFailuresIn } from './flight-tracefs.js';
 
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 const FIRST_HEARTBEAT_MS = 20000;
 const MONITOR_EVERY_MS = 2000;
+export const COST_FILE = 'cost.json';
 const RING_QUIET_MS = 60000;
 // The specs' way to see an end condition without waiting for its real limit (evidence-real.spec.js; nothing else sets these): the limit, in ms,
 // that the variable names, in place of the constant. The condition and the code that ends the run are the real ones.
 const limit = (env, name, fallback) => (Number(env[name]) > 0 ? Number(env[name]) : fallback);
-// a capture reads a ring in seconds (6 s for 600 MB) and its sudo call is killed at 60 s: a hold older than twice that is a capture that died holding the ring
-export const HOLD_MOST_MS = 120000;
 
 export class PreflightFailed extends Error {
   constructor(part, why) { super(`PREFLIGHT FAILED: ${part}: ${why}`); this.part = part; }
@@ -56,7 +55,9 @@ export function heartbeats(out) {
 
 /**
  * What the recording costs, measured in this job's log at its start (`[cost]`, every job and both runs): the same loop of page cycles (nothing but
- * IPC, the worst case for a recorder) with the rings off (the kernel ring paused under a hold, no trace) and on (both), the least of the rounds of each.
+ * IPC, the worst case for a recorder) with the rings off (the kernel ring paused, no trace) and on (both), the least of the rounds of each. It runs before the
+ * first test, when no worker records, so the pause hides nothing: a capture never pauses the ring (ring snapshot). It writes `cost.json` in the output
+ * directory, which the spec of the cost reads.
  * One measurement per run is enough because the cost is a property of this runner, this Chromium and these rings, not of a spec; QUIRE_NO_COST=1 skips it
  * (the nested runs of the real-path tests). It never fails the run: a number is a report.
  */
@@ -81,13 +82,13 @@ export async function measureCost(env = process.env, launchOptions = null, { rou
     const on = [];
     for (let round = 0; round < rounds; round += 1) {
       const plain = await launch();
-      markKept(env, 'cost');
-      try { await pauseInstance(env[INSTANCE_VARIABLE]); off.push(await loop(plain)); } finally { await resumeKernel(env, 'cost'); await plain.close(); }
+      try { await pauseInstance(env[INSTANCE_VARIABLE]); off.push(await loop(plain)); } finally { await resumeInstance(env[INSTANCE_VARIABLE]); await plain.close(); }
       const traced = await launch();
       try { await startBrowserTrace(traced, env); on.push(await loop(traced)); } finally { await traced.close(); }
     }
     const least = (list) => Math.min(...list);
     console.error(`[cost] ${cycles} page cycles${serialRun() ? ' (the @serial run)' : ''}: ${Math.round(least(off))} ms with the rings off, ${Math.round(least(on))} ms with both on (x${(least(on) / least(off)).toFixed(2)}); rounds off ${off.map(Math.round)}, on ${on.map(Math.round)}`);
+    if (env[OUT_VARIABLE]) writeFileSync(join(env[OUT_VARIABLE], COST_FILE), JSON.stringify({ cycles, off, on, ratio: least(on) / least(off) }));
     return { off, on };
   } catch (error) {
     console.error(`[cost] not measured: ${String((error && error.message) || error).split('\n')[0]}`);
@@ -103,7 +104,7 @@ export async function preflight(env = process.env, options = {}) {
   const started = {};
   try { return await prove(env, options, started); } catch (error) {
     stopWatchdog(started.watchdog);
-    await stopKernel(started.kernel);
+    await stopKernel(started.kernel, env);
     throw error;
   }
 }
@@ -130,6 +131,12 @@ async function prove(env, { cwd = process.cwd(), version = '149.0.7827.55', laun
   const kernel = await startKernel(env);
   started.kernel = kernel;
   if (!kernel || kernel.error) throw new PreflightFailed('kernel ring', (kernel && kernel.error) || 'did not start');
+  // a capture reads a snapshot of the ring and never stops it (ring snapshot): a kernel without tracefs `snapshot` cannot give one. The answer is
+  // in capabilities.json, written now so that the first job that fails here still says it
+  if (!kernel.snapshot || !kernel.snapshot.available) {
+    writeFileSync(join(out, 'capabilities.json'), JSON.stringify({ kernelSnapshot: kernel.snapshot || { available: false, why: 'not answered' } }, null, 2));
+    throw new PreflightFailed('kernel ring', `snapshot: ${(kernel.snapshot && kernel.snapshot.why) || 'not answered'}`);
+  }
   if (kernel.missing && kernel.missing.length) throw new PreflightFailed('kernel ring', `${kernel.missing.join('; ')} could not be set (a kernel without these events cannot answer the question)`);
   // recording: this process is in the ring's tree, so what it does (a few reads, a timer) must add events
   const before = await ringStats(env);
@@ -157,9 +164,9 @@ async function prove(env, { cwd = process.cwd(), version = '149.0.7827.55', laun
   mkdirSync(traceDirectory, { recursive: true });
   const found = await capabilities({ run: (command, args, env) => run(command, args, 20000, env), fetchHead: head, version, traceDirectory });
   rmSync(traceDirectory, { recursive: true, force: true }); // rr's recording of `true` is not evidence
-  writeFileSync(join(out, 'capabilities.json'), JSON.stringify(found, null, 2));
+  writeFileSync(join(out, 'capabilities.json'), JSON.stringify({ ...found, kernelSnapshot: kernel.snapshot }, null, 2));
   console.error(`[capabilities] perf cycles available: ${found.counters.available}; rr: ${found.rr.installed ? `${found.rr.version}, record ${found.rr.record.works ? 'WORKS' : `refused (${found.rr.record.text.split('\n').slice(-1)[0].slice(0, 160)})`}` : 'not installed'}; symbols: ${JSON.stringify(found.symbols)}`);
-  console.error(`[preflight] ok${serialRun() ? ' (the @serial run)' : ''}: sudo, ${out} written and read back, ring ${kernel.instance} recording (${(kernel.skipped || []).length} optional events skipped), watchdog ${first.pid} beating; perf cycles ${found.counters.available ? 'AVAILABLE' : 'unsupported'}; rr ${found.rr.installed ? (found.rr.record.works ? 'WORKS' : 'refused') : 'not installed'}; symbols ${JSON.stringify(found.symbols)}`);
+  console.error(`[preflight] ok${serialRun() ? ' (the @serial run)' : ''}: sudo, ${out} written and read back, ring ${kernel.instance} recording with a snapshot to read (${(kernel.skipped || []).length} optional events skipped), watchdog ${first.pid} beating; perf cycles ${found.counters.available ? 'AVAILABLE' : 'unsupported'}; rr ${found.rr.installed ? (found.rr.record.works ? 'WORKS' : 'refused') : 'not installed'}; symbols ${JSON.stringify(found.symbols)}`);
   for (const notice of found.notice) console.error(`::notice title=capabilities changed::${notice}`);
   await measureCost(env, launchOptions);
   return { kernel, watchdog, out };
@@ -183,14 +190,14 @@ export function startMonitor(started, env = process.env) {
   let lastWritten = null;
   let lastMoved = Date.now();
   let unreadable = 0;
-  const seen = { checks: 0, beats: new Set(), holdsMost: 0, lastRing: null, lastScans: null };
-  const summary = () => `${seen.checks} checks in ${Math.round((Date.now() - began) / 1000)} s; ${seen.beats.size} distinct heartbeats of the watchdog read (last: ${seen.lastScans === null ? 'none' : `${seen.lastScans} scans`}); ${seen.lastRing === null ? 'no reading of the ring was made' : `the ring had written ${seen.lastRing} events at the last reading`}; ring holds seen at once: ${seen.holdsMost}`;
+  const seen = { checks: 0, beats: new Set(), lastRing: null, lastScans: null };
+  const summary = () => `${seen.checks} checks in ${Math.round((Date.now() - began) / 1000)} s; ${seen.beats.size} distinct heartbeats of the watchdog read (last: ${seen.lastScans === null ? 'none' : `${seen.lastScans} scans`}); ${seen.lastRing === null ? 'no reading of the ring was made' : `the ring had written ${seen.lastRing} events at the last reading`}`;
   const die = (part, why) => { console.error(`[monitor] ended the run: ${summary()}`); return fatal(part, why, out); };
-  console.error(`[monitor] started (${serialRun() ? 'the @serial run' : 'the run'}): every ${MONITOR_EVERY_MS} ms the watchdog ${started.watchdog.child ? started.watchdog.child.pid : '?'} (child and heartbeat), the ring ${started.kernel.instance} (on, taking events, held paused only by a capture that ends within ${HOLD_MOST_MS / 1000} s)`);
+  console.error(`[monitor] started (${serialRun() ? 'the @serial run' : 'the run'}): every ${MONITOR_EVERY_MS} ms the watchdog ${started.watchdog.child ? started.watchdog.child.pid : '?'} (child and heartbeat), the ring ${started.kernel.instance} (on, taking events: no capture stops it)`);
   const timer = setInterval(() => {
     seen.checks += 1;
     if (watchdog.exited && !watchdog.stopping) return die('watchdog', `exited during the run (code ${watchdog.exited.code}, signal ${watchdog.exited.signal})`);
-    // a capture that went without the ring lock (flight-tracefs.js, ring lock) may have crossed another's pause and resume: the ring is then not to be trusted
+    // a capture that went without the ring lock (flight-tracefs.js, ring lock) may have swapped the snapshot while another capture read it: its record is then not to be trusted
     const unlocked = lockFailuresIn(out);
     if (unlocked.length) return die('ring lock', `${unlocked[0].text} (${unlocked.length} record(s), files ${LOCK_FAILED_PREFIX}*)`);
     const beat = heartbeats(out).find((each) => each.file.startsWith(`heartbeat-${process.pid}-`));
@@ -202,14 +209,9 @@ export function startMonitor(started, env = process.env) {
     const ring = beat.ring || {};
     if (ring.error) return die('kernel ring', `unreadable by the watchdog: ${ring.error}`);
     if (ring.written !== undefined) seen.lastRing = ring.written;
-    // a ring paused by a capture is held by a file of that capture (ring hold); one held longer than a capture can take is a capture that died holding it
-    const holders = holdersIn(out);
-    seen.holdsMost = Math.max(seen.holdsMost, holders.length);
-    const stale = holders.find((each) => Number.isFinite(each.at) && Date.now() - each.at > HOLD_MOST_MS);
-    if (stale) return die('kernel ring', `held paused by ${stale.holder} for ${Math.round((Date.now() - stale.at) / 1000)} s: a capture that does not end (a capture takes seconds)`);
-    // the heartbeat read the state and the holders in one step (ring hold), so a pause that a capture made and ended between the heartbeat and this look is not a stop;
-    // judged by this look's own holders, a second capture that began and ended between two looks was taken for a ring nobody paused (quire#993, the first loaded run)
-    if (stoppedUnheld(beat)) return die('kernel ring', `stopped (tracing_on is ${ring.on}) and no capture paused it`);
+    // a capture never stops the ring (ring snapshot), so a ring that is not recording is the ring's failure; only a reading the watchdog made after the monitor
+    // began counts (the cost measurement before the first test pauses the ring, and a heartbeat made then may be the newest one read at the first check)
+    if (ring.on !== '1' && beat.at > began) return die('kernel ring', `stopped (tracing_on is ${ring.on}); no capture stops the ring`);
     if (ring.written !== lastWritten) { lastWritten = ring.written; lastMoved = Date.now(); }
     else if (ring.on === '1' && Date.now() - lastMoved > ringQuietMs) return die('kernel ring', `takes no events: ${ring.written} written, unchanged for ${Math.round((Date.now() - lastMoved) / 1000)} s`);
   }, MONITOR_EVERY_MS);
