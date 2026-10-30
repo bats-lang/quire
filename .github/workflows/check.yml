@@ -639,12 +639,14 @@ jobs:
       # renders (the static page shows only a spinner), is on the screen
       smoke-test-text: Import EPUB
       # then start it anew with a book (VIEW), as a file manager opens
-      # it, until its title is in the library; turn and recreate it, and
-      # open and share the book while it is open (VIEW, SEND): each
-      # intent's book handed to the page once (#247)
+      # it, until the book is open in the reader (a file handed to the app
+      # opens its book, #959, so its title is no longer on the screen: the
+      # text is the first chapter's heading, which only the open book shows);
+      # turn and recreate it, and open and share the book while it is open
+      # (VIEW, SEND): each intent's book handed to the page once (#247)
       smoke-share-file: android/smoke-share.epub
       smoke-share-type: application/epub+zip
-      smoke-share-text: Shared With Quire
+      smoke-share-text: Chapter 1
 
   # Every push to main that passed the whole check (the e2e groups and the
   # Android build and smoke test) goes to Google Play's internal testing
