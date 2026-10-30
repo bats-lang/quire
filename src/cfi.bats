@@ -481,6 +481,7 @@ and _resolve_element {l:agz}{n:pos}{cl:agz}{cn:pos}{size:nat}{until:nat | until 
        else if _has_id(data, attrs, cfi, until, value_start, value_end) then _resolve_list(data, children, name_offset, cfi, until, after)
        else @(WalkLookForId(), value_start))
 
+(* fixture: whether-a-walk-found-something-a *)
 (* Whether a walk found something (a place or an id to look for) *)
 fn _walk_found (kind: walk_kind): bool =
   case+ kind of

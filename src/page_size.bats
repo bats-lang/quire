@@ -46,4 +46,5 @@ implement page_width_rule (extent) =
   case+ extent of
   | RoundedDown() => "max-width:round(down,calc(100% - env(safe-area-inset-left) - env(safe-area-inset-right)),1px);"
 
+(* fixture: the-two-rules-above-are-all *)
 (* The two rules above are all this module holds *)

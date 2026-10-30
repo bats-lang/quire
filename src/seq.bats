@@ -62,6 +62,7 @@ and SQC(ckres, seqres) =
     SQC_bad_fail(ck_bad(tag, data, rest), sq_cut(pbad(tag, chunks), cause)) of SEQ(rest, sq_cut(chunks, cause))
 
 
+(* fixture: the-rest-after-a-chunk-is *)
 (* the rest after a chunk is shorter than the whole *)
 prfn _rest_shorter_ok {octets,tag,data,rest:bytes}{octets_size:nat}
   (read_proof: CK(octets, ck_ok(tag, data, rest)), whole: LEN(octets, octets_size))

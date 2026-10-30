@@ -1,0 +1,2 @@
+(* fixture: roundtrip *) 
+fn f

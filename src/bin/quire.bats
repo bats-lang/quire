@@ -626,6 +626,7 @@ fn _jumped (): void = let
   val () = _bars_down_for_jump()
 in ui_focus("page") end
 
+(* fixture: reader-acts-the-tap-in-the-middle *)
 (* reader acts: the tap in the middle, or the t key *)
 fn _chrome_toggle (): void = if !_chrome then _chrome_hide(ActMiddleTap()) else _chrome_show()
 

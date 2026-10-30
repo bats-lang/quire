@@ -8,7 +8,8 @@
  * Every second it writes `<out>/heartbeat-<root>-<pid>.json` (when it looked, what the ring has taken): the run's monitor
  * (preflight.js) fails the job when that stops, so a dead watchdog is not found by reading a log after a loss.
  * A renderer (or a process matching `match`) whose main thread has been in an untimed wait with no CPU used for `sustainMs` is
- * written out to `<out>/watchdog-<root>-<pid>-<n>.json`; a tick late by more than `gapMs` is kept in `host-stalls-*.json`.
+ * written out to `<out>/watchdog-<root>-<pid>-<n>.json`; a tick late by more than `gapMs` is kept in `host-stalls-*.json`, with what the
+ * machine was doing over it (pressure stall time, swap, major faults, direct reclaim: `activityOf`, quire#909).
  */
 
 import { execFile } from 'node:child_process';
@@ -16,8 +17,9 @@ import { chownSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,
 import { dirname, join, resolve as absolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as tracefs from './flight-tracefs.js';
-import { futexAnalysis } from './flight-recorder.js';
+import { futexAnalysis, nowSeconds } from './flight-recorder.js';
 import { fdPeers, fdTarget, parseBlocked, parseFutexSyscall } from './evidence.js';
+import { memoryReclaim } from './runner-load.js';
 
 export const SCAN_MS = 1000;
 export const SUSTAIN_MS = 10000;
@@ -27,7 +29,7 @@ export const CLOCK_JUMP_MS = 500;
 export const HEARTBEAT_STALE_MS = 6000;
 const STACK_MS = 15000;
 const RINGS_MOST = 3;       // reports that keep the ring (each is up to tens of MB); later ones keep the rest
-const RING_LINES = 600000;  // the events of earlier captures a watchdog report begins with, at most (the snapshot itself is whole)
+export const RING_LINES = tracefs.LINES_KEPT; // a report keeps the whole ring, not its tail: 600000 lines were 1.2 s under load and lost the wait (quire#993, keyword: ring reach)
 
 const text = (path) => { try { return readFileSync(path, 'utf8'); } catch (error) { return ''; } };
 
@@ -111,6 +113,61 @@ export function stealMs(proc = '/proc') {
   return line ? Number(line.trim().split(/\s+/)[8] || 0) * 10 : 0;
 }
 
+/**
+ * What the kernel accumulated, read from `proc` (quire#909, keyword: host-stall): the `total=` microseconds of `some` and `full` of
+ * /proc/pressure/{memory,io,cpu} (PSI, kernel 4.20 or later with CONFIG_PSI; a kernel before 5.13 has no `full` line for cpu), and from
+ * /proc/vmstat the swap-ins and -outs, the major faults and the direct reclaims (`allocstall_*`: a task that had to free memory itself
+ * because the allocation found none). A source that cannot be read is the text `not available: why`, never an exception.
+ */
+export function activityOf(proc = '/proc') {
+  const pressure = {};
+  for (const resource of ['memory', 'io', 'cpu']) {
+    try {
+      const found = {};
+      for (const line of readFileSync(`${proc}/pressure/${resource}`, 'utf8').trim().split('\n')) {
+        const [kind, ...fields] = line.trim().split(/\s+/);
+        const total = fields.find((field) => field.startsWith('total='));
+        if (total && /^\d+$/.test(total.slice(6))) found[kind] = Number(total.slice(6));
+      }
+      if (found.some === undefined) throw new Error('no "some" line with total=');
+      pressure[resource] = { some: found.some, full: found.full === undefined ? null : found.full };
+    } catch (error) { pressure[resource] = `not available: ${error && error.code ? error.code : String(error && error.message || error)}`; }
+  }
+  let vmstat;
+  try {
+    vmstat = {};
+    for (const line of readFileSync(`${proc}/vmstat`, 'utf8').split('\n')) {
+      const [name, value] = line.trim().split(/\s+/);
+      if (/^(pswpin|pswpout|pgmajfault|allocstall_.*)$/.test(name) && /^\d+$/.test(value)) vmstat[name] = Number(value);
+    }
+    if (vmstat.pgmajfault === undefined) throw new Error('no pgmajfault line');
+  } catch (error) { vmstat = `not available: ${error && error.code ? error.code : String(error && error.message || error)}`; }
+  return { steal: stealMs(proc), pressure, vmstat };
+}
+
+/** What `after` accumulated over `before` (both from `activityOf`): microseconds of pressure and the vmstat counters' change. */
+export function activityDuring(before, after) {
+  const pressureUs = {};
+  for (const resource of ['memory', 'io', 'cpu']) {
+    const was = before.pressure[resource];
+    const now = after.pressure[resource];
+    if (typeof was === 'string' || typeof now === 'string') pressureUs[resource] = typeof now === 'string' ? now : was;
+    else pressureUs[resource] = { some: now.some - was.some, full: now.full === null || was.full === null ? null : now.full - was.full };
+  }
+  let vmstat;
+  if (typeof before.vmstat === 'string' || typeof after.vmstat === 'string') vmstat = typeof after.vmstat === 'string' ? after.vmstat : before.vmstat;
+  else vmstat = Object.fromEntries(Object.keys(after.vmstat).filter((name) => name in before.vmstat).map((name) => [name, after.vmstat[name] - before.vmstat[name]]));
+  return { stealMsDuring: after.steal - before.steal, pressureDuringUs: pressureUs, vmstatDuring: vmstat };
+}
+
+/** The sentence that goes with a stall: memory reclaim when the memory pressure (some) covers most of the gap, else what was and was not seen. */
+export function stallReading(gapMs, during) {
+  const memory = during.pressureDuringUs.memory;
+  if (typeof memory === 'string') return `memory pressure ${memory}`;
+  if (memoryReclaim(gapMs, memory.some)) return `memory reclaim: tasks were stalled on memory for ${Math.round(memory.some / 1000)} ms of the ${gapMs} ms gap`;
+  return `memory pressure stalled tasks for ${Math.round(memory.some / 1000)} ms of the ${gapMs} ms gap, not most of it`;
+}
+
 const run = (command, args, ms) => new Promise((resolve) => {
   execFile(command, args, { timeout: ms, killSignal: 'SIGKILL', maxBuffer: 4 << 20, encoding: 'utf8' }, (error, stdout, stderr) => resolve({ ok: !error, stdout: stdout || '', stderr: stderr || '', error: error ? String(error.message).slice(0, 200) : undefined }));
 });
@@ -124,7 +181,8 @@ export class Watchdog {
     this.ownFailures = [];      // the first 100 paths that could not be given to the owner (owner)
     this.failedPaths = new Set(); // every such path, so each is logged once
     this.match = new RegExp(match || '--type=renderer\\b');
-    this.seen = new Map();      // pid -> { since, ticks }
+    this.seen = new Map();      // pid -> { since, ticks, began } (began: the bound on the wait's entry in the ring's clock, ring reach)
+    this.lastScan = null;       // the ring's clock at the start of the scan before this one (ring reach)
     this.reported = new Set();
     this.stalls = [];
     this.clockJumps = [];
@@ -133,7 +191,7 @@ export class Watchdog {
     this.scans = 0;
     this.lastTick = null;
     this.lastWall = null;
-    this.lastSteal = stealMs(proc);
+    this.lastActivity = activityOf(proc);   // read at every tick, so a stall is compared with the tick before it (quire#909)
     const top = topMissing(out);
     mkdirSync(out, { recursive: true });
     this.own(top || out);
@@ -176,12 +234,13 @@ export class Watchdog {
    * is a stall of the machine or of this process; a wall clock that moved differently from the monotonic one is a jump of the clock.
    */
   tick(now, wall = Date.now()) {
+    const activity = activityOf(this.proc);
     if (this.lastTick !== null) {
       if (now - this.lastTick - TICK_MS > this.gapMs) {
-        const steal = stealMs(this.proc);
-        this.stalls.push({ at: new Date().toISOString(), gapMs: now - this.lastTick - TICK_MS, stealMsDuring: steal - this.lastSteal });
+        const during = activityDuring(this.lastActivity, activity);
+        const gapMs = now - this.lastTick - TICK_MS;
+        this.stalls.push({ at: new Date().toISOString(), gapMs, ...during, reading: stallReading(gapMs, during) });
         if (this.stalls.length > 100) this.stalls.shift();
-        this.lastSteal = steal;
         try { writeFileSync(join(this.out, `host-stalls-${this.root}-${process.pid}.json`), JSON.stringify(this.stalls, null, 2)); this.written = true; } catch (error) { /* the output directory is gone */ }
         this.own();
       }
@@ -194,6 +253,7 @@ export class Watchdog {
     }
     this.lastTick = now;
     this.lastWall = wall;
+    this.lastActivity = activity;
   }
 
   /** What the monitor reads: when this looked last, what the ring has taken, and what was seen. */
@@ -217,6 +277,8 @@ export class Watchdog {
 
   /** One look at the tree; resolves with the reports it wrote (their file names). */
   async scan(now) {
+    const before = this.lastScan;
+    this.lastScan = nowSeconds();
     const table = processTable(this.proc);
     const below = tree(table, this.root);
     const written = [];
@@ -228,16 +290,17 @@ export class Watchdog {
       if (!blocked || !blocked.untimed) { this.seen.delete(pid); continue; }
       const seen = this.seen.get(pid);
       const ticks = mainThreadTicks(pid, this.proc) ?? entry.ticks;
-      if (!seen || seen.ticks !== ticks) { this.seen.set(pid, { since: now, ticks }); continue; }
+      // the wait was entered after the scan before this one (which did not see the thread in it, or saw it use CPU) and before this read of its syscall
+      if (!seen || seen.ticks !== ticks) { this.seen.set(pid, { since: now, ticks, began: { notBefore: before, notAfter: nowSeconds() } }); continue; }
       if (now - seen.since >= this.sustainMs && !this.reported.has(pid)) {
         this.reported.add(pid);
-        written.push(await this.report(pid, table, below, blocked, syscall, now - seen.since));
+        written.push(await this.report(pid, table, below, blocked, syscall, now - seen.since, seen.began));
       }
     }
     return written;
   }
 
-  async report(pid, table, below, blocked, syscall, heldMs) {
+  async report(pid, table, below, blocked, syscall, heldMs, waitBegan = { notBefore: null, notAfter: nowSeconds() }) {
     this.count += 1;
     const name = `watchdog-${this.root}-${process.pid}-${this.count}`;
     const threads = (() => {
@@ -250,6 +313,7 @@ export class Watchdog {
     })();
     const futex = parseFutexSyscall(syscall);
     const body = {
+      heldMs, waitBegan,
       reason: `process ${pid}: the main thread has been in an untimed wait (${blocked.name}) with no CPU used for ${heldMs} ms (seen by the watchdog, outside the run)`,
       at: new Date().toISOString(), blocked,
       target: blocked.fd === null ? null : fdTarget(pid, blocked.fd, this.proc),
@@ -264,9 +328,12 @@ export class Watchdog {
       const ring = join(this.out, `${name}-kernel.txt.gz`);
       // the snapshot is read from the live ring, which goes on recording (ring snapshot), under the ring lock; the lock, the segments and the ring's file
       // are owned too, whatever the snapshot does (finally)
+      const snapshotBegan = Date.now();
       const kept = await tracefs.snapshot({ instance: this.instance, out: ring, lines: RING_LINES, dir: this.ringDir }).finally(() => { this.written = true; this.own(); });
       body.kernelRing = kept;
+      const analysisBegan = Date.now();
       if (kept.file && futex) body.futex.ring = await futexAnalysis(ring, { address: futex.address, tid: pid }).catch((error) => ({ error: String(error && error.message || error) }));
+      body.timings = { snapshotMs: analysisBegan - snapshotBegan, analysisMs: Date.now() - analysisBegan }; // the cost of keeping the whole ring (ring reach)
     } else body.kernelRing = { unavailable: 'no ring was started' };
     // written now and again with the stacks, which take up to STACK_MS: what is known is not held back by them
     writeFileSync(join(this.out, `${name}.json`), JSON.stringify(body, null, 2));
@@ -291,6 +358,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const origin = performance.now();
   const ticker = setInterval(() => dog.tick(performance.now() - origin, Date.now()), TICK_MS);
   // on a timer of its own: a report that takes seconds (the ring written, the stacks) must not look like a dead watchdog
+  // a look at the tree comes before the first heartbeat, so a wait seen at the next scan is known to have begun after this look (ring reach, quire#993)
+  await dog.scan(performance.now() - origin).catch((error) => console.error(`[watchdog] ${error && error.stack || error}`));
   dog.heartbeat();
   const beater = setInterval(() => dog.heartbeat(), SCAN_MS);
   let busy = false;

@@ -739,6 +739,7 @@ fn _export_run (sink: export_sink): void =
         in _export_books(0, lib_count(), true, sink) end)
   end
 
+(* fixture: what-the-reader-is-told-of *)
 (* What the reader is told of how making the backup ended *)
 fn _export_said (outcome: export_outcome): void =
   case+ outcome of
@@ -1628,6 +1629,7 @@ fn _restored (report: restore_report): void = let
   val stop = _report_text(buf, 0, report)
 in modal_text(buf, stop) end
 
+(* fixture: whether-the-file-was-one-its *)
 (* Whether the file was one: its text taken as a backup, whole or in
    part, or not one *)
 datatype restore_end =
@@ -1674,6 +1676,7 @@ fn _put_back (snapshot: backup_snapshot): void =
       val _ = _apply(bytes, total, PutBack())
     in piece_free(owner, bytes) end
 
+(* fixture: a-file-read-as-a-backup *)
 (* A file read as a backup: what is in the library now is kept first
    (a snapshot), then the file is put back, the report said, and an
    Undo offered that puts the snapshot back. When the snapshot cannot

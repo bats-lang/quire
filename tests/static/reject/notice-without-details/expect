@@ -1,8 +1,4 @@
 function _static_details
 line 4
 pattern match is nonexhaustive:
-HandedBookNotAdded()
-pattern match is nonexhaustive:
-WordsNotStored()
-pattern match is nonexhaustive:
-WordsFull()
+among HandedBookNotAdded()
