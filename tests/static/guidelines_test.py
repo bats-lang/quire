@@ -14,6 +14,7 @@ usage: python3 tests/static/guidelines_test.py
 import os
 import re
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -75,6 +76,47 @@ class Phrases(unittest.TestCase):
                     handle.write(''.join(f'agent{i}\t-\t-\n' for i in range(rows)))
                 done = subprocess.run(['sh', script, 'check', str(number)], env={**os.environ, 'SLOTS_FILE': ledger}, capture_output=True, text=True)
                 self.assertEqual((rows, number, done.returncode), (rows, number, status), done.stderr)
+
+    def test_slots_check_says_the_ledger_has_fewer_rows_and_a_missing_ledger_is_not_made(self):
+        """quire#956: N equal to the rows passes, one more exits 1 and says fewer rows (ledgers of two and of three rows); no default ledger."""
+        import subprocess
+        import tempfile
+        script = os.path.join(gl.ROOT, '.claude', 'skills', 'sweep', 'slots')
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = os.path.join(directory, 'slots.tsv')
+            for rows in (2, 3):
+                with open(ledger, 'w', encoding='utf-8') as handle:
+                    handle.write(''.join(f'agent{i}\t-\t-\n' for i in range(rows)))
+                env = {**os.environ, 'SLOTS_FILE': ledger}
+                same = subprocess.run(['sh', script, 'check', str(rows)], env=env, capture_output=True, text=True)
+                more = subprocess.run(['sh', script, 'check', str(rows + 1)], env=env, capture_output=True, text=True)
+                self.assertEqual((same.returncode, more.returncode), (0, 1), (same.stderr, more.stderr))
+                self.assertIn(f'agents running: {rows} (ledger rows: {rows})', same.stdout)
+                self.assertIn(f'has fewer rows ({rows};', more.stderr)
+            os.remove(ledger)
+            missing = subprocess.run(['sh', script, 'check', '1'], env={**os.environ, 'SLOTS_FILE': ledger}, capture_output=True, text=True)
+            self.assertEqual(missing.returncode, 1, missing.stderr)
+            self.assertIn('does not exist', missing.stderr)
+            self.assertIn('the owner creates it', missing.stderr)
+            self.assertFalse(os.path.exists(ledger))
+
+    def test_a_count_of_slots_added_to_a_guideline_is_refused(self):
+        """quire#956: the checkers group fails when a count of slots or agents is written into .claude/orchestration.md; slots.tsv is authoritative."""
+        clean = read_root('.claude', 'orchestration.md')
+        self.assertEqual(gl.lint_text(clean, '.claude/orchestration.md', PHRASES, guide=True), [])
+        for count in ('At most two agents run at any time.', 'Run one sonnet and one haiku.', 'Never a third agent beside two busy slots.',
+                      'There is one running agent.', 'Reviewers run one at a time as agents.', 'The limit: two agents at once.', 'Keep 3 slots.'):
+            with self.subTest(count=count):
+                found = gl.lint_text(clean + '\n' + count + '\n', '.claude/orchestration.md', PHRASES, guide=True)
+                self.assertTrue(found and all('row 14' in line for line in found), found)
+        quoted = gl.lint_text(clean + '\nThe history: `At most two agents run at any time.`\n', '.claude/orchestration.md', PHRASES, guide=True)
+        self.assertEqual(quoted, [])
+
+    def test_the_guidelines_name_the_ledger_as_authoritative_and_the_owner_as_the_only_one_who_changes_it(self):
+        # the rule itself is pitboss's (rules.md, "Agents and slots"); quire's sweep skill states it where the ledger script is
+        text = read_root('.claude', 'skills', 'sweep', 'SKILL.md')
+        self.assertIn('/tmp/claude-0/slots.tsv', text)
+        self.assertIn('only an explicit instruction from the owner', text)
 
     def test_a_guideline_quotes_a_phrase_in_a_code_span_or_a_block(self):
         self.assertEqual(gl.lint_text('Never write `it passed alone`.', 'x', PHRASES, guide=True), [])
@@ -403,6 +445,104 @@ class AffectedLine(unittest.TestCase):
         self.assertNotEqual(found, expect)
 
 
+class QuarantineAndRace(unittest.TestCase):
+    """quire#976: a failing test is quarantined with its ticket, a race fix shows its root cause, an injection and a CI run; each class has a case that fails when it occurs."""
+    TICKET = Brief.TICKET
+    BRIEF = 'Every row has its line.\nThe tests pass.\n'
+    RUN = 'https://github.com/bats-lang/quire/actions/runs/123456789'
+
+    def test_a_brief_about_a_failing_test_without_the_line_is_refused(self):
+        found = gl.lint_brief(self.BRIEF + 'The gdb teardown test fails on the runner.\n', self.TICKET, PHRASES)
+        self.assertTrue(any('Quarantine: ...' in line for line in found), found)
+
+    def test_a_brief_about_a_failing_test_with_the_line_passes(self):
+        brief = self.BRIEF + 'The gdb teardown test fails on the runner.\nQuarantine: stall-capture.spec.js test.fixme(#807) on every project, removed by the fix.\n'
+        self.assertEqual(gl.lint_brief(brief, self.TICKET, PHRASES), [])
+
+    def test_a_brief_about_a_race_without_the_line_is_refused(self):
+        found = gl.lint_brief(self.BRIEF + 'Fix the race in the ring lock.\n', self.TICKET, PHRASES)
+        self.assertTrue(any('Race: ...' in line for line in found), found)
+        ok = self.BRIEF + 'Fix the race in the ring lock.\nRace: the body names the root cause, an injection and one CI run.\n'
+        self.assertEqual(gl.lint_brief(ok, self.TICKET, PHRASES), [])
+
+    def test_a_review_of_either_without_its_check_is_refused(self):
+        found = gl.lint_review(GOOD_REVIEW + '\nThe flaky test is fixed.\n', PHRASES)
+        self.assertTrue(any('Quarantine check: ...' in line for line in found), found)
+        self.assertTrue(any('Race check: ...' in line for line in found), found)
+        ok = GOOD_REVIEW + '\nThe flaky test is fixed.\nQuarantine check: listed in the body.\nRace check: the body has the three items.\n'
+        self.assertEqual(gl.lint_review(ok, PHRASES), [])
+
+    def test_a_quote_in_a_code_span_is_not_a_trigger(self):
+        self.assertEqual(gl.lint_brief(self.BRIEF + 'The phrase `the race` is quoted.\n', self.TICKET, PHRASES), [])
+
+    def body(self, extra, evidence=''):
+        return GOOD_BODY.replace('ok: 33 phrases\n```', 'ok: 33 phrases\n```\n' + evidence).replace('Head:', extra + '\n\nHead:')
+
+    ITEMS = {
+        'Root cause': 'Root cause: the ring lock was taken before the pause ended; the test now waits for the release event.',
+        'Injection': 'Injection: a 3 s delay at the release step fails the old code and passes the fix.',
+        'CI run': 'CI run: ' + RUN,
+    }
+
+    def race_body(self, leave_out=None):
+        lines = [text for key, text in self.ITEMS.items() if key != leave_out]
+        return self.body('Quarantine: none listed.\nRace: see the three items.\nThe race in the ring lock is fixed.\n' + '\n'.join(lines))
+
+    def test_a_race_fix_body_with_the_three_items_passes(self):
+        self.assertEqual(gl.lint_pr_body(self.race_body(), HEAD, PHRASES), [])
+
+    def test_a_race_fix_body_missing_one_item_is_refused(self):
+        for key in self.ITEMS:
+            found = gl.lint_pr_body(self.race_body(key), HEAD, PHRASES)
+            self.assertEqual(len(found), 1, (key, found))
+            self.assertIn(f'"{key}', found[0])
+
+    def test_an_item_with_nothing_after_it_is_refused(self):
+        body = self.race_body().replace(self.ITEMS['Injection'], 'Injection:')
+        found = gl.lint_pr_body(body, HEAD, PHRASES)
+        self.assertTrue(any('"Injection: ..."' in line for line in found), found)
+
+    def test_a_ci_run_with_no_url_is_refused(self):
+        body = self.race_body().replace(self.RUN, 'green')
+        found = gl.lint_pr_body(body, HEAD, PHRASES)
+        self.assertTrue(any('"CI run: <URL>"' in line for line in found), found)
+
+    def mark_tree(self, mark):
+        root = tempfile.mkdtemp()
+        os.makedirs(os.path.join(root, 'e2e'))
+        with open(os.path.join(root, 'e2e', 'a.spec.js'), 'w') as handle:
+            handle.write(mark)
+        return root
+
+    def test_a_fix_that_leaves_the_mark_is_refused(self):
+        root = self.mark_tree("test.fixme('#807 the gdb teardown', async () => {});\n")
+        self.assertEqual(gl.marks_left(root), {'807': 1})
+        found = gl.lint_pr_body(GOOD_BODY.replace('Fixes #751', 'Fixes #807'), HEAD, PHRASES, gl.marks_left(root))
+        self.assertTrue(any('still holds 1 test.fixme' in line for line in found), found)
+
+    def test_a_fix_that_removes_the_mark_passes(self):
+        root = self.mark_tree('// the mark is gone\n')
+        self.assertEqual(gl.lint_pr_body(GOOD_BODY.replace('Fixes #751', 'Fixes #807'), HEAD, PHRASES, gl.marks_left(root)), [])
+
+    def test_the_marks_after_a_pull_request_are_the_base_plus_added_minus_removed(self):
+        root = self.mark_tree("test.fixme('#807 the gdb teardown', async () => {});\n")
+        removed = {'patch': "@@\n-test.fixme('#807 the gdb teardown', async () => {});\n+test('the gdb teardown', async () => {});"}
+        kept = {'patch': "@@\n+test.fixme('#891 the ring lock', async () => {});"}
+
+        def api(files):
+            return lambda path, method='GET', fields=None: files if 'page=1' in path else []
+        self.assertEqual(gl.marks_after(api([removed]), 'o/r', 5, root), {'807': 0})
+        self.assertEqual(gl.marks_after(api([kept]), 'o/r', 5, root), {'807': 1, '891': 1})
+
+    def test_the_rules_are_written_where_the_agents_read_them(self):
+        for parts, needle in (
+                (('.claude', 'rules', 'e2e.md'), 'Quarantine and race fixes'),
+                (('.claude', 'orchestration.md'), '`Quarantine: '),
+                (('.claude', 'orchestration.md'), '`Race: '),
+                (('.claude', 'agents', 'reviewer.md'), 'Race check:'),
+                (('.claude', 'agents', 'worker.md'), 'test.fixme')):
+            self.assertIn(needle, read_root(*parts), parts)
+
 class Rulings(unittest.TestCase):
     """quire#995: the rules say the owner's latest rulings, with the line and time of the message."""
 
@@ -441,14 +581,16 @@ class Rulings(unittest.TestCase):
 
 
 class FakeApi:
-    def __init__(self, comments=()):
-        self.comments, self.calls = list(comments), []
+    def __init__(self, comments=(), runs=({'id': 1, 'name': 'check', 'status': 'completed', 'conclusion': 'success'},)):
+        self.comments, self.calls, self.runs = list(comments), [], list(runs)
 
     def __call__(self, path, method='GET', fields=None):
         self.calls.append((method, path, fields))
         if method == 'GET' and path.split('?')[0].endswith('/comments'):
             page = int(path.rsplit('page=', 1)[1])
             return self.comments if page == 1 else []
+        if method == 'GET' and '/check-runs' in path:
+            return {'check_runs': self.runs if path.endswith('page=1') else []}
         if method == 'GET' and '/pulls/' in path:
             return PULL
         return None
@@ -517,6 +659,59 @@ class GitHub(unittest.TestCase):
         code = '\n'.join(line for line in text.split('\n') if not line.lstrip().startswith('#'))
         self.assertNotIn('draft', code.lower())
         self.assertIn('pull_request_target', code)
+
+    def approval_status(self, runs, review=GOOD_REVIEW, head=HEAD):
+        api = FakeApi([{'author_association': 'OWNER', 'body': review, 'html_url': 'u'}], runs)
+        pull = dict(PULL, head={'sha': head, 'ref': 'x'}, body=GOOD_BODY.replace(HEAD, head))
+        return self.run_event('pull_request_target', {'pull_request': pull}, api), self.status(api)
+
+    def test_an_approval_of_a_head_with_no_completed_check_run_is_refused(self):
+        # quire#978 (keyword: draft): the injected failure is each way a head can lack a completed green check
+        green = {'id': 1, 'name': 'check', 'status': 'completed', 'conclusion': 'success'}
+        self.assertEqual(self.approval_status([green])[0], [])
+        for runs, wording in (([], 'no `check` run'),
+                              ([{'id': 1, 'name': 'plan', 'status': 'completed', 'conclusion': 'success'}], 'no `check` run'),
+                              ([dict(green, status='in_progress', conclusion=None)], 'in_progress'),
+                              ([dict(green, status='queued', conclusion=None)], 'queued'),
+                              ([dict(green, conclusion='failure')], 'ended failure'),
+                              ([dict(green, conclusion='skipped')], 'ended skipped')):
+            findings, status = self.approval_status(runs)
+            self.assertEqual(len(findings), 1, runs)
+            self.assertIn(wording, findings[0])
+            self.assertIn('waiting for CI at this head', findings[0])
+            self.assertEqual(status['state'], 'failure')
+
+    def test_the_newest_check_run_decides(self):
+        # a draft run and the run of the ready transition share a head (quire#978): the older green one does not stand in
+        old = {'id': 1, 'name': 'check', 'status': 'completed', 'conclusion': 'success'}
+        self.assertEqual(len(self.approval_status([old, dict(old, id=2, status='in_progress', conclusion=None)])[0]), 1)
+        self.assertEqual(self.approval_status([dict(old, id=2, conclusion='failure'), dict(old, id=1)])[0] != [], True)
+        self.assertEqual(self.approval_status([dict(old, id=1, conclusion='failure'), dict(old, id=2)])[0], [])
+
+    def test_the_gated_form_and_a_review_of_an_older_head_are_read_too(self):
+        findings, _ = self.approval_status([], GATE_REVIEW)
+        self.assertEqual(len(findings), 1)
+        self.assertIn('no `check` run', findings[0])
+        self.assertEqual(self.approval_status([], GOOD_REVIEW, OTHER)[0], [])  # the review names another head: no claim about this one
+        changes = GOOD_REVIEW.replace(': approved', ': changes needed')
+        self.assertEqual(self.approval_status([], changes)[0], [])  # a verdict of changes needed claims nothing
+
+    def test_a_draft_runs_plan_build_and_check_and_skips_the_rest(self):
+        # quire#978 (keyword: draft): the jobs of check.yml and which of them carry the draft condition
+        text = read_root('.github', 'workflows', 'check.yml')
+        jobs = text.split('\njobs:\n', 1)[1]
+        blocks = {}
+        for block in re.split(r'\n(?=  [a-z0-9-]+:\n)', '\n' + jobs):
+            name = block.strip().split(':', 1)[0]
+            blocks[name] = '\n'.join(line for line in block.split('\n') if not line.lstrip().startswith('#'))
+        draft = 'github.event.pull_request.draft'
+        for name in ('plan', 'build'):
+            self.assertNotIn(draft, blocks[name], name)
+        for name in ('queue', 'static', 'e2e', 'android'):
+            self.assertIn(draft, blocks[name], name)
+        self.assertIn('jobs: plan build\n', blocks['check'])
+        self.assertIn('jobs: plan queue build static e2e\n', blocks['check'])
+        self.assertEqual(blocks['check'].count('github.event.pull_request.draft'), 3)
 
     def test_an_ordinary_comment_is_not_linted(self):
         ordinary = {'author_association': 'OWNER', 'body': 'Use Refs instead of Fixes. It passed alone.', 'html_url': 'u'}
@@ -1039,6 +1234,38 @@ class SweepFiles(unittest.TestCase):
             os.remove(os.path.join(repo, 'stray'))
             subprocess.run(git + ['checkout', '-q', '-b', 'feature'], check=True, env=clean_env)
             self.assertIn('STRAY-WORK ' + repo, run())
+
+
+class NoBackgroundNoSleep(unittest.TestCase):
+    """quire#911: a brief, and a line of a brief template, that tells an agent to run a command in the background or to loop with sleep is refused."""
+    DIR = os.path.join(HERE, 'guidelines', 'reject', 'brief-runs-in-background')
+
+    def test_the_fixture_is_refused_exactly_as_its_expect_says(self):
+        brief, ticket, expect = [open(os.path.join(self.DIR, name)).read() for name in ('brief.txt', 'ticket.txt', 'expect')]
+        self.assertEqual('\n'.join(gl.lint_brief(brief, ticket, PHRASES)) + '\n', expect)
+        self.assertEqual(len(expect.strip().split('\n')), 2)
+
+    def test_the_brief_without_the_instruction_passes(self):
+        brief, ticket, _ = [open(os.path.join(self.DIR, name)).read() for name in ('brief.txt', 'ticket.txt', 'expect')]
+        brief = brief.replace('Start the static suite with run_in_background and poll it with sleep 60 until it ends.', 'Hand back at once after the push.')
+        self.assertEqual(gl.lint_brief(brief, ticket, PHRASES), [])
+
+    def test_a_template_line_in_a_code_span_is_refused(self):
+        line = 'Sample: a local run over a population is a seeded sample; run the rest in the background and read its log.'
+        found = gl.lint_brief_templates('* `' + line + '`\n', 'orchestration.md', PHRASES)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn('brief template line "Sample:"', found[0])
+        self.assertEqual(gl.lint_brief_templates('* `' + line.replace('run the rest in the background and read its log', 'CI runs the rest') + '`\n', 'orchestration.md', PHRASES), [])
+
+    def test_the_templates_of_orchestration_md_pass(self):
+        self.assertEqual(gl.lint_brief_templates(read_root('.claude', 'orchestration.md'), '.claude/orchestration.md', PHRASES), [])
+        self.assertTrue(gl.TEMPLATE_LINE.findall(read_root('.claude', 'orchestration.md')))
+
+    def test_worker_md_states_the_rule_with_the_owners_words_and_date(self):
+        text = read_root('.claude', 'agents', 'worker.md')
+        for needle in ('filed 2026-10-26T17:49:33Z', 'Short jobs locally, CI for the rest', 'left to CI', 'nothing is left running at hand-back'):
+            self.assertIn(needle, text)
+        self.assertNotIn('about 10 minutes', read_root('CLAUDE.md'))
 
 
 if __name__ == '__main__':

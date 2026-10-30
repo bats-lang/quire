@@ -13,9 +13,9 @@ _pressure(){
 }
 # `qsweep pressure` prints only that line (and exits 1 under pressure), so no caller pipes qsweep through grep
 if [ "$1" = pressure ]; then r=$(_pressure); echo "$r"; case "$r" in "runner pressure: none") exit 0;; *) exit 1;; esac; fi
-# `qsweep push <git push arguments>` is the pressure check and the push in one command (quire#751, row 5): the check cannot be left out
+# `qsweep push <git push arguments>` is the pressure check and the push in one command (quire#751, row 5); the checks of the commits are not here but in .githooks/pre-push, which `git push` runs, so no push path is without them (quire#973); the push runs with the env file's variables (QUIRE_ENV, default ~/quire.env: PATH of the compiler, BATS_REPOSITORY, BATS_PATSOPT_MEM_MB) that the hook reads: the check cannot be left out
 # or put in the wrong place. Under pressure it prints the hold line, exits 1 and pushes nothing.
-if [ "$1" = push ]; then shift; r=$(_pressure); echo "$r"; case "$r" in "runner pressure: none") exec git push "$@";; *) exit 1;; esac; fi
+if [ "$1" = push ]; then shift; r=$(_pressure); echo "$r"; case "$r" in "runner pressure: none") _env="${QUIRE_ENV:-$HOME/quire.env}"; if [ -f "$_env" ]; then set -a; . "$_env"; set +a; fi; exec git push "$@";; *) exit 1;; esac; fi
 # every open PR of bats-lang/quire (subscribed or not): merge state, the failing checks of its head, and what the head is ready for (quire#751, rows 15 and 19):
 #   FIX-NEEDED          a check or a commit status of the head is red, the PR has a merge conflict (dirty), or the newest review names this head and says changes needed
 #   WAIT-FOR-CI         no check-run yet, one not finished, or the aggregate `check` not green: no reviewer starts (a reviewer starts only on green)
@@ -134,6 +134,17 @@ for _r in quire bats pwa bridge dom gestures arith array zip sha256 capacitor-pl
   _d=/home/user/$_r; [ -e "$_d/.git" ] || continue
   _b=$(git -C "$_d" branch --show-current)
   if [ "$_b" != main ] || [ -n "$(git -C "$_d" status --porcelain | head -1)" ]; then echo "STRAY-WORK $_d (the orchestrator's checkout) [${_b:-detached}] dirty=$(git -C "$_d" status --porcelain | wc -l): no worker works here; move the work to its own worktree, then fast-forward to main"; fi
+done
+# the pre-push hook (.githooks/pre-push, quire#973): a checkout that has it and whose core.hooksPath is not .githooks pushes with none of its checks
+for d in /home/user/* ; do
+  [ -e "$d/.githooks/pre-push" ] || continue
+  _hp=$(git -C "$d" config --get core.hooksPath)
+  [ "$_hp" = .githooks ] || echo "HOOKS-NOT-INSTALLED $d core.hooksPath=${_hp:-unset}: run git -C $d config core.hooksPath .githooks (the worktree's creation sets it, worker.md)"
+done
+# a --no-verify on a git push or commit in a transcript of the last two days skips that hook (quire#973); the transcript is named with the count
+for _t in $(find /root/.claude/projects -name '*.jsonl' -mtime -2 2>/dev/null); do
+  _n=$(grep -c -E '"command": ?"[^"]*(git|qsweep)[^"]* (push)[^"]* (--no-verify)( |\\"|")' "$_t" 2>/dev/null)
+  [ "${_n:-0}" -gt 0 ] && echo "NO-VERIFY $_t: $_n command(s) skipped the hooks"
 done
 echo "stragglers: sweep done"
 _lap "stragglers done"

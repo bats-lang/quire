@@ -83,8 +83,9 @@ import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, placeChanged, bookPage, control, showChrome, dialog, selectionButton, marks, oneColumn,
   openReadingSettings, readingSettings,
-  rawMouse, bareReader,
+  rawMouse, bareReader, framesPassed, quiet,
 } from './helpers.js';
+import { timersDrained } from './quiet.js';
 import { cutOff, insetsShort, labelInName, coveredByBanner } from './controls-shown.js';
 import { selectionBooks } from './selection-books.js';
 
@@ -97,6 +98,16 @@ const HANDLE = 20;
 
 // ------------------------------------------------------------------
 // what plays a finger and a mouse
+
+/** Listens, in the page, for the next event of the type: the step that causes it is sent after this returns, and
+    `arrived` answers when the page has had it (the commands of the finger are not answered while a long press is
+    decided, so the page is asked and no time is waited, quire#985) */
+async function expectEvent(page, type) {
+  await page.evaluate(wanted => {
+    window.__eventArrived = new Promise(done => addEventListener(wanted, () => done(), { once: true, capture: true }));
+  }, type);
+}
+const arrived = page => page.evaluate(() => window.__eventArrived);
 
 /** A finger: mouse events made touch events by Chromium, which is the way
     to a long press in Chromium. Not awaited on a press, which is not
@@ -112,16 +123,27 @@ async function fingerOn(page) {
   // answers the next mouse command only after the release (probed), and
   // the commands are carried out in the order they are sent
   const finger = {
-    async down(x, y) { send('mouseMoved', x, y); down = true; send('mousePressed', x, y); },
+    async down(x, y) {
+      await expectEvent(page, 'pointerdown');
+      send('mouseMoved', x, y); down = true; send('mousePressed', x, y);
+      await arrived(page);
+    },
     async moveTo(x, y) { send('mouseMoved', x, y); },
-    async up(x, y) { down = false; send('mouseReleased', x, y); await page.waitForTimeout(50); },
+    // the release is answered when it has been carried out
+    async up(x, y) {
+      down = false;
+      await expectEvent(page, 'pointerup');
+      send('mouseReleased', x, y);
+      await arrived(page);
+    },
     /** The mouse is the mouse again: while it is a finger, Playwright's own
         clicks wait for a long press to be decided and never return */
     async off() {
       await cdp.send('Emulation.setEmitTouchEventsForMouse', { enabled: false }).catch(() => {});
       await cdp.detach().catch(() => {});
     },
-    async tap(x, y) { await finger.down(x, y); await page.waitForTimeout(60); await finger.up(x, y); },
+    // the commands are carried out in the order they are sent: the press is over before the release
+    async tap(x, y) { await finger.down(x, y); await finger.up(x, y); },
     /** Held for the long press: the word is selected while the finger is down */
     async longPress(x, y) {
       await finger.down(x, y);
@@ -133,7 +155,7 @@ async function fingerOn(page) {
       const steps = Math.max(2, Math.ceil(Math.hypot(x2 - x, y2 - y) / 20));
       for (let k = 1; k <= steps; k++) {
         await finger.moveTo(x + (x2 - x) * k / steps, y + (y2 - y) * k / steps);
-        await page.waitForTimeout(16);
+        await framesPassed(page, 1);
       }
     },
   };
@@ -254,16 +276,16 @@ async function pressOn(page, testInfo, word) {
 const barsUp = page => control(page, 'Previous page').isVisible();
 
 /** Waits until the layout has settled: the chapter's pages are counted
-    again for a few seconds after it is shown (and when a font arrives), and
-    a word's place is only a place once two looks 500 ms apart agree */
+    again for a few seconds after it is shown (and when a font arrives), which
+    is done when the app has no short timer left, and a word's place is only a
+    place once two looks, a frame apart, agree */
 async function settled(page) {
-  let last = '';
+  await timersDrained(page);
+  const looked = async () => JSON.stringify((await pageWords(page)).map(w => [w.text, Math.round(w.x), Math.round(w.y)]));
   await expect.poll(async () => {
-    const now = JSON.stringify((await pageWords(page)).map(w => [w.text, Math.round(w.x), Math.round(w.y)]));
-    const same = now === last;
-    last = now;
-    await page.waitForTimeout(500);
-    return same;
+    const first = await looked();
+    await framesPassed(page);
+    return first === await looked();
   }, { timeout: 20000 }).toBe(true);
 }
 
@@ -359,7 +381,7 @@ test('a long press on a word selects it, shows the toolbar, and neither turns th
   // and let go
   await expect(toolbar(page)).toBeVisible();
   expect(await selected(page)).toBe(word.text);
-  await page.waitForTimeout(400);
+  await quiet(page);
   expect(await barsUp(page), 'the bars stay away after the press').toBe(false);
   expect(await place(page)).toEqual(before);
   await finger.off();
@@ -373,7 +395,7 @@ test('a double click on a word selects it, shows the toolbar, and does not turn 
   await rawMouse(page, 'dblclick', word.x, word.y);
   await expect.poll(() => selected(page).then(squash)).toBe(word.text);
   await expect(toolbar(page)).toBeVisible();
-  await page.waitForTimeout(400);
+  await quiet(page);
   // (the bars are not asserted: the first click of the two is a tap on the
   // page's middle, which brings the bars up, as one does for every click
   // there; a long press is no tap, and its test says the bars stay away)
@@ -389,7 +411,7 @@ test('the page-turn gesture does not start from a selection: the finger that hol
   await finger.longPress(word.x, word.y);
   await finger.dragTo(word.x, word.y, 8, word.y);
   await finger.up(8, word.y);
-  await page.waitForTimeout(500);
+  await quiet(page);
   expect(await place(page), 'the held finger\'s drag turned the page').toEqual(before);
   await finger.off();
   expect(await selected(page)).toBe(word.text);
@@ -406,7 +428,7 @@ test('the page-turn gesture does not start from a selection: a finger put down o
   await finger.down(word.x, word.y);
   await finger.dragTo(word.x, word.y, page.viewportSize().width * 0.1, word.y);
   await finger.up(page.viewportSize().width * 0.1, word.y);
-  await page.waitForTimeout(500);
+  await quiet(page);
   expect(await place(page), 'a drag from the selection turned the page').toEqual(before);
   await finger.off();
 });
@@ -502,7 +524,7 @@ test('dragging past the page\'s edge does not turn the page while the selection 
     await finger.dragTo(width - 2, height - 2, width - 2, anchor.y);
     await finger.dragTo(width - 2, anchor.y, 2, anchor.y);
     await handleTo(page, anchor, last);
-    await page.waitForTimeout(600);
+    await quiet(page);
     expect(await place(page)).toEqual(before);
     await finger.up(2, anchor.y);
     await finger.off();
@@ -511,11 +533,11 @@ test('dragging past the page\'s edge does not turn the page while the selection 
     await rawMouse(page, 'down');
     await rawMouse(page, 'move', width - 2, height - 2, { steps: 15 });
     await rawMouse(page, 'move', 2, anchor.y, { steps: 15 });
-    await page.waitForTimeout(600);
+    await quiet(page);
     expect(await place(page)).toEqual(before);
     await rawMouse(page, 'up');
   }
-  await page.waitForTimeout(600);
+  await quiet(page);
   expect(await place(page), 'the page turned while the selection was dragged to its edge').toEqual(before);
   // the selection is still the page's own: it ends on this page
   const text = squash(await selected(page));
@@ -830,7 +852,7 @@ for (const where of ['in the middle of the page', 'in the zone that turns the pa
     await tapAt(page, testInfo, { x, y });
     await expect(toolbar(page)).toBeHidden();
     expect(await selected(page)).toBe('');
-    await page.waitForTimeout(500);
+    await quiet(page);
     expect(await place(page), 'the tap that cancelled the selection turned the page').toEqual(before);
     expect((await marks(page)).size).toBe(0);
     expect(await highlightCount(page)).toBe(0);

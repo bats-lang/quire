@@ -246,6 +246,8 @@ RULES = [
     # The e2e suite: the specs it reaches; the static checkers that read e2e/
     Rule('e2e modules', ['e2e/*.js', 'e2e/**/*.js'], e2e_modules, only_checkers),
     Rule('e2e files', ['e2e/**'], e2e_assets, only_checkers),
+    # The pre-push hook (#973): read by its test, a checker, and by no spec
+    Rule('the pre-push hook', ['.githooks/**', 'scripts/pre-push.py'], NONE, only_checkers),
     # The static tests
     Rule('a static fixture', ['tests/static/accept/*/**', 'tests/static/reject/*/**'], NONE, static_fixture),
     Rule('the solver fixtures', ['tests/static/solver.py', 'tests/static/solver/**'], NONE, only_solver),

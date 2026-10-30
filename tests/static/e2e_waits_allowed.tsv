@@ -1,0 +1,3 @@
+# Fixed waits of e2e/ that are allowed (quire#976, keyword: fixed-wait): path, count, the ticket that migrates them.
+# The count is exact: a new wait fails, a migrated one lowers it. quire#985 migrated every wait: no line is left, and a new one
+# is a wait the lint refuses.

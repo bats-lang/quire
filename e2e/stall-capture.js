@@ -137,7 +137,10 @@ export const FLIGHT_MOST_MS = ROOT_MOST_MS + 2 * TRACE_END_MS; // the kernel's r
 export const NATIVE_MOST_MS = FLIGHT_MOST_MS + COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 8 * HELPER_MS + GDB_MS + GZIP_MS + 2 * FALLBACK_MS
   + 2 * FALLBACK_MS; // the browser's and the GPU's fallback tools
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/** The duration of an instrument, not a wait for a step to end (quire#985, keyword: window): the CPU time read over
+    CPU_WINDOW_MS, the profile sampled over PROFILE_MS, the probe that asks every PROBE_EVERY_MS. What is measured is
+    the time itself, so the span is the thing the timer is for; its callback has a body, as a limit's does. */
+export const lasting = (ms) => new Promise((resolve) => { setTimeout(() => { resolve(); }, ms); });
 
 /** How a promise ended within `ms`: { answered, ms, value } or { error } or { answered: false }. */
 async function within(promise, ms) {
@@ -454,7 +457,7 @@ async function rendererCpu(browser, ms) {
       return result.value ? result.value.processInfo : null;
     };
     const before = await read();
-    await delay(ms);
+    await lasting(ms);
     const after = await read();
     if (!before || !after) return { error: 'SystemInfo.getProcessInfo did not answer' };
     return after.map((process) => {
@@ -1036,7 +1039,7 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
       const enabled = await within(session.send('Profiler.enable'), COMMAND_MS);
       const started = enabled.answered && !enabled.error && await within(session.send('Profiler.start'), COMMAND_MS);
       if (started && started.answered && !started.error) {
-        await delay(PROFILE_MS);
+        await lasting(PROFILE_MS);
         const stopped = await within(session.send('Profiler.stop'), COMMAND_MS);
         result.profile = stopped.value ? profileSummary(stopped.value.profile) : { error: stopped.error || 'Profiler.stop was not answered' };
       } else {
@@ -1190,7 +1193,8 @@ export function summary(result) {
  * each, captures a page that stops answering (once) and every page when
  * the test is about to time out. `captures` holds what it took;
  * `next(page, ms)` waits for a capture of that page, and
- * `started(page, ms)` for one to begin.
+ * `started(page, ms)` for one to begin, `ringing(page, ms)` for it to come to the rings, `answered(page, count, ms)` for
+ * its probes to be answered.
  */
 export function stallWatch(browser, testInfo) {
   const armed = new Map();     // page -> its armed session (a promise)
@@ -1202,6 +1206,8 @@ export function stallWatch(browser, testInfo) {
   const scope = nativeScope(); // what they run outside node
   const captures = [];
   const starts = [];           // the pages whose capture has begun
+  const ringing = [];          // the pages whose capture has come to the rings
+  const answers = new Map();   // page -> how many of its probes were answered
   const waiters = [];
   let stopped = false;
   let count = 0;
@@ -1238,7 +1244,7 @@ export function stallWatch(browser, testInfo) {
     const save = (partial) => { try { writeFileSync(path, JSON.stringify({ ...identity, ...partial }, null, 2)); } catch (error) { /* the output directory is gone: the test is over */ } };
     const number = count;
     const result = await capture(page, armedPage, reason, browser, save, scope, (pid) => testInfo.outputPath(`stall-core-${count}-${pid}.core`),
-      async () => { const kept = await keepBoth(browser, (name) => testInfo.outputPath(`flight-${number}-${name}`)); state.flight = kept; await attachFlight(testInfo, kept); return kept; });
+      async () => { ringing.push(page); for (const waiter of waiters.splice(0)) waiter(); const kept = await keepBoth(browser, (name) => testInfo.outputPath(`flight-${number}-${name}`)); state.flight = kept; await attachFlight(testInfo, kept); return kept; });
     Object.assign(result, identity);
     if (result.flight) { state.frozen = true; state.captureFile = path; if (!state.captureResult) state.captureResult = result; }
     save(result);
@@ -1282,16 +1288,18 @@ export function stallWatch(browser, testInfo) {
   async function probe(page) {
     while (!stopped && !page.isClosed()) {
       // not while the page is captured: its pause would stop in the probe
-      if (ready.has(page) && ready.get(page).capturing) { await delay(PROBE_EVERY_MS); continue; }
+      if (ready.has(page) && ready.get(page).capturing) { await lasting(PROBE_EVERY_MS); continue; }
       const answer = await within(page.evaluate(() => 1), ANSWER_MS);
       if (stopped || page.isClosed()) return;
       if (!answer.answered) {
         start(page, `page did not answer an evaluate within ${ANSWER_MS / 1000} s`);
         return;
       }
+      answers.set(page, (answers.get(page) || 0) + 1);
+      for (const waiter of waiters.splice(0)) waiter();
       const timing = ready.has(page) && ready.get(page).timing;
       if (timing) { timing.heardFrom(); await timing.harvest(true).catch(() => {}); }
-      await delay(PROBE_EVERY_MS);
+      await lasting(PROBE_EVERY_MS);
     }
   }
 
@@ -1363,7 +1371,11 @@ export function stallWatch(browser, testInfo) {
       const value = found();
       if (value !== undefined) return value;
       if (Date.now() >= deadline) throw new Error(`${missing} within ${ms} ms`);
-      await new Promise((resolve) => { waiters.push(resolve); setTimeout(resolve, 250); });
+      // a capture's start or end wakes it; the deadline is the limit
+      let limit;
+      const over = new Promise((resolve) => { limit = setTimeout(() => { resolve(); }, Math.max(deadline - Date.now(), 0)); });
+      await Promise.race([new Promise((resolve) => { waiters.push(resolve); }), over]);
+      clearTimeout(limit);
     }
   };
 
@@ -1378,6 +1390,14 @@ export function stallWatch(browser, testInfo) {
     },
     async started(page, ms) {
       await waitFor(() => (starts.includes(page) ? true : undefined), ms, 'no stall capture of the page began');
+    },
+    /** Resolves when `count` probes of the page were answered (the watch asked and the page answered: it is not frozen). */
+    async answered(page, count, ms) {
+      await waitFor(() => ((answers.get(page) || 0) >= count ? true : undefined), ms, `the page's probes were not answered ${count} times`);
+    },
+    /** Resolves when the capture of the page has come to the rings (its questions to the page are over). */
+    async ringing(page, ms) {
+      await waitFor(() => (ringing.includes(page) ? true : undefined), ms, 'the capture of the page did not come to the rings');
     },
     /** The page's armed session (null when arming failed): its commands still reach a page that hangs. */
     async session(page) {

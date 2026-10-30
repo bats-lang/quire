@@ -17,6 +17,7 @@
 import { createServer } from 'node:http';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { test, expect } from './fixtures.js';
@@ -25,7 +26,10 @@ import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
 import { gunzipSync } from 'node:zlib';
 import { keepBrowserTrace, keepKernel, ringSeen, serialRun, startBrowserTrace, startKernel, stopKernel, wanted } from './flight-recorder.js';
-import { arm, capture, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
+import { arm, capture, lasting, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
+
+/** Resolves when the child has been started (its program is running). */
+const started = (child) => once(child, 'spawn');
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
 const SPIN_MODULE = (() => {
@@ -45,6 +49,7 @@ const SPIN_MODULE = (() => {
 
 const LOOPS = `<!doctype html><title>Endless loops</title><script>
 function spinForever() { let turns = 0; for (;;) { turns += 1; } }
+function spinForeverAnnounced() { console.log('spinning'); spinForever(); }
 function enterWasm(bytes) {
   const instance = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array(bytes)));
   instance.exports.spin();
@@ -60,6 +65,15 @@ async function startLoop(page, stallWatch, expression) {
   await page.setContent(LOOPS);
   const session = await stallWatch.session(page);
   await session.send('Runtime.evaluate', { expression });
+}
+
+/** startLoop, resolved when the page is in the loop: it says so (a console message reaches this process while the page loops). */
+async function startLoopHeard(page, stallWatch) {
+  await page.setContent(LOOPS);
+  const heard = page.waitForEvent('console', (message) => message.text() === 'spinning');
+  const session = await stallWatch.session(page);
+  await session.send('Runtime.evaluate', { expression: 'setTimeout(spinForeverAnnounced, 0)' });
+  await heard;
 }
 
 /**
@@ -222,13 +236,15 @@ test('a page\'s recent console messages, errors and requests are in its capture,
   await page.route('**/history-never-answered', () => {});
   await page.route('**/history-refused', (route) => route.abort('failed'));
   await page.setContent('<!doctype html><title>History</title><p>History</p>');
+  // the page's error and its unanswered request reach this process as events: they are in the history when both have been heard
+  const heard = Promise.all([page.waitForEvent('pageerror'), page.waitForEvent('request', (request) => /\/history-never-answered$/.test(request.url()))]);
   await page.evaluate(async () => {
     console.warn('history-marker');
     setTimeout(() => { throw new Error('history-error'); }, 0);
     await fetch('http://history.test/history-refused').catch(() => {});
     fetch('http://history.test/history-never-answered').catch(() => {});
   });
-  await new Promise((done) => setTimeout(done, 500));
+  await heard;
   await startLoop(page, stallWatch, 'setTimeout(spinForever, 0)');
   const capture = await stallWatch.next(page, 20000);
   await endLoop(page, stallWatch);
@@ -354,8 +370,7 @@ test('the kernel ring starts for a process tree, keeps its futex calls and wakeu
   }
   try {
     expect(env.QUIRE_FLIGHT_INSTANCE).toBe(started.instance);
-    // this process is the tree's root: its own waits and wakeups are the record
-    await new Promise((resolve) => { const timer = setTimeout(resolve, 50); timer.ref(); });
+    // this process is the tree's root: its own waits and wakeups are the record (a worker's message is both)
     await page_free_work();
     const out = testInfo.outputPath('kernel.txt.gz');
     const kept = await keepKernel(out, env);
@@ -481,7 +496,7 @@ test('without gdb the stacks come from eu-stack, else pstack, else the capture s
   const kept = process.env.QUIRE_STALL_GDB;
   process.env.QUIRE_STALL_GDB = NO_GDB;
   try {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await started(hung);   // the program is running, not on its way to it
     const FRAMES = 'echo "PID $2 - process"; echo "TID $2:"; echo "#0  0x00007f0000001000 - /lib/libc.so.6 + 0x1000 nanosleep"; echo "#1  0x0000555500002000 - /usr/bin/sleep + 0x2000 main"';
     // eu-stack answers: it is used, pstack is not asked
     const first = await withTools({ 'eu-stack': FRAMES, pstack: 'echo "#0 pstack should not run"' }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
@@ -518,7 +533,7 @@ test('a stack tool that prints frames and exits 1, or prints pstack\'s lines, ha
   const kept = process.env.QUIRE_STALL_GDB;
   process.env.QUIRE_STALL_GDB = NO_GDB;
   try {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await started(hung);   // the program is running, not on its way to it
     const UNWOUND = 'echo "TID $2:"; echo "#0  0x00007f0000001000 nanosleep - /lib/libc.so.6"; echo "eu-stack: tid 9: no matching address range" >&2; exit 1';
     const partial = await withTools({ 'eu-stack': UNWOUND, pstack: 'echo "#0 pstack should not run"' }, () => nativeStacks([{ pid: hung.pid }], nativeScope()));
     expect(partial.renderers[0].userSpaceStacks, 'frames with exit code 1 are stacks').toBe('eu-stack');
@@ -541,7 +556,7 @@ test('the real eu-stack and pstack give the stacks of a hung process when gdb do
   const kept = process.env.QUIRE_STALL_GDB;
   process.env.QUIRE_STALL_GDB = NO_GDB;
   try {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await started(hung);   // the program is running, not on its way to it
     const real = await nativeStacks([{ pid: hung.pid }], nativeScope());
     if (real.renderers[0].userSpaceStacks.startsWith('not available') && CANNOT_ATTACH.test(real.renderers[0].fallbackStacks.tried.map((each) => each.stderr).join('\n'))) unavailable('the kernel does not let this user attach');
     expect(real.renderers[0].userSpaceStacks).toBe('eu-stack');
@@ -564,7 +579,7 @@ test('the browser and GPU processes are asked for their stacks by the fallback t
   const kept = process.env.QUIRE_STALL_GDB;
   process.env.QUIRE_STALL_GDB = NO_GDB;
   try {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await started(utility);   // the program is running, not on its way to it
     const FRAMES = 'echo "TID $2:"; echo "#0  0x00007f0000001000 nanosleep - /lib/libc.so.6"; echo "#1  0x0000555500002000 main - /usr/bin/sleep"';
     const others = [
       { pid: browser.pid, type: 'browser', cpuSeconds: 0 },
@@ -600,7 +615,7 @@ test('the real eu-stack gives a browser or GPU process\'s stacks, and leaves the
   const kept = process.env.QUIRE_STALL_GDB;
   process.env.QUIRE_STALL_GDB = NO_GDB;
   try {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await started(gpu);   // the program is running, not on its way to it
     const found = await nativeStacks([], nativeScope(), null, [{ pid: browser.pid, type: 'browser', cpuSeconds: 0 }, { pid: gpu.pid, type: 'GPU', cpuSeconds: 0 }]);
     expect(found.browserProcesses.length).toBe(2);
     for (const other of found.browserProcesses) {
@@ -671,7 +686,7 @@ test('a hung stand-in process is read through the same path: its library frames 
   // a process that is hung for good (it sleeps), in the same sudo and gdb path as a renderer
   const hung = spawn('sleep', ['300'], { stdio: 'ignore' });
   try {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await started(hung);   // the program is running, not on its way to it
     const found = await nativeStacks([{ pid: hung.pid }], nativeScope());
     if (found.unavailable) unavailable(found.unavailable);
     const stacks = found.renderers[0].gdbStacks;
@@ -782,7 +797,8 @@ test('a busy page next to an idle healthy one: nothing is attached, the idle pag
     while (!capture) {
       expect(await other.page.evaluate(() => 1)).toBe(1);
       answered += 1;
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // the questions are the sampler of this test: one every 100 ms, so that the idle page stays idle (keyword: window)
+      await lasting(100);
     }
     expect(capture.native, 'the busy page is presumed busy, so no renderer is attached to').toBeUndefined();
     expect(capture.presumedBusy).toContain('presumed busy');
@@ -889,7 +905,7 @@ test('teardown ends a gdb attached to a hung renderer: gdb lets go and the rende
     // runner (run 40081059903, job 120837242373), so a fixed 45 s gave up before gdb started and the finally below put the real
     // gdb back; it waits for the stay, or for the capture to end without one, within the capture's own bound
     const captured = () => !!(stallWatch.captures[0] && stallWatch.captures[0].result);
-    for (let waited = 0; !staying() && !captured() && waited < NATIVE_MOST_MS; waited += 250) await new Promise((resolve) => setTimeout(resolve, 250));
+    await expect.poll(() => !!staying() || captured(), { timeout: NATIVE_MOST_MS, intervals: [250] }).toBe(true);
     if (!staying()) {
       const capture = stallWatch.captures[0] && stallWatch.captures[0].result;
       if (capture && capture.native && capture.native.unavailable) unavailable(capture.native.unavailable);
@@ -897,8 +913,7 @@ test('teardown ends a gdb attached to a hung renderer: gdb lets go and the rende
     expect(staying(), 'gdb is attached to the hung renderer and staying').not.toBe('');
     expect(pids.some((pid) => ['t', 'T'].includes(stateOf(pid))), 'gdb holds the renderer stopped').toBe(true);
     await stallWatch.stop();
-    for (let waited = 0; gdbRunning() && waited < 3000; waited += 250) await new Promise((resolve) => setTimeout(resolve, 250));
-    expect(gdbRunning(), 'stop() ended gdb: nothing of the capture left behind').toBe('');
+    await expect.poll(gdbRunning, { message: 'stop() ended gdb: nothing of the capture left behind', timeout: 3000, intervals: [250] }).toBe('');
     expect(pids.some((pid) => ['t', 'T'].includes(stateOf(pid))), 'no renderer is left stopped').toBe(false);
     // and the renderer works: the request is let go, the main thread returns, the page answers
     hung.release();
@@ -942,8 +957,8 @@ test('the kernel evidence is saved before the native step, which a teardown can 
 
 test('a page that answers is not captured', async ({ page, stallWatch }) => {
   await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
-  // longer than a probe's limit, so a page that answers has been probed
-  await page.waitForTimeout(7000);
+  // the watch has probed the page twice and the page answered both: a page that answers is not captured
+  await stallWatch.answered(page, 2, 30000);
   expect(stallWatch.captures).toEqual([]);
 });
 
@@ -1007,8 +1022,8 @@ test('every page of a test about to time out is captured', async ({ page, stallW
 test('a capture holds the runner\'s load over the last minute and the page\'s attempts', async ({ page, browser, stallWatch }) => {
   await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
   const armed = await arm(page);
-  // two samples at least, 2 s apart
-  await page.waitForTimeout(SAMPLE_EVERY_MS + 500);
+  // two samples at least, 2 s apart: the sampler has taken them
+  await expect.poll(() => runnerLoad(60000).samples.length, { timeout: 30000 }).toBeGreaterThanOrEqual(2);
   const result = await capture(page, armed, 'a capture asked for', browser);
   await armed.session.detach();
   const load = result.runnerLoad;
@@ -1076,9 +1091,8 @@ test('taking the evidence never fails or hangs a test, and says why when it cann
   expect(metricsBetween(null, {}, 5).unavailable).toMatch(/^not available: /);
   expect(metricsBetween({ unavailable: 'no page' }, {}, 5).unavailable).toBe('not available: no page');
   // a page that is stuck in a loop: the attempt ends, its metrics are given or said to be unavailable, and it all takes seconds
-  await startLoop(page, stallWatch, 'setTimeout(spinForever, 0)');
+  await startLoopHeard(page, stallWatch);   // the loop is running; the watch captures it only at 5 s
   try {
-    await page.waitForTimeout(500); // the loop is running; the watch captures it only at 5 s
     const began = Date.now();
     const log = attemptsOf(page);
     await attempted(page, 'stuck', 1, async () => 'done');
@@ -1099,9 +1113,8 @@ test('taking the evidence never fails or hangs a test, and says why when it cann
 });
 
 test('a page that answers nothing costs the attempts one wait, not one before and one after each (#715)', async ({ page, stallWatch }) => {
-  await startLoop(page, stallWatch, 'setTimeout(spinForever, 0)');
+  await startLoopHeard(page, stallWatch);
   try {
-    await page.waitForTimeout(500);
     const log = attemptsOf(page);
     const took = [];
     for (let attempt = 1; attempt <= 4; attempt++) {
@@ -1126,16 +1139,17 @@ test('a page that answers nothing costs the attempts one wait, not one before an
 
 test('the runner\'s samples taken under the name of an earlier test remain after that test left (#715)', async ({ page }) => {
   const leave = sampleRunner('an earlier test');
-  await page.waitForTimeout(SAMPLE_EVERY_MS + 500);
+  // the sampler has taken a sample under the name
+  await expect.poll(() => runnerLoad(60000).samples.some((each) => each.test === 'an earlier test'), { timeout: 30000 }).toBe(true);
   leave();
-  // stallWatch is a user of the sampler too, so the timer runs on; the earlier test's samples must be kept, not dropped with its user
-  await page.waitForTimeout(SAMPLE_EVERY_MS + 500);
+  // stallWatch is a user of the sampler too, so the timer runs on; the earlier test's samples must be kept, not dropped with its user: a later sample says no test
+  await expect.poll(() => { const taken = runnerLoad(60000).samples; return taken[taken.length - 1].test; }, { timeout: 30000 }).toBe('');
   const samples = runnerLoad(60000).samples;
   expect(samples.some((each) => each.test === 'an earlier test'), 'the earlier test\'s samples are still there').toBe(true);
   expect(samples[samples.length - 1].test, 'and the later ones say no test').toBe('');
 });
 
-test('a page that stops answering for 1.5 s and recovers gets its metrics again within the probe period, not after DEAF_MS (#715)', async ({ page, browser, stallWatch }, testInfo) => {
+test('a page that stops answering until a read of it times out, and recovers, gets its metrics again within the probe period, not after DEAF_MS (#715)', async ({ page, browser, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   await page.setContent('<!doctype html><title>Recovers</title>');
   await stallWatch.session(page);
@@ -1143,13 +1157,12 @@ test('a page that stops answering for 1.5 s and recovers gets its metrics again 
   await attempted(page, 'before', 1, async () => 1);
   expect(log.entries.find((each) => each.step === 'before').devtools.unavailable, 'answered while idle').toBeUndefined();
   const pids = await rendererPids(browser);
-  // frozen (no answer to anything): the read waits its second and the page is deaf from then on; it is let go before the 5 s that make the probe capture it
+  // frozen (no answer to anything): the read waits its second and the page is deaf from then on; it is let go as that read ends, long before the 5 s that make the probe capture it
   let released = 0;
   await frozen(pids, async () => {
-    const began = Date.now();
+    // the freeze lasts until the read has timed out (the attempt returns after its METRICS_MS): that is what the page is let go for
     await attempted(page, 'frozen', 1, async () => 1);
     expect(String(log.entries.find((each) => each.step === 'frozen').devtools.unavailable)).toContain('was not answered');
-    await new Promise((done) => setTimeout(done, Math.max(0, 1500 - (Date.now() - began)))); // node's timer: the frozen page cannot run Playwright's
     released = Date.now();
   });
   await expect.poll(async () => {

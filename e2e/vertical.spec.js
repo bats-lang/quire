@@ -8,7 +8,7 @@ import {
   start, importFiles, epubFile, openBook, readBook, toLibrary, reload, bookPage, dialog,
   place, indicator, chapters, japaneseChapters,
   readingSettings, openReadingSettings, expectBarFollows, marks, selectionButton,
-  rawMouse,
+  rawMouse, touchPath, straight,
 } from './helpers.js';
 
 const verticalBook = (title) => ({ title, author: 'Vertical Tests', language: 'ja', rtl: true, rawChapters: japaneseChapters(2, 40) });
@@ -167,20 +167,12 @@ test.describe('on a touch screen', () => {
     const box = await bookPage(page).boundingBox();
     const y = box.y + box.height / 2;
     const mid = box.x + box.width / 2;
-    const swipe = (x0, x1, id) => bookPage(page).evaluate(async (el, [x0, x1, y, id]) => {
-      const ev = (type, x) => el.dispatchEvent(new PointerEvent(type, {
-        bubbles: true, pointerId: id, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y,
-      }));
-      const wait = (t) => new Promise((r) => setTimeout(r, t));
-      const start = [el.scrollLeft, el.scrollTop];
-      const held = [];
-      ev('pointerdown', x0);
-      for (let i = 1; i <= 4; i++) { await wait(16); ev('pointermove', x0 + ((x1 - x0) * i) / 4); held.push([el.scrollLeft, el.scrollTop]); }
-      await wait(16);
-      ev('pointerup', x1);
-      await wait(50);
+    // whether the page was held still while it was dragged
+    const swipe = async (x0, x1, id) => {
+      const start = await bookPage(page).evaluate(el => [el.scrollLeft, el.scrollTop]);
+      const held = await touchPath(bookPage(page), straight(x0, x1, y), 16, { id, scrolls: true });
       return held.every(([left, top]) => left === start[0] && top === start[1]);
-    }, [x0, x1, y, id]);
+    };
     // held still while dragged to the right, then on to the next page
     expect(await swipe(mid - 60, mid + 60, 21)).toBe(true);
     await expect.poll(async () => (await place(page)).p).toBe(2);

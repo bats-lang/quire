@@ -82,9 +82,10 @@ edit. What bats does not yet judge is listed in `.claude/rules/ci.md`.
 
 ## Check locally before every push
 
-Run `bats check` before every push, so a push that does not type-check never reaches CI. Only
-the first build of a new checkout is cold (10 to 15 minutes), and that one runs in the
-background and is waited for in the same turn. Under disk pressure `qsweep clean` removes only
+Run `bats check` before every push, so a push that does not type-check never reaches CI. Short
+jobs run locally and CI runs the rest (quire#911, the owner's words in
+`.claude/agents/worker.md`): the first build of a new checkout is cold (10 to 15 minutes) and is
+left to CI, not started here (foreground or background); nothing is left running at hand-back. Under disk pressure `qsweep clean` removes only
 an older worktree whose pull request merged, never the one that merged last, a ticket in
 flight, or the orchestrator's checkout. How (the compiler, the machine's slots and env file,
 the cache, the e2e run): `.claude/rules/ci.md`.

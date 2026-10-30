@@ -12,7 +12,7 @@
 // `gen-pwa test` runs alone on one worker before the rest (#499).
 
 import { test, expect } from './fixtures.js';
-import { start, readBook, place, bookPage, chapters, clickControl, rawMouse, clockNow, expectMoment, placeChanged } from './helpers.js';
+import { start, readBook, place, bookPage, chapters, clickControl, rawMouse, clockNow, expectMoment, placeChanged, touchPath, straight } from './helpers.js';
 
 const book = (title, rtl = false) => ({ title, author: 'Turn Tests', rawChapters: chapters(2, 20), rtl });
 
@@ -51,16 +51,7 @@ const sides = async (page) => {
 
 // A drag of touch pointer events, as the gestures recognizer gets them
 const drag = (page, x0, x1, y, { cancel = false, id = 31 } = {}) =>
-  bookPage(page).evaluate(async (el, [x0, x1, y, cancel, id]) => {
-    const ev = (type, x) => el.dispatchEvent(new PointerEvent(type, {
-      bubbles: true, pointerId: id, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y,
-    }));
-    const wait = (t) => new Promise((r) => setTimeout(r, t));
-    ev('pointerdown', x0);
-    for (let i = 1; i <= 4; i++) { await wait(16); ev('pointermove', x0 + ((x1 - x0) * i) / 4); }
-    await wait(16);
-    ev(cancel ? 'pointercancel' : 'pointerup', x1);
-  }, [x0, x1, y, cancel, id]);
+  touchPath(bookPage(page), straight(x0, x1, y), 16, { cancel, id });
 
 // What a turn looked like: the page shown at its end, and whether the
 // page being left was laid over it on the way (the copy seen in any
