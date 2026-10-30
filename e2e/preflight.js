@@ -26,7 +26,7 @@ const MONITOR_EVERY_MS = 2000;
 const RING_QUIET_MS = 60000;
 // A watchdog in uninterruptible sleep (state D) may be silent this long before the run is ended (keyword: blocked watchdog, quire#972): 3 of the
 // 10 s probe periods that Kubernetes' liveness default (periodSeconds 10, failureThreshold 3) takes to give up on a container, 3 times the longest
-// block measured (9580 ms), and a quarter of the 120 s after which the kernel's hung-task detector reports a task stuck in D.
+// block measured (9580 ms). The kernel's hung-task detector (`hung_task_timeout_secs`, a tunable whose Kconfig default is 120 s) reports a task stuck in D only after that timeout; the 30 s is not derived from it.
 const BLOCKED_BEAT_STALE_MS = 30000;
 // The specs' way to see an end condition without waiting for its real limit (evidence-real.spec.js; nothing else sets these): the limit, in ms,
 // that the variable names, in place of the constant. The condition and the code that ends the run are the real ones.
