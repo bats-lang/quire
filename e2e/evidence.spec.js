@@ -987,10 +987,14 @@ test('a capture is reading the ring while a renderer in another page begins an u
   let hang = null;
   let reading = null;
   let draining = null;
+  let ticking = null;
   try {
     const page = await (await own.newContext()).newPage();
     const armed = await arm(page);
     const before = segmentsBegun();
+    // this process is in the ring's tree and idle while the capture waits: it ticks, so that a silence of the ring is a pause and not a quiet tree (the first run of
+    // this test measured 2.9 s of silence in the 3 s sleep below, with the ring recording). Each tick wakes the main thread: a sched_wakeup and a sched_switch.
+    ticking = setInterval(() => {}, 100);
     let capturing = true;
     reading = keepKernel(pipe, process.env).finally(() => { capturing = false; });
     // the capture has taken its snapshot when its segment is begun (flight-tracefs.js writes the segment's file right after the swap)
@@ -1030,6 +1034,7 @@ test('a capture is reading the ring while a renderer in another page begins an u
     expect(history.onAddress.events, 'and the address it waits on').toBeGreaterThan(0);
     expect(history.waiter.lastWait.at, 'the wait began after the capture took its snapshot').toBeGreaterThan(first.lastAt);
   } finally {
+    if (ticking) clearInterval(ticking);
     if (hang) hang.release();
     if (!draining) { draining = (async () => { for await (const chunk of createReadStream(pipe)) { void chunk; } })(); }
     if (reading) await reading.catch(() => {});

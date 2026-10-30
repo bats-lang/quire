@@ -238,8 +238,9 @@ const closed = (stream) => new Promise((resolve, reject) => { stream.once('finis
 const ended = (child) => new Promise((resolve) => child.on('close', (code) => resolve(code)));
 
 /** Writes the bytes of `file` into `sink`, waiting for it when it is full (a sink that is a pipe nobody reads yet holds this up, as it should). */
-async function copyInto(file, sink) {
-  for await (const chunk of createReadStream(file)) { if (!sink.write(chunk)) await once(sink, 'drain'); }
+async function copyInto(file, sink, failed) {
+  // `failed` rejects when the sink errors: a sink that cannot be written never drains, and waiting for 'drain' alone would wait for ever
+  for await (const chunk of createReadStream(file)) { if (!sink.write(chunk)) await Promise.race([once(sink, 'drain'), failed]); }
 }
 
 /**
@@ -284,7 +285,11 @@ async function capture({ instance, out, lines, dir, swap, clear }) {
     const teeClosed = tee ? closed(tee) : Promise.resolve();
     sink = createWriteStream(out);
     const sinkClosed = closed(sink);
-    for (const segment of earlier) await copyInto(`${dir}/${segment.name}`, sink);
+    // a stream that fails while an earlier segment is copied has no waiter yet: its rejection is awaited below, and is not an unhandled one that ends the process
+    // (the root call died with the lock and the half segment left, CI's run 40977154590). Keyword: ring readers.
+    sinkClosed.catch(() => {});
+    teeClosed.catch(() => {});
+    for (const segment of earlier) await copyInto(`${dir}/${segment.name}`, sink, sinkClosed);
     gzip = spawn('gzip', ['-1'], { stdio: ['pipe', 'pipe', 'inherit'] });
     gzip.stdin.on('error', () => {}); // a gzip ended on purpose (the finally below) is written to no more
     gzip.stdout.pipe(sink, { end: false });
