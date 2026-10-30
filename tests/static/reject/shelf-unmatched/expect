@@ -1,4 +1,4 @@
 function _static_shelf_label
 line 4
 pattern match is nonexhaustive:
-Trash()
+among Trash()

@@ -1,0 +1,2 @@
+(* The image of a stored book, as read *)
+fn f

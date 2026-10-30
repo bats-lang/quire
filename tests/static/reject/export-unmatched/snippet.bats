@@ -3,8 +3,3 @@
 fn _static_export_said (outcome: export_outcome): string =
   case+ outcome of
   | ExportedByDownload() => "saved"
-  | ExportedByShare() => "saved"
-  | ExportNotShared() => "not saved"
-  | ExportNoMemory() => "not saved"
-  | ExportNotesUnread() => "not saved"
-  | ExportBusy() => "not saved"

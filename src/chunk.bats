@@ -253,6 +253,7 @@ primplement ck_ckenc {tag,data,rest,octets} (read_proof) =
     in (CKENC_mk(tag_len, data_len, length_ok, crc_form, crc_proof, data_crc_app, tag_data_app, chunk_app), whole_app) end
 
 
+(* fixture: a-chunk-read-with-what-it *)
 (* A chunk read, with what it holds *)
 #pub datavtype ckread(ckres, int) =
   | {list_len:nat} CKR_trunc(ck_trunc(), list_len)

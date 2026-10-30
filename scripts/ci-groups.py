@@ -55,7 +55,29 @@ usage:
                                        members run only the lemmas the change can have made
                                        vacuous (#594), the others what scripts/affected.py
                                        selects
-  scripts/ci-groups.py local [<base>]  the static fixtures the working tree's change since the git
+  scripts/ci-groups.py local <base> [--sample N] [--seed S] [--specs N] [--run <repository>]
+                                       a worker's local run for the change since <base> (the
+                                       merge base with origin/main, tracked files of the
+                                       working tree included), by the rule CI uses at the
+                                       granularity of a fixture (keyword: affected): the
+                                       members to run, one per line (`check`, `checkers`,
+                                       every fixture that reads a changed file, every e2e spec
+                                       the rule selects as e2e/<spec>: all of them for a change
+                                       under src/**), the whole selected population in every
+                                       case, the reasons on standard error. A path for which CI
+                                       runs the whole static population is said, and --sample N
+                                       adds N other fixtures drawn with the seed S (printed).
+                                       --run runs the static members whole with
+                                       tests/static/run.sh (bats on PATH), then the selected specs
+                                       with `dist/debug/gen-pwa test -- <specs>` (built as in
+                                       .claude/rules/ci.md, under the env file): whole when they
+                                       are at most --specs N (default 12, about 10 minutes), else
+                                       N of them drawn with the seed S, printed with the sample;
+                                       CI runs the rest
+                                       Stopgap (keyword: affected): the fixture list is derived from
+                                       the source; bats-lang/bats#570 gives it from the fixtures memo,
+                                       and the derivation is deleted when it lands
+  scripts/ci-groups.py local-listed [<base>] the static fixtures the working tree's change since the git
                                        revision <base> (default origin/main) can affect, one
                                        `accept/<name>` or `reject/<name>` a line, as
                                        `bats fixtures tests/static --list-affected <paths>` lists
@@ -105,6 +127,9 @@ def static_members():
                         if os.path.isdir(os.path.join(directory, name)))
     return found
 
+
+#: How many specs a local run takes of the selected ones: about 10 minutes of e2e (a CI group of 13 to 17 specs takes about 5)
+E2E_CAP = 12
 
 NARROWING = ('testMatch', 'testIgnore', 'grep', 'grepInvert')
 
@@ -261,6 +286,66 @@ def local_affected(base, environment, run=subprocess.run):
              '--repository', repository, '--list-affected'] + paths, paths)
 
 
+def local(groups, arguments):
+    """The `local` command: print (and with --run, run) a change's members. Returns the status."""
+    import random
+    import subprocess
+    base, options = arguments[0], arguments[1:]
+    sample, seed, repository, spec_cap = 0, None, None, E2E_CAP
+    while options:
+        if options[0] == '--sample' and len(options) > 1 and options[1].isdigit():
+            sample, options = int(options[1]), options[2:]
+        elif options[0] == '--seed' and len(options) > 1 and options[1].isdigit():
+            seed, options = int(options[1]), options[2:]
+        elif options[0] == '--specs' and len(options) > 1 and options[1].isdigit():
+            spec_cap, options = int(options[1]), options[2:]
+        elif options[0] == '--run' and len(options) > 1:
+            repository, options = options[1], options[2:]
+        else:
+            return None
+    changes = selection.git_changes(base, ROOT, head=None)
+    result = selection.local_plan(changes, selection.Tree(ROOT))
+    members = list(result['static'])
+    for line in result['why']:
+        print(line, file=sys.stderr)
+    if result['whole']:
+        print('CI runs the whole static population for: ' + '; '.join(result['whole']), file=sys.stderr)
+    if sample or repository is not None:
+        seed = random.SystemRandom().randrange(10**9) if seed is None else seed
+    if sample:
+        pool = [member for member in selection.fixture_members(selection.Tree(ROOT)) if member not in members]
+        drawn = random.Random(seed).sample(pool, min(sample, len(pool)))
+        print(f'seeded sample: {len(drawn)} of {len(pool)} other fixtures, seed {seed}', file=sys.stderr)
+        members += sorted(drawn)
+    if result['e2e'] == selection.ALL:
+        print('e2e: every spec (the app or a shared module changed; a spec reads the built app)', file=sys.stderr)
+        specs_list = [f'e2e/{name}' for name in specs()]
+    else:
+        specs_list = sorted(result['e2e'])
+    print('\n'.join(members + specs_list))
+    if repository is None:
+        return 0
+    status = 0
+    if members:
+        status = subprocess.run([os.path.join(ROOT, 'tests', 'static', 'run.sh'), repository] + members).returncode
+    to_run = specs_list
+    if len(specs_list) > spec_cap:
+        to_run = sorted(random.Random(seed).sample(specs_list, spec_cap))
+        print(f'e2e: {len(to_run)} of the {len(specs_list)} selected specs run (seed {seed}, --specs {spec_cap}); CI runs the rest: ' + ' '.join(to_run),
+              file=sys.stderr)
+    elif specs_list:
+        print(f'e2e: the {len(specs_list)} selected specs fit the cap of {spec_cap} and run whole', file=sys.stderr)
+    if to_run:
+        # as CI's e2e job does (check.yml, "Run e2e tests"): the generator serves dist/pwa and runs the specs
+        try:
+            status = subprocess.run([os.path.join(ROOT, 'dist', 'debug', 'gen-pwa'), 'test', '--'] + to_run,
+                                    cwd=ROOT).returncode or status
+        except FileNotFoundError:
+            print('dist/debug/gen-pwa is not built: the e2e steps of .claude/rules/ci.md, "Checking locally", come first', file=sys.stderr)
+            return 2
+    return status
+
+
 def main(arguments):
     with open(os.path.join(ROOT, 'tests', 'groups.json')) as groups_file:
         groups = json.load(groups_file)
@@ -301,7 +386,11 @@ def main(arguments):
                 summary_file.write('\n'.join(report) + '\n')
         print('\n'.join(lines + report))
         return 0
-    if arguments[:1] == ['local'] and len(arguments) in (1, 2):
+    if arguments[:1] == ['local'] and len(arguments) >= 2:
+        status = local(groups, arguments[1:])
+        if status is not None:
+            return status
+    if arguments[:1] == ['local-listed'] and len(arguments) in (1, 2):
         try:
             found = local_affected(arguments[1] if len(arguments) == 2 else 'origin/main', os.environ)
         except RuntimeError as error:

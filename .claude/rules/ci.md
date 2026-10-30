@@ -14,7 +14,7 @@ paths:
 
 ## CI is pinned
 
-The pins and the relock are in CLAUDE.md. Specifics:
+The rule that every input is pinned, and the relock, are pitboss's `ci.md`; quire's pin names and its Dependabot and relock split are in CLAUDE.md, "CI is pinned". Specifics:
 
 * **The runner label** (#667): every job runs on `ubuntu-24.04`, written in each
   job's `runs-on` (quire has no reusable workflow to write it once in);
@@ -110,7 +110,9 @@ bats's judgement, by the mechanisms below.
 * **Who restores**: a pull request and the merge queue's group (#586: restoring main's cache
   keeps its build job near 3 minutes, where cold it took 13 of a 60-minute window). Main's push,
   the nightly run and a dispatched relock restore nothing (the static jobs pass `--cold`), so
-  every state of main is checked from nothing and is the base the pull requests' caches
+  every state of main is checked from nothing, except a push whose commit the merge queue's
+  run passed (queue-passed, #882): its static groups and e2e end after their first step, `build`
+  still builds cold, and the nightly run checks the state from nothing; that state is the base the pull requests' caches
   start from (GitHub gives a pull request and a merge group its base branch's caches; a pull
   request's own are readable only by it). A bug of bats's incremental logic that passes a PR
   therefore shows on main or in the nightly run at the latest. A cache is saved only by a job
@@ -137,6 +139,24 @@ function, the snippet line patsopt reports and patsopt's error word for word, an
 that is the one error, in that module, at that line, inside that function; an accept must check.
 A fixture whose memo entry is unchanged costs nothing, else about what its snippet changes (a
 changed `#pub` declaration re-checks what depends on it).
+
+A fixture finds its edit by a marker (keyword: fixture anchors, #983): `before` is a line `(* fixture: <name> *)`
+that exists in the module for that purpose, or a code line such as a function's name, never a comment's prose
+(a reworded comment, or a keyword added to it, would break every fixture that anchors on it). The marker sits
+directly above the place the snippet goes. `tests/static/anchors.py` (in `checkers`, with its own accept and reject
+trees in `tests/static/anchors/`) refuses a `before` that is a comment with no marker, one that is a line inside a block comment (a continuation
+line, found by reading the module's `(* *)` nesting; its tree has a `comment-continuation` reject), and one that no
+line of its `file` equals. It is Python as a stopgap (bats's `fixtures` cannot judge a `before`): bats#577 moves it.
+
+A reject fixture about a nonexhaustive match names the one constructor it is about (keyword: fixture among, #984): its
+`expect` is `function <name>`, `line <n>`, `pattern match is nonexhaustive:` and `among <Constructor>` (bats#573, in the
+compiler since the pin of 2026-10-29), written as patsopt prints the constructor, and its snippet is a match with one arm of
+another constructor (nothing spells out the datatype's other constructors, so adding one breaks no fixture). The expect is
+written by hand in that form: `bats fixtures --bless` writes the full error, which is the form this removes. A nested
+constructor keeps the arms that make patsopt print it (`Fixed(Grey())` needs the other `Fixed` arms). `tests/static/among.py`
+(in `checkers`, with its trees in `tests/static/among/`) refuses an `expect` that says `pattern match is nonexhaustive` in any
+other form: constructors listed line for line (one or several) or more than one `among` line. Python as a stopgap, as anchors.py
+is (bats's `fixtures` accepts both forms and cannot refuse one); it is deleted with anchors.py.
 
 ### The solver fixtures written from the sources (keyword: solver fixtures, #837 to #841, pieces of #594)
 
@@ -203,6 +223,24 @@ first (the mutation check is, below).
 * Where an entry is: the PR timeline (`added_to_merge_queue`,
   `removed_from_merge_queue`); `auto_merge` empty means enqueued or removed.
 
+**Why a merge-queue entry is removed (keyword: queue-removal).** An entry leaves the queue for one of two
+causes, and the `merge_group` runs that read `skipped` or `cancelled` beside a removal are never the cause:
+
+* The `destroyed` merge_group event. GitHub sends it for a group it throws away (an entry removed, a group
+  rebuilt). `check.yml` listens for it (`types: [checks_requested, destroyed]`) only so that its run joins the
+  concurrency group of the run it ends and cancels it. Every job of that run carries the false `if`
+  `github.event.action != 'destroyed'`, so the whole run reads `skipped`, `plan` included. A `skipped` queue run
+  is therefore the end of a group, and the run it cancelled reads `cancelled`: neither says why the entry was
+  removed.
+* The 60-minute window. The queue removes an entry whose required checks have not all passed 60 minutes after
+  it was added (the queue's checks timeout, 60 minutes by default). The timeline shows it as about 60 minutes
+  between `added_to_merge_queue` and `removed_from_merge_queue`, with `auto_merge` empty after.
+  A group whose jobs waited for runners, or a push run of main that took the runners for the commit the queue
+  had just tested, spends the window.
+
+Read the cause from the PR timeline first: the minutes between the two events (about 60 is the window), then the
+failed job of the group's run (`failure` in `check`). A removal with another cause is a ticket of its own.
+
 The static groups (`tests/groups.json`) are balanced by measured time (#618):
 every group pays the app's cold check and then its members (a reject is
 seconds, an accept a minute or more). A new fixture goes in the group with the
@@ -216,7 +254,7 @@ Both jobs that use Node install it with pwa's `e2e-setup` action (called by
 commit; `npm ci`, retried on a dropped connection, Playwright checked against
 `playwright-minimum`). Quire holds no install logic of its own (CLAUDE.md, "Pipeline and tooling improvements belong in bats or pwa").
 
-The owner ruled that every pin moves from the relock and that no bot opens a pull request (CLAUDE.md, "CI is pinned"); #996 moves these two to the relock and deletes `.github/dependabot.yml`. Until it does, which tool moves which pin here (#760; CLAUDE.md, "CI is pinned"): Dependabot
+The owner ruled that every pin moves from the relock and that no bot opens a pull request (pitboss's `ci.md`); #996 moves these two to the relock and deletes `.github/dependabot.yml`. Until it does, which tool moves which pin here (#760; CLAUDE.md, "CI is pinned"): Dependabot
 (`.github/dependabot.yml`, weekly, `cooldown` 7 days) moves the npm versions and `package-lock.json`
 of the root `package.json`.
 
@@ -280,7 +318,7 @@ mutants, too long for the required `check` and for a merge queue window. So:
 
 ### Locally, only the fixtures a change reaches (#1006)
 
-`scripts/ci-groups.py local [<base>]` (default `origin/main`) is the worker's list: it calls
+`scripts/ci-groups.py local-listed [<base>]` (default `origin/main`) is the list of bats's own selection (`local` is the source-derived run of #957, which keeps its name and use; this is the call that replaces its derivation once the workers move to it): it calls
 `bats fixtures tests/static --list-affected <paths>` (bats#570) over the paths the working tree
 differs in from the base (committed, uncommitted and untracked) and prints the fixtures that
 reach, one `accept/<name>` or `reject/<name>` a line; run those with `tests/static/run.sh`
@@ -335,7 +373,8 @@ each kind selects) and prints each path's reason in its summary. Rules:
   `e2e`; only `play-internal` needs `android`), a change of the branch
   protection that is an admin's;
   tested: `Workflow` in `tests/static/affected_test.py`.
-* **A draft PR runs no job (#939, keyword: draft).** `check.yml` has `types: [opened,
+* **The draft condition (#939, keyword: draft; the rule that a draft runs no costly job is
+  pitboss's `ci.md`).** `check.yml` has `types: [opened,
   synchronize, reopened, ready_for_review]` (GitHub's default three plus the transition to ready,
   so marking ready runs the check on the head) and `plan`, `build` and `check` carry
   `github.event_name != 'pull_request' || !github.event.pull_request.draft`; `static`, `e2e` and
@@ -344,6 +383,16 @@ each kind selects) and prints each path's reason in its summary. Rules:
   the ready run reports every context (`android / ...` included, which #656 keeps unskipped
   for a ready PR). Push, `workflow_dispatch`, `schedule` and `merge_group` are unchanged.
   Libraries: the condition is repository-prototype#525, their callers' types the tickets of #939.
+* **A push of a commit the merge queue passed skips the static and e2e groups (#882, keyword:
+  queue-passed; pwa#215).** `check.yml`'s `queue` job calls pwa's `queue-passed` action by commit
+  (the relock moves its pin: `relock.yml`'s `workflow-pins`) and outputs `skip`, `run_url` and
+  `reason`. The action decides by the commit alone (a `merge_group` run of this workflow, same
+  `head_sha`, `success`) and gives `skip=false` for every other event, so a schedule run, a
+  `workflow_dispatch` and a pull request run everything. `static` and `e2e` read `skip`: on `true`
+  a group is a job that runs and ends after its first step, as an unaffected group does (a skipped
+  job would fail `check`). `build`, `android` and `play-internal` never read it, so the AAB that
+  goes to Play is built and signed in the push run. `check` needs `queue`, prints its reason and
+  writes its `run_url` to the step summary. Tested: `Workflow` in `tests/static/affected_test.py`.
 * **The merge queue's group runs everything, by decision (#656).** Its diff
   (against `HEAD^1`) is one PR's, so a selection by it would be the PR's own
   and would miss what two PRs do together, which is what the queue is for
@@ -372,9 +421,31 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   command, and a wrapper below it kills a cold check for nothing. The first build of a new checkout
   runs with `run_in_background` and its log is read until it ends, in the same turn. A push is
   `qsweep push <arguments>`, which holds when `qsweep pressure` does not say `runner pressure: none`.
-* **A run over a population is a sample** (quire#751): about 10 minutes, the members drawn at random
-  with a seed that is printed (`python3 -c 'import random; r = random.Random(SEED); ...'`), and the
-  PR says the sample, its seed and size and why it suffices; the whole population is CI's.
+* **The affected members (quire#957, keyword: affected).** Before every push, a worker
+  runs `python3 scripts/ci-groups.py local $(git merge-base origin/main HEAD)`: the rule of the
+  `plan` job (`scripts/affected.py`, #619) at the granularity of a fixture, over the diff against
+  the merge base, tracked files of the working tree included (commit new files first). It lists
+  the whole selected population on standard output in every case, one member a line (`check`,
+  `checkers`, `accept/<name>`, `reject/<name>`, `e2e/<spec>`), and the reason of each on standard
+  error. A source module (`src/**`) selects `check`, `checkers`, and each fixture that reads it:
+  the module the fixture is put into (`file`), a module that one staloads, however far
+  (`staload "x.sats"` is `src/x.bats`), and any repository path a fixture's `before`, `expect`,
+  `file` or `snippet.bats` spells out. Every other path selects what CI's table says (a note, a
+  spec, a fixture's directory); a path for which CI runs the whole static population (the CI
+  files, the pins, an unknown path, `assets/**`) is said (`CI runs the whole static population
+  for: ...`) and left to the sample. A spec reads the built app, so a source change selects every
+  spec. **One relation between the list and the run** (the ruling recorded on the ticket, until the
+  owner says otherwise): the static members run whole; the specs run whole when they are at most
+  `--specs N` (default 12, about 10 minutes of e2e), else a sample of N of the selected specs is
+  drawn with a printed seed; CI runs the rest. `--run <repository>` does both: `tests/static/run.sh`,
+  then `./dist/debug/gen-pwa test -- <specs>` (the build steps and the env file below come first).
+  The worker writes the seed, the sample and why it suffices in the PR. `--sample N` adds N other
+  fixtures with the printed `--seed`, beside the affected ones and never in their place. The stopgap
+  carries its ticket in a comment on each piece (keyword: affected, bats-lang/bats#570, deleted when it
+  lands): the list is an over-approximation of what `bats fixtures` knows exactly (the files patsopt read
+  for each fixture, kept by its memo), and the exact form replaces the staload walk. The PR's Evidence has
+  the command and its output; a reviewer sends back a PR without it. Tested: `LocalRun` and `LocalCommand`
+  in `tests/static/affected_test.py`; the brief line: `tests/static/guidelines.py` (`WORKER_LINES`).
 * Two bats in one checkout take turns (a lock on `bats.toml`). Two checkouts take turns by
   bats's opt-in machine-wide slots: with `BATS_SLOTS=N` (1 to 64) `check`, `build`, `test` and
   `run`'s build each hold one of N `flock` files in `BATS_LOCK_DIR`. `gen-pwa test` uses the

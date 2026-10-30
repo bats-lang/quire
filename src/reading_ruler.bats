@@ -480,6 +480,7 @@ implement ruler_record_of_code (code) =
 implement ruler_device_of_code (code) =
   if code = 1 then RulerDeviceMouse() else RulerDeviceTouchOrPen()
 
+(* fixture: reading-ruler-a-finger-or-pen *)
 (* Reading ruler: a finger or pen down on the band of a paged page drags it *)
 fn _drag_begin (view: ruler_view, id: int, px: int, py: int): bool =
   case+ !_drag of
