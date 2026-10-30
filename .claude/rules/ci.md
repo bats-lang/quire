@@ -103,9 +103,27 @@ bats's judgement, by the mechanisms below.
   anywhere. `QUIRE_STATIC_WORK` (CI: `$RUNNER_TEMP/quire-static`) is the directory
   `tests/static/run.sh` works in. It stays a fixed directory because the save step names the
   directory it keeps (`app/build`, `memo`), and a `mktemp` one has no name the save can know.
-* **What is cached**: the `build` job caches `build/`. A static job caches the app's `build/`
-  under the one name `static` (every group checks the same app) and its memo under
-  `static-memo-<group>`. `check` and `build` never share a `build/` (check is mode 2 and 3,
+* **What is cached**: the `build` job caches `build/`, and the checked app's `build/` under the
+  one name `static`. A static job caches its memo under `static-memo-<group>`.
+* **The checked app (keyword: checked app, #974)**: `static` has `needs: build`. `build` runs
+  `tests/static/run.sh check` (a copy of the checkout in `$RUNNER_TEMP/quire-static/app` and
+  `bats check` of it) before `bats build`, restores and saves the `static` cache for it, and
+  uploads `app/build` (hidden files included: `.bats_stamp`) as the artifact `quire-app-checked`.
+  Every group that needs the compiler downloads it to the same place, on every event: a push to
+  main and the nightly run restore no cache, so `build` made it from nothing. The artifact is a
+  locator as the cache is: the group's own `bats fixtures` (and its `check` member) judge it by
+  bats's stamp and memo and check what differs. A module that fails `bats check` therefore stops
+  `build` at that step (about a minute into it) and the groups do not start, where each of them
+  used to fail on the same line. **Exactly one failed job** (the ticket's test): the step has
+  `continue-on-error`, every later step of `build` is skipped, `build` ends as a success with the
+  output `app` (the step's outcome), `static`, `e2e` and `android` run only when it is `success`,
+  and `check` (the required status) is the one job that fails, by a step naming the check. Research:
+  a skipped required check passes (GitHub, troubleshooting required status checks: "Successful check
+  statuses are `success`, `skipped`, and `neutral`"; a job skipped by a conditional "reports Success"), so the aggregate cannot simply be
+  skipped while `build` fails unless `build` is itself a required status of the ruleset (an admin's
+  change, in #974); a job's `needs` result is `skipped` for its dependents when it fails, and `if:
+  always()` is what makes an aggregate run. Hence one red job needs the failing step not to fail its
+  job, as here. `check` and `build` never share a `build/` (check is mode 2 and 3,
   build 0 and 1).
 * **Who restores**: a pull request and the merge queue's group (#586: restoring main's cache
   keeps its build job near 3 minutes, where cold it took 13 of a 60-minute window). Main's push,
@@ -119,7 +137,7 @@ bats's judgement, by the mechanisms below.
   that passed.
 * **Sharing**: jobs of one run start together, so none sees what another saves; the gain is from
   the previous build. A key is a name plus the commit and a save of it is immutable, so one name
-  is saved by one job: the `static` build (every group restores it) only by the `app` group, and
+  is saved by one job: the `static` build (the groups take it as an artifact, #974) only by the `build` job, and
   each group saves its own `static-memo-<group>`. Two jobs saving one key print
   `Cache save failed` (seen in the run of #750). Caches are immutable, 10 GB per repository, evicted
   by last access and after 7 days.
@@ -242,8 +260,10 @@ Read the cause from the PR timeline first: the minutes between the two events (a
 failed job of the group's run (`failure` in `check`). A removal with another cause is a ticket of its own.
 
 The static groups (`tests/groups.json`) are balanced by measured time (#618):
-every group pays the app's cold check and then its members (a reject is
-seconds, an accept a minute or more). A new fixture goes in the group with the
+`build` pays the app's cold check once, and every group that needs the compiler
+starts from the `build/` it made (keyword: checked app, #974), so a group pays
+its members (a reject is seconds, an accept a minute or more) and what bats
+checks again of that `build/`. A new fixture goes in the group with the
 least member time; `scripts/ci-groups.py` fails a spec or fixture in no group
 (or two), so a new one that is not in a group fails CI instead of never
 running.
@@ -338,7 +358,8 @@ each kind selects) and prints each path's reason in its summary. Rules:
   proved: a spec that builds a path from pieces is not seen.
 * The rule is Python in `scripts/` because it runs in the plan job, before any
   compiler exists.
-* **`build` and `android` run for every PR, by decision (#656).** The plan has no
+* **The plan never skips `build` or `android`, by decision (#656).** `build` runs for every
+  PR, and `android` for every PR whose app passed its check. The plan has no
   entry for them and they read none, so a missing or malformed entry cannot
   skip them. `android` is a call of pwa's reusable workflow, and a skipped
   caller starts none of that workflow's jobs: the required contexts
@@ -347,8 +368,11 @@ each kind selects) and prints each path's reason in its summary. Rules:
   skipped by a condition reports success, but "avoid requiring workflows that
   can be skipped"; community discussion 29825 has the nested context left
   unfulfilled). `android` needs the `build` artifact, so `build` runs too.
-  Skipping them waits for the required checks to be `check` alone, and for
-  `check` to need `android` (today it needs `plan`, `build`, `static` and
+  Its one `if` is `needs.build.outputs.app == 'success'` (keyword: checked app, #974):
+  when the app's check failed, `build` uploaded nothing for it, and the contexts
+  it leaves unreported hold nothing back, because `check`, the required status,
+  fails in that run. Letting the plan skip them waits for the required checks to be `check` alone, and for
+  `check` to need `android` (today it needs `plan`, `queue`, `build`, `static` and
   `e2e`; only `play-internal` needs `android`), a change of the branch
   protection that is an admin's;
   tested: `Workflow` in `tests/static/affected_test.py`.
@@ -360,7 +384,7 @@ each kind selects) and prints each path's reason in its summary. Rules:
   `android` need them and are skipped with them. `check` is skipped, which a required check
   counts as passed, so it is reported, not missing; the draft cannot merge in any case, and
   the ready run reports every context (`android / ...` included, which #656 keeps unskipped
-  for a ready PR). Push, `workflow_dispatch`, `schedule` and `merge_group` are unchanged.
+  for a ready PR whose app passes its check, #974). Push, `workflow_dispatch`, `schedule` and `merge_group` are unchanged.
   Libraries: the condition is repository-prototype#525, their callers' types the tickets of #939.
 * **A push of a commit the merge queue passed skips the static and e2e groups (#882, keyword:
   queue-passed; pwa#215).** `check.yml`'s `queue` job calls pwa's `queue-passed` action by commit

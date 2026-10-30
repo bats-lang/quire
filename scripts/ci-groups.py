@@ -9,8 +9,9 @@ Two kinds of group:
 * static: each a list of what one job of the static tests runs: `check`
   (bats check of the app itself), `checkers` (ids.py and case_plus.py,
   with their fixtures), and the fixtures, `accept/<name>` and
-  `reject/<name>` under tests/static/. Every job that runs a fixture
-  checks the app first (the long part: 9 min on CI), and each fixture
+  `reject/<name>` under tests/static/. The `build` job checks the app once
+  (the long part: 9 min on CI, #974) and every group takes that build/, so a
+  job that runs a fixture only verifies it, and each fixture
   then checks only its module again: on CI about 13 s for a reject, 54 s
   for an accept (which links the app). A fixture about the stylesheet is
   put in the module of its area (src/palette.bats for the roles), not in

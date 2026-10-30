@@ -120,6 +120,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       play_signing_sha1: ${{ steps.clients.outputs.play_signing_sha1 }}
+      app: ${{ steps.app.outcome }}
     steps:
       # Two commits deep: a pull request's checkout is the merge, and its
       # own head (its second parent) is what the version names (#219)
@@ -153,15 +154,53 @@ jobs:
           name: build
           path: build
 
+      # The app checked once, first: a module that fails `bats check` ends
+      # this step, in about a minute; every later step of this job is skipped
+      # and the static groups, e2e and android (which need this job) do not
+      # start. The groups take this build/ instead of each checking the app
+      # again (keyword: checked app, #974). run.sh's `check` member is the
+      # copy of the checkout the groups work in and its `bats check`
+      - name: Restore the checked app's cache
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        uses: ./.github/actions/build-cache
+        with:
+          mode: restore
+          name: static
+          path: ${{ runner.temp }}/quire-static/app/build
+
+      - name: Check the app
+        id: app
+        # The job goes on to the end as a success when the check failed (every step
+        # after it is skipped) and says so in its output `app`: `check` is then
+        # the one failed job of the run, where the failed check would make
+        # `build` and `check` two (keyword: checked app, #974)
+        continue-on-error: true
+        env:
+          QUIRE_STATIC_WORK: ${{ runner.temp }}/quire-static
+        run: tests/static/run.sh "$BATS_REPOSITORY" check
+
+      # Hidden files: build/.bats_stamp, which bats judges the build/ by
+      - name: Upload the checked app
+        if: steps.app.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: quire-app-checked
+          include-hidden-files: true
+          path: ${{ runner.temp }}/quire-static/app/build
+          retention-days: 1
+
       - name: Build the app and the PWA generator
+        if: steps.app.outcome == 'success'
         run: bats build
 
       - name: Generate PWA
+        if: steps.app.outcome == 'success'
         run: ./dist/debug/gen-pwa
 
       # The OAuth clients it signs in with: public IDs, committed in
       # scripts/sync-clients.env
       - name: Sync clients
+        if: steps.app.outcome == 'success'
         run: scripts/sync-clients.sh dist/pwa
 
       # The Android project's committed lock, beside its build-android.sh: the
@@ -169,20 +208,24 @@ jobs:
       # when it and the generated package.json disagree, and refuses to run
       # without it (keyword: android lock, #735; pwa#131)
       - name: Put the committed lock beside the Android project
+        if: steps.app.outcome == 'success'
         run: cp scripts/android/pnpm-lock.yaml dist/android/pnpm-lock.yaml
 
       # android.yml (pwa#136, pwa#254) reads Node's and Java's versions from
       # the project's own .nvmrc and .java-version; the locked pwa package does
       # not write them yet, so they are committed beside the lock (keyword: version-file)
       - name: Put the version files beside the Android project
+        if: steps.app.outcome == 'success'
         run: cp scripts/android/.nvmrc scripts/android/.java-version dist/android/
 
       # The same commit always gives the same version, whatever the clock
       # or time zone, and the Android project carries it (#219)
       - name: Check the version
+        if: steps.app.outcome == 'success'
         run: tests/version/same.sh
 
       - name: Verify PWA output
+        if: steps.app.outcome == 'success'
         run: |
           test -f dist/pwa/index.html
           test -f dist/pwa/bridge.js
@@ -197,6 +240,7 @@ jobs:
 
       # A book for the Android smoke test to open the app with
       - name: Make the book to share
+        if: steps.app.outcome == 'success'
         run: >-
           node -e "import('./e2e/create-epub.js').then(m => require('fs').writeFileSync('dist/android/smoke-share.epub',
           m.createEpub({ title: 'Shared With Quire', author: 'Smoke Test', chapters: 2, storeChapters: true })))"
@@ -205,6 +249,7 @@ jobs:
       # groups (which add the home page themselves: the Android project
       # never holds it)
       - name: Upload Android project
+        if: steps.app.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: quire-android
@@ -217,6 +262,7 @@ jobs:
 
       # The generator, whose `test` runs the e2e groups' suites (#499)
       - name: Upload the PWA generator
+        if: steps.app.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: quire-gen-pwa
@@ -227,49 +273,65 @@ jobs:
       # pwa's action (quire#637). The WASM smoke tests need no browsers, which
       # are restored from the cache here
       - name: Set up Node.js and Playwright
+        if: steps.app.outcome == 'success'
         uses: bats-lang/pwa/.github/actions/e2e-setup@c7aca6b5c45ea4d12680b8f3307a030c7e81f0e5 # pwa main c7aca6b
         with:
           playwright-minimum: "1.58"
 
       - name: Run WASM smoke tests
+        if: steps.app.outcome == 'success'
         run: npx vitest@1.6.1 run
 
       # The record codec, natively: the checksum's check value, the edge of
       # 32 bits, damage to every byte, fuzz (#354)
       - name: Codec tests
+        if: steps.app.outcome == 'success'
         run: tests/codec/run.sh $BATS_REPOSITORY
 
       # The CSS font-size reader, natively: values and units, declaration
       # blocks, selectors, whole style sheets and fuzz (#431)
       - name: CSS size tests
+        if: steps.app.outcome == 'success'
         run: tests/css-size/run.sh $BATS_REPOSITORY
 
       # The EPUB CFI module, natively: the specification's examples, epub.js's
       # and KOReader's CFIs, the steps of every position of generated chapters
       # (#901)
       - name: CFI tests
+        if: steps.app.outcome == 'success'
         run: tests/cfi/run.sh $BATS_REPOSITORY
 
       # The capped layout waits of the e2e helpers, in node with a fake page
       # (tests/layout-cap/check.mjs, #600): node is set up above by e2e-setup
       - name: Layout cap tests
+        if: steps.app.outcome == 'success'
         run: node tests/layout-cap/check.mjs
 
       # Only after everything above passed: a cache holds no failed build
       - name: Save the compiler cache
-        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        if: steps.app.outcome == 'success' && (github.event_name == 'pull_request' || github.event_name == 'push')
         uses: ./.github/actions/build-cache
         with:
           mode: save
           name: build
           path: build
 
+      - name: Save the checked app's cache
+        if: steps.app.outcome == 'success' && (github.event_name == 'pull_request' || github.event_name == 'push')
+        uses: ./.github/actions/build-cache
+        with:
+          mode: save
+          name: static
+          path: ${{ runner.temp }}/quire-static/app/build
+
   # The static tests (tests/static/run.sh): bats check of the app, the
   # checkers, and the fixtures, each put into the app checked whole, so
-  # each checks only its module again; in groups side by side, each
-  # checking the app first
+  # each checks only its module again; in groups side by side, each on the
+  # app that `build` checked (quire-app-checked, #974): bats judges that
+  # build/ itself, so a groups' `check` member is a check of what it was given
   static:
-    needs: [plan, queue]
+    needs: [plan, queue, build]
+    if: needs.build.outputs.app == 'success'
     runs-on: ubuntu-24.04
     # a mutation group of a change to crc.bats is the longest (keyword: mutation, #594)
     timeout-minutes: 120
@@ -319,16 +381,17 @@ jobs:
         uses: bats-lang/bats/.github/actions/setup@87f57a17a8b5455deefaf084b237932f96f4aeb7 # bats main 87f57a1
 
       # What bats keeps of the static run, in the directory run.sh works in
-      # (QUIRE_STATIC_WORK): the app's build/, which every group shares, and
-      # the fixtures' memo, which is the group's own (#622). bats judges both
-      # itself: a build/ made by another bats is dropped, a memo entry is
-      # served only when what it read is unchanged
-      - name: Restore the compiler cache
-        if: env.GROUP_BATS == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
-        uses: ./.github/actions/build-cache
+      # (QUIRE_STATIC_WORK): the app's build/, which `build` made and every
+      # group takes (on every event, a push to main and the nightly run too:
+      # `build` made it from nothing there), and the fixtures' memo, which is
+      # the group's own (#622). bats judges both itself: a build/ made by
+      # another bats is dropped, a memo entry is served only when what it read
+      # is unchanged
+      - name: Download the checked app
+        if: env.GROUP_BATS == 'yes'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          mode: restore
-          name: static
+          name: quire-app-checked
           path: ${{ runner.temp }}/quire-static/app/build
 
       - name: Restore the fixtures' memo
@@ -350,17 +413,6 @@ jobs:
           QUIRE_MUTATION_BASE: ${{ steps.scope.outputs.base != 'none' && steps.scope.outputs.base || '' }}
         run: tests/static/run.sh $FIXTURES_COLD "${BATS_REPOSITORY:-none}" $GROUP_MEMBERS
 
-      # One saver: every group restores the app's build/ but only the app
-      # group saves it, because the six jobs would reserve one key (name plus
-      # commit) and five would print "Cache save failed" (keyword: build cache, #622)
-      - name: Save the compiler cache
-        if: matrix.group == 'app' && env.GROUP_BATS == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'push')
-        uses: ./.github/actions/build-cache
-        with:
-          mode: save
-          name: static
-          path: ${{ runner.temp }}/quire-static/app/build
-
       - name: Save the fixtures' memo
         if: env.GROUP_BATS == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'push')
         uses: ./.github/actions/build-cache
@@ -373,6 +425,7 @@ jobs:
   # once (quire-android)
   e2e:
     needs: [plan, build, queue]
+    if: needs.build.outputs.app == 'success'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -426,12 +479,9 @@ jobs:
         with:
           playwright-minimum: "1.58"
           stall-tools: "true"
-
-      # A font with Japanese characters: the vertical book's shots are
-      # empty boxes without one (quire#359; vertical.spec.js checks it)
-      - name: Install a CJK font
-        if: env.GROUP_RUN == 'yes'
-        run: sudo apt-get install -y -q fonts-noto-cjk
+          # A font with Japanese characters, from pwa's cache: the vertical book's
+          # shots are empty boxes without one (quire#359, #932; vertical.spec.js checks it)
+          japanese-font: "true"
 
       # Each spec of the group, and only those: the filters must name
       # exactly as many files as the group lists
@@ -586,6 +636,17 @@ jobs:
           echo "e2e groups run (false: shown unaffected by the change): $E2E_RUN"
           echo "static members run, by group: $STATIC_RUN"
 
+      # The app's check failed: `build` went on to the end as a success so that
+      # this is the one failed job of the run (keyword: checked app, #974)
+      - name: The app passed its check
+        env:
+          APP_CHECK: ${{ needs.build.outputs.app }}
+        run: |
+          if [ "$APP_CHECK" != success ]; then
+            echo "::error::bats check of the app did not pass (the step 'Check the app' of job build ended: '$APP_CHECK')"
+            exit 1
+          fi
+
       # Why the groups did not run again, when they did not: the queue run that
       # passed this commit (pwa's queue-passed, #882). No compiler is set up in
       # this job, so the only avenue is the shell that already prints above
@@ -609,18 +670,23 @@ jobs:
           results: ${{ toJSON(needs) }}
 
   # The Android app (AAB and APK), built by the pwa package's workflow and
-  # signed with this repository's secrets; see ANDROID.md. Every run, a
-  # branch's or a pull request's too, builds and signs them the same way
-  # and checks that both are signed with the release key; only a push to
-  # main uploads them as downloadable artifacts.
+  # signed with this repository's secrets; see ANDROID.md. Every run whose
+  # app passed its check, a branch's or a pull request's too, builds and
+  # signs them the same way and checks that both are signed with the release
+  # key; only a push to main uploads them as downloadable artifacts.
   #
-  # It reads nothing of the plan and has no `if`: a skipped job that calls a
-  # reusable workflow starts none of that workflow's jobs, so the required
-  # contexts `android / build-android` and `android / smoke-test` would never
-  # be reported and the pull request would wait for them for ever (GitHub:
-  # "avoid requiring workflows that can be skipped"; #656)
+  # It reads nothing of the plan, and its one `if` is the app's check, never
+  # the plan: a skipped job that calls a reusable workflow starts none of that
+  # workflow's jobs, so the required contexts `android / build-android` and
+  # `android / smoke-test` would never be reported and the pull request would
+  # wait for them for ever (GitHub: "avoid requiring workflows that can be
+  # skipped"; #656). When the app's check failed, that wait holds nothing back:
+  # `check`, the required status, fails in the same run (keyword: checked app, #974)
   android:
     needs: build
+    # not when the app's check failed: `build` is a success then (its step
+    # went on), and nothing it uploaded is there (keyword: checked app, #974)
+    if: needs.build.outputs.app == 'success'
     # Pinned by commit; the relock workflow moves it (#203)
     uses: bats-lang/pwa/.github/workflows/android.yml@c7aca6b5c45ea4d12680b8f3307a030c7e81f0e5 # pwa main c7aca6b
     secrets: inherit

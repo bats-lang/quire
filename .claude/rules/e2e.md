@@ -96,7 +96,8 @@ never a reason to skip a spec is pitboss's `rules.md`, "Briefs and workers"):
   (any entry of an `e2e/*-books.js` registry): `node --input-type=module -e "import { writeFileSync } from 'node:fs'; import { createEpub } from './e2e/create-epub.js'; import { tocLevelBooks } from './e2e/toc-levels-books.js'; const e = tocLevelBooks.fourLevels; writeFileSync('/tmp/book.epub', e.bytes ? e.bytes() : createEpub(e.opts));"`,
   then `java -jar ~/epubcheck-5.2.1/epubcheck.jar /tmp/book.epub`. Checked: that
   book gives "No errors or warnings detected."
-* **A CJK font** (`fonts-noto-cjk`, `check.yml`): `two-books.spec.js` and
+* **A CJK font** (CI: the `japanese-font` input of pwa's `e2e-setup` in `check.yml`, from its
+  cache, quire#932; locally `fonts-noto-cjk`): `two-books.spec.js` and
   `vertical.spec.js` skip or fail without one. `fc-list | grep -i cjk` must
   list Noto Sans CJK.
 * **gdb and elfutils** (`apt-get install gdb elfutils pstack`): the stall watch
