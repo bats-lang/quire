@@ -173,6 +173,38 @@ export function fatal(part, why, out) {
   process.exit(1);
 }
 
+/**
+ * Whether a watchdog's last heartbeat is too old to be a live one (host stall): its age less the time this monitor was itself late.
+ * When the whole machine stops, the monitor's timer runs before the watchdog's on its return and finds the old beat; that is the machine's
+ * stop, recorded by the watchdog as a host stall, not a watchdog gone quiet. A watchdog stopped alone leaves the monitor on time.
+ */
+export function heartbeatQuiet({ beatAgeMs, monitorLateMs, staleMs }) { return beatAgeMs - Math.max(0, monitorLateMs) > staleMs; }
+
+/** The state letter of a process from /proc/<pid>/stat (readable for every user, root's processes too), or null when there is no such process. */
+export function processState(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
+  } catch (gone) { return null; }
+}
+
+/**
+ * Continues processes that were stopped until none is stopped, and says which still are (quire#908, run 40705566021). One SIGCONT is not enough for a
+ * `sudo` that wraps a stopped command: sudo stops itself when it sees its command stopped (job control), and it may see that after the SIGCONT it was
+ * sent, so it stays stopped, keeps the run's output pipe and the run never closes (the stopped-alone test kills it for the same reason, quire#749).
+ * `pids` is in the order to continue first; `send(pid)` signals one, `stateOf(pid)` is its state letter or null.
+ */
+export async function resumeUntilRunning(pids, { send, stateOf = processState, rounds = 40, everyMs = 250 }) {
+  let stopped = [...pids];
+  for (let round = 0; round < rounds; round += 1) {
+    for (const pid of round === 0 ? pids : stopped) { try { send(pid); } catch (gone) { /* it ended */ } }
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
+    stopped = pids.filter((pid) => /^[Tt]$/.test(stateOf(pid) || ''));
+    if (!stopped.length) return [];
+  }
+  return stopped;
+}
+
 /** Watches the parts while the run goes on. Returns a function that ends the watching. Logs a line at its start and a summary at its end (or at its fatal). */
 export function startMonitor(started, env = process.env) {
   if (!started || env.QUIRE_FLIGHT_MONITOR === 'off') return () => {};
@@ -183,12 +215,16 @@ export function startMonitor(started, env = process.env) {
   let lastWritten = null;
   let lastMoved = Date.now();
   let unreadable = 0;
-  const seen = { checks: 0, beats: new Set(), holdsMost: 0, lastRing: null, lastScans: null };
-  const summary = () => `${seen.checks} checks in ${Math.round((Date.now() - began) / 1000)} s; ${seen.beats.size} distinct heartbeats of the watchdog read (last: ${seen.lastScans === null ? 'none' : `${seen.lastScans} scans`}); ${seen.lastRing === null ? 'no reading of the ring was made' : `the ring had written ${seen.lastRing} events at the last reading`}; ring holds seen at once: ${seen.holdsMost}`;
+  let lastTick = began;
+  const seen = { stalls: 0, checks: 0, beats: new Set(), holdsMost: 0, lastRing: null, lastScans: null };
+  const summary = () => `${seen.checks} checks in ${Math.round((Date.now() - began) / 1000)} s; ${seen.beats.size} distinct heartbeats of the watchdog read (last: ${seen.lastScans === null ? 'none' : `${seen.lastScans} scans`}); ${seen.lastRing === null ? 'no reading of the ring was made' : `the ring had written ${seen.lastRing} events at the last reading`}; ring holds seen at once: ${seen.holdsMost}${seen.stalls ? `; the monitor itself was late ${seen.stalls} time(s) (host stall)` : ''}`;
   const die = (part, why) => { console.error(`[monitor] ended the run: ${summary()}`); return fatal(part, why, out); };
   console.error(`[monitor] started (${serialRun() ? 'the @serial run' : 'the run'}): every ${MONITOR_EVERY_MS} ms the watchdog ${started.watchdog.child ? started.watchdog.child.pid : '?'} (child and heartbeat), the ring ${started.kernel.instance} (on, taking events, held paused only by a capture that ends within ${HOLD_MOST_MS / 1000} s)`);
   const timer = setInterval(() => {
     seen.checks += 1;
+    const monitorLateMs = Date.now() - lastTick - MONITOR_EVERY_MS;
+    lastTick = Date.now();
+    if (monitorLateMs >= staleMs) seen.stalls += 1;
     if (watchdog.exited && !watchdog.stopping) return die('watchdog', `exited during the run (code ${watchdog.exited.code}, signal ${watchdog.exited.signal})`);
     // a capture that went without the ring lock (flight-tracefs.js, ring lock) may have crossed another's pause and resume: the ring is then not to be trusted
     const unlocked = lockFailuresIn(out);
@@ -198,7 +234,7 @@ export function startMonitor(started, env = process.env) {
     unreadable = 0;
     seen.beats.add(beat.at);
     seen.lastScans = beat.scans;
-    if (Date.now() - beat.at > staleMs) return die('watchdog', `no heartbeat for ${Date.now() - beat.at} ms`);
+    if (heartbeatQuiet({ beatAgeMs: Date.now() - beat.at, monitorLateMs, staleMs })) return die('watchdog', `no heartbeat for ${Date.now() - beat.at} ms`);
     const ring = beat.ring || {};
     if (ring.error) return die('kernel ring', `unreadable by the watchdog: ${ring.error}`);
     if (ring.written !== undefined) seen.lastRing = ring.written;
