@@ -58,15 +58,24 @@ usage:
   scripts/ci-groups.py local <base> [--sample N] [--seed S] [--specs N] [--run <repository>]
                                        a worker's local run for the change since <base> (the
                                        merge base with origin/main, tracked files of the
-                                       working tree included), by the rule CI uses at the
-                                       granularity of a fixture (keyword: affected): the
-                                       members to run, one per line (`check`, `checkers`,
-                                       every fixture that reads a changed file, every e2e spec
-                                       the rule selects as e2e/<spec>: all of them for a change
-                                       under src/**), the whole selected population in every
-                                       case, the reasons on standard error. A path for which CI
-                                       runs the whole static population is said, and --sample N
-                                       adds N other fixtures drawn with the seed S (printed).
+                                       working tree included): the members to run, one per
+                                       line, the reasons on standard error. The fixtures are
+                                       what `bats fixtures tests/static --list-affected <paths>`
+                                       lists over the changed paths (bats#570: the files patsopt
+                                       read for each fixture, kept by its memo; a fixture with no
+                                       memo entry is listed, so no memo lists every fixture); a bats
+                                       that is not on PATH or fails is an error, not an empty list.
+                                       Needs the package repository, from --run or BATS_REPOSITORY;
+                                       the work directory and the memo are $QUIRE_STATIC_WORK's
+                                       (the ones run.sh keeps), else ~/.cache/quire-static.
+                                       Beside them, by the rule CI uses (keyword: affected): `check`
+                                       and `checkers` for a change under src/**, what the table
+                                       selects for another path (a note: `checkers`; a fixture's
+                                       directory: that fixture), and every e2e spec the rule
+                                       selects as e2e/<spec> (all of them for a change under
+                                       src/**). A path for which CI runs the whole static population is said, and
+                                       --sample N adds N other fixtures drawn with the seed S
+                                       (printed).
                                        --run runs the static members whole with
                                        tests/static/run.sh (bats on PATH), then the selected specs
                                        with `dist/debug/gen-pwa test -- <specs>` (built as in
@@ -74,9 +83,6 @@ usage:
                                        are at most --specs N (default 12, about 10 minutes), else
                                        N of them drawn with the seed S, printed with the sample;
                                        CI runs the rest
-                                       Stopgap (keyword: affected): the fixture list is derived from
-                                       the source; bats-lang/bats#570 gives it from the fixtures memo,
-                                       and the derivation is deleted when it lands
   scripts/ci-groups.py members <kind> <group>
                                        check, then print that group's
                                        members, one per line (e2e specs
@@ -85,6 +91,7 @@ usage:
 import json
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -247,10 +254,34 @@ def group_affected(groups, group, base):
     return 'yes' if result['static'][group]['members'] else 'no'
 
 
+def listed_fixtures(paths, repository, environment, run=subprocess.run):
+    """The fixtures `bats fixtures tests/static --list-affected <paths>` lists (bats#570,
+    quire#1006, keyword: list-affected), one `accept/<name>` or `reject/<name>` a line, with the
+    work directory and the memo that tests/static/run.sh keeps when QUIRE_STATIC_WORK names one.
+    Returns (the command, the fixtures). Anything that is not a fixture line, a failing bats or
+    none on PATH is an error: the list is never made up, and never left short."""
+    if not repository:
+        raise RuntimeError('--run <repository> or BATS_REPOSITORY (the package repository) is needed for bats fixtures --list-affected')
+    work = environment.get('QUIRE_STATIC_WORK') or os.path.join(
+        environment.get('XDG_CACHE_HOME') or os.path.join(os.path.expanduser('~'), '.cache'), 'quire-static')
+    command = ['bats', 'fixtures', 'tests/static', '--work', work, '--memo', os.path.join(work, 'memo'),
+               '--repository', repository, '--list-affected'] + paths
+    try:
+        done = run(command, cwd=ROOT, capture_output=True, text=True)
+    except FileNotFoundError:
+        raise RuntimeError('bats is not on PATH (bats fixtures --list-affected lists the fixtures)')
+    if done.returncode != 0:
+        raise RuntimeError(f'bats fixtures --list-affected failed (status {done.returncode}): {done.stderr.strip()}')
+    found = [line for line in done.stdout.splitlines() if line]
+    for line in found:
+        if not re.fullmatch(r'(accept|reject)/[^/\s]+', line):
+            raise RuntimeError(f'bats fixtures --list-affected printed a line that is no fixture: {line}')
+    return command, found
+
+
 def local(groups, arguments):
     """The `local` command: print (and with --run, run) a change's members. Returns the status."""
     import random
-    import subprocess
     base, options = arguments[0], arguments[1:]
     sample, seed, repository, spec_cap = 0, None, None, E2E_CAP
     while options:
@@ -266,9 +297,21 @@ def local(groups, arguments):
             return None
     changes = selection.git_changes(base, ROOT, head=None)
     result = selection.local_plan(changes, selection.Tree(ROOT))
-    members = list(result['static'])
     for line in result['why']:
         print(line, file=sys.stderr)
+    paths = []
+    for _, path in changes:
+        if path not in paths:
+            paths.append(path)
+    listed = []
+    if paths:
+        try:
+            command, listed = listed_fixtures(paths, repository or os.environ.get('BATS_REPOSITORY'), os.environ)
+        except RuntimeError as error:
+            print(f'error: {error}', file=sys.stderr)
+            return 1
+        print(f'{len(listed)} fixtures from `{" ".join(command[:3])} --list-affected` over {len(paths)} changed paths', file=sys.stderr)
+    members = sorted(set(result['static']) | set(listed))
     if result['whole']:
         print('CI runs the whole static population for: ' + '; '.join(result['whole']), file=sys.stderr)
     if sample or repository is not None:

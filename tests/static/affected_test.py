@@ -19,7 +19,10 @@ selects everything. What is tested here:
   build job's tests, the home page for the static tests): nothing that could
   read the path names it (`Readers`), so the claim is checked against the
   text of the e2e suite, the static tests and the app's staloads, and not
-  only believed. That is a test of the table, not a proof of it.
+  only believed. That is a test of the table, not a proof of it;
+* the local run (`scripts/ci-groups.py local`, quire#957 and #1006): the rule's part of it
+  (`LocalRun`), the command and its merge of the fixtures `bats fixtures --list-affected` lists
+  (`LocalCommand`, `ListedFixtures`), with a stand-in for bats: the list itself is bats's own.
 
 No bats and no patsopt: it reads files (and runs git on a repository of its own).
 
@@ -578,27 +581,20 @@ class Readers(unittest.TestCase):
 
 
 class LocalRun(unittest.TestCase):
-    """The local run takes CI's rule at the granularity of a fixture (quire#957, keyword: affected)."""
+    """The local run takes CI's rule for what it does not take from bats: `check`, `checkers`, a
+    fixture's own directory and the specs (quire#957, keyword: affected). The fixtures a source
+    module reaches are `bats fixtures --list-affected`'s (quire#1006, LocalCommand)."""
 
     FILES = {
-        'src/a.bats': '#include "x"\nstaload "b.sats"\n',
-        'src/b.bats': 'staload "c.sats"\n',
-        'src/c.bats': 'val c = 1\n',
+        'src/a.bats': 'val a = 1\n',
         'src/d.bats': 'val d = 1\n',
-        'src/bin/q.bats': 'staload "d.sats"\n',
-        'tests/static/accept/reads-a/file': 'src/a.bats',
-        'tests/static/accept/reads-a/before': 'x',
-        'tests/static/accept/reads-a/snippet.bats': 'val s = 1',
-        'tests/static/reject/reads-d/file': 'src/d.bats\n',
-        'tests/static/reject/reads-d/before': 'val d = 1',
-        'tests/static/reject/reads-d/snippet.bats': 'val s = 1',
-        'tests/static/reject/reads-d/expect': 'function s\nline 1\nerror',
-        'tests/static/accept/names-doc/file': 'src/d.bats',
-        'tests/static/accept/names-doc/before': 'val d = 1',
-        'tests/static/accept/names-doc/snippet.bats': '(* e2e/shared.js is the mirror *)',
-        'tests/static/accept/uses-c/file': 'src/d.bats',
-        'tests/static/accept/uses-c/before': 'val d = 1',
-        'tests/static/accept/uses-c/snippet.bats': 'staload "c.sats"',
+        'tests/static/accept/in-d/file': 'src/d.bats',
+        'tests/static/accept/in-d/before': 'val d = 1',
+        'tests/static/accept/in-d/snippet.bats': 'val s = 1',
+        'tests/static/reject/in-d-too/file': 'src/d.bats\n',
+        'tests/static/reject/in-d-too/before': 'val d = 1',
+        'tests/static/reject/in-d-too/snippet.bats': 'val s = 1',
+        'tests/static/reject/in-d-too/expect': 'function s\nline 1\nerror',
         'e2e/one.spec.js': "import './shared.js';\n",
         'e2e/two.spec.js': 'export {};\n',
         'e2e/shared.js': 'export {};\n',
@@ -616,25 +612,15 @@ class LocalRun(unittest.TestCase):
     def plan(self, *changes):
         return af.local_plan([(status, path) for status, path in changes], self.tree)
 
-    def test_a_fixture_is_listed_for_the_module_it_is_put_into(self):
-        self.assertEqual(self.plan(('M', 'src/a.bats'))['static'], ['accept/reads-a', 'check', 'checkers'])
+    def test_a_source_module_selects_check_and_checkers_and_no_fixture(self):
+        """The fixtures it reaches come from bats, not from this plan."""
+        self.assertEqual(self.plan(('M', 'src/a.bats'))['static'], ['check', 'checkers'])
+        self.assertEqual(self.plan(('M', 'src/d.bats'))['static'], ['check', 'checkers'])
 
-    def test_a_fixture_is_listed_for_a_module_its_module_staloads_however_far(self):
-        # c is read by a through b; the snippet of uses-c staloads c itself
-        self.assertEqual(self.plan(('M', 'src/c.bats'))['static'], ['accept/reads-a', 'accept/uses-c', 'check', 'checkers'])
-
-    def test_a_fixture_is_not_listed_for_a_module_it_does_not_read(self):
-        found = self.plan(('M', 'src/d.bats'))['static']
-        self.assertNotIn('accept/reads-a', found)
-        self.assertEqual(found, ['accept/names-doc', 'accept/uses-c', 'check', 'checkers', 'reject/reads-d'])
-
-    def test_a_fixture_is_listed_for_a_path_its_files_name(self):
+    def test_a_shared_spec_module_selects_its_specs_and_the_checkers(self):
         found = self.plan(('M', 'e2e/shared.js'))
-        self.assertEqual(found['static'], ['accept/names-doc', 'checkers'])
+        self.assertEqual(found['static'], ['checkers'])
         self.assertEqual(found['e2e'], {'e2e/one.spec.js'})
-
-    def test_a_module_the_driver_staloads_is_found_through_src(self):
-        self.assertEqual(self.plan(('M', 'src/bin/q.bats'))['static'], ['check', 'checkers'])
 
     def test_a_spec_only_change_lists_no_fixture(self):
         found = self.plan(('M', 'e2e/two.spec.js'))
@@ -643,7 +629,7 @@ class LocalRun(unittest.TestCase):
         self.assertEqual(found['whole'], [])
 
     def test_a_fixture_change_lists_that_fixture(self):
-        self.assertEqual(self.plan(('M', 'tests/static/reject/reads-d/expect'))['static'], ['reject/reads-d'])
+        self.assertEqual(self.plan(('M', 'tests/static/reject/in-d-too/expect'))['static'], ['reject/in-d-too'])
 
     def test_notes_list_the_checkers_only(self):
         self.assertEqual(self.plan(('M', '.claude/rules/ci.md'))['static'], ['checkers'])
@@ -651,7 +637,7 @@ class LocalRun(unittest.TestCase):
     def test_a_path_that_runs_the_whole_population_in_ci_is_said_and_lists_no_member_for_it(self):
         found = self.plan(('M', 'bats.lock'), ('M', 'src/d.bats'))
         self.assertEqual(found['whole'], ['bats.lock: CI files'])
-        self.assertIn('reject/reads-d', found['static'])
+        self.assertEqual(found['static'], ['check', 'checkers'])
 
     def test_an_app_path_outside_src_is_whole(self):
         self.assertEqual(self.plan(('M', 'assets/x.png'))['whole'], ['assets/x.png: the app'])
@@ -659,16 +645,16 @@ class LocalRun(unittest.TestCase):
     def test_no_change_to_go_by_is_whole(self):
         self.assertEqual(self.plan()['whole'], ['no change to go by: everything'])
 
-    def test_a_deleted_module_still_lists_its_readers(self):
+    def test_a_deleted_module_still_selects_check_and_checkers(self):
         os.remove(Path(self.directory.name) / 'src/d.bats')
-        self.assertIn('reject/reads-d', self.plan(('D', 'src/d.bats'))['static'])
+        self.assertEqual(self.plan(('D', 'src/d.bats'))['static'], ['check', 'checkers'])
 
     def test_a_src_change_selects_every_spec(self):
         self.assertEqual(self.plan(('M', 'src/a.bats'))['e2e'], af.ALL)
 
 
 class LocalCommand(unittest.TestCase):
-    """`scripts/ci-groups.py local` on the real fixtures."""
+    """`scripts/ci-groups.py local`, with bats's list stood in for (ListedFixtures is the call) and git's changes given."""
 
     @classmethod
     def setUpClass(cls):
@@ -676,27 +662,55 @@ class LocalCommand(unittest.TestCase):
         cls.module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.module)
 
-    def run_local(self, changes, *options):
+    def run_local(self, changes, *options, listed=(), failure=None):
+        """`local` with git's changes given and bats's list stood in for: self.asked is what it was asked."""
+        self.asked = []
+        def stand_in(paths, repository, environment, run=None):
+            self.asked.append((paths, repository))
+            if failure:
+                raise RuntimeError(failure)
+            return ['bats', 'fixtures', 'tests/static'], list(listed)
         out, err = io.StringIO(), io.StringIO()
         with patch.object(self.module.selection, 'git_changes', return_value=changes), \
+                patch.object(self.module, 'listed_fixtures', side_effect=stand_in), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             status = self.module.local(GROUPS, ['origin/main', *options])
         return status, out.getvalue().split('\n')[:-1], err.getvalue()
 
-    def test_a_change_to_a_module_lists_every_fixture_anchored_in_it(self):
-        """quire#890: the fixtures anchored on the lines of src/bookimage.bats were not in the sample."""
-        status, lines, _ = self.run_local([('M', 'src/bookimage.bats')])
-        self.assertEqual(status, 0)
-        for member in ('accept/image-roundtrip', 'reject/image-roundtrip-another-book', 'check', 'checkers'):
-            self.assertIn(member, lines)
-        self.assertLess(len(lines), len(non_mutation_members()))
+    LISTED = ['accept/image-roundtrip', 'reject/image-roundtrip-another-book']
 
-    def test_every_fixture_is_listed_for_a_change_to_its_module(self):
-        tree = af.Tree(str(ROOT))
-        for member in sorted(af.fixture_members(tree)):
-            module = (ROOT / 'tests' / 'static' / member / 'file').read_text().strip()
-            with self.subTest(member):
-                self.assertIn(member, af.local_plan([('M', module)], tree)['static'])
+    def test_a_change_to_a_module_lists_the_fixtures_bats_lists(self):
+        """quire#1006: the fixtures are `bats fixtures --list-affected`'s; quire#890: those anchored in src/bookimage.bats."""
+        with patch.dict(os.environ, {'BATS_REPOSITORY': '/repo'}):
+            status, lines, err = self.run_local([('M', 'src/bookimage.bats')], listed=self.LISTED)
+        self.assertEqual(status, 0)
+        self.assertEqual([line for line in lines if not line.startswith('e2e/')],
+                         ['accept/image-roundtrip', 'check', 'checkers', 'reject/image-roundtrip-another-book'])
+        self.assertEqual(self.asked, [(['src/bookimage.bats'], '/repo')])
+        self.assertIn('2 fixtures from `bats fixtures tests/static --list-affected` over 1 changed paths', err)
+
+    def test_run_gives_bats_its_repository(self):
+        with patch.dict(os.environ, {'BATS_REPOSITORY': '/other'}), patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0)):
+            self.run_local([('M', 'e2e/folders.spec.js')], '--run', '/repository')
+        self.assertEqual(self.asked[0][1], '/repository')
+
+    def test_bats_is_asked_for_each_changed_path_once_a_rename_as_both(self):
+        self.run_local([('D', 'src/old.bats'), ('A', 'src/new.bats'), ('M', 'src/new.bats'), ('M', 'e2e/folders.spec.js')])
+        self.assertEqual(self.asked[0][0], ['src/old.bats', 'src/new.bats', 'e2e/folders.spec.js'])
+
+    def test_a_fixture_both_rules_select_is_listed_once(self):
+        member = 'reject/image-roundtrip-another-book'
+        status, lines, _ = self.run_local([('M', f'tests/static/{member}/expect')], listed=[member])
+        self.assertEqual(lines, [member])
+
+    def test_a_bats_that_cannot_list_fails_the_command_and_lists_nothing(self):
+        status, lines, err = self.run_local([('M', 'src/bookimage.bats')], failure='bats is not on PATH')
+        self.assertEqual((status, lines), (1, []))
+        self.assertIn('error: bats is not on PATH', err)
+
+    def test_no_change_asks_bats_nothing(self):
+        self.run_local([])
+        self.assertEqual(self.asked, [])
 
     def test_a_spec_only_change_lists_no_fixture(self):
         status, lines, _ = self.run_local([('M', 'e2e/folders.spec.js')])
@@ -773,13 +787,64 @@ class LocalCommand(unittest.TestCase):
         (status, _, _), _ = self.run_recording([('M', 'e2e/folders.spec.js')], returncodes=(1, 0))
         self.assertEqual(status, 1)
 
-    def test_the_stopgap_names_its_ticket_in_every_place(self):
-        """Four places: STALOAD, module_reach and fixture_readers in affected.py, the usage of ci-groups.py."""
-        places = {'scripts/affected.py': 3, 'scripts/ci-groups.py': 1}
-        for path, count in places.items():
-            text = (ROOT / path).read_text()
-            for needle in ('keyword: affected', 'bats-lang/bats#570', 'deleted when'):
-                self.assertGreaterEqual(text.count(needle), count, (path, needle))
+
+class ListedFixtures(unittest.TestCase):
+    """The call of `local` to `bats fixtures tests/static --list-affected` (quire#1006), with a stand-in for bats given as `run`."""
+
+    @staticmethod
+    def module():
+        spec = importlib.util.spec_from_file_location('ci_groups_listed', ROOT / 'scripts' / 'ci-groups.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    @staticmethod
+    def bats(stdout, returncode=0, stderr=''):
+        calls = []
+        def run(command, **options):
+            calls.append((command, options))
+            return subprocess.CompletedProcess(command, returncode, stdout, stderr)
+        run.calls = calls
+        return run
+
+    def test_it_runs_bats_fixtures_list_affected_over_the_paths(self):
+        run = self.bats('accept/x\nreject/y\n')
+        command, found = self.module().listed_fixtures(
+            ['src/a.bats', 'tests/static/accept/x/snippet.bats'], '/repo', {'QUIRE_STATIC_WORK': '/work'}, run)
+        self.assertEqual(command, ['bats', 'fixtures', 'tests/static', '--work', '/work', '--memo', '/work/memo',
+                                   '--repository', '/repo', '--list-affected',
+                                   'src/a.bats', 'tests/static/accept/x/snippet.bats'])
+        self.assertEqual(found, ['accept/x', 'reject/y'])
+        self.assertEqual(run.calls[0][0], command)
+        self.assertEqual(os.path.realpath(run.calls[0][1]['cwd']), str(ROOT))
+
+    def test_the_work_directory_defaults_to_the_cache(self):
+        command, _ = self.module().listed_fixtures(['a'], '/r', {'XDG_CACHE_HOME': '/cache'}, self.bats(''))
+        self.assertEqual(command[3:7], ['--work', '/cache/quire-static', '--memo', '/cache/quire-static/memo'])
+
+    def test_no_fixture_is_an_empty_list(self):
+        self.assertEqual(self.module().listed_fixtures(['a'], '/r', {}, self.bats(''))[1], [])
+
+    def test_no_repository_is_refused(self):
+        with self.assertRaises(RuntimeError):
+            self.module().listed_fixtures(['a'], None, {}, self.bats(''))
+
+    def test_a_failing_bats_is_refused_with_its_words(self):
+        with self.assertRaises(RuntimeError) as raised:
+            self.module().listed_fixtures(['a'], '/r', {}, self.bats('accept/x\n', 2, 'usage'))
+        self.assertIn('failed (status 2): usage', str(raised.exception))
+
+    def test_a_missing_bats_is_refused(self):
+        def run(command, **_):
+            raise FileNotFoundError('bats')
+        with self.assertRaises(RuntimeError) as raised:
+            self.module().listed_fixtures(['a'], '/r', {}, run)
+        self.assertIn('not on PATH', str(raised.exception))
+
+    def test_a_line_that_is_no_fixture_is_refused(self):
+        for line in ('check', 'accept/', 'e2e/x.spec.js', 'accept/a/b'):
+            with self.subTest(line), self.assertRaises(RuntimeError):
+                self.module().listed_fixtures(['a'], '/r', {}, self.bats(f'accept/x\n{line}\n'))
 
 
 def strip_hash_comments(text):
