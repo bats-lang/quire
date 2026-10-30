@@ -3,5 +3,3 @@
 fn _static_is_link (found: !link_found): bool =
   case+ found of
   | NoLink() => false
-  | InBook(_, _, _, _) => true
-

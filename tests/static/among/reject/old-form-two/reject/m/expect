@@ -1,0 +1,6 @@
+function f
+line 3
+pattern match is nonexhaustive:
+RoleText()
+pattern match is nonexhaustive:
+RoleCard()

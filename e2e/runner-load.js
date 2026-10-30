@@ -31,6 +31,7 @@ import { cpus } from 'node:os';
 export const SAMPLE_EVERY_MS = 2000;
 export const SAMPLE_KEEP = 45;
 const OTHERS_MOST = 4;
+export const STALL_LATE_MS = 300; // a sample this late is a stall of the machine or of the worker (the watchdog's GAP_MS)
 const TICKS_PER_SECOND = 100; // USER_HZ, 100 on Linux for every architecture the runners use
 
 const text = (file) => readFileSync(file, 'utf8');
@@ -178,13 +179,27 @@ export function sampleRunner(test = '') {
   };
 }
 
+/** Memory reclaim (quire#909): the memory pressure (`some`, microseconds) of a stall covers most (more than half) of its gap. */
+export function memoryReclaim(gapMs, memoryUs) {
+  return typeof memoryUs === 'number' && typeof gapMs === 'number' && gapMs > 0 && memoryUs / 1000 > gapMs / 2;
+}
+
+/** The samples whose timer came late, each with the memory pressure that stalled tasks in its interval and whether that is memory reclaim. */
+export function lateSamples(taken) {
+  return taken.filter((each) => each.lateMs >= STALL_LATE_MS).map((each) => {
+    const memory = each.pressure && each.pressure.memory && each.pressure.memory.some;
+    const memoryStalledMs = memory && typeof memory.stalledMs === 'number' ? memory.stalledMs : null;
+    return { at: each.at, lateMs: each.lateMs, memoryStalledMs, memoryReclaim: memoryReclaim(each.lateMs, memoryStalledMs === null ? null : memoryStalledMs * 1000) };
+  });
+}
+
 const peak = (values) => (values.length ? Math.max(...values) : null);
 const mean = (values) => (values.length ? +(values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2) : null);
 
 /** The samples taken in the last `ms`, with what they add up to (numbers and ratios, no verdict). */
-export function runnerLoad(ms = 60000) {
+export function runnerLoad(ms = 60000, source = samples) {
   const since = Date.now() - ms;
-  const taken = samples.filter((each) => !each.at || Date.parse(each.at) >= since);
+  const taken = source.filter((each) => !each.at || Date.parse(each.at) >= since);
   const some = (resource) => taken.map((each) => each.pressure && each.pressure[resource] && each.pressure[resource].some && each.pressure[resource].some.avg10).filter((value) => typeof value === 'number');
   const share = (name) => taken.map((each) => each.cpuShare && each.cpuShare[name]).filter((value) => typeof value === 'number');
   const browserCpu = taken.map((each) => each.browserCpuSeconds).filter((value) => typeof value === 'number');
@@ -206,6 +221,8 @@ export function runnerLoad(ms = 60000) {
   };
   const notAvailable = [...new Set(taken.flatMap((each) => [each.cpuShare, each.processes, ...Object.values(each.pressure || {})].filter((value) => typeof value === 'string')))];
   summary.notAvailable = notAvailable;
-  summary.reading = `over the last ${Math.round(ms / 1000)} s (${taken.length} samples) on ${cores} cores: CPU pressure (some, avg10) peak ${summary.cpuPressureSomeAvg10.peak}%, steal peak ${summary.stealPercent.peak}%, iowait peak ${summary.iowaitPercent.peak}%, the browsers used ${typeof summary.browserCores === 'string' ? summary.browserCores : `${summary.browserCores.mean} cores on average, ${summary.browserCores.peak} at most`}, the worker's timer was late by ${summary.workerLateMs.peak} ms at most`;
+  summary.stalls = lateSamples(taken);
+  const reclaims = summary.stalls.filter((each) => each.memoryReclaim);
+  summary.reading = `over the last ${Math.round(ms / 1000)} s (${taken.length} samples) on ${cores} cores: CPU pressure (some, avg10) peak ${summary.cpuPressureSomeAvg10.peak}%, steal peak ${summary.stealPercent.peak}%, iowait peak ${summary.iowaitPercent.peak}%, the browsers used ${typeof summary.browserCores === 'string' ? summary.browserCores : `${summary.browserCores.mean} cores on average, ${summary.browserCores.peak} at most`}, the worker's timer was late by ${summary.workerLateMs.peak} ms at most${reclaims.length ? `; memory reclaim: ${reclaims.map((each) => `memory pressure stalled tasks for ${each.memoryStalledMs} ms of the sample at ${each.at} whose timer was ${each.lateMs} ms late`).join(', ')}` : ''}`;
   return { everyMs: SAMPLE_EVERY_MS, summary, samples: taken };
 }

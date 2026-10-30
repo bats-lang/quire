@@ -306,9 +306,10 @@ def describe(selected):
     return ', '.join(sorted(os.path.basename(name) if name.endswith('.js') else name for name in selected))
 
 
-def git_changes(base, root):
-    """The paths changed since `base`: (status, path), a rename as its two paths."""
-    out = subprocess.run(['git', 'diff', '--no-renames', '--name-status', '-z', base, 'HEAD'],
+def git_changes(base, root, head='HEAD'):
+    """The paths changed since `base`: (status, path), a rename as its two paths.
+    With `head` None, the working tree (tracked files) is compared instead of HEAD."""
+    out = subprocess.run(['git', 'diff', '--no-renames', '--name-status', '-z', base] + ([head] if head else []),
                          cwd=root, check=True, capture_output=True).stdout.decode('utf-8')
     tokens = out.split('\0')
     changes = []
@@ -345,3 +346,125 @@ def plan(groups, changes, tree, mutation_runs):
         needs_bats = any(member != CHECKERS for member in chosen)
         result['static'][group] = {'members': ' '.join(chosen), 'bats': needs_bats}
     return result
+
+
+# --- the local run: the same rule, at the granularity of a fixture (quire#957, keyword: affected) ----------
+
+# Stopgap (keyword: affected): the reads of a fixture are derived from the source until bats-lang/bats#570 lists them from the fixtures memo; STALOAD and module_reach are deleted when it lands.
+STALOAD = re.compile(r'staload\s+(?:\w+\s*=\s*)?"([\w./-]+)\.sats"')
+FIXTURE_FILES = ('file', 'before', 'expect', 'snippet.bats')
+
+
+def fixture_members(tree):
+    """accept/<name> and reject/<name>, every fixture directory of tests/static."""
+    found = []
+    for verdict in ('accept', 'reject'):
+        base = os.path.join(tree.root, 'tests', 'static', verdict)
+        if os.path.isdir(base):
+            found += [f'{verdict}/{name}' for name in sorted(os.listdir(base))
+                      if os.path.isdir(os.path.join(base, name))]
+    return found
+
+
+def fixture_text(tree, member, name):
+    path = os.path.join(tree.root, 'tests', 'static', member, name)
+    if not os.path.isfile(path):
+        return ''
+    with open(path, encoding='utf-8', errors='replace') as file:
+        return file.read()
+
+
+def staloaded(tree, path):
+    """The modules `path` staloads by the interface of another module of the app
+    ('staload "bytes.sats"' reads src/bytes.bats, the module that makes it)."""
+    if not tree.exists(path):
+        return []
+    with open(os.path.join(tree.root, path), encoding='utf-8', errors='replace') as file:
+        text = file.read()
+    found = []
+    for name in STALOAD.findall(text):
+        for directory in (os.path.dirname(path), 'src'):
+            candidate = os.path.normpath(os.path.join(directory, name + '.bats'))
+            if tree.exists(candidate):
+                found.append(candidate)
+                break
+    return found
+
+
+def module_reach(tree, roots):
+    """Stopgap (keyword: affected), deleted when bats-lang/bats#570 lands.
+    {module: the module that staloads it, or None for a root}: every module the
+    roots read, however far (patsopt reads the interface of each one staloaded)."""
+    reach, queue = {root: None for root in roots}, list(roots)
+    while queue:
+        module = queue.pop()
+        for needed in staloaded(tree, module):
+            if needed not in reach:
+                reach[needed] = module
+                queue.append(needed)
+    return reach
+
+
+def fixture_reads(tree):
+    """{fixture: (module it is put into, {module read: the one that staloads it}, texts)},
+    made once for a tree."""
+    if getattr(tree, '_fixture_reads', None) is None:
+        found = {}
+        for member in fixture_members(tree):
+            module = fixture_text(tree, member, 'file').strip()
+            texts = [fixture_text(tree, member, name) for name in FIXTURE_FILES]
+            snippet = [os.path.normpath(os.path.join('src', name + '.bats'))
+                       for name in STALOAD.findall(fixture_text(tree, member, 'snippet.bats'))]
+            reach = module_reach(tree, [module] + [m for m in snippet if tree.exists(m)])
+            found[member] = (module, reach, texts)
+        tree._fixture_reads = found
+    return tree._fixture_reads
+
+
+def fixture_readers(changes, tree):
+    """Stopgap (keyword: affected), deleted when bats-lang/bats#570 lands (the memo's reads replace it).
+    {fixture: [why]} for each fixture that reads a changed path: its own files, the
+    module it is put into (`file`), a module that one reads through a staload, and any
+    repository path its files spell out. This is the over-approximation of `bats fixtures`'s
+    memo, which keeps the files patsopt read; the memo is the exact answer (bats-lang/bats)."""
+    paths = [path for _, path in changes]
+    found = {}
+    for member, (module, reach, texts) in fixture_reads(tree).items():
+        why = []
+        for path in paths:
+            if path.startswith(f'tests/static/{member}/'):
+                why.append(f'{path}: its own file')
+            elif path == module:
+                why.append(f'{path}: the module it is put into (`file`)')
+            elif path in reach:
+                why.append(f'{path}: read through the staload of {reach[path]}')
+            elif any(path in text for text in texts):
+                why.append(f'{path}: named in its files')
+        if why:
+            found[member] = why
+    return found
+
+
+def local_plan(changes, tree):
+    """What a worker's local run takes from a change, by CI's rule at the granularity of a
+    fixture. Returns {'static': sorted members, 'whole': [why] (paths for which CI runs the
+    whole static population: a seeded sample stands in locally), 'e2e': ALL or specs,
+    'why': [line]}. A source module of the app (src/**) selects `check`, `checkers` and
+    the fixtures that read it; every other path selects what `select` says."""
+    picked, why = select(changes, tree)
+    members, whole = set(), []
+    if not changes:
+        whole.append('no change to go by: everything')
+    readers = fixture_readers(changes, tree)
+    for status, path in changes:
+        name, one = classify(path, status, tree)
+        if one.static != ALL:
+            members |= one.static
+        elif name == 'the app' and path.startswith('src/'):
+            members |= {'check', CHECKERS}
+        else:
+            whole.append(f'{path}: {name}')
+    members |= set(readers)
+    for member, reasons in sorted(readers.items()):
+        why += [f'  {member} reads {reason}' for reason in reasons]
+    return {'static': sorted(members), 'whole': whole, 'e2e': picked.e2e, 'why': why}

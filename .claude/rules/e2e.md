@@ -41,8 +41,9 @@ it does not hang on the machine's fonts.
   pages a spec makes itself are not guarded. `releaseClick` is a trial hover
   that moves the pointer to the viewport's centre, so never call it between a
   move and the press, wheel or release that depend on the pointer's place.
-* **A test never waits in real time for a moment of the app's own** (#657: the
-  back button's 10 s, a toast's 2 s, the Nextcloud poll). It
+* **The fake clock** (#657: the back button's 10 s, a toast's 2 s, the Nextcloud
+  poll; the rule that a test never waits in real time for a moment of the app's own
+  is pitboss's `engineering.md`). A test
   installs the fake clock before the page opens (`page.clock.install()`) and
   runs it to the moment: `expectMoment` (`e2e/helpers.js`) asserts the thing is
   there 1.5 s before the moment's end and gone 1.5 s after, `runUntil` runs the
@@ -63,8 +64,8 @@ it does not hang on the machine's fonts.
 
 ## A worker's machine matches CI (#713)
 
-"This machine lacks X" is never a reason for a spec to be skipped or to pass
-here and fail in CI. What CI has, and the one command each takes here:
+What CI has, and the one command each takes here (the rule that a missing tool is
+never a reason to skip a spec is pitboss's `rules.md`, "Briefs and workers"):
 
 * **Speech voices: CI has none, and neither does a worker's machine, and the
   Read aloud tab is built either way.** #713 started from the belief that the
@@ -289,6 +290,7 @@ only for a red. The design, with the research and what each means cannot find, i
   main thread has been in an untimed futex wait with no CPU used for 10 s is written out to `flight-watchdog/` (the threads, the word and its neighbours, the ring's view of the word,
   stacks), whatever the stall watch does (off, unarmed, dead or stuck). Its output and the ring's holds go to SUDO_UID and SUDO_GID when sudo set them (`ownerOf`, `ownTree`, quire#767), so a root run leaves nothing a non-root run cannot rewrite. It also keeps every tick of its own that came late by 300 ms or more, with the steal time that passed
   (`host-stalls-*.json`): a stall of the machine shows as a gap of everything at once.
+  **What the machine was doing over a stall (host-stall, quire#909)**: the watchdog reads `activityOf` at every tick (the steal time, `total=` microseconds of `some` and `full` of `/proc/pressure/{memory,io,cpu}`, and `pswpin`, `pswpout`, `pgmajfault` and `allocstall_*` of `/proc/vmstat`), so a stall's entry holds the change since the tick before it: `stealMsDuring`, `pressureDuringUs.{memory,io,cpu}.{some,full}`, `vmstatDuring`, and `reading` (`memory reclaim: ...` when the memory `some` time is more than half of the gap, else the numbers). Run 40232296271 (7965 ms, steal 0) could not say why; PSI is the kernel's own accounting of time lost to waiting for memory, io or cpu (docs.kernel.org, accounting/psi), `allocstall_*` counts direct reclaims (a task freeing memory itself) and `pswpin/pswpout/pgmajfault` the swap and disk reads, which is what memory reclaim is made of. `some` is used for the rule because on a machine where one task reclaims and the rest wait, `full` is a subset of it and a 2-core runner rarely has every task stalled. A kernel without PSI (no `CONFIG_PSI`, or `psi=0`) or with no `full` line for cpu (before 5.13) is written as `not available: <code>` or `null`, never an exception. `runnerLoad().summary.reading` (`e2e/runner-load.js`) says `memory reclaim` for a worker sample whose timer was 300 ms late or more (`summary.stalls`) when the memory pressure in its interval covers more than half of the lateness (`memoryReclaim`, the same rule); the sampler's interval is 2 s, so that is a coarser reading than the watchdog's 100 ms ticks. Tested on a /proc of its own (`a stall of the machine names the memory, io and cpu pressure ...`, `the reading of the runner load says memory reclaim ...`, `evidence.spec.js`).
 * **The apparatus fails closed; `EVIDENCE MISSING` is the last net (`e2e/preflight.js`).** Before any test, global setup
   proves every part works, or the job is red with `PREFLIGHT FAILED: <part>: <why>`: `sudo -n` usable; the output directory
   written and read back; the kernel ring made with every required event (futex, sched, signals, read/write/sendmsg/recvmsg/epoll;
@@ -394,3 +396,19 @@ so there was nothing to root-cause. The flake is still #932 item 5's; this is th
 * **Where it belongs**: the check and the summary are what every app running its suite through `gen-pwa test` would copy, so
   they move to pwa's evidence check with the rest of this tooling (bats-lang/pwa#260, after #233); the `upload-artifact` steps are
   workflow steps and stay in the app's `check.yml`.
+
+## Ring reach: what a watchdog report's ring holds (quire#993)
+
+Keyword: ring reach. A watchdog report keeps the whole ring (`LINES_KEPT`, and the spec compares `RING_LINES` with that constant), not its tail: 600000 lines were 1.24 s of the ring under four busy Playwright workers (484203 events a second, run 40705566021), so the futex wait of a thread held for 4 s or 10 s was not in the file and `lastWait` was null. What the file proves of the wait is decided by `ringReach` (`flight-recorder.js`), on three numbers in the ring's clock (CLOCK_MONOTONIC, `process.hrtime`):
+
+* `waitBegan.notBefore`: the start of the scan before the one that first saw the thread blocked with its CPU ticks as they are now (it did not see the thread in this wait, or saw it use CPU), null when there was no scan before. The watchdog looks once before its first heartbeat, and the spec waits for that heartbeat before it freezes the renderer.
+* `waitBegan.notAfter`: the time just after the read of the thread's syscall that saw it blocked.
+* `ringStart` (the oldest event of any CPU) and `ringCompleteFrom` (the latest of the CPUs' first events: each CPU's buffer overwrites by itself, so the merged text begins at the least busy CPU and says nothing of a busier one).
+
+`'reaches'` when `ringCompleteFrom <= notBefore` (every CPU holds all its events from before the wait), `'misses'` when `ringStart > notAfter` (or no event), else `'unknown'`: the spec asserts the wait for the first, a null `lastWait` for the second, nothing for the third. `heldMs` (the report's) is not the rule: it is measured from the scan that saw the hold, after the wait began, and the ring ends at the pause, after it was measured. A report's `timings` say what the snapshot (the ring paused) and the analysis took.
+
+Cost, measured (quire#993): a snapshot of the 4.9M-line ring of run 40705566021 (a synthetic trace file of that size, the real `snapshot` and `futexAnalysis`, 4 busy loops) took 5.5 s (the hold; the limit is `HOLD_MOST_MS`, 120 s) and the analysis 9.2 s, with the longest gap between two heartbeats of the process that did both 1003 ms (the limit is `HEARTBEAT_STALE_MS`, 6 s).
+
+## Ring hold: the monitor judges a stop by the heartbeat's own holders (quire#993)
+
+Keyword: ring hold. A heartbeat reads the ring's state and the holders in one step to the captures (the ring lock), and the monitor calls the ring stopped (`stoppedUnheld`) only when that reading shows it off with no holder. The monitor used to read the holders at its own look: a capture that paused the ring in the time between a heartbeat and the look, and ended before the look, was a stopped ring nobody paused, and a second such capture within the 2 s between two looks passed the "seen missing before" test with the first one's time. `e2e/evidence.spec.js` has the case (`ring hold`).

@@ -5234,6 +5234,7 @@ fn _back_offer {count:pos} (positions: pstack(count)): void = let
   val (armed | timeout) = _back_arm()
 in _ps_put(PsShown(armed | timeout, positions)) end
 
+(* fixture: remembers-where-the-reader-is-before *)
 (* Remembers where the reader is, before a jump *)
 fn _push_position (): void = let
   (* a jump is the reader's move *)
@@ -6456,6 +6457,11 @@ in
 end
 
 (* Stores where the reader is *)
+(* Whether the page just shown is still settling after a book opened (its place
+   is not final: leaving now records the first page, keyword: handed-intent) *)
+#pub fun reader_settling (): bool
+implement reader_settling () = !_settling
+
 #pub fun reader_save (): void
 implement reader_save () = _record_position()
 

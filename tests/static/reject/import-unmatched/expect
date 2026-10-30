@@ -1,4 +1,4 @@
 function _static_outcome_text
 line 4
 pattern match is nonexhaustive:
-Kept()
+among Kept()

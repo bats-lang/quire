@@ -252,6 +252,7 @@ fn _same (one: brightness_choice, other: brightness_choice): bool =
   | (BrightnessOwn(), BrightnessOwn()) => true
   | (_, _) => false
 
+(* fixture: the-slider-made-again-at-the *)
 (* The slider, made again at the level kept (after the settings are
    loaded, reset or restored; not while it is being moved), and the
    switch for the system's own *)
