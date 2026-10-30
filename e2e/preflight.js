@@ -17,7 +17,7 @@ import { request } from 'node:https';
 import { join } from 'node:path';
 import { capabilities } from './evidence.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, WATCHDOG_DIRECTORY, markKept, pauseInstance, resumeKernel, ringStats, serialRun, settleOutstanding, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
-import { HEARTBEAT_STALE_MS } from './flight-watchdog.js';
+import { HEARTBEAT_STALE_MS, stoppedUnheld } from './flight-watchdog.js';
 import { LOCK_FAILED_PREFIX, holdersIn, lockFailuresIn } from './flight-tracefs.js';
 
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
@@ -209,7 +209,6 @@ export function startMonitor(started, env = process.env, stateOf = processStateL
   const began = Date.now();
   let lastWritten = null;
   let lastMoved = Date.now();
-  let stoppedSeenAt = null;
   let unreadable = 0;
   const seen = { checks: 0, beats: new Set(), holdsMost: 0, lastRing: null, lastScans: null };
   const summary = () => `${seen.checks} checks in ${Math.round((Date.now() - began) / 1000)} s; ${seen.beats.size} distinct heartbeats of the watchdog read (last: ${seen.lastScans === null ? 'none' : `${seen.lastScans} scans`}); ${seen.lastRing === null ? 'no reading of the ring was made' : `the ring had written ${seen.lastRing} events at the last reading`}; ring holds seen at once: ${seen.holdsMost}`;
@@ -237,12 +236,9 @@ export function startMonitor(started, env = process.env, stateOf = processStateL
     seen.holdsMost = Math.max(seen.holdsMost, holders.length);
     const stale = holders.find((each) => Number.isFinite(each.at) && Date.now() - each.at > HOLD_MOST_MS);
     if (stale) return die('kernel ring', `held paused by ${stale.holder} for ${Math.round((Date.now() - stale.at) / 1000)} s: a capture that does not end (a capture takes seconds)`);
-    if (ring.on !== '1' && !holders.length) {
-      // a capture resumes the ring and then takes its hold down, so a heartbeat read just before the resume shows a stopped ring with no hold:
-      // it is the ring's failure only when a reading made after the hold was first seen missing still shows it stopped
-      if (stoppedSeenAt === null) stoppedSeenAt = Date.now();
-      else if (beat.at > stoppedSeenAt) return die('kernel ring', `stopped (tracing_on is ${ring.on}) and no capture paused it`);
-    } else stoppedSeenAt = null;
+    // the heartbeat read the state and the holders in one step (ring hold), so a pause that a capture made and ended between the heartbeat and this look is not a stop;
+    // judged by this look's own holders, a second capture that began and ended between two looks was taken for a ring nobody paused (quire#993, the first loaded run)
+    if (stoppedUnheld(beat)) return die('kernel ring', `stopped (tracing_on is ${ring.on}) and no capture paused it`);
     if (ring.written !== lastWritten) { lastWritten = ring.written; lastMoved = Date.now(); }
     else if (ring.on === '1' && Date.now() - lastMoved > ringQuietMs) return die('kernel ring', `takes no events: ${ring.written} written, unchanged for ${Math.round((Date.now() - lastMoved) / 1000)} s`);
   }, MONITOR_EVERY_MS);
