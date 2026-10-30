@@ -58,6 +58,7 @@ staload H = "css/src/harmony.sats"
 implement theme_palette (which) =
   case+ which of Light() => 0 | Sepia() => 1 | Dark() => 2 | Night() => 3 | Grey() => 4
 
+(* fixture: a-role-s-custom-property-name *)
 (* A role's custom property, --<name> *)
 #pub fn role_name {role:colour_role} (role: role_value(role)): [length:pos | length <= 9] string length
 

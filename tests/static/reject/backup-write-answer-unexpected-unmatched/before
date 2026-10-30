@@ -1,1 +1,1 @@
-(* The text bridge kept of a refused or thrown backup write is not shown: the banner names the outcome (keyword: backup-write-answer) *)
+(* fixture: the-text-bridge-kept-of-a *)

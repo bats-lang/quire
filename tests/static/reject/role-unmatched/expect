@@ -1,4 +1,4 @@
 function _static_role_name
 line 4
 pattern match is nonexhaustive:
-RoleSecondHighlight()
+among RoleSecondHighlight()
