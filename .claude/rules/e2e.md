@@ -17,7 +17,11 @@ insets, and the app's Capacitor played in the page (`androidApp` in
 fails the run when the `android` project is missing or narrowed (a testMatch,
 testIgnore or grep in it or over the configuration, or a --project or --grep on
 CI's run); a spec that cannot apply on Android skips itself, saying why
-(`test.skip`). `e2e/icons.spec.js` draws every icon character on a canvas, so
+(`test.skip`). `mobile-landscape` also runs `e2e/touch-selection.spec.js`, for its "floating menu band"
+case alone (the file's other cases skip there; #1029, keyword: selection-menu-band). The font
+scale (`scaledBy`, `e2e/font-scale.js`) is `text-size-adjust`, which takes effect in a mobile
+viewport only, so a case at a scale runs in the `android` project (or sets `isMobile`).
+`e2e/icons.spec.js` draws every icon character on a canvas, so
 it does not hang on the machine's fonts.
 
 ## No flaky waits
