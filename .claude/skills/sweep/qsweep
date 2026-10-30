@@ -69,7 +69,7 @@ _judge_pr(){  # sets _ready from what _read_pr read
   else _ready=READY-FOR-REVIEW; fi
 }
 # the candidates of the NEXT line, one per line "<created_at> <repository>#<number>", for quire and the libraries together: the line is ordered oldest first by the
-# PR's creation date across all repositories (orchestration.md, Agents and slots: "As always inside each category, go by oldest"), not by the API's order or by repository
+# PR's creation date across all repositories (pitboss rules.md, Agents and slots: "As always inside each category, go by oldest"), not by the API's order or by repository
 _cand_fix=""; _cand_review=""
 _order(){ printf '%s' "$1" | sort | awk '{printf " %s",$2}'; }
 _quire_numbers=$(_gh "repos/bats-lang/quire/pulls?state=open&per_page=50" --jq '.[].number') || { echo "quire ERROR reading the open pull requests: $(_why)"; _unread="$_unread quire"; }
@@ -103,10 +103,10 @@ done
 # a repository or a PR whose call failed was not read: the NEXT line below is incomplete and says so (it never lists a PR it could not read as if nothing were there)
 [ -n "$_unread" ] && echo "UNREAD (the NEXT line is incomplete; look at these by hand):$_unread"
 rm -f "$_errfile"
-# the one NEXT line: the quire PRs and the library PRs together, a fix before a review before a new ticket (orchestration.md, Agents and slots), each category oldest first
+# the one NEXT line: the quire PRs and the library PRs together, a fix before a review before a new ticket (pitboss rules.md, Agents and slots), each category oldest first
 if [ -n "$_cand_fix" ]; then echo "NEXT FOR A FREE SLOT: a fix (an author; any author) for$(_order "$_cand_fix")"
 elif [ -n "$_cand_review" ]; then echo "NEXT FOR A FREE SLOT: a review (not by the author) of$(_order "$_cand_review")"
-else echo "NEXT FOR A FREE SLOT: the oldest ticket of the highest priority (CLAUDE.md, Priorities)"; fi
+else echo "NEXT FOR A FREE SLOT: the oldest ticket of the highest priority (pitboss rules.md, Tickets)"; fi
 # `qsweep prs` stops here: the pull request lines and the NEXT line only (the tests run it against a fixture gh)
 [ "$1" = prs ] && exit 0
 _lap "library PRs done"
@@ -128,7 +128,7 @@ for d in /home/user/* ; do
     echo "STRAGGLER $d [${b:-detached}] uncommitted=$dirty commits-not-on-origin=${ahead:-0} branch-on-origin=$remote last=$(git -C "$d" log -1 --format='%h %cr %s' | cut -c1-60)"
   fi
 done
-# the loaded checkouts (/home/user/<repo> of the 12 repositories) stay on main with a clean tree (orchestration.md, Checkouts): a worker works in a worktree of its own,
+# the loaded checkouts (/home/user/<repo> of the 12 repositories) stay on main with a clean tree (pitboss rules.md, Checkouts and disk): a worker works in a worktree of its own,
 # so the user-level stop hook, which reads the orchestrator's directory, has nothing to complain about; STRAY-WORK names a checkout that is not (quire#751, row 12)
 for _r in quire bats pwa bridge dom gestures arith array zip sha256 capacitor-plugins repository-prototype; do
   _d=/home/user/$_r; [ -e "$_d/.git" ] || continue
@@ -151,7 +151,7 @@ done
 echo "queue runs not completed: $(wc -l < /tmp/qsweep-queue.tsv) for $(cut -f4 /tmp/qsweep-queue.tsv | sort -u | wc -l) pull requests"
 _lap "queue runs done"
 
-# finished worktrees of quire: reported as reusable. The persistent checkout is never removed (CLAUDE.md, "Check locally"; orchestration.md, Checkouts): it is the
+# finished worktrees of quire: reported as reusable. The persistent checkout is never removed (pitboss rules.md, Checkouts and disk): it is the
 # finished worktree whose pull request merged most recently (the one the next ticket reuses), and the orchestrator's own checkout /home/user/quire is not in the list.
 # `qsweep clean` at 90% disk removes only the other worktrees whose pull request is merged and whose tip is in origin/main (the branch is kept).
 # A worktree is finished only when ALL hold: not the main clone; nothing uncommitted; every commit is on a remote branch; nothing in it touched in the last 3 hours;
@@ -206,8 +206,8 @@ _lap "worktrees done"
 echo "Look to see which tasks need to be updated"
 echo "SWEEP REMINDER: check whether any ticket is closeable (its work merged: read the merged PR against the ticket's Done-when, comment the evidence, close it; a duplicate is closed as a duplicate)"
 echo "SWEEP REMINDER: the rows of the slot ledger are the agents that run, each always filled; a free slot is refilled the same turn. Run slots set at every spawn and slots free at every hand-back, in the same turn"
-echo "SWEEP REMINDER: check whether any open ticket holds genuinely several unrelated changes, or pieces in another repository, or a split the owner approved: only then break it up, before work, into the fewest tickets that reason forces (original closed with Broken into #a #b, pieces inherit priority); size, call sites and the number of Done-when items are never a reason (quire/.claude/orchestration.md, Tickets)"
+echo "SWEEP REMINDER: check whether any open ticket holds genuinely several unrelated changes, or pieces in another repository, or a split the owner approved: only then break it up, before work, into the fewest tickets that reason forces (original closed with Broken into #a #b, pieces inherit priority); size, call sites and the number of Done-when items are never a reason (pitboss rules.md, Tickets)"
 echo "SWEEP REMINDER: check whether any blocked ticket is unblocked (read the PR or ticket it says it waits for; if that merged or closed, say so on the ticket and make it workable)"
-echo "SWEEP REMINDER: order for a free slot (orchestration.md, Agents and slots): (1) a fix, by an author (any author, not necessarily the one who wrote the PR), for a review that asked for changes, a red CI, or a merge conflict; (2) a review of a PR green on its exact head; (3) the oldest ticket of the highest priority (CLAUDE.md, Priorities); oldest first inside each step. Never a new ticket while a changes-needed review, a red CI or a merge conflict waits for its fix, or a green PR waits for its reviewer"
+echo "SWEEP REMINDER: order for a free slot (pitboss rules.md, Agents and slots): (1) a fix, by an author (any author, not necessarily the one who wrote the PR), for a review that asked for changes, a red CI, or a merge conflict; (2) a review of a PR green on its exact head; (3) the oldest ticket of the highest priority (pitboss rules.md, Tickets); oldest first inside each step. Never a new ticket while a changes-needed review, a red CI or a merge conflict waits for its fix, or a green PR waits for its reviewer"
 echo "SWEEP REMINDER: workers never wait for CI (owner, 2026-10-20T04:22:32Z: \"Standing rule: agents don't wait for check. They hand back, and trust you to continue the process.\"): every brief says push, then hand back at once with PR, head sha and local runs. The orchestrator watches the checks and continues; a worker found waiting is told to hand back"
 slots show
