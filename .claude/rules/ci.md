@@ -223,6 +223,24 @@ first (the mutation check is, below).
 * Where an entry is: the PR timeline (`added_to_merge_queue`,
   `removed_from_merge_queue`); `auto_merge` empty means enqueued or removed.
 
+**Why a merge-queue entry is removed (keyword: queue-removal).** An entry leaves the queue for one of two
+causes, and the `merge_group` runs that read `skipped` or `cancelled` beside a removal are never the cause:
+
+* The `destroyed` merge_group event. GitHub sends it for a group it throws away (an entry removed, a group
+  rebuilt). `check.yml` listens for it (`types: [checks_requested, destroyed]`) only so that its run joins the
+  concurrency group of the run it ends and cancels it. Every job of that run carries the false `if`
+  `github.event.action != 'destroyed'`, so the whole run reads `skipped`, `plan` included. A `skipped` queue run
+  is therefore the end of a group, and the run it cancelled reads `cancelled`: neither says why the entry was
+  removed.
+* The 60-minute window. The queue removes an entry whose required checks have not all passed 60 minutes after
+  it was added (the queue's checks timeout, 60 minutes by default). The timeline shows it as about 60 minutes
+  between `added_to_merge_queue` and `removed_from_merge_queue`, with `auto_merge` empty after.
+  A group whose jobs waited for runners, or a push run of main that took the runners for the commit the queue
+  had just tested, spends the window.
+
+Read the cause from the PR timeline first: the minutes between the two events (about 60 is the window), then the
+failed job of the group's run (`failure` in `check`). A removal with another cause is a ticket of its own.
+
 The static groups (`tests/groups.json`) are balanced by measured time (#618):
 every group pays the app's cold check and then its members (a reject is
 seconds, an accept a minute or more). A new fixture goes in the group with the
