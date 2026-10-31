@@ -24,7 +24,8 @@ import { missingFields } from './evidence-check.js';
 import { futexAnalysis, ringContent, ringReach } from './flight-recorder.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { RING_LINES, Watchdog, stoppedUnheld } from './flight-watchdog.js';
-import { heartbeatQuiet, processState, resumeUntilRunning } from './preflight.js';
+import { heartbeatLimitMs, heartbeatQuiet, processState, resumeUntilRunning } from './preflight.js';
+import { startBlockedProcess } from './blocked-process.js';
 import { memoryReclaim, runnerLoad } from './runner-load.js';
 import { LINES_KEPT, LOCK_NAME, LOCK_UNREADABLE_MS, holdAndPause, release, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
 
@@ -1229,6 +1230,93 @@ test('what the runner can do that bears on the classes the record cannot see is 
   expect(reading.counters).toHaveProperty('available');
   expect(reading.rr, 'the preflight asked rr itself').toHaveProperty('installed');
   expect(reading.rr.record, 'and said what its recording did').toHaveProperty('works');
+});
+
+// A watchdog blocked in the kernel (state D) is told apart from one that is quiet (keyword: blocked watchdog, quire#972; the outer monitor ended a run on
+// beats 6052, 7744 and 9580 ms old, the watchdog in `tracing_check_open_get_tr`, `submit_bio_wait` and `folio_wait_bit_common`).
+test('the limit of a silent heartbeat is longer for a watchdog in state D and the same for every other state (quire#972)', async () => {
+  const limits = { staleMs: 6000, blockedStaleMs: 30000 };
+  expect(heartbeatLimitMs({ watchdogState: 'D', ...limits }), 'blocked in the kernel').toBe(30000);
+  for (const state of ['S', 'R', 'T', 't', 'Z', null]) expect(heartbeatLimitMs({ watchdogState: state, ...limits }), `state ${state}`).toBe(6000);
+  expect(heartbeatLimitMs({ watchdogState: 'D', staleMs: 6000, blockedStaleMs: 1000 }), 'a blocked limit below the plain one never shortens it').toBe(6000);
+  for (const age of [6052, 7744, 9580]) {
+    expect(age > heartbeatLimitMs({ watchdogState: 'D', ...limits }), `blocked, beat ${age} ms old: not ended`).toBe(false);
+    expect(age > heartbeatLimitMs({ watchdogState: 'S', ...limits }), `asleep, beat ${age} ms old: ended`).toBe(true);
+  }
+  expect(30001 > heartbeatLimitMs({ watchdogState: 'D', ...limits }), 'blocked past the longer limit: ended').toBe(true);
+});
+
+test('the monitor lateness comes off a beat age before the limit of a watchdog in state D is applied (quire#908 with quire#972)', async () => {
+  const limits = { staleMs: 6000, blockedStaleMs: 30000 };
+  const quiet = (beatAgeMs, monitorLateMs, watchdogState) => heartbeatQuiet({ beatAgeMs, monitorLateMs, staleMs: heartbeatLimitMs({ watchdogState, ...limits }) });
+  expect(quiet(7846, 7900, 'S'), 'the machine stopped: not quiet').toBe(false);
+  expect(quiet(9580, 0, 'D'), 'blocked in the kernel, 9580 ms: not quiet').toBe(false);
+  expect(quiet(9580, 0, 'S'), 'asleep, 9580 ms: quiet').toBe(true);
+  expect(quiet(40000, 7900, 'D'), 'blocked past the longer limit, less the lateness: quiet').toBe(true);
+  expect(quiet(37000, 7900, 'D'), 'blocked, the lateness takes it under the longer limit: not quiet').toBe(false);
+});
+
+test('the state of a process is read from its stat file, a name with brackets and spaces included (quire#972)', async ({}, testInfo) => {
+  const proc = testInfo.outputPath('proc');
+  mkdirSync(join(proc, '4242'), { recursive: true });
+  writeFileSync(join(proc, '4242', 'stat'), '4242 (node (a b) c) D 1 4242 4242 0 -1\n');
+  expect(processState(4242, proc)).toBe('D');
+  expect(processState(4243, proc), 'a process that is gone').toBeNull();
+  expect(processState(process.pid)).toMatch(/^[RS]$/);
+  const sleeper = spawn('sleep', ['30']);
+  try {
+    spawnSync('kill', ['-STOP', String(sleeper.pid)]);
+    expect(processState(sleeper.pid), 'a stopped process is T, not D').toBe('T');
+  } finally { sleeper.kill('SIGKILL'); }
+});
+
+// The monitor itself, in a process of its own (it ends the run with process.exit): the heartbeat file is written once and never again, the watchdog's
+// state is the one given, and the limits are shortened as the real-path tests shorten them.
+async function monitorOn(testInfo, name, state, { pid = 4242, blockedStaleMs = 6000 } = {}) {
+  const out = testInfo.outputPath(name);
+  mkdirSync(out, { recursive: true });
+  const began = Date.now();
+  // the monitor reads `heartbeat-<its own pid>-*`, so the process that runs it writes the one beat, and writes it once
+  const script = `
+    import { writeFileSync } from 'node:fs';
+    import { startMonitor } from ${JSON.stringify(new URL('./preflight.js', import.meta.url).href)};
+    writeFileSync(${JSON.stringify(out)} + '/heartbeat-' + process.pid + '-1.json', JSON.stringify({ at: Date.now(), pid: ${pid}, scans: 1, ring: { on: '1', written: 5 } }));
+    startMonitor({ watchdog: { exited: null, child: { pid: ${pid} } }, kernel: { instance: 'x' }, out: ${JSON.stringify(out)} },
+      { ...process.env, QUIRE_FLIGHT_BEAT_STALE_MS: '1000', QUIRE_FLIGHT_BLOCKED_STALE_MS: '${blockedStaleMs}', QUIRE_FLIGHT_RING_QUIET_MS: '600000' }, ${state === undefined ? '' : `() => ${JSON.stringify(state)}`});
+    setTimeout(() => {}, 20000);`;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script],{ stdio: ['ignore', 'pipe', 'pipe'], cwd: process.cwd() });
+  let text = '';
+  child.stdout.on('data', (chunk) => { text += chunk; });
+  child.stderr.on('data', (chunk) => { text += chunk; });
+  const code = await new Promise((resolve) => { child.on('exit', resolve); setTimeout(() => { child.kill('SIGKILL'); }, 15000); });
+  return { code, text, afterMs: Date.now() - began };
+}
+
+test('the monitor lets a watchdog blocked in the kernel stay silent past the plain limit and still ends the run past the longer one (quire#972)', async ({}, testInfo) => {
+  const blocked = await monitorOn(testInfo, 'blocked', 'D');
+  expect(blocked.code, 'ended with a failure').toBe(1);
+  expect(blocked.text).toMatch(/EVIDENCE MISSING: watchdog: no heartbeat for \d+ ms \(the watchdog's state: D\)/);
+  expect(blocked.afterMs, 'not at the plain limit (1 s, the monitor looks every 2 s): at the longer one (6 s)').toBeGreaterThan(6000);
+  const quiet = await monitorOn(testInfo, 'quiet', 'S');
+  expect(quiet.code).toBe(1);
+  expect(quiet.text).toMatch(/no heartbeat for \d+ ms \(the watchdog's state: S\)/);
+  expect(quiet.afterMs, 'asleep and quiet: at the plain limit').toBeLessThan(5000);
+});
+
+// The same with a real process in state D, read from /proc by the monitor itself (no injected state): a vfork parent whose child waits on a FIFO (blocked-process.js).
+test('a real process in state D, silent past the plain limit, is let live to the longer one; with the old single limit the same process ends the run (quire#972)', async ({}, testInfo) => {
+  const blocked = await startBlockedProcess();
+  try {
+    expect(processState(blocked.pid), 'really in D, read from /proc').toBe('D');
+    const longer = await monitorOn(testInfo, 'real-blocked', undefined, { pid: blocked.pid, blockedStaleMs: 6000 });
+    expect(longer.text).toMatch(/no heartbeat for \d+ ms \(the watchdog's state: D\)/);
+    expect(longer.afterMs, 'past the plain limit (1 s, looks every 2 s), ended only at the longer one (6 s)').toBeGreaterThan(6000);
+    // the class occurring: the old single limit (the blocked limit no longer than the plain one) ends the same process at the plain limit
+    const old = await monitorOn(testInfo, 'real-blocked-old-limit', undefined, { pid: blocked.pid, blockedStaleMs: 1000 });
+    expect(old.text).toMatch(/no heartbeat for \d+ ms \(the watchdog's state: D\)/);
+    expect(old.afterMs, 'the old limit ends it at the plain limit').toBeLessThan(5000);
+  } finally { blocked.release(); }
+  expect(processState(blocked.pid), 'released: gone or no longer D').not.toBe('D');
 });
 
 test('the monitor does not take a stop of the whole machine for a watchdog gone quiet (quire#908, run 40232296271: a beat 7846 ms old, the machine stopped 7965 ms)', async () => {
