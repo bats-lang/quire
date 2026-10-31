@@ -9,7 +9,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, openSync, closeSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { processStateLetter } from './preflight.js';
+import { processState } from './preflight.js';
 
 const PARENT = `
 import os, sys
@@ -36,10 +36,10 @@ export async function startBlockedProcess({ waitMs = 10000 } = {}) {
   };
   const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
-    if (processStateLetter(child.pid) === 'D') return { pid: child.pid, release };
+    if (processState(child.pid) === 'D') return { pid: child.pid, release };
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  const last = processStateLetter(child.pid);
+  const last = processState(child.pid);
   release();
   throw new Error(`the process did not reach state D in ${waitMs} ms (last state: ${last})`);
 }

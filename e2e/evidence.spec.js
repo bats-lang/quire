@@ -24,7 +24,7 @@ import { missingFields } from './evidence-check.js';
 import { futexAnalysis, ringContent, ringReach } from './flight-recorder.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, markKept, pauseInstance, resumeKernel, ringSeen, ringState, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { RING_LINES, Watchdog, stoppedUnheld } from './flight-watchdog.js';
-import { heartbeatLimitMs, processStateLetter } from './preflight.js';
+import { heartbeatLimitMs, heartbeatQuiet, processState, resumeUntilRunning } from './preflight.js';
 import { startBlockedProcess } from './blocked-process.js';
 import { memoryReclaim, runnerLoad } from './runner-load.js';
 import { LINES_KEPT, LOCK_NAME, LOCK_UNREADABLE_MS, holdAndPause, release, holdersIn, lockFailuresIn, withRingLock } from './flight-tracefs.js';
@@ -1246,17 +1246,27 @@ test('the limit of a silent heartbeat is longer for a watchdog in state D and th
   expect(30001 > heartbeatLimitMs({ watchdogState: 'D', ...limits }), 'blocked past the longer limit: ended').toBe(true);
 });
 
+test('the monitor lateness comes off a beat age before the limit of a watchdog in state D is applied (quire#908 with quire#972)', async () => {
+  const limits = { staleMs: 6000, blockedStaleMs: 30000 };
+  const quiet = (beatAgeMs, monitorLateMs, watchdogState) => heartbeatQuiet({ beatAgeMs, monitorLateMs, staleMs: heartbeatLimitMs({ watchdogState, ...limits }) });
+  expect(quiet(7846, 7900, 'S'), 'the machine stopped: not quiet').toBe(false);
+  expect(quiet(9580, 0, 'D'), 'blocked in the kernel, 9580 ms: not quiet').toBe(false);
+  expect(quiet(9580, 0, 'S'), 'asleep, 9580 ms: quiet').toBe(true);
+  expect(quiet(40000, 7900, 'D'), 'blocked past the longer limit, less the lateness: quiet').toBe(true);
+  expect(quiet(37000, 7900, 'D'), 'blocked, the lateness takes it under the longer limit: not quiet').toBe(false);
+});
+
 test('the state of a process is read from its stat file, a name with brackets and spaces included (quire#972)', async ({}, testInfo) => {
   const proc = testInfo.outputPath('proc');
   mkdirSync(join(proc, '4242'), { recursive: true });
   writeFileSync(join(proc, '4242', 'stat'), '4242 (node (a b) c) D 1 4242 4242 0 -1\n');
-  expect(processStateLetter(4242, proc)).toBe('D');
-  expect(processStateLetter(4243, proc), 'a process that is gone').toBeNull();
-  expect(processStateLetter(process.pid)).toMatch(/^[RS]$/);
+  expect(processState(4242, proc)).toBe('D');
+  expect(processState(4243, proc), 'a process that is gone').toBeNull();
+  expect(processState(process.pid)).toMatch(/^[RS]$/);
   const sleeper = spawn('sleep', ['30']);
   try {
     spawnSync('kill', ['-STOP', String(sleeper.pid)]);
-    expect(processStateLetter(sleeper.pid), 'a stopped process is T, not D').toBe('T');
+    expect(processState(sleeper.pid), 'a stopped process is T, not D').toBe('T');
   } finally { sleeper.kill('SIGKILL'); }
 });
 
@@ -1297,7 +1307,7 @@ test('the monitor lets a watchdog blocked in the kernel stay silent past the pla
 test('a real process in state D, silent past the plain limit, is let live to the longer one; with the old single limit the same process ends the run (quire#972)', async ({}, testInfo) => {
   const blocked = await startBlockedProcess();
   try {
-    expect(processStateLetter(blocked.pid), 'really in D, read from /proc').toBe('D');
+    expect(processState(blocked.pid), 'really in D, read from /proc').toBe('D');
     const longer = await monitorOn(testInfo, 'real-blocked', undefined, { pid: blocked.pid, blockedStaleMs: 6000 });
     expect(longer.text).toMatch(/no heartbeat for \d+ ms \(the watchdog's state: D\)/);
     expect(longer.afterMs, 'past the plain limit (1 s, looks every 2 s), ended only at the longer one (6 s)').toBeGreaterThan(6000);
@@ -1306,7 +1316,31 @@ test('a real process in state D, silent past the plain limit, is let live to the
     expect(old.text).toMatch(/no heartbeat for \d+ ms \(the watchdog's state: D\)/);
     expect(old.afterMs, 'the old limit ends it at the plain limit').toBeLessThan(5000);
   } finally { blocked.release(); }
-  expect(processStateLetter(blocked.pid), 'released: gone or no longer D').not.toBe('D');
+  expect(processState(blocked.pid), 'released: gone or no longer D').not.toBe('D');
+});
+
+test('the monitor does not take a stop of the whole machine for a watchdog gone quiet (quire#908, run 40232296271: a beat 7846 ms old, the machine stopped 7965 ms)', async () => {
+  expect(heartbeatQuiet({ beatAgeMs: 7846, monitorLateMs: 7900, staleMs: 6000 }), 'the monitor was as late as the beat is old').toBe(false);
+  expect(heartbeatQuiet({ beatAgeMs: 7846, monitorLateMs: 0, staleMs: 6000 }), 'a watchdog quiet while the monitor was on time').toBe(true);
+  expect(heartbeatQuiet({ beatAgeMs: 14000, monitorLateMs: 7900, staleMs: 6000 }), 'quiet for longer than the monitor was late').toBe(true);
+});
+
+test('a process that stops itself again after its first SIGCONT (a sudo that saw its command stopped) is continued until it runs (quire#908, run 40705566021: the nested run never closed)', async () => {
+  // the stand-in stops itself the first time it is continued, as sudo does on seeing its command stopped; a second SIGCONT runs it
+  const standIn = spawn(process.execPath, ['-e', "let again = true; process.on('SIGCONT', () => { if (again) { again = false; process.kill(process.pid, 'SIGSTOP'); } }); setInterval(() => {}, 1000); console.log('up');"], { stdio: ['ignore', 'pipe', 'ignore'] });
+  try {
+    await new Promise((resolve) => standIn.stdout.once('data', resolve));
+    process.kill(standIn.pid, 'SIGSTOP');
+    await expect.poll(() => processState(standIn.pid)).toBe('T');
+    // the first SIGCONT (the one the test used to send) leaves it stopped again; the helper sends more
+    const left = await resumeUntilRunning([standIn.pid], { send: (pid) => process.kill(pid, 'SIGCONT'), everyMs: 200 });
+    expect(left, 'continued until it runs').toEqual([]);
+    expect(processState(standIn.pid)).not.toBe('T');
+    // a process that is never continued is named, not waited for for ever
+    process.kill(standIn.pid, 'SIGSTOP');
+    await expect.poll(() => processState(standIn.pid)).toBe('T');
+    expect(await resumeUntilRunning([standIn.pid], { send: () => {}, rounds: 3, everyMs: 50 }), 'a process that stays stopped is named').toEqual([standIn.pid]);
+  } finally { try { process.kill(standIn.pid, 'SIGCONT'); } catch (gone) { /* ended */ } standIn.kill('SIGKILL'); }
 });
 
 test('a futex wait older than the tail of the ring a watchdog report keeps is lost by the tail and found in the whole ring (quire#993, ring reach)', async ({}, testInfo) => {
