@@ -6,8 +6,13 @@
 # YEAR.MONTH.DAY.SECONDS (SHA); and the Android project gen-pwa wrote
 # carries it as its versionName, and the number of commits reachable from
 # the commit plus the offset of src/version.bats as its versionCode (#989:
-# above 955894, the last code the minutes scheme gave Play, and above the
-# parent's).
+# above the highest code Play holds, and above the parent's).
+#
+# HIGHEST_RELEASED is the highest code Play had when the offset was chosen:
+# run 41112273987 of check.yml (main, 2026-10-30) released 961586, and the
+# minutes scheme adds 1440 a day until the merge. Re-read the newest
+# play-internal run's "released to the internal track: version code N" right
+# before merge and raise it (and the offset) when N is not below the offset.
 #
 # Run after `bats build` and gen-pwa, from the checkout, with the
 # BATS_COMMIT the build had (none: HEAD); bats must be on PATH.
@@ -55,8 +60,10 @@ count=$(grep -Eo '^implement bats_commit_count \(\) = CommitCounted \([0-9]+\)$'
 [ "$count" = "$(git rev-list --count "${BATS_COMMIT:-HEAD}")" ] || { echo "the facts' count $count is not ${BATS_COMMIT:-HEAD}'s"; exit 1; }
 offset=$(sed -n 's/^#pub stadef VERSION_CODE_OFFSET = \([0-9][0-9]*\)$/\1/p' src/version.bats)
 echo "$offset" | grep -Eq '^[0-9]+$' || { echo "src/version.bats has no VERSION_CODE_OFFSET: '$offset'"; exit 1; }
+HIGHEST_RELEASED=961586
+[ "$offset" -gt "$HIGHEST_RELEASED" ] || { echo "offset $offset is not above $HIGHEST_RELEASED, the highest code released to Play"; exit 1; }
 code=$(( count + offset ))
-[ "$code" -gt 955894 ] || { echo "version code $code is not above 955894, the last code the minutes scheme gave Play"; exit 1; }
+[ "$code" -gt "$HIGHEST_RELEASED" ] || { echo "version code $code is not above $HIGHEST_RELEASED, the highest code released to Play"; exit 1; }
 if git rev-parse -q --verify "${BATS_COMMIT:-HEAD}^" > /dev/null; then
   parent=$(( $(git rev-list --count "${BATS_COMMIT:-HEAD}^") + offset ))
   [ "$code" -gt "$parent" ] || { echo "version code $code is not above its parent's $parent"; exit 1; }

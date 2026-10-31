@@ -27,10 +27,12 @@ implement quire_commit_short () = $F.bats_commit_short()
    commit built from, plus this offset (#989, #979). A count only grows along
    main, so the queue's merges a minute apart give different codes (the
    minutes scheme gave two of them 955894, and Play refused the second). The
-   offset puts the first count's code above 955894, the last code the minutes
-   scheme gave Play; it never changes, so one commit always gives one code
+   offset is above the highest code Play holds (the minutes scheme kept
+   releasing: 961586 on 2026-10-30, 1440 more a day) with room for the days
+   until the merge; check it again right before merge. It never changes
+   afterwards, so one commit always gives one code
    (keyword: version code, .claude/rules/release.md) *)
-#pub stadef VERSION_CODE_OFFSET = 955000
+#pub stadef VERSION_CODE_OFFSET = 1000000
 
 (* The code, or that the clone is shallow and cannot count (the answer the
    facts give, kept: a number that is wrong is never made) *)
@@ -42,7 +44,7 @@ implement quire_commit_short () = $F.bats_commit_short()
 
 (* The offset as a number: its type is the stadef above, so the compiler
    holds the two literals equal (keyword: version code) *)
-fn _version_code_offset (): int(VERSION_CODE_OFFSET) = 955000
+fn _version_code_offset (): int(VERSION_CODE_OFFSET) = 1000000
 
 implement quire_version_code () =
   case+ $F.bats_commit_count() of

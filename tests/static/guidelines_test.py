@@ -113,7 +113,7 @@ class VersionCode(unittest.TestCase):
         self.assertIn('bats_commit_count', found[1])
 
     def test_the_start_of_2025_alone_is_refused_beside_the_count(self):
-        found = gl.lint_version_code(self.root_with('bats_commit_count () + 955000 - 1735689600'))
+        found = gl.lint_version_code(self.root_with('bats_commit_count () + 1000000 - 1735689600'))
         self.assertEqual(len(found), 1)
 
     def test_the_count_with_an_offset_is_accepted(self):

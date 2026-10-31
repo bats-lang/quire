@@ -29,12 +29,16 @@ commit, and that the Android project carries the version and its code.
 ## The version code is the commit count plus an offset (#989, #979)
 
 Keyword: version code. `quire_version_code` is `bats_commit_count()` (the commits reachable from the
-built commit, bats#574) plus `VERSION_CODE_OFFSET` (955000, the one literal of `src/version.bats`: the
+built commit, bats#574) plus `VERSION_CODE_OFFSET` (1000000, the one literal of `src/version.bats`: the
 private `_version_code_offset` is typed by it, so the compiler holds the two equal). The minutes scheme it replaces (the committer time less the
 start of 2025, in minutes) gave two merges a minute apart one code, 955894, and Play refused the
 second (run 7, #889 and #886). A count only grows along main, so the code is above its parent's; the
-offset is above the last minutes code (955894) with the count at its value when it was chosen, and
-never changes afterwards, so one commit always gives one code. A shallow clone cannot count: the facts
+offset is above the highest code Play holds, not only above the code of the failed run (955894): main kept
+releasing under the minutes scheme until this merges (run 41112273987 released 961586 on 2026-10-30, and
+the scheme adds 1440 a day), so 955000 would have been refused and 1000000 leaves about 28 days. It
+never changes afterwards, so one commit always gives one code. **Re-check the offset right before merge**:
+read the newest `play-internal` run's "released to the internal track: version code N" on main; the offset
+must be above N, else raise it (here, `tests/version/same.sh`'s `HIGHEST_RELEASED`, ANDROID.md) before merging. A shallow clone cannot count: the facts
 say so (`CommitHistoryShallow`), `quire_version_code` answers `VersionCodeShallow`, and gen-pwa appends
 no versionCode block and exits 1. `dist/pwa` and `dist/android` are already written by then (pwa's
 `create_pwa_opening` and `create_android_locked` run first), and the Android project keeps pwa's
@@ -43,7 +47,7 @@ before anything is built or released, so a wrong code is never released. The tic
 versionCode block be refused, so the statement is what changed, not the order of the writes. Every job that runs gen-pwa to generate
 (check.yml `build`, deploy.yml) checks out with `fetch-depth: 0`; the static and e2e jobs never call
 it. pwa's release script refuses a code not above the highest on Play (pwa#258).
-`tests/version/same.sh` reads the offset from `src/version.bats`, checks the count is git's, the code is above 955894 and above the parent's, and
+`tests/version/same.sh` reads the offset from `src/version.bats`, checks the count is git's, the offset and the code are above `HIGHEST_RELEASED` (the highest code released to Play) and the code above the parent's, and
 the Android project carries it. `tests/static/guidelines.py` (`lint_version_code`) refuses the minutes
 scheme in `src/version.bats` (the committer time or 1735689600) and demands `bats_commit_count`.
 
