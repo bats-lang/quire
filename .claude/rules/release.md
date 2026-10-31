@@ -20,7 +20,8 @@ commit `BATS_COMMIT` names, else HEAD) and `src/version.bats` words them (`quire
 them in: About shows the text, a backup records it (`appVersion`), and gen-pwa appends it to
 the Android project's `android-release.gradle` as `versionName`, with `versionCode` the
 commit count plus an offset (next section). CI names a pull request's own head (`BATS_COMMIT`, set by bats's
-setup action: the merge's second parent, hence `fetch-depth: 2`) and for a merge group the
+setup action: the merge's second parent, so a job that builds checks out at least `fetch-depth: 2`, and
+check.yml `build` the whole history, `fetch-depth: 0`, next section) and for a merge group the
 group's own commit (`github.sha`). Outside a git repository a build fails and says so;
 `tests/static/run.sh` points git at the checkout's repository (`GIT_DIR`).
 `tests/version/same.sh` checks that the facts are the same in other time zones, name the
