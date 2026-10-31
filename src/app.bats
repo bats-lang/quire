@@ -490,6 +490,7 @@ fn _collection_menu (): void = let
   val () = ui_menuitem("collection-menu-box", "collection-menu-done", "Close")
 in _hide("collection-menu") end
 
+(* fixture: the-settings-screen-opened-from-the *)
 (* The Settings screen, opened from the library menu:
    one screen of groups, each complex area a screen of its own opened
    from a row that says its state (Android's settings pattern). Sync
@@ -649,6 +650,10 @@ fn _notices (): void = let
   val () = _hide("error-reopen")
   val () = ui_icon_btn("error-banner", "error-dismiss", "ibtn", IcClose, "Dismiss")
   val () = _hide("error-banner")
+  (* and the same in words, read out (book-edge) *)
+  val () = ui_el("bats-root", "edge-status", TDiv, "toast tedge")
+  val () = ui_role("edge-status", RStatus)
+  val () = _hide("edge-status")
   val () = ui_el("bats-root", "copy-status", TDiv, "toast tcopy")
   val () = ui_role("copy-status", RStatus)
   val () = _hide("copy-status")
@@ -743,6 +748,10 @@ fn _reader (): void = let
   val () = ui_el("reader", "turn-shade", TDiv, "shade")
   val () = ui_attr("turn-shade", AHidden, "true")
   val () = _hide("turn-shade")
+  (* a turn refused at the book's first or last page (reader.bats, book-edge): a bar on the edge pushed against *)
+  val () = ui_el("reader", "book-edge", TDiv, "edge")
+  val () = ui_attr("book-edge", AHidden, "true")
+  val () = _hide("book-edge")
   (* page-turn is laid out even while no page turns (idle: hidden), so
      the copy kept in it is ready for a turn (reader.bats) *)
   val () = ui_el("reader", "page-turn", TDiv, "turn idle")

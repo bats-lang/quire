@@ -378,6 +378,7 @@ primplement entry_below_count {index}{label}{source} (entry) =
   | LABELENTRY_75() => ()
   | LABELENTRY_76() => ()
 
+(* fixture: the-source-of-a-label-as *)
 (* The source of a label, as a value *)
 #pub datatype label_source(tsrc) = LabelUtf8(SrcUtf8()) | LabelUtf16Le(SrcUtf16(LittleEndian())) | LabelUtf16Be(SrcUtf16(BigEndian())) | LabelUnsupported(SrcUnsupported()) | LabelCp1250(SrcTable(Cp1250())) | LabelCp1251(SrcTable(Cp1251())) | LabelCp1252(SrcTable(Cp1252())) | LabelCp1253(SrcTable(Cp1253())) | LabelCp1254(SrcTable(Cp1254())) | LabelCp1255(SrcTable(Cp1255())) | LabelCp1256(SrcTable(Cp1256())) | LabelCp1257(SrcTable(Cp1257())) | LabelIso88592(SrcTable(Iso88592())) | LabelIso88595(SrcTable(Iso88595())) | LabelIso88597(SrcTable(Iso88597())) | LabelIso88598(SrcTable(Iso88598())) | LabelIso885915(SrcTable(Iso885915())) | LabelKoi8r(SrcTable(Koi8r()))
 

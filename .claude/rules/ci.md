@@ -14,7 +14,7 @@ paths:
 
 ## CI is pinned
 
-The pins and the relock are in CLAUDE.md. Specifics:
+The rule that every input is pinned, and the relock, are pitboss's `ci.md`; quire's pin names and its Dependabot and relock split are in CLAUDE.md, "CI is pinned". Specifics:
 
 * **The runner label** (#667): every job runs on `ubuntu-24.04`, written in each
   job's `runs-on` (quire has no reusable workflow to write it once in);
@@ -103,21 +103,41 @@ bats's judgement, by the mechanisms below.
   anywhere. `QUIRE_STATIC_WORK` (CI: `$RUNNER_TEMP/quire-static`) is the directory
   `tests/static/run.sh` works in. It stays a fixed directory because the save step names the
   directory it keeps (`app/build`, `memo`), and a `mktemp` one has no name the save can know.
-* **What is cached**: the `build` job caches `build/`. A static job caches the app's `build/`
-  under the one name `static` (every group checks the same app) and its memo under
-  `static-memo-<group>`. `check` and `build` never share a `build/` (check is mode 2 and 3,
+* **What is cached**: the `build` job caches `build/`, and the checked app's `build/` under the
+  one name `static`. A static job caches its memo under `static-memo-<group>`.
+* **The checked app (keyword: checked app, #974)**: `static` has `needs: build`. `build` runs
+  `tests/static/run.sh check` (a copy of the checkout in `$RUNNER_TEMP/quire-static/app` and
+  `bats check` of it) before `bats build`, restores and saves the `static` cache for it, and
+  uploads `app/build` (hidden files included: `.bats_stamp`) as the artifact `quire-app-checked`.
+  Every group that needs the compiler downloads it to the same place, on every event: a push to
+  main and the nightly run restore no cache, so `build` made it from nothing. The artifact is a
+  locator as the cache is: the group's own `bats fixtures` (and its `check` member) judge it by
+  bats's stamp and memo and check what differs. A module that fails `bats check` therefore stops
+  `build` at that step (about a minute into it) and the groups do not start, where each of them
+  used to fail on the same line. **Exactly one failed job** (the ticket's test): the step has
+  `continue-on-error`, every later step of `build` is skipped, `build` ends as a success with the
+  output `app` (the step's outcome), `static`, `e2e` and `android` run only when it is `success`,
+  and `check` (the required status) is the one job that fails, by a step naming the check. Research:
+  a skipped required check passes (GitHub, troubleshooting required status checks: "Successful check
+  statuses are `success`, `skipped`, and `neutral`"; a job skipped by a conditional "reports Success"), so the aggregate cannot simply be
+  skipped while `build` fails unless `build` is itself a required status of the ruleset (an admin's
+  change, in #974); a job's `needs` result is `skipped` for its dependents when it fails, and `if:
+  always()` is what makes an aggregate run. Hence one red job needs the failing step not to fail its
+  job, as here. `check` and `build` never share a `build/` (check is mode 2 and 3,
   build 0 and 1).
 * **Who restores**: a pull request and the merge queue's group (#586: restoring main's cache
   keeps its build job near 3 minutes, where cold it took 13 of a 60-minute window). Main's push,
   the nightly run and a dispatched relock restore nothing (the static jobs pass `--cold`), so
-  every state of main is checked from nothing and is the base the pull requests' caches
+  every state of main is checked from nothing, except a push whose commit the merge queue's
+  run passed (queue-passed, #882): its static groups and e2e end after their first step, `build`
+  still builds cold, and the nightly run checks the state from nothing; that state is the base the pull requests' caches
   start from (GitHub gives a pull request and a merge group its base branch's caches; a pull
   request's own are readable only by it). A bug of bats's incremental logic that passes a PR
   therefore shows on main or in the nightly run at the latest. A cache is saved only by a job
   that passed.
 * **Sharing**: jobs of one run start together, so none sees what another saves; the gain is from
   the previous build. A key is a name plus the commit and a save of it is immutable, so one name
-  is saved by one job: the `static` build (every group restores it) only by the `app` group, and
+  is saved by one job: the `static` build (the groups take it as an artifact, #974) only by the `build` job, and
   each group saves its own `static-memo-<group>`. Two jobs saving one key print
   `Cache save failed` (seen in the run of #750). Caches are immutable, 10 GB per repository, evicted
   by last access and after 7 days.
@@ -137,6 +157,24 @@ function, the snippet line patsopt reports and patsopt's error word for word, an
 that is the one error, in that module, at that line, inside that function; an accept must check.
 A fixture whose memo entry is unchanged costs nothing, else about what its snippet changes (a
 changed `#pub` declaration re-checks what depends on it).
+
+A fixture finds its edit by a marker (keyword: fixture anchors, #983): `before` is a line `(* fixture: <name> *)`
+that exists in the module for that purpose, or a code line such as a function's name, never a comment's prose
+(a reworded comment, or a keyword added to it, would break every fixture that anchors on it). The marker sits
+directly above the place the snippet goes. `tests/static/anchors.py` (in `checkers`, with its own accept and reject
+trees in `tests/static/anchors/`) refuses a `before` that is a comment with no marker, one that is a line inside a block comment (a continuation
+line, found by reading the module's `(* *)` nesting; its tree has a `comment-continuation` reject), and one that no
+line of its `file` equals. It is Python as a stopgap (bats's `fixtures` cannot judge a `before`): bats#577 moves it.
+
+A reject fixture about a nonexhaustive match names the one constructor it is about (keyword: fixture among, #984): its
+`expect` is `function <name>`, `line <n>`, `pattern match is nonexhaustive:` and `among <Constructor>` (bats#573, in the
+compiler since the pin of 2026-10-29), written as patsopt prints the constructor, and its snippet is a match with one arm of
+another constructor (nothing spells out the datatype's other constructors, so adding one breaks no fixture). The expect is
+written by hand in that form: `bats fixtures --bless` writes the full error, which is the form this removes. A nested
+constructor keeps the arms that make patsopt print it (`Fixed(Grey())` needs the other `Fixed` arms). `tests/static/among.py`
+(in `checkers`, with its trees in `tests/static/among/`) refuses an `expect` that says `pattern match is nonexhaustive` in any
+other form: constructors listed line for line (one or several) or more than one `among` line. Python as a stopgap, as anchors.py
+is (bats's `fixtures` accepts both forms and cannot refuse one); it is deleted with anchors.py.
 
 ### The solver fixtures written from the sources (keyword: solver fixtures, #837 to #841, pieces of #594)
 
@@ -192,7 +230,7 @@ restores main's build cache; the long pole is the slowest static group. A
 change that would make its own group longer than about 45 minutes is sharded
 first (the mutation check is, below).
 
-* **At most two entries in the queue at a time**; the next goes in when one has
+* **No more than two entries in the queue at a time**; the next goes in when one has
   merged or been removed (five at once wanted more runners than the pool has,
   and nothing merged for 3.5 hours).
 * **Superseded runs are cancelled**: GitHub rebuilds the groups behind a
@@ -203,9 +241,29 @@ first (the mutation check is, below).
 * Where an entry is: the PR timeline (`added_to_merge_queue`,
   `removed_from_merge_queue`); `auto_merge` empty means enqueued or removed.
 
+**Why a merge-queue entry is removed (keyword: queue-removal).** An entry leaves the queue for one of two
+causes, and the `merge_group` runs that read `skipped` or `cancelled` beside a removal are never the cause:
+
+* The `destroyed` merge_group event. GitHub sends it for a group it throws away (an entry removed, a group
+  rebuilt). `check.yml` listens for it (`types: [checks_requested, destroyed]`) only so that its run joins the
+  concurrency group of the run it ends and cancels it. Every job of that run carries the false `if`
+  `github.event.action != 'destroyed'`, so the whole run reads `skipped`, `plan` included. A `skipped` queue run
+  is therefore the end of a group, and the run it cancelled reads `cancelled`: neither says why the entry was
+  removed.
+* The 60-minute window. The queue removes an entry whose required checks have not all passed 60 minutes after
+  it was added (the queue's checks timeout, 60 minutes by default). The timeline shows it as about 60 minutes
+  between `added_to_merge_queue` and `removed_from_merge_queue`, with `auto_merge` empty after.
+  A group whose jobs waited for runners, or a push run of main that took the runners for the commit the queue
+  had just tested, spends the window.
+
+Read the cause from the PR timeline first: the minutes between the two events (about 60 is the window), then the
+failed job of the group's run (`failure` in `check`). A removal with another cause is a ticket of its own.
+
 The static groups (`tests/groups.json`) are balanced by measured time (#618):
-every group pays the app's cold check and then its members (a reject is
-seconds, an accept a minute or more). A new fixture goes in the group with the
+`build` pays the app's cold check once, and every group that needs the compiler
+starts from the `build/` it made (keyword: checked app, #974), so a group pays
+its members (a reject is seconds, an accept a minute or more) and what bats
+checks again of that `build/`. A new fixture goes in the group with the
 least member time; `scripts/ci-groups.py` fails a spec or fixture in no group
 (or two), so a new one that is not in a group fails CI instead of never
 running.
@@ -216,7 +274,7 @@ Both jobs that use Node install it with pwa's `e2e-setup` action (called by
 commit; `npm ci`, retried on a dropped connection, Playwright checked against
 `playwright-minimum`). Quire holds no install logic of its own (CLAUDE.md, "Pipeline and tooling improvements belong in bats or pwa").
 
-Which tool moves which pin here (#760; CLAUDE.md, "CI is pinned"): Dependabot
+The owner ruled that every pin moves from the relock and that no bot opens a pull request (pitboss's `ci.md`); #996 moves these two to the relock and deletes `.github/dependabot.yml`. Until it does, which tool moves which pin here (#760; CLAUDE.md, "CI is pinned"): Dependabot
 (`.github/dependabot.yml`, weekly, `cooldown` 7 days) moves the npm versions and `package-lock.json`
 of the root `package.json`.
 
@@ -300,7 +358,8 @@ each kind selects) and prints each path's reason in its summary. Rules:
   proved: a spec that builds a path from pieces is not seen.
 * The rule is Python in `scripts/` because it runs in the plan job, before any
   compiler exists.
-* **`build` and `android` run for every PR, by decision (#656).** The plan has no
+* **The plan never skips `build` or `android`, by decision (#656).** `build` runs for every
+  PR, and `android` for every PR whose app passed its check. The plan has no
   entry for them and they read none, so a missing or malformed entry cannot
   skip them. `android` is a call of pwa's reusable workflow, and a skipped
   caller starts none of that workflow's jobs: the required contexts
@@ -309,20 +368,34 @@ each kind selects) and prints each path's reason in its summary. Rules:
   skipped by a condition reports success, but "avoid requiring workflows that
   can be skipped"; community discussion 29825 has the nested context left
   unfulfilled). `android` needs the `build` artifact, so `build` runs too.
-  Skipping them waits for the required checks to be `check` alone, and for
-  `check` to need `android` (today it needs `plan`, `build`, `static` and
+  Its one `if` is `needs.build.outputs.app == 'success'` (keyword: checked app, #974):
+  when the app's check failed, `build` uploaded nothing for it, and the contexts
+  it leaves unreported hold nothing back, because `check`, the required status,
+  fails in that run. Letting the plan skip them waits for the required checks to be `check` alone, and for
+  `check` to need `android` (today it needs `plan`, `queue`, `build`, `static` and
   `e2e`; only `play-internal` needs `android`), a change of the branch
   protection that is an admin's;
   tested: `Workflow` in `tests/static/affected_test.py`.
-* **A draft PR runs no job (#939, keyword: draft).** `check.yml` has `types: [opened,
+* **The draft condition (#939, keyword: draft; the rule that a draft runs no costly job is
+  pitboss's `ci.md`).** `check.yml` has `types: [opened,
   synchronize, reopened, ready_for_review]` (GitHub's default three plus the transition to ready,
   so marking ready runs the check on the head) and `plan`, `build` and `check` carry
   `github.event_name != 'pull_request' || !github.event.pull_request.draft`; `static`, `e2e` and
   `android` need them and are skipped with them. `check` is skipped, which a required check
   counts as passed, so it is reported, not missing; the draft cannot merge in any case, and
   the ready run reports every context (`android / ...` included, which #656 keeps unskipped
-  for a ready PR). Push, `workflow_dispatch`, `schedule` and `merge_group` are unchanged.
+  for a ready PR whose app passes its check, #974). Push, `workflow_dispatch`, `schedule` and `merge_group` are unchanged.
   Libraries: the condition is repository-prototype#525, their callers' types the tickets of #939.
+* **A push of a commit the merge queue passed skips the static and e2e groups (#882, keyword:
+  queue-passed; pwa#215).** `check.yml`'s `queue` job calls pwa's `queue-passed` action by commit
+  (the relock moves its pin: `relock.yml`'s `workflow-pins`) and outputs `skip`, `run_url` and
+  `reason`. The action decides by the commit alone (a `merge_group` run of this workflow, same
+  `head_sha`, `success`) and gives `skip=false` for every other event, so a schedule run, a
+  `workflow_dispatch` and a pull request run everything. `static` and `e2e` read `skip`: on `true`
+  a group is a job that runs and ends after its first step, as an unaffected group does (a skipped
+  job would fail `check`). `build`, `android` and `play-internal` never read it, so the AAB that
+  goes to Play is built and signed in the push run. `check` needs `queue`, prints its reason and
+  writes its `run_url` to the step summary. Tested: `Workflow` in `tests/static/affected_test.py`.
 * **The merge queue's group runs everything, by decision (#656).** Its diff
   (against `HEAD^1`) is one PR's, so a selection by it would be the PR's own
   and would miss what two PRs do together, which is what the queue is for
@@ -351,9 +424,31 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   command, and a wrapper below it kills a cold check for nothing. The first build of a new checkout
   runs with `run_in_background` and its log is read until it ends, in the same turn. A push is
   `qsweep push <arguments>`, which holds when `qsweep pressure` does not say `runner pressure: none`.
-* **A run over a population is a sample** (quire#751): about 10 minutes, the members drawn at random
-  with a seed that is printed (`python3 -c 'import random; r = random.Random(SEED); ...'`), and the
-  PR says the sample, its seed and size and why it suffices; the whole population is CI's.
+* **The affected members (quire#957, keyword: affected).** Before every push, a worker
+  runs `python3 scripts/ci-groups.py local $(git merge-base origin/main HEAD)`: the rule of the
+  `plan` job (`scripts/affected.py`, #619) at the granularity of a fixture, over the diff against
+  the merge base, tracked files of the working tree included (commit new files first). It lists
+  the whole selected population on standard output in every case, one member a line (`check`,
+  `checkers`, `accept/<name>`, `reject/<name>`, `e2e/<spec>`), and the reason of each on standard
+  error. A source module (`src/**`) selects `check`, `checkers`, and each fixture that reads it:
+  the module the fixture is put into (`file`), a module that one staloads, however far
+  (`staload "x.sats"` is `src/x.bats`), and any repository path a fixture's `before`, `expect`,
+  `file` or `snippet.bats` spells out. Every other path selects what CI's table says (a note, a
+  spec, a fixture's directory); a path for which CI runs the whole static population (the CI
+  files, the pins, an unknown path, `assets/**`) is said (`CI runs the whole static population
+  for: ...`) and left to the sample. A spec reads the built app, so a source change selects every
+  spec. **One relation between the list and the run** (the ruling recorded on the ticket, until the
+  owner says otherwise): the static members run whole; the specs run whole when they are at most
+  `--specs N` (default 12, about 10 minutes of e2e), else a sample of N of the selected specs is
+  drawn with a printed seed; CI runs the rest. `--run <repository>` does both: `tests/static/run.sh`,
+  then `./dist/debug/gen-pwa test -- <specs>` (the build steps and the env file below come first).
+  The worker writes the seed, the sample and why it suffices in the PR. `--sample N` adds N other
+  fixtures with the printed `--seed`, beside the affected ones and never in their place. The stopgap
+  carries its ticket in a comment on each piece (keyword: affected, bats-lang/bats#570, deleted when it
+  lands): the list is an over-approximation of what `bats fixtures` knows exactly (the files patsopt read
+  for each fixture, kept by its memo), and the exact form replaces the staload walk. The PR's Evidence has
+  the command and its output; a reviewer sends back a PR without it. Tested: `LocalRun` and `LocalCommand`
+  in `tests/static/affected_test.py`; the brief line: `tests/static/guidelines.py` (`WORKER_LINES`).
 * Two bats in one checkout take turns (a lock on `bats.toml`). Two checkouts take turns by
   bats's opt-in machine-wide slots: with `BATS_SLOTS=N` (1 to 64) `check`, `build`, `test` and
   `run`'s build each hold one of N `flock` files in `BATS_LOCK_DIR`. `gen-pwa test` uses the
@@ -412,11 +507,21 @@ reports `the kernel ring did not start (no tracefs, or sudo refused: see the run
   A setup script must therefore mount only when the line is missing. Its line, tested here
   on the already-mounted path (exit 0 and no second mount), is
   `grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing`.
-* **Does the mount survive a container restart.** The ticket's reading is that it does not:
-  `/proc/mounts` is per boot, and nothing writes the mount to disk. This session did not restart
-  its container, so that is the ticket's reading, not a restart test. The mount is set again at
-  the start of each session by the environment's setup script, which is not in the repo: the
-  script holds the line above (the owner's confirmation with a screenshot, quire#785).
+* **Does the mount survive a container restart (quire#958).** It does not: tracefs is a mount, and
+  `/proc/mounts` is per boot. Observed after the restart of 2026-10-27/28: the boot was at
+  2026-10-27 23:56:40 UTC (`uptime -s`), `grep tracefs /proc/mounts` printed nothing until the
+  orchestrator ran the allowed command by hand, and the preflight failed with `PREFLIGHT FAILED:
+  kernel ring: no tracefs instances directory`. Why it was unmounted (the environment's setup script
+  did not run at the restart, or ran and failed) is not established, and an agent in the container
+  cannot establish it: the container's logs hold nothing after the boot that the script would leave
+  (no apt or dpkg entry since 2026-10-21, no shell history, and the mount line leaves no trace when
+  it runs). It is quire#965, for the owner. The rule does not depend on the answer: a worker on a
+  container that was restarted, or whose preflight prints that message, runs once, as root, the
+  allowed command `grep -q tracefs /proc/mounts || mount -t tracefs nodev /sys/kernel/tracing`
+  (the compound form `.claude/settings.json` allows on line 9; it does nothing where tracefs is
+  mounted), checks `grep tracefs /proc/mounts`, and runs the spec again. The preflight's message
+  (`e2e/flight-tracefs.js`), `worker.md` and the worker brief (`.claude/orchestration.md`, "Briefs
+  and the machine") carry the same command. No other `mount` is run.
 * **Who runs the specs.** As uid 0, the specs run without any `sudo`. A run as another user
   (comment 6329897260 ran as user `quireci`, `sudo -u quireci -H env CI=true ...`) needs a user
   and a `sudo -n` grant. The ticket records no `useradd` and no `sudoers.d` command for that user,

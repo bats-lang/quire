@@ -9108,6 +9108,7 @@ fn _table_koi8r {byte:int | 128 <= byte; byte < 256} (byte: int byte)
               else
                 (TABLEAT_Koi8r(PAGEAT_Koi8r_255()) | 1066)
 
+(* fixture: the-code-point-a-byte-of *)
 (* The code point a byte of 128 to 255 stands for in a single-byte source, with the proof of it *)
 #pub fn text_table_point {page:codepage}{byte:int | 128 <= byte; byte < 256} (source: label_source(SrcTable(page)), byte: int byte)
   : [point:int | 0 <= point; point < 65536] (TABLEAT(page, byte, point) | int point)

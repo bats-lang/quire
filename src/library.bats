@@ -976,6 +976,7 @@ fun _dictionary_files_delete {count:nat} .<count>. (keys: dict_file_keys(count))
       val () = release_bytes(key_frozen, key_bytes)
     in _dictionary_files_delete(rest) end
 
+(* fixture: asks-about-harm-with-the-action *)
 (* Asks about harm, with the action that does it; if the answer is yes
    (Accepted), it is done. The promise resolves with the answer once
    that is done. HEmptyTrash: every book in the Trash and everything
@@ -3051,6 +3052,7 @@ fn _unreadable_shown (kind: failure_kind): void = let
     | ~NoRemedy() => ui_try_again_hide())
 in ui_inert("import-file", true) end
 
+(* fixture: the-library-view-shows-only-the *)
 (* The library view shows only the books whose title or author has
    query[0, query_len) in it (letters in any case); an empty query shows
    all *)
@@ -3856,6 +3858,7 @@ in
 in _emptiness_text(reason) end
 end
 
+(* fixture: shows-shelf-the-library-or-the *)
 (* Shows shelf: the library, or the screen of the shelf (Hidden,
    Archived, Trash; quire#404), whose bar is its back button and its
    name in place of the library's. A shelf's screen has no collection

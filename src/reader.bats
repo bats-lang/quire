@@ -1477,6 +1477,100 @@ in _turn_end(old) end
    it: a resize, a jump, the book closed *)
 fn _turn_settle (): void = _turn_end(_turn_take())
 
+(* ============================================================
+   The book's edge (#860, keyword: book-edge): a turn refused on the
+   book's last page (on) or first page (back) shows a bar on the edge
+   the reader pushed against and says it in words (a status), for every
+   way of turning, since each ends in _page_next, _page_previous or
+   reader_turn_on. Shown by one mark, linear, that only _edge_clear
+   consumes, held in the cell with the serial of its timeout: a timeout
+   of an older serial is a no-op, so a late or repeated turn cannot
+   leave it up
+   ============================================================ *)
+
+(* How long the edge stays, in milliseconds *)
+#define BOOK_EDGE_MS 1500
+
+stadef EDGE_UP = 1
+
+local
+datavtype edge_mark_(int) =
+  | EdgeMarkUp(EDGE_UP) of ()
+in
+stadef edge_mark = edge_mark_
+
+(* The edge pushed against, for the way the page being left would have
+   slid: the page would have come in from the other side *)
+fn _edge_side (slide: slide): void =
+  case+ slide of
+  | SlideLeft() => ui_class("book-edge", "edge edge-right")
+  | SlideRight() => ui_class("book-edge", "edge edge-left")
+  | SlideUp() => ui_class("book-edge", "edge edge-bottom")
+  | SlideDown() => ui_class("book-edge", "edge edge-top")
+
+(* The edge shown, and its words *)
+fn _edge_lay (way: turn_way): edge_mark(EDGE_UP) = let
+  val () = _edge_side(_slide_of(way))
+  val () = (case+ way of
+    | TurnOn() => ui_text("edge-status", "End of the book")
+    | TurnBack() => ui_text("edge-status", "Start of the book"))
+  val () = ui_show("book-edge", true)
+  val () = ui_show("edge-status", true)
+in EdgeMarkUp() end
+
+(* The edge taken away *)
+fn _edge_clear (mark: edge_mark(EDGE_UP)): void = let
+  val+ ~EdgeMarkUp() = mark
+  val () = ui_show("book-edge", false)
+in ui_show("edge-status", false) end
+end
+
+(* The edge: none, or up (with the serial of the timeout that takes it away) *)
+datavtype edge_cell =
+  | EdgeNone of ()
+  | EdgeUp of (edge_mark(EDGE_UP), int)
+
+val _edge = ref<edge_cell>(EdgeNone())
+
+(* The serial of the last edge shown *)
+val _edge_serial = ref<int>(0)
+
+fn _edge_take (): edge_cell = let
+  var cell: edge_cell = EdgeNone()
+  val () = ref_exch_elt<edge_cell>(_edge, cell)
+in cell end
+
+(* An edge taken away at once *)
+fn _edge_end (cell: edge_cell): void =
+  case+ cell of
+  | ~EdgeNone() => ()
+  | ~EdgeUp(mark, _) => _edge_clear(mark)
+
+fn _edge_put (cell: edge_cell): void = let
+  var old: edge_cell = cell
+  val () = ref_exch_elt<edge_cell>(_edge, old)
+in _edge_end(old) end
+
+(* A timeout has run: the edge goes when it is the one it was armed for *)
+fn _edge_timeout (serial: int): void =
+  case+ _edge_take() of
+  | ~EdgeNone() => ()
+  | ~EdgeUp(mark, kept) =>
+    if kept = serial then _edge_clear(mark) else _edge_put(EdgeUp(mark, kept))
+
+(* A turn refused at the book's end (on) or start (back) *)
+fn _edge_show (way: turn_way): void = let
+  val serial = !_edge_serial + 1
+  val () = !_edge_serial := serial
+  (* the edge of an earlier refusal goes first, else its clearing would
+     hide this one *)
+  val () = _edge_end(_edge_take())
+  val () = _edge_put(EdgeUp(_edge_lay(way), serial))
+in
+  (* a timer's status carries nothing *)
+  $P.finish<Int>($P.vow($TM.timer_set(BOOK_EDGE_MS)), llam(_) => _edge_timeout(serial))
+end
+
 (* Eased out (a cubic): how far a turn is, in thousandths, when its
    time is so many thousandths gone *)
 fn _eased (time: int): int =
@@ -5140,6 +5234,7 @@ fn _back_offer {count:pos} (positions: pstack(count)): void = let
   val (armed | timeout) = _back_arm()
 in _ps_put(PsShown(armed | timeout, positions)) end
 
+(* fixture: remembers-where-the-reader-is-before *)
 (* Remembers where the reader is, before a jump *)
 fn _push_position (): void = let
   (* a jump is the reader's move *)
@@ -5210,7 +5305,7 @@ in
         val turn = _turn_begin(TurnOn())
       in _turn_jump(turn, _goto(next, 0, ~1)) end
       (* the book's last page: a drag holding it goes back *)
-      else let val () = _turn_return() in _show_page(page, page_count, chapter, chapter_count) end
+      else let val () = _turn_return() val () = _edge_show(TurnOn()) in _show_page(page, page_count, chapter, chapter_count) end
     end
 end
 
@@ -5237,7 +5332,7 @@ in
         val turn = _turn_begin(TurnBack())
       in _turn_jump(turn, _goto(previous, ~1, ~1)) end
       (* the book's first page: a drag holding it goes back *)
-      else let val () = _turn_return() in _show_page(0, page_count, chapter, chapter_count) end
+      else let val () = _turn_return() val () = _edge_show(TurnBack()) in _show_page(0, page_count, chapter, chapter_count) end
     end
 end
 
@@ -6362,6 +6457,11 @@ in
 end
 
 (* Stores where the reader is *)
+(* Whether the page just shown is still settling after a book opened (its place
+   is not final: leaving now records the first page, keyword: handed-intent) *)
+#pub fun reader_settling (): bool
+implement reader_settling () = !_settling
+
 #pub fun reader_save (): void
 implement reader_save () = _record_position()
 
@@ -7060,7 +7160,7 @@ in
           val () = notice_say_part(!_chapter_asked)
         in $P.ret<turned>(NotTurned()) end)
     end
-    else $P.ret<turned>(NotTurned())
+    else let val () = _edge_show(TurnOn()) in $P.ret<turned>(NotTurned()) end
 end
 
 (* Whether the chapter is scrolled down rather than paged across *)

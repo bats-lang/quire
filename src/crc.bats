@@ -534,6 +534,7 @@ prfun crcfrom_snoc {count:nat}{high,low,mid_high,mid_low,end_high,end_low:nat}{o
        (case+ octets_len of LEN_cons(rest_len) => CRCFROM_cons(first_step, crcfrom_snoc(rest_len, rest_append, rest_done, step))))
 
 
+(* fixture: the-crc-32-high-and-low *)
 (* The CRC-32 (high and low 16 bits) of the n bytes the cells of an array
    hold, by the table of the 256 registers the byte step above makes from zero
    (entry i is the register after the byte i; 4 bytes an entry, low half

@@ -2933,6 +2933,7 @@ in
   | LabelKoi8r() => _fill_converted(length, textof_single_conv(plan, detect, length), total_len, out_len | data, n, ConvKoi8r(), mark, out)
 end
 
+(* fixture: the-end-of-text-relation-the *)
 (* The end of text_relation: the static fixtures of tests/static/reject named text are put before this line *)
 
 end
