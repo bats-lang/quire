@@ -46,21 +46,30 @@ end
 (* Appends to the Android project's android-release.gradle (which
    build-android.sh appends to the app's build.gradle) the version of the
    commit built from (#219): versionName is the version About shows, and
-   versionCode that commit's time in minutes since 2025, so it grows from
-   release to release. Set after pwa's run-number version code, it is
-   the one Gradle takes *)
-fn _android_version (): void = let
-  var b = $B.create()
-  val () = $B.bput(b, "\n// Appended by quire's gen-pwa: the version of the commit built from (#219)\n")
-  val () = $B.bput(b, "android {\n    defaultConfig {\n        versionCode ")
-  val () = $B.put_int(b, quire_version_code())
-  val () = $B.bput(b, "\n        versionName '")
-  val () = $B.bput(b, quire_version())
-  val () = $B.bput(b, " (")
-  val () = $B.bput(b, quire_commit_short())
-  val () = $B.bput(b, ")")
-  val () = $B.bput(b, "'\n    }\n}\n")
-in _write_file("dist/android/android-release.gradle", b, $F.CreateOrAppend()) end
+   versionCode the commit count plus an offset (#989), so it grows from
+   release to release and is the same for the same commit. Set after pwa's
+   run-number version code, it is the one Gradle takes. A shallow clone
+   cannot count: no versionCode block is appended and the answer is false
+   (_generate then exits 1; the project pwa wrote before keeps its fallback
+   code), so no wrong code is ever released *)
+fn _android_version (): bool =
+  case+ quire_version_code() of
+  | ~VersionCodeShallow() => let
+      val () = println! ("gen-pwa: the clone is shallow, so the commits cannot be counted for the Android version code; fetch the whole history (fetch-depth: 0)")
+    in false end
+  | ~VersionCode(code) => let
+      var b = $B.create()
+      val () = $B.bput(b, "\n// Appended by quire's gen-pwa: the version of the commit built from (#219)\n")
+      val () = $B.bput(b, "android {\n    defaultConfig {\n        versionCode ")
+      val () = $B.put_int(b, code)
+      val () = $B.bput(b, "\n        versionName '")
+      val () = $B.bput(b, quire_version())
+      val () = $B.bput(b, " (")
+      val () = $B.bput(b, quire_commit_short())
+      val () = $B.bput(b, ")")
+      val () = $B.bput(b, "'\n    }\n}\n")
+      val () = _write_file("dist/android/android-release.gradle", b, $F.CreateOrAppend())
+    in true end
 
 (* The scheme the app is opened at: Dropbox's sign-in in the system's
    browser comes back to quire://oauth/dropbox (#184) *)
@@ -163,9 +172,10 @@ fn _generate (): void = let
      form: its build-android.sh installs from scripts/android/pnpm-lock.yaml
      (copied beside it by check.yml), keyword: android lock *)
   val () = $P.create_android_locked("Quire", "dev.middlefield.quire", "../pwa", "dist/android", "application/epub+zip")
-  val () = _android_version()
+  val versioned = _android_version()
 in
-  if _intent_filters() then println! ("Android project generated in dist/android/")
+  if ~versioned then exit(1)
+  else if _intent_filters() then println! ("Android project generated in dist/android/")
   else exit(1)
 end
 
