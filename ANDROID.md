@@ -1,7 +1,9 @@
 # Android app
 
 CI builds Quire's Android app (a Capacitor shell around the PWA) on every
-push to main and every pull request: the `android` job of
+push to main and every pull request that is not a draft, whenever the app
+passes `bats check` (a run whose check fails stops before it; `check` is
+red then, see `.claude/rules/ci.md`, keyword: checked app): the `android` job of
 `.github/workflows/check.yml`. It runs the pwa package's reusable
 workflow (`bats-lang/pwa/.github/workflows/android.yml`) on the project
 `gen-pwa` writes to `dist/android`. Every run builds and signs the app

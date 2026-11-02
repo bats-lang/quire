@@ -261,10 +261,13 @@ class Workflow(unittest.TestCase):
         build's artifact: neither reads the plan, so the plan cannot skip them. The
         build's `if` is the `destroyed` one and the draft one (#939, keyword: draft:
         a draft pull request runs no job, which is the owner's rule and not the plan's
-        skip logic); the Android job has none and is skipped only with the build."""
+        skip logic); the Android job's only `if` is that the build's app check
+        succeeded (keyword: checked app, #974), so it is skipped only with the build
+        or its failed check, never by the plan."""
         self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('build')),
                          [f"    if: github.event.action != 'destroyed' && {self.NOT_DRAFT}"])
-        self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('android')), [])
+        self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('android')),
+                         ["    if: needs.build.outputs.app == 'success'"])
         self.assertIn('needs: build', self.job('android'))
 
     def test_a_draft_pull_request_runs_no_job_and_nothing_else_is_skipped_for_it(self):
