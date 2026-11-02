@@ -90,6 +90,40 @@ class Phrases(unittest.TestCase):
         self.assertEqual(gl.lint_guidelines(gl.ROOT, PHRASES), [])
 
 
+class VersionCode(unittest.TestCase):
+    """quire#989: the minutes scheme is refused, the commit count is demanded."""
+
+    def root_with(self, text):
+        import tempfile
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        os.makedirs(os.path.join(directory.name, 'src'))
+        with open(os.path.join(directory.name, 'src', 'version.bats'), 'w', encoding='utf-8') as handle:
+            handle.write(text)
+        return directory.name
+
+    def test_the_repository_reads_the_commit_count(self):
+        self.assertEqual(gl.lint_version_code(gl.ROOT), [])
+
+    def test_the_minutes_scheme_is_refused(self):
+        root = self.root_with('implement quire_version_code () =\n  ($F.bats_commit_time() - 1735689600) / 60\n')
+        found = gl.lint_version_code(root)
+        self.assertEqual(len(found), 2)
+        self.assertIn('minutes scheme', found[0])
+        self.assertIn('bats_commit_count', found[1])
+
+    def test_the_start_of_2025_alone_is_refused_beside_the_count(self):
+        found = gl.lint_version_code(self.root_with('bats_commit_count () + 1000000 - 1735689600'))
+        self.assertEqual(len(found), 1)
+
+    def test_the_count_with_an_offset_is_accepted(self):
+        self.assertEqual(gl.lint_version_code(self.root_with('$F.bats_commit_count()')), [])
+
+    def test_the_guideline_run_holds_it(self):
+        root = self.root_with('implement quire_version_code () = $F.bats_commit_time() / 60\n')
+        self.assertTrue(any('minutes scheme' in finding for finding in gl.lint_guidelines(root, PHRASES)))
+
+
 class Contradictions(unittest.TestCase):
     def test_each_pair_is_found_on_its_examples_and_not_on_one_alone(self):
         pairs = gl.load_contradictions()
