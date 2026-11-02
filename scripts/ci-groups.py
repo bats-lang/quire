@@ -9,8 +9,9 @@ Two kinds of group:
 * static: each a list of what one job of the static tests runs: `check`
   (bats check of the app itself), `checkers` (ids.py and case_plus.py,
   with their fixtures), and the fixtures, `accept/<name>` and
-  `reject/<name>` under tests/static/. Every job that runs a fixture
-  checks the app first (the long part: 9 min on CI), and each fixture
+  `reject/<name>` under tests/static/. The `build` job checks the app once
+  (the long part: 9 min on CI, #974) and every group takes that build/, so a
+  job that runs a fixture only verifies it, and each fixture
   then checks only its module again: on CI about 13 s for a reject, 54 s
   for an accept (which links the app). A fixture about the stylesheet is
   put in the module of its area (src/palette.bats for the roles), not in
@@ -55,6 +56,34 @@ usage:
                                        members run only the lemmas the change can have made
                                        vacuous (#594), the others what scripts/affected.py
                                        selects
+  scripts/ci-groups.py local <base> [--sample N] [--seed S] [--specs N] [--run <repository>]
+                                       a worker's local run for the change since <base> (the
+                                       merge base with origin/main, tracked files of the
+                                       working tree included): the members to run, one per
+                                       line, the reasons on standard error. The fixtures are
+                                       what `bats fixtures tests/static --list-affected <paths>`
+                                       lists over the changed paths (bats#570: the files patsopt
+                                       read for each fixture, kept by its memo; a fixture with no
+                                       memo entry is listed, so no memo lists every fixture); a bats
+                                       that is not on PATH or fails is an error, not an empty list.
+                                       Needs the package repository, from --run or BATS_REPOSITORY;
+                                       the work directory and the memo are $QUIRE_STATIC_WORK's
+                                       (the ones run.sh keeps), else ~/.cache/quire-static.
+                                       Beside them, by the rule CI uses (keyword: affected): `check`
+                                       and `checkers` for a change under src/**, what the table
+                                       selects for another path (a note: `checkers`; a fixture's
+                                       directory: that fixture), and every e2e spec the rule
+                                       selects as e2e/<spec> (all of them for a change under
+                                       src/**). A path for which CI runs the whole static population is said, and
+                                       --sample N adds N other fixtures drawn with the seed S
+                                       (printed).
+                                       --run runs the static members whole with
+                                       tests/static/run.sh (bats on PATH), then the selected specs
+                                       with `dist/debug/gen-pwa test -- <specs>` (built as in
+                                       .claude/rules/ci.md, under the env file): whole when they
+                                       are at most --specs N (default 12, about 10 minutes), else
+                                       N of them drawn with the seed S, printed with the sample;
+                                       CI runs the rest
   scripts/ci-groups.py members <kind> <group>
                                        check, then print that group's
                                        members, one per line (e2e specs
@@ -63,6 +92,7 @@ usage:
 import json
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -95,6 +125,9 @@ def static_members():
                         if os.path.isdir(os.path.join(directory, name)))
     return found
 
+
+#: How many specs a local run takes of the selected ones: about 10 minutes of e2e (a CI group of 13 to 17 specs takes about 5)
+E2E_CAP = 12
 
 NARROWING = ('testMatch', 'testIgnore', 'grep', 'grepInvert')
 
@@ -222,6 +255,102 @@ def group_affected(groups, group, base):
     return 'yes' if result['static'][group]['members'] else 'no'
 
 
+def listed_fixtures(paths, repository, environment, run=subprocess.run):
+    """The fixtures `bats fixtures tests/static --list-affected <paths>` lists (bats#570,
+    quire#1006, keyword: list-affected), one `accept/<name>` or `reject/<name>` a line, with the
+    work directory and the memo that tests/static/run.sh keeps when QUIRE_STATIC_WORK names one.
+    Returns (the command, the fixtures). Anything that is not a fixture line, a failing bats or
+    none on PATH is an error: the list is never made up, and never left short."""
+    if not repository:
+        raise RuntimeError('--run <repository> or BATS_REPOSITORY (the package repository) is needed for bats fixtures --list-affected')
+    work = environment.get('QUIRE_STATIC_WORK') or os.path.join(
+        environment.get('XDG_CACHE_HOME') or os.path.join(os.path.expanduser('~'), '.cache'), 'quire-static')
+    command = ['bats', 'fixtures', 'tests/static', '--work', work, '--memo', os.path.join(work, 'memo'),
+               '--repository', repository, '--list-affected'] + paths
+    try:
+        done = run(command, cwd=ROOT, capture_output=True, text=True)
+    except FileNotFoundError:
+        raise RuntimeError('bats is not on PATH (bats fixtures --list-affected lists the fixtures)')
+    if done.returncode != 0:
+        raise RuntimeError(f'bats fixtures --list-affected failed (status {done.returncode}): {done.stderr.strip()}')
+    found = [line for line in done.stdout.splitlines() if line]
+    for line in found:
+        if not re.fullmatch(r'(accept|reject)/[^/\s]+', line):
+            raise RuntimeError(f'bats fixtures --list-affected printed a line that is no fixture: {line}')
+    return command, found
+
+
+def local(groups, arguments):
+    """The `local` command: print (and with --run, run) a change's members. Returns the status."""
+    import random
+    base, options = arguments[0], arguments[1:]
+    sample, seed, repository, spec_cap = 0, None, None, E2E_CAP
+    while options:
+        if options[0] == '--sample' and len(options) > 1 and options[1].isdigit():
+            sample, options = int(options[1]), options[2:]
+        elif options[0] == '--seed' and len(options) > 1 and options[1].isdigit():
+            seed, options = int(options[1]), options[2:]
+        elif options[0] == '--specs' and len(options) > 1 and options[1].isdigit():
+            spec_cap, options = int(options[1]), options[2:]
+        elif options[0] == '--run' and len(options) > 1:
+            repository, options = options[1], options[2:]
+        else:
+            return None
+    changes = selection.git_changes(base, ROOT, head=None)
+    result = selection.local_plan(changes, selection.Tree(ROOT))
+    for line in result['why']:
+        print(line, file=sys.stderr)
+    paths = []
+    for _, path in changes:
+        if path not in paths:
+            paths.append(path)
+    listed = []
+    if paths:
+        try:
+            command, listed = listed_fixtures(paths, repository or os.environ.get('BATS_REPOSITORY'), os.environ)
+        except RuntimeError as error:
+            print(f'error: {error}', file=sys.stderr)
+            return 1
+        print(f'{len(listed)} fixtures from `{" ".join(command[:3])} --list-affected` over {len(paths)} changed paths', file=sys.stderr)
+    members = sorted(set(result['static']) | set(listed))
+    if result['whole']:
+        print('CI runs the whole static population for: ' + '; '.join(result['whole']), file=sys.stderr)
+    if sample or repository is not None:
+        seed = random.SystemRandom().randrange(10**9) if seed is None else seed
+    if sample:
+        pool = [member for member in selection.fixture_members(selection.Tree(ROOT)) if member not in members]
+        drawn = random.Random(seed).sample(pool, min(sample, len(pool)))
+        print(f'seeded sample: {len(drawn)} of {len(pool)} other fixtures, seed {seed}', file=sys.stderr)
+        members += sorted(drawn)
+    if result['e2e'] == selection.ALL:
+        print('e2e: every spec (the app or a shared module changed; a spec reads the built app)', file=sys.stderr)
+        specs_list = [f'e2e/{name}' for name in specs()]
+    else:
+        specs_list = sorted(result['e2e'])
+    print('\n'.join(members + specs_list))
+    if repository is None:
+        return 0
+    status = 0
+    if members:
+        status = subprocess.run([os.path.join(ROOT, 'tests', 'static', 'run.sh'), repository] + members).returncode
+    to_run = specs_list
+    if len(specs_list) > spec_cap:
+        to_run = sorted(random.Random(seed).sample(specs_list, spec_cap))
+        print(f'e2e: {len(to_run)} of the {len(specs_list)} selected specs run (seed {seed}, --specs {spec_cap}); CI runs the rest: ' + ' '.join(to_run),
+              file=sys.stderr)
+    elif specs_list:
+        print(f'e2e: the {len(specs_list)} selected specs fit the cap of {spec_cap} and run whole', file=sys.stderr)
+    if to_run:
+        # as CI's e2e job does (check.yml, "Run e2e tests"): the generator serves dist/pwa and runs the specs
+        try:
+            status = subprocess.run([os.path.join(ROOT, 'dist', 'debug', 'gen-pwa'), 'test', '--'] + to_run,
+                                    cwd=ROOT).returncode or status
+        except FileNotFoundError:
+            print('dist/debug/gen-pwa is not built: the e2e steps of .claude/rules/ci.md, "Checking locally", come first', file=sys.stderr)
+            return 2
+    return status
+
+
 def main(arguments):
     with open(os.path.join(ROOT, 'tests', 'groups.json')) as groups_file:
         groups = json.load(groups_file)
@@ -262,6 +391,10 @@ def main(arguments):
                 summary_file.write('\n'.join(report) + '\n')
         print('\n'.join(lines + report))
         return 0
+    if arguments[:1] == ['local'] and len(arguments) >= 2:
+        status = local(groups, arguments[1:])
+        if status is not None:
+            return status
     if len(arguments) == 3 and arguments[0] == 'affected' \
             and (arguments[1] in groups['static'] or arguments[1] in groups['e2e']):
         print(group_affected(groups, arguments[1], arguments[2]))

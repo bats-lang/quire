@@ -3,4 +3,3 @@
 fn _static_search_nav (control: search_nav_control): void =
   case+ control of
   | SearchPrevious() => reader_search_step(~1)
-  | SearchNext() => reader_search_step(1)

@@ -157,6 +157,13 @@ that wins is named:
 * **`pub-cmt-jxl`** is the platform's: Chromium and Android's WebView have no JPEG XL
   decoder. A fallback is followed when the manifest names one (`pub-foreign_image`).
 * **`pkg-manifest-unlisted-resource`**: `epub-format.md`.
+* **The 14 failing `should` tests are decided not to be followed (#829, keyword: should decisions)**:
+  `css-epub-*`, `lay-pp-xhtml-icb_invalid_meta`, `mol-css`, `ocf-font_obfuscation` and
+  `pkg-manifest-unlisted-resource`. The reason and what the other reading systems answer are in each
+  row of `reports/quire-w3c-epub-tests.md` (its `DECISIONS` in `scripts/w3c-epub-tests-report.py`),
+  marked `decision`. Only `css-epub-text-orientation` and `css-epub-writing-mode` fail where most
+  readers pass (15 of 17, 14 of 16): vertical text comes from the book's language and reading
+  direction, as Readium sets it, and a book's rule must not split the one column flow.
 * **Deprecated tests** (`fxl-spine-overrides_duplicate`, `lay-fxl-orientation-landscape`):
   the suite files them as deprecated; `rendition:orientation` is not read.
 

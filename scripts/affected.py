@@ -306,9 +306,10 @@ def describe(selected):
     return ', '.join(sorted(os.path.basename(name) if name.endswith('.js') else name for name in selected))
 
 
-def git_changes(base, root):
-    """The paths changed since `base`: (status, path), a rename as its two paths."""
-    out = subprocess.run(['git', 'diff', '--no-renames', '--name-status', '-z', base, 'HEAD'],
+def git_changes(base, root, head='HEAD'):
+    """The paths changed since `base`: (status, path), a rename as its two paths.
+    With `head` None, the working tree (tracked files) is compared instead of HEAD."""
+    out = subprocess.run(['git', 'diff', '--no-renames', '--name-status', '-z', base] + ([head] if head else []),
                          cwd=root, check=True, capture_output=True).stdout.decode('utf-8')
     tokens = out.split('\0')
     changes = []
@@ -345,3 +346,38 @@ def plan(groups, changes, tree, mutation_runs):
         needs_bats = any(member != CHECKERS for member in chosen)
         result['static'][group] = {'members': ' '.join(chosen), 'bats': needs_bats}
     return result
+
+
+# --- the local run: the same rule, with the fixtures from bats (quire#957, #1006, keyword: affected) ----------
+
+def fixture_members(tree):
+    """accept/<name> and reject/<name>, every fixture directory of tests/static."""
+    found = []
+    for verdict in ('accept', 'reject'):
+        base = os.path.join(tree.root, 'tests', 'static', verdict)
+        if os.path.isdir(base):
+            found += [f'{verdict}/{name}' for name in sorted(os.listdir(base))
+                      if os.path.isdir(os.path.join(base, name))]
+    return found
+
+
+def local_plan(changes, tree):
+    """What a worker's local run takes from a change by CI's rule, without the fixtures a
+    source module reaches: those are `bats fixtures --list-affected`'s (the memo's recorded
+    reads, scripts/ci-groups.py `local`, quire#1006). Returns {'static': sorted members,
+    'whole': [why] (paths for which CI runs the whole static population: a seeded sample
+    stands in locally), 'e2e': ALL or specs, 'why': [line]}. A source module of the app
+    (src/**) selects `check` and `checkers`; every other path selects what `select` says."""
+    picked, why = select(changes, tree)
+    members, whole = set(), []
+    if not changes:
+        whole.append('no change to go by: everything')
+    for status, path in changes:
+        name, one = classify(path, status, tree)
+        if one.static != ALL:
+            members |= one.static
+        elif name == 'the app' and path.startswith('src/'):
+            members |= {'check', CHECKERS}
+        else:
+            whole.append(f'{path}: {name}')
+    return {'static': sorted(members), 'whole': whole, 'e2e': picked.e2e, 'why': why}

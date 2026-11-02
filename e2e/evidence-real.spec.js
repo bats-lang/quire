@@ -8,13 +8,14 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, chmodSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, writeFileSync, chmodSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { test, expect } from './fixtures.js';
 import { OUT_VARIABLE, INSTANCE_VARIABLE, isRoot, pauseInstance, removeInstance, ringSeen, silenceInstance, wanted } from './flight-recorder.js';
 import { processTable, tree } from './flight-watchdog.js';
+import { resumeUntilRunning } from './preflight.js';
 
 test.describe.configure({ mode: 'parallel' });
 
@@ -118,6 +119,34 @@ function evidenceCheck(run, extra = []) {
 }
 
 const kill = (pid, signal = 'SIGKILL') => (isRoot ? process.kill(pid, signal) : spawnSync('sudo', ['-n', 'kill', `-${signal.replace('SIG', '')}`, String(pid)]));
+
+/**
+ * A pid a test is about to stop, checked to be a process of the nested run (quire#908): a descendant of the run's own runner process (the parent
+ * chain of /proc/<pid>/stat, readable for every user), or one whose working directory or command line is inside the run's directory. The pids come
+ * from the nested run's output; a pid that is not the run's own (the outer run's watchdog or runner, another run's) fails here, by name, before any
+ * signal, and never ends the outer run. The watchdog runs as root on CI (sudo), so its /proc/<pid>/cwd is EACCES for the runner's user: only ENOENT
+ * on the stat file says the process ended, and the descent is what says it is the run's.
+ */
+export function ownOfRun(run, pid) {
+  const parentOf = (of) => {
+    const stat = readFileSync(`/proc/${of}/stat`, 'utf8');
+    return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]); // after the command (which may hold spaces): state, then the parent
+  };
+  try {
+    let at = pid;
+    for (let depth = 0; at > 1 && depth < 64; depth += 1) {
+      if (at === run.child.pid) return pid;
+      at = parentOf(at);
+    }
+  } catch (gone) { throw new Error(`pid ${pid} is not a process (it ended), so it is not the nested run's`); }
+  const inside = (path) => path === run.directory || path.startsWith(`${run.directory}/`);
+  let where = '';
+  let arguments_ = [];
+  try { where = readlinkSync(`/proc/${pid}/cwd`); } catch (hidden) { /* a root process: its cwd is not the runner user's to read */ }
+  try { arguments_ = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'); } catch (gone) { /* it ended */ }
+  if (!inside(where) && !arguments_.some(inside)) throw new Error(`pid ${pid} (${arguments_.join(' ').trim()}, in ${where}) is not a process of the nested run in ${run.directory}: not stopped`);
+  return pid;
+}
 
 // a ring is read a line at a time: one that recorded a whole run is larger than a string can be
 const ringFirst = async (file, pattern) => (await ringSeen(file, { found: pattern })).found;
@@ -273,9 +302,9 @@ test('heartbeat: a watchdog that is alive and stops beating fails the job at tha
   let parent = null;
   try {
     const ok = await run.until(/watchdog (\d+) beating/);
-    watchdog = Number(ok[1]);
+    watchdog = ownOfRun(run, Number(ok[1]));
     // the monitor's line names the process the runner started: on CI's user that is `sudo`, the parent of the watchdog (the heartbeat's pid)
-    parent = Number((await run.until(/the watchdog (\d+) \(child and heartbeat\)/))[1]);
+    parent = ownOfRun(run, Number((await run.until(/the watchdog (\d+) \(child and heartbeat\)/))[1]));
     const stoppedAt = Date.now();
     kill(watchdog, 'SIGSTOP'); // not killed: its process is there and its child has not exited
     await run.until(/EVIDENCE MISSING: watchdog: no heartbeat for/, 30000);
@@ -290,6 +319,39 @@ test('heartbeat: a watchdog that is alive and stops beating fails the job at tha
     expect(Date.now() - stoppedAt).toBeLessThan(30000);
     expect(evidenceCheck(run).text).toMatch(/EVIDENCE MISSING: watchdog: no heartbeat for/);
   } finally { run.child.kill('SIGKILL'); for (const pid of [watchdog, parent]) if (pid) { try { kill(pid, 'SIGKILL'); } catch (gone) { /* it ended with the run */ } } }
+});
+
+// The machine stopping as a whole (quire#908: a host stall of 7965 ms with no steal, run 40232296271): the runner and the watchdog stop together, and the
+// monitor, on their return, must not read the beat that was written before the stop as a watchdog gone quiet.
+test('heartbeat: the runner and the watchdog stopped together, for longer than the limit, are not a watchdog gone quiet (quire#908)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  const run = nested(testInfo, 'quiet', { QUIRE_NESTED_SLEEP: '20000', QUIRE_NESTED_TIMEOUT: '60000', QUIRE_FLIGHT_BEAT_STALE_MS: '3000' });
+  let watchdog = null;
+  let parent = null;
+  let owned = []; // only what was checked to be the nested run's is ever signalled, in the body and in the cleanup
+  const pids = () => owned;
+  try {
+    watchdog = Number((await run.until(/watchdog (\d+) beating/))[1]);
+    parent = Number((await run.until(/the watchdog (\d+) \(child and heartbeat\)/))[1]);
+    owned = [...new Set([run.child.pid, parent, watchdog])].map((pid) => ownOfRun(run, pid));
+    for (const pid of pids()) kill(pid, 'SIGSTOP');
+    await new Promise((resolve) => setTimeout(resolve, 7000));
+    // the runner returns first, as in the observed stall (its timer ran before the watchdog's): the monitor's tick finds the beat written before the stop
+    // (a process the old rule ended with the run is gone: the expectations below then say so, not a kill)
+    const resume = (pid) => { try { kill(pid, 'SIGCONT'); } catch (gone) { /* it ended with the run */ } };
+    resume(run.child.pid);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    // the watchdog before its `sudo` (CI's user), and each until it is running: a sudo that saw its command stopped stops itself and one SIGCONT may come before that
+    const stillStopped = await resumeUntilRunning([run.child.pid, watchdog, parent].filter((pid) => owned.includes(pid)), { send: (pid) => kill(pid, 'SIGCONT') });
+    expect(stillStopped, 'every process stopped for the test is running again').toEqual([]);
+    // the run goes on to its own end, which prints the monitor's stopped line: the stall is counted in it
+    const { code } = await run.done(60000);
+    expect(run.output(), 'a stop of the whole machine is not a quiet watchdog').not.toMatch(/EVIDENCE MISSING/);
+    expect(code, run.output()).toBe(0);
+    expect(run.output(), 'the stopped line counts the monitor\'s own late tick').toMatch(/\[monitor\] stopped: .*; the monitor itself was late [1-9]\d* time\(s\) \(host stall\)/);
+    console.error(`nested run after the stop: ${/\[monitor\] stopped: .*/.exec(run.output())[0]}`);
+  } finally { for (const pid of pids()) { try { kill(pid, 'SIGCONT'); kill(pid, 'SIGKILL'); } catch (gone) { /* it ended with the run */ } } run.child.kill('SIGKILL'); }
 });
 
 test('heartbeat: a ring that is on and takes no events fails the job at that moment, by name', async ({}, testInfo) => {

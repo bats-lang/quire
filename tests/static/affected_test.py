@@ -19,13 +19,18 @@ selects everything. What is tested here:
   build job's tests, the home page for the static tests): nothing that could
   read the path names it (`Readers`), so the claim is checked against the
   text of the e2e suite, the static tests and the app's staloads, and not
-  only believed. That is a test of the table, not a proof of it.
+  only believed. That is a test of the table, not a proof of it;
+* the local run (`scripts/ci-groups.py local`, quire#957 and #1006): the rule's part of it
+  (`LocalRun`), the command and its merge of the fixtures `bats fixtures --list-affected` lists
+  (`LocalCommand`, `ListedFixtures`), with a stand-in for bats: the list itself is bats's own.
 
 No bats and no patsopt: it reads files (and runs git on a repository of its own).
 
 usage: python3 tests/static/affected_test.py
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -259,10 +264,13 @@ class Workflow(unittest.TestCase):
         build's artifact: neither reads the plan, so the plan cannot skip them. The
         build's `if` is the `destroyed` one and the draft one (#939, keyword: draft:
         a draft pull request runs no job, which is the owner's rule and not the plan's
-        skip logic); the Android job has none and is skipped only with the build."""
+        skip logic); the Android job's only `if` is that the build's app check
+        succeeded (keyword: checked app, #974), so it is skipped only with the build
+        or its failed check, never by the plan."""
         self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('build')),
                          [f"    if: github.event.action != 'destroyed' && {self.NOT_DRAFT}"])
-        self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('android')), [])
+        self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('android')),
+                         ["    if: needs.build.outputs.app == 'success'"])
         self.assertIn('needs: build', self.job('android'))
 
     def test_a_draft_pull_request_runs_no_job_and_nothing_else_is_skipped_for_it(self):
@@ -279,6 +287,29 @@ class Workflow(unittest.TestCase):
                 self.assertIn('plan', re.search(r'(?m)^    needs: .*$', self.job(name)).group(0))
         self.assertNotIn('draft', self.job('android'))
         self.assertIn('types: [opened, synchronize, reopened, ready_for_review]', self.TEXT)
+
+    def test_the_queue_job_calls_queue_passed_by_commit_and_the_groups_read_its_skip(self):
+        """#882: pwa's queue-passed is called by commit in its own job, the static and
+        e2e groups read its `skip` and end after their first step on `true`, `check`
+        needs it and reports its run-url, and the relock moves its pin."""
+        self.assertRegex(self.job('queue'),
+                         r'uses: bats-lang/pwa/\.github/actions/queue-passed@[0-9a-f]{40} # pwa main [0-9a-f]{7}\n')
+        self.assertIn('actions: read', self.job('queue'))
+        self.assertIn("needs.queue.outputs.skip != 'true'", self.job('static'))
+        self.assertIn("needs.queue.outputs.skip == 'true' && 'no'", self.job('e2e'))
+        for name in ('static', 'e2e', 'check'):
+            with self.subTest(name):
+                self.assertIn('queue', re.search(r'(?m)^    needs: .*$', self.job(name)).group(0))
+        self.assertIn('needs.queue.outputs.run_url', self.job('check'))
+        self.assertIn('jobs: plan queue build static e2e', self.job('check'))
+        relock = (ROOT / '.github' / 'workflows' / 'relock.yml').read_text()
+        self.assertIn('bats-lang/pwa/.github/actions/queue-passed\n', relock)
+
+    def test_the_build_the_android_job_and_the_release_do_not_read_the_queue(self):
+        for name in ('build', 'android', 'play-internal'):
+            with self.subTest(name):
+                self.assertNotIn('needs.queue', self.job(name))
+                self.assertNotIn('queue.outputs', self.job(name))
 
     def test_a_merge_group_plans_the_whole_check(self):
         scope = self.job('plan')[self.job('plan').index('id: scope'):]
@@ -550,6 +581,273 @@ class Readers(unittest.TestCase):
         rule = af.Rule('fake', ['home' + 'page/**'], af.NONE, af.NONE)
         hits = self.mentions(self.e2e_readers(), self.names_of(rule))
         self.assertTrue(any('about.spec.js' in hit for hit in hits), hits)
+
+
+class LocalRun(unittest.TestCase):
+    """The local run takes CI's rule for what it does not take from bats: `check`, `checkers`, a
+    fixture's own directory and the specs (quire#957, keyword: affected). The fixtures a source
+    module reaches are `bats fixtures --list-affected`'s (quire#1006, LocalCommand)."""
+
+    FILES = {
+        'src/a.bats': 'val a = 1\n',
+        'src/d.bats': 'val d = 1\n',
+        'tests/static/accept/in-d/file': 'src/d.bats',
+        'tests/static/accept/in-d/before': 'val d = 1',
+        'tests/static/accept/in-d/snippet.bats': 'val s = 1',
+        'tests/static/reject/in-d-too/file': 'src/d.bats\n',
+        'tests/static/reject/in-d-too/before': 'val d = 1',
+        'tests/static/reject/in-d-too/snippet.bats': 'val s = 1',
+        'tests/static/reject/in-d-too/expect': 'function s\nline 1\nerror',
+        'e2e/one.spec.js': "import './shared.js';\n",
+        'e2e/two.spec.js': 'export {};\n',
+        'e2e/shared.js': 'export {};\n',
+    }
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        for path, text in self.FILES.items():
+            full = Path(self.directory.name) / path
+            full.parent.mkdir(parents=True, exist_ok=True)
+            full.write_text(text)
+        self.tree = af.Tree(self.directory.name)
+
+    def plan(self, *changes):
+        return af.local_plan([(status, path) for status, path in changes], self.tree)
+
+    def test_a_source_module_selects_check_and_checkers_and_no_fixture(self):
+        """The fixtures it reaches come from bats, not from this plan."""
+        self.assertEqual(self.plan(('M', 'src/a.bats'))['static'], ['check', 'checkers'])
+        self.assertEqual(self.plan(('M', 'src/d.bats'))['static'], ['check', 'checkers'])
+
+    def test_a_shared_spec_module_selects_its_specs_and_the_checkers(self):
+        found = self.plan(('M', 'e2e/shared.js'))
+        self.assertEqual(found['static'], ['checkers'])
+        self.assertEqual(found['e2e'], {'e2e/one.spec.js'})
+
+    def test_a_spec_only_change_lists_no_fixture(self):
+        found = self.plan(('M', 'e2e/two.spec.js'))
+        self.assertEqual(found['static'], ['checkers'])
+        self.assertEqual(found['e2e'], {'e2e/two.spec.js'})
+        self.assertEqual(found['whole'], [])
+
+    def test_a_fixture_change_lists_that_fixture(self):
+        self.assertEqual(self.plan(('M', 'tests/static/reject/in-d-too/expect'))['static'], ['reject/in-d-too'])
+
+    def test_notes_list_the_checkers_only(self):
+        self.assertEqual(self.plan(('M', '.claude/rules/ci.md'))['static'], ['checkers'])
+
+    def test_a_path_that_runs_the_whole_population_in_ci_is_said_and_lists_no_member_for_it(self):
+        found = self.plan(('M', 'bats.lock'), ('M', 'src/d.bats'))
+        self.assertEqual(found['whole'], ['bats.lock: CI files'])
+        self.assertEqual(found['static'], ['check', 'checkers'])
+
+    def test_an_app_path_outside_src_is_whole(self):
+        self.assertEqual(self.plan(('M', 'assets/x.png'))['whole'], ['assets/x.png: the app'])
+
+    def test_no_change_to_go_by_is_whole(self):
+        self.assertEqual(self.plan()['whole'], ['no change to go by: everything'])
+
+    def test_a_deleted_module_still_selects_check_and_checkers(self):
+        os.remove(Path(self.directory.name) / 'src/d.bats')
+        self.assertEqual(self.plan(('D', 'src/d.bats'))['static'], ['check', 'checkers'])
+
+    def test_a_src_change_selects_every_spec(self):
+        self.assertEqual(self.plan(('M', 'src/a.bats'))['e2e'], af.ALL)
+
+
+class LocalCommand(unittest.TestCase):
+    """`scripts/ci-groups.py local`, with bats's list stood in for (ListedFixtures is the call) and git's changes given."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location('ci_groups_local', ROOT / 'scripts' / 'ci-groups.py')
+        cls.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.module)
+
+    def run_local(self, changes, *options, listed=(), failure=None):
+        """`local` with git's changes given and bats's list stood in for: self.asked is what it was asked."""
+        self.asked = []
+        def stand_in(paths, repository, environment, run=None):
+            self.asked.append((paths, repository))
+            if failure:
+                raise RuntimeError(failure)
+            return ['bats', 'fixtures', 'tests/static'], list(listed)
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(self.module.selection, 'git_changes', return_value=changes), \
+                patch.object(self.module, 'listed_fixtures', side_effect=stand_in), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            status = self.module.local(GROUPS, ['origin/main', *options])
+        return status, out.getvalue().split('\n')[:-1], err.getvalue()
+
+    LISTED = ['accept/image-roundtrip', 'reject/image-roundtrip-another-book']
+
+    def test_a_change_to_a_module_lists_the_fixtures_bats_lists(self):
+        """quire#1006: the fixtures are `bats fixtures --list-affected`'s; quire#890: those anchored in src/bookimage.bats."""
+        with patch.dict(os.environ, {'BATS_REPOSITORY': '/repo'}):
+            status, lines, err = self.run_local([('M', 'src/bookimage.bats')], listed=self.LISTED)
+        self.assertEqual(status, 0)
+        self.assertEqual([line for line in lines if not line.startswith('e2e/')],
+                         ['accept/image-roundtrip', 'check', 'checkers', 'reject/image-roundtrip-another-book'])
+        self.assertEqual(self.asked, [(['src/bookimage.bats'], '/repo')])
+        self.assertIn('2 fixtures from `bats fixtures tests/static --list-affected` over 1 changed paths', err)
+
+    def test_run_gives_bats_its_repository(self):
+        with patch.dict(os.environ, {'BATS_REPOSITORY': '/other'}), patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0)):
+            self.run_local([('M', 'e2e/folders.spec.js')], '--run', '/repository')
+        self.assertEqual(self.asked[0][1], '/repository')
+
+    def test_bats_is_asked_for_each_changed_path_once_a_rename_as_both(self):
+        self.run_local([('D', 'src/old.bats'), ('A', 'src/new.bats'), ('M', 'src/new.bats'), ('M', 'e2e/folders.spec.js')])
+        self.assertEqual(self.asked[0][0], ['src/old.bats', 'src/new.bats', 'e2e/folders.spec.js'])
+
+    def test_a_fixture_both_rules_select_is_listed_once(self):
+        member = 'reject/image-roundtrip-another-book'
+        status, lines, _ = self.run_local([('M', f'tests/static/{member}/expect')], listed=[member])
+        self.assertEqual(lines, [member])
+
+    def test_a_bats_that_cannot_list_fails_the_command_and_lists_nothing(self):
+        status, lines, err = self.run_local([('M', 'src/bookimage.bats')], failure='bats is not on PATH')
+        self.assertEqual((status, lines), (1, []))
+        self.assertIn('error: bats is not on PATH', err)
+
+    def test_no_change_asks_bats_nothing(self):
+        self.run_local([])
+        self.assertEqual(self.asked, [])
+
+    def test_a_spec_only_change_lists_no_fixture(self):
+        status, lines, _ = self.run_local([('M', 'e2e/folders.spec.js')])
+        self.assertEqual(lines, ['checkers', 'e2e/folders.spec.js'])
+
+    def test_the_sample_is_seeded_and_adds_other_fixtures(self):
+        changes = [('M', 'src/bookimage.bats')]
+        first = self.run_local(changes, '--sample', '5', '--seed', '7')
+        second = self.run_local(changes, '--sample', '5', '--seed', '7')
+        other = self.run_local(changes, '--sample', '5', '--seed', '8')
+        base = self.run_local(changes)
+        self.assertEqual(first[1], second[1])
+        self.assertNotEqual(first[1], other[1])
+        self.assertEqual(len(first[1]), len(base[1]) + 5)
+        self.assertIn('seed 7', first[2])
+
+    def run_recording(self, changes, returncodes=(0, 0), options=()):
+        calls, codes = [], list(returncodes)
+        def fake(command, **options):
+            calls.append((command, options))
+            return subprocess.CompletedProcess(command, codes.pop(0))
+        with patch('subprocess.run', side_effect=fake):
+            result = self.run_local(changes, *options, '--run', '/repository')
+        return result, calls
+
+    def test_run_passes_the_static_members_then_the_specs_to_their_runners(self):
+        (status, lines, _), calls = self.run_recording([('M', 'e2e/folders.spec.js')])
+        self.assertEqual(status, 0)
+        self.assertEqual([command[1:] for command, _ in calls[:1]], [['/repository', 'checkers']])
+        self.assertEqual(calls[1][0][1:], ['test', '--', 'e2e/folders.spec.js'])
+        self.assertTrue(calls[1][0][0].endswith('dist/debug/gen-pwa'))
+
+    def run_with(self, changes, *options):
+        (status, lines, err), calls = self.run_recording(changes, options=options)
+        return lines, err, [call for call, _ in calls if call[0].endswith('gen-pwa')]
+
+    def test_a_source_change_lists_every_spec_and_runs_a_seeded_sample_of_them(self):
+        every = [f'e2e/{name}' for name in self.module.specs()]
+        self.assertGreater(len(every), 50)
+        lines, err, runs = self.run_with([('M', 'src/bookimage.bats')], '--seed', '7')
+        self.assertEqual([line for line in lines if line.startswith('e2e/')], every)
+        sample = runs[0][3:]
+        self.assertEqual(len(sample), self.module.E2E_CAP)
+        self.assertTrue(set(sample) <= set(every))
+        self.assertIn(f'{self.module.E2E_CAP} of the {len(every)} selected specs run (seed 7', err)
+        self.assertIn(' '.join(sample), err)
+        again = self.run_with([('M', 'src/bookimage.bats')], '--seed', '7')[2][0][3:]
+        other = self.run_with([('M', 'src/bookimage.bats')], '--seed', '8')[2][0][3:]
+        self.assertEqual(sample, again)
+        self.assertNotEqual(sample, other)
+
+    def test_the_seed_is_printed_when_none_is_given(self):
+        err = self.run_with([('M', 'src/bookimage.bats')])[1]
+        self.assertRegex(err, r'selected specs run \(seed \d+, --specs 12\)')
+
+    def test_specs_sets_the_size_of_the_sample(self):
+        runs = self.run_with([('M', 'src/bookimage.bats')], '--specs', '3', '--seed', '1')[2]
+        self.assertEqual(len(runs[0][3:]), 3)
+
+    def test_a_selection_under_the_cap_runs_whole(self):
+        lines, err, runs = self.run_with([('M', 'e2e/folders.spec.js'), ('M', 'e2e/about.spec.js')], '--seed', '1')
+        self.assertEqual(runs[0][3:], ['e2e/about.spec.js', 'e2e/folders.spec.js'])
+        self.assertIn('fit the cap of 12 and run whole', err)
+
+    def test_a_selection_over_a_lower_cap_is_sampled_from_the_selected_only(self):
+        changes = [('M', 'e2e/folders.spec.js'), ('M', 'e2e/about.spec.js'), ('M', 'e2e/keys.spec.js')]
+        runs = self.run_with(changes, '--specs', '2', '--seed', '5')[2]
+        self.assertEqual(len(runs[0][3:]), 2)
+        self.assertTrue(set(runs[0][3:]) <= {'e2e/folders.spec.js', 'e2e/about.spec.js', 'e2e/keys.spec.js'})
+
+    def test_a_failing_runner_fails_the_command(self):
+        (status, _, _), _ = self.run_recording([('M', 'e2e/folders.spec.js')], returncodes=(0, 3))
+        self.assertEqual(status, 3)
+        (status, _, _), _ = self.run_recording([('M', 'e2e/folders.spec.js')], returncodes=(1, 0))
+        self.assertEqual(status, 1)
+
+
+class ListedFixtures(unittest.TestCase):
+    """The call of `local` to `bats fixtures tests/static --list-affected` (quire#1006), with a stand-in for bats given as `run`."""
+
+    @staticmethod
+    def module():
+        spec = importlib.util.spec_from_file_location('ci_groups_listed', ROOT / 'scripts' / 'ci-groups.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    @staticmethod
+    def bats(stdout, returncode=0, stderr=''):
+        calls = []
+        def run(command, **options):
+            calls.append((command, options))
+            return subprocess.CompletedProcess(command, returncode, stdout, stderr)
+        run.calls = calls
+        return run
+
+    def test_it_runs_bats_fixtures_list_affected_over_the_paths(self):
+        run = self.bats('accept/x\nreject/y\n')
+        command, found = self.module().listed_fixtures(
+            ['src/a.bats', 'tests/static/accept/x/snippet.bats'], '/repo', {'QUIRE_STATIC_WORK': '/work'}, run)
+        self.assertEqual(command, ['bats', 'fixtures', 'tests/static', '--work', '/work', '--memo', '/work/memo',
+                                   '--repository', '/repo', '--list-affected',
+                                   'src/a.bats', 'tests/static/accept/x/snippet.bats'])
+        self.assertEqual(found, ['accept/x', 'reject/y'])
+        self.assertEqual(run.calls[0][0], command)
+        self.assertEqual(os.path.realpath(run.calls[0][1]['cwd']), str(ROOT))
+
+    def test_the_work_directory_defaults_to_the_cache(self):
+        command, _ = self.module().listed_fixtures(['a'], '/r', {'XDG_CACHE_HOME': '/cache'}, self.bats(''))
+        self.assertEqual(command[3:7], ['--work', '/cache/quire-static', '--memo', '/cache/quire-static/memo'])
+
+    def test_no_fixture_is_an_empty_list(self):
+        self.assertEqual(self.module().listed_fixtures(['a'], '/r', {}, self.bats(''))[1], [])
+
+    def test_no_repository_is_refused(self):
+        with self.assertRaises(RuntimeError):
+            self.module().listed_fixtures(['a'], None, {}, self.bats(''))
+
+    def test_a_failing_bats_is_refused_with_its_words(self):
+        with self.assertRaises(RuntimeError) as raised:
+            self.module().listed_fixtures(['a'], '/r', {}, self.bats('accept/x\n', 2, 'usage'))
+        self.assertIn('failed (status 2): usage', str(raised.exception))
+
+    def test_a_missing_bats_is_refused(self):
+        def run(command, **_):
+            raise FileNotFoundError('bats')
+        with self.assertRaises(RuntimeError) as raised:
+            self.module().listed_fixtures(['a'], '/r', {}, run)
+        self.assertIn('not on PATH', str(raised.exception))
+
+    def test_a_line_that_is_no_fixture_is_refused(self):
+        for line in ('check', 'accept/', 'e2e/x.spec.js', 'accept/a/b'):
+            with self.subTest(line), self.assertRaises(RuntimeError):
+                self.module().listed_fixtures(['a'], '/r', {}, self.bats(f'accept/x\n{line}\n'))
 
 
 def strip_hash_comments(text):

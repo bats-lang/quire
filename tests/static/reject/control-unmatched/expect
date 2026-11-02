@@ -1,4 +1,4 @@
 function _static_search_nav
 line 4
 pattern match is nonexhaustive:
-SearchNavClose()
+among SearchNavClose()

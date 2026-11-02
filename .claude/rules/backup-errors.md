@@ -40,8 +40,10 @@ files are not in it.
 
 ## Every error says what to do (#360)
 
-The error banner (`error-banner`, `src/notice.bats`) says a failure and a next
-step, made in one place from data: `notice_say(failure)`, `notice_say_part`
+The rule that a failure is said with a next step, and that the unexpected is an
+outcome of its own, is pitboss's (`engineering.md`, "Failures and outcomes are
+said"). The error banner (`error-banner`, `src/notice.bats`) is made in one place
+from data: `notice_say(failure)`, `notice_say_part`
 (a chapter) and `notice_say_named(name, name_len, named_failure)` (a file or
 book). The words come from two total `case+` matches, `_what_put` (per `host`:
 `InBrowser | InApp`, so the app never says "browser") and `remedy_of` /

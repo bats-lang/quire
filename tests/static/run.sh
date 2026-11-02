@@ -189,6 +189,26 @@ for d in "$ROOT"/tests/static/anchors/reject/*/; do
   else echo "FAIL anchors/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/anchors-$n.log"; fail=1; fi
 done
 
+# A reject fixture's expect names the one constructor it is about (among.py,
+# quire#984; python for the reason among.py gives, deleted with anchors.py): the
+# fixtures here, and the checker's own, each a tree of expects that must pass it
+# (accept/) or fail it with its `expect` (reject/)
+if python3 "$ROOT/tests/static/among.py" "$ROOT/tests/static" > "$TMP/among.log" 2>&1; then echo "ok   among: $(tail -1 "$TMP/among.log")"
+else echo "FAIL among:"; cat "$TMP/among.log"; fail=1; fi
+for d in "$ROOT"/tests/static/among/accept/*/; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  if python3 "$ROOT/tests/static/among.py" "$d" > "$TMP/among-$n.log" 2>&1; then echo "ok   among/accept/$n"
+  else echo "FAIL among/accept/$n: should pass"; cat "$TMP/among-$n.log"; fail=1; fi
+done
+for d in "$ROOT"/tests/static/among/reject/*/; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  if python3 "$ROOT/tests/static/among.py" "$d" > "$TMP/among-$n.log" 2>&1; then echo "FAIL among/reject/$n: should be rejected"; fail=1
+  elif grep -qF -- "$(cat "$d/expect")" "$TMP/among-$n.log"; then echo "ok   among/reject/$n"
+  else echo "FAIL among/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/among-$n.log"; fail=1; fi
+done
+
 # The solver's 32 bits (literals.py) and the library's keys (keys.py)
 if python3 "$ROOT/tests/static/literals.py" "$ROOT/src" > "$TMP/literals.log" 2>&1; then echo "ok   literals: $(tail -1 "$TMP/literals.log")"
 else echo "FAIL literals:"; cat "$TMP/literals.log"; fail=1; fi

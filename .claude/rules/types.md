@@ -34,10 +34,8 @@ comment saying why losing it is harmless.
 
 ## A choice is a datatype
 
-An int never encodes one of a fixed set of cases (bats-lang/quire#192): a choice
-is a datatype matched with `case+` (`tests/static/case_plus.py` fails any plain
-`case`, since ATS2 checks only `case+`), so a case left out does not type-check,
-and "none" is an option, not -1. Ints are quantities, offsets and indexes.
+`tests/static/case_plus.py` fails any plain `case`, since ATS2 checks only `case+`
+(the rule that a choice is a datatype, bats-lang/quire#192, is pitboss's `engineering.md`).
 
 * Stored bytes stay as they are, decoded once as they are read and encoded once
   as they are written (`shelf_of_code`/`shelf_code`, `image_of_code`, the "S2"

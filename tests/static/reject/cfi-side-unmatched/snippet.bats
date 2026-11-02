@@ -3,4 +3,3 @@
 fn _static_side_said (side: cfi_side): string =
   case+ side of
   | CfiSideNone() => "none"
-  | CfiSideBefore() => "before"

@@ -2,7 +2,3 @@
 fn _static_unmatched (record: ruler_record): bool =
   case+ record of
   | RulerRecordDown() => true
-  | RulerRecordMove() => true
-  | RulerRecordUp() => true
-  | RulerRecordCancel() => true
-  | RulerRecordOther() => false

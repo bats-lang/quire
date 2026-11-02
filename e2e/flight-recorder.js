@@ -73,7 +73,7 @@ export async function stopKernel(started) {
 }
 
 let holds = 0;
-const nowSeconds = () => Number(process.hrtime.bigint()) / 1e9; // CLOCK_MONOTONIC, the clock of the ring
+export const nowSeconds = () => Number(process.hrtime.bigint()) / 1e9; // CLOCK_MONOTONIC, the clock of the ring
 // a ring that reaches the red ends no earlier than the red: the pause comes after it, and the snapshot's own process adds events. The slack is for the
 // clock reads that differ by a few thousand cycles, not for a ring left paused (that one ends seconds before the next red)
 export const REACH_SLACK_S = 0.5;
@@ -197,9 +197,23 @@ export function readMemory(pid, address, length = 64) { return asRoot('readmem',
 // FUTEX_WAIT 0, WAKE 1, REQUEUE 3, WAKE_OP 5, WAIT_BITSET 9, WAKE_BITSET 10 (flags 0x80 private and 0x100 realtime are masked off)
 const FUTEX_WAITS = new Set([0, 9, 11, 13]);
 const FUTEX_WAKES = new Set([1, 3, 4, 5, 10, 12]);
-const RING_LINE = /^\s*(.+)-(\d+)\s+\[\d+\]\s+\S+\s+(\d+\.\d+):\s+(.*)$/;
+const RING_LINE = /^\s*(.+)-(\d+)\s+\[(\d+)\]\s+\S+\s+(\d+\.\d+):\s+(.*)$/;
 // the kernel prints the arguments in hex with a 0x on some versions (6.18) and without on others (7.0, the runners'): both are read
 const FUTEX_CALL = /sys_futex\(uaddr: (?:0x)?([0-9a-f]+), op: (?:0x)?([0-9a-f]+), val: (\S+), utime: (\S+?),/;
+
+/**
+ * What a ring file proves of a wait (keyword: ring reach, quire#993): 'reaches' when every CPU's buffer holds all its events from `ringCompleteFrom`
+ * (the latest of the CPUs' first events: each CPU's buffer overwrites by itself) and the wait cannot have begun before that, 'misses' when even the
+ * oldest event of any CPU (`ringStart`) is later than the wait's entry, and 'unknown' between, where the file proves neither. `waitBegan` is the
+ * watchdog's bound on the wait's entry in the ring's clock: not before the scan that last saw the main thread run (`notBefore`, null when there was
+ * none), not after the scan that saw it blocked (`notAfter`). A ring of no events misses.
+ */
+export function ringReach({ ringStart, ringCompleteFrom, waitBegan }) {
+  if (ringStart === null || ringStart === undefined) return 'misses';
+  if (ringStart > waitBegan.notAfter) return 'misses';
+  if (waitBegan.notBefore !== null && waitBegan.notBefore !== undefined && ringCompleteFrom <= waitBegan.notBefore) return 'reaches';
+  return 'unknown';
+}
 
 /**
  * What the kernel ring says of one futex word and the thread that waits on it (#575): the waiter's last wait
@@ -212,15 +226,17 @@ export async function futexAnalysis(ringFile, { address, tid }) {
   const wanted = address.toLowerCase().replace(/^0x/, '').replace(/^0+/, '');
   const last = [];
   const wakers = new Map();
-  let lastWait = null, wokenLast = null, switchedOut = null, ringEnd = 0, lines = 0, onAddress = 0;
+  let lastWait = null, wokenLast = null, switchedOut = null, ringStart = null, ringEnd = 0, cpuStarts = new Map(), lines = 0, onAddress = 0;
   const reader = createInterface({ input: createReadStream(ringFile).pipe(createGunzip()), crlfDelay: Infinity });
   for await (const line of reader) {
     if (line.startsWith('#')) continue;
     const parts = RING_LINE.exec(line);
     if (!parts) continue;
     lines += 1;
-    const [, task, thread, stamp, text] = parts;
+    const [, task, thread, cpu, stamp, text] = parts;
     const at = Number(stamp);
+    if (ringStart === null) ringStart = at;
+    if (!cpuStarts.has(cpu)) cpuStarts.set(cpu, at);
     ringEnd = at;
     const call = FUTEX_CALL.exec(text);
     if (call) {
@@ -243,7 +259,7 @@ export async function futexAnalysis(ringFile, { address, tid }) {
     if (switched && Number(switched[1]) === tid) switchedOut = { at, state: switched[2] };
   }
   return {
-    address: `0x${wanted}`, waiterTid: tid, ringLines: lines, ringEnd,
+    address: `0x${wanted}`, waiterTid: tid, ringLines: lines, ringStart, ringCompleteFrom: cpuStarts.size ? Math.max(...cpuStarts.values()) : null, ringEnd,
     waiter: {
       lastWait, switchedOut, wokenLast,
       silentMs: wokenLast ? Math.round((ringEnd - wokenLast.at) * 1000) : null,

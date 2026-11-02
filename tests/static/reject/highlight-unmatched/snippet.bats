@@ -3,5 +3,3 @@
 fn _static_mark (kind: annotation_kind): int =
   case+ kind of
   | Bookmark() => 0
-  | YellowHighlight() => 1
-  | OrangeHighlight() => 3
