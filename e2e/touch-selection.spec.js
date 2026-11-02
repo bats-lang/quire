@@ -475,8 +475,12 @@ test('with the mouse, a shift-click on a later word extends the selection to it,
   const before = await place(page);
   const anchor = await middleWord(page, 100);
   await pressOn(page, testInfo, anchor);
-  // a word on a later line, in the middle third (a click in a side zone turns the page)
-  const later = (await middleWords(page, anchor.y + 40)).find(w => w.y > anchor.y + 40);
+  // a word on a later line, in the middle third (a click in a side zone turns the page),
+  // clear of the toolbar: it lies below the handles when it does not fit above the
+  // system menu's band (#1029), and a click on it is a click on the toolbar
+  await expect(toolbar(page)).toBeVisible();
+  const bar = await toolbar(page).boundingBox();
+  const later = (await middleWords(page, anchor.y + 40)).find(w => w.y > anchor.y + 40 && (w.top >= bar.y + bar.height || w.bottom <= bar.y));
   expect(later, 'a later word to click on').toBeDefined();
   await page.keyboard.down('Shift');
   await rawMouse(page, 'click', later.right - 2, later.y);
