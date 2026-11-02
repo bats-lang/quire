@@ -13,15 +13,10 @@
 
 import { test, expect } from './fixtures.js';
 import { start, epubFile, importFiles, bookMenu, menuItem, dialog, cards, collectionButton, collectionMenu, showCollection } from './helpers.js';
+import { scaledBy } from './font-scale.js';
 
 // forty bytes, the longest a collection's name can be (COLL_NAME)
 const LONG_NAME = 'A long name is cut with an ellipsis, not';
-
-/** The script that makes every text size of the page scale percent of
-    itself, before the app starts (as font-scale.spec.js does) */
-function scaledBy(percent) {
-  return `(() => { const sheet = new CSSStyleSheet(); sheet.replaceSync('html { text-size-adjust: ${percent}%; -webkit-text-size-adjust: ${percent}%; }'); document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]; })();`;
-}
 
 /** Makes a collection from a book's menu, with the book in it */
 async function makeCollection(page, book, name) {
