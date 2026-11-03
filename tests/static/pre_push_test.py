@@ -298,6 +298,14 @@ class Hook(Fixtures):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertTrue(self.remote_has_branch())
 
+    def test_a_push_from_a_linked_worktree_reads_the_package_repository(self):
+        """git sets GIT_DIR for a hook run in a linked worktree, where every worker pushes from."""
+        worktree = self.temp / 'worktree'
+        git('worktree', 'add', '-q', '-b', 'linked', str(worktree), 'work', cwd=self.tree)
+        done = subprocess.run(['git', 'push', str(self.remote), 'linked'], cwd=worktree, env=self.environment,
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
     def test_a_fixture_in_no_group_refuses_the_push(self):
         (self.tree / 'tests/static/reject/zz-new').mkdir()
         (self.tree / 'tests/static/reject/zz-new/src.bats').write_text('x\n')

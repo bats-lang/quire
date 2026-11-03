@@ -56,6 +56,13 @@ def git(*arguments, cwd=None, binary=False):
     return done.stdout if binary else done.stdout.decode()
 
 
+def foreign_environment():
+    """The environment for a git command in another repository: git sets GIT_DIR (and the like) for a hook run in a linked
+    worktree, and `git -C <other>` would then read the worktree's own repository, not <other> (found in the Execution of quire#1038)."""
+    own = ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_PREFIX', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES')
+    return {key: value for key, value in os.environ.items() if key not in own}
+
+
 def export_tree(commit, directory):
     """The tree of `commit` (a repository's own, the current directory's) in `directory`."""
     archive = subprocess.run(['git', 'archive', '--format=tar', commit], capture_output=True)
@@ -106,7 +113,7 @@ def check_locks(tree, repository, pin):
     if not repository:
         raise Failure(2, 'locks', 'BATS_REPOSITORY is not set, so the package repository at the pin cannot be read',
                       f'clone bats-lang/repository-prototype and set BATS_REPOSITORY to it in the env file (~/quire.env, which qsweep push reads, or `bats with-env ~/quire.env git push`); CI is at {pin}')
-    have = subprocess.run(['git', '-C', repository, 'cat-file', '-e', f'{pin}^{{commit}}'], capture_output=True)
+    have = subprocess.run(['git', '-C', repository, 'cat-file', '-e', f'{pin}^{{commit}}'], capture_output=True, env=foreign_environment())
     if have.returncode != 0:
         raise Failure(2, 'locks', f'{repository} does not have the commit {pin} of .github/repository-version',
                       f'git -C {repository} fetch origin {pin} (BATS_REPOSITORY comes from ~/quire.env: qsweep push reads it, or use `bats with-env ~/quire.env git push`)')
@@ -123,7 +130,7 @@ def check_locks(tree, repository, pin):
                     continue
                 package, version, digest = fields
                 sidecar = subprocess.run(['git', '-C', repository, 'show', f'{pin}:{sidecar_path(package, version)}'],
-                                         capture_output=True, text=True)
+                                         capture_output=True, text=True, env=foreign_environment())
                 if sidecar.returncode != 0:
                     wrong.append(f'{shown}:{number}: {package} {version} is not in the package repository at {pin[:12]}')
                 elif sidecar.stdout.split()[:1] != [digest]:
