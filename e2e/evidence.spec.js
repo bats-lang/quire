@@ -959,14 +959,18 @@ test('a capture whose file cannot be written ends at once, with no reader of the
   expect(readdirSync(ring), 'no lock and no half segment is left').toEqual([]);
 });
 
-/** The widest silence of a kept ring after `since` (CLOCK_MONOTONIC seconds): { seconds, from }, read a line at a time. A pause of the ring is a silence of its length. */
-async function widestSilence(file, since) {
+/**
+ * The widest silence of a kept ring from `since` to `until` (CLOCK_MONOTONIC seconds): { seconds, from }, read a line at a time. A pause of the ring is a silence of its
+ * length. The window is the test's own clock, both ends: a line stamped outside it is not an event of this window (CI's run 41611800728 read a silence of 2657 s between two lines
+ * stamped 898.2 and 3555.7 on a machine up for about 700 s; they are lines 898 and 3555 of the stand-in ring of the test of a capture whose file cannot be written).
+ */
+async function widestSilence(file, since, until) {
   const reader = createInterface({ input: createReadStream(file).pipe(createGunzip()), crlfDelay: Infinity });
   let previous = null;
   let widest = { seconds: 0, from: null };
   for await (const line of reader) {
     const found = /^\s*.+-\d+\s+\[\d+\]\s+\S+\s+(\d+\.\d+):/.exec(line);
-    if (!found || Number(found[1]) < since) continue;
+    if (!found || Number(found[1]) < since || Number(found[1]) > until) continue;
     const at = Number(found[1]);
     if (previous !== null && at - previous > widest.seconds) widest = { seconds: at - previous, from: previous };
     previous = at;
@@ -1001,6 +1005,8 @@ test('a capture is reading the ring while a renderer in another page begins an u
     reading = keepKernel(pipe, process.env).finally(() => { capturing = false; });
     // the capture has taken its snapshot when its segment is begun (flight-tracefs.js writes the segment's file right after the swap)
     await expect.poll(() => [...segmentsBegun()].some((name) => !before.has(name)), { timeout: 30000, message: 'the capture took its snapshot' }).toBe(true);
+    // node's hrtime is CLOCK_MONOTONIC, the clock of the ring: the window of the checks below begins here, after the swap and before the wait
+    const snapshotAt = Number(process.hrtime.bigint()) / 1e9;
     const written = (await ringStats(process.env)).written;
     // the renderer begins its wait now, while the capture is in the middle of reading
     hang = await hangPage(page, { session: async () => armed.session });
@@ -1028,13 +1034,13 @@ test('a capture is reading the ring while a renderer in another page begins an u
     const next = await keepKernel(testInfo.outputPath('after.txt.gz'), process.env);
     expect(next.file, JSON.stringify(next)).toBeTruthy();
     // no hole: from the first capture's snapshot to the end of the next one the ring has no silence of seconds (a ring paused for the capture has the length of the capture)
-    const silence = await widestSilence(next.file, first.lastAt);
+    const silence = await widestSilence(next.file, snapshotAt, Number(process.hrtime.bigint()) / 1e9);
     expect.soft(silence.seconds, `the widest silence of the ring after the first capture's snapshot began at ${silence.from}`).toBeLessThan(1.5);
     const history = await futexAnalysis(next.file, { address: waiting.address, tid: waiting.pid });
     expect(history.waiter.lastWait, `the ring holds the renderer's wait (${waiting.syscall}): ${JSON.stringify(history.waiter)}`).not.toBeNull();
     expect(history.waiter.lastWait.untimed).toBe(true);
     expect(history.onAddress.events, 'and the address it waits on').toBeGreaterThan(0);
-    expect(history.waiter.lastWait.at, 'the wait began after the capture took its snapshot').toBeGreaterThan(first.lastAt);
+    expect(history.waiter.lastWait.at, 'the wait began after the capture took its snapshot').toBeGreaterThan(snapshotAt);
   } finally {
     if (ticking) clearInterval(ticking);
     if (hang) hang.release();
