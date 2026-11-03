@@ -361,7 +361,7 @@ test('the kernel ring starts for a process tree, keeps its futex calls and wakeu
     const kept = await keepKernel(out, env);
     expect(kept.error, JSON.stringify(kept)).toBeUndefined();
     expect(kept.lines).toBeGreaterThan(0);
-    const seen = await ringSeen(out, { header: /# the last/, events: /sys_futex|sched_switch|sched_wakeup/, clock: /clock: mono/ });
+    const seen = await ringSeen(out, { header: /# the snapshot of the ring taken for this capture/, events: /sys_futex|sched_switch|sched_wakeup/, clock: /clock: mono/ });
     expect(seen.header).not.toBeNull();
     expect(seen.events).not.toBeNull();
     expect(seen.clock, 'timestamps are CLOCK_MONOTONIC (the clock of Chrome\'s trace)').not.toBeNull();

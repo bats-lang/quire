@@ -29,12 +29,6 @@ export const CLOCK_JUMP_MS = 500;
 export const HEARTBEAT_STALE_MS = 6000;
 const STACK_MS = 15000;
 const RINGS_MOST = 3;       // reports that keep the ring (each is up to tens of MB); later ones keep the rest
-/** Whether the ring is stopped with nobody holding it paused, by one heartbeat's own reading (ring hold: the state and the holders were read in one step). */
-export function stoppedUnheld(beat) {
-  const ring = beat.ring || {};
-  return ring.on !== '1' && (beat.holders || []).length === 0;
-}
-
 export const RING_LINES = tracefs.LINES_KEPT; // a report keeps the whole ring, not its tail: 600000 lines were 1.2 s under load and lost the wait (quire#993, keyword: ring reach)
 
 const text = (path) => { try { return readFileSync(path, 'utf8'); } catch (error) { return ''; } };
@@ -179,10 +173,10 @@ const run = (command, args, ms) => new Promise((resolve) => {
 });
 
 export class Watchdog {
-  constructor({ root, out, instance, proc = '/proc', sustainMs = SUSTAIN_MS, gapMs = GAP_MS, stacks = true, match = '--type=renderer\\b', holdDir = null, env = process.env, chown = chownSync }) {
-    Object.assign(this, { root, out, instance, proc, sustainMs, gapMs, stacks, holdDir: holdDir || out, owner: ownerOf(env), chown });
+  constructor({ root, out, instance, proc = '/proc', sustainMs = SUSTAIN_MS, gapMs = GAP_MS, stacks = true, match = '--type=renderer\\b', ringDir = null, env = process.env, chown = chownSync }) {
+    Object.assign(this, { root, out, instance, proc, sustainMs, gapMs, stacks, ringDir: ringDir || out, owner: ownerOf(env), chown });
     this.written = false;       // a file was written since own() last walked (owner)
-    this.listed = '';           // the names in the output and the holds' directory at that walk
+    this.listed = '';           // the names in the output and the ring's directory at that walk
     this.walks = 0;
     this.ownFailures = [];      // the first 100 paths that could not be given to the owner (owner)
     this.failedPaths = new Set(); // every such path, so each is logged once
@@ -203,7 +197,7 @@ export class Watchdog {
     this.own(top || out);
   }
 
-  /** Gives the output and the ring's holds (their directory) to the invoking user, so no file this run leaves is root's alone (owner). */
+  /** Gives the output and the ring's lock and segments (their directory) to the invoking user, so no file this run leaves is root's alone (owner). */
   own(path) {
     if (!this.owner) return;
     const listing = this.listing();
@@ -212,7 +206,7 @@ export class Watchdog {
     this.walks += 1;
     const failed = [];
     ownTree(path === undefined ? this.out : path, this.owner, failed, this.chown);
-    if (this.holdDir !== this.out) ownTree(this.holdDir, this.owner, failed, this.chown);
+    if (this.ringDir !== this.out) ownTree(this.ringDir, this.owner, failed, this.chown);
     this.written = false;
     this.listed = this.listing();
     // owner: a chown that fails (EPERM) is the watchdog's log, never an exception out of tick, heartbeat or report
@@ -229,10 +223,10 @@ export class Watchdog {
     }
   }
 
-  /** The names in the output and in the holds' directory (owner). */
+  /** The names in the output and in the ring's directory (owner). */
   listing() {
     const names = (dir) => { try { return readdirSync(dir).join('\0'); } catch (error) { return ''; } };
-    return `${names(this.out)}\u0001${this.holdDir === this.out ? '' : names(this.holdDir)}`;
+    return `${names(this.out)}\u0001${this.ringDir === this.out ? '' : names(this.ringDir)}`;
   }
 
   /**
@@ -265,10 +259,8 @@ export class Watchdog {
   /** What the monitor reads: when this looked last, what the ring has taken, and what was seen. */
   heartbeat() {
     this.scans += 1;
-    // the ring's state and its holders are read in one step to the captures (their lock), so the monitor judges a stopped ring by the holders of that moment (ring hold)
-    const looked = this.instance ? tracefs.withRingLock(this.holdDir, () => ({ ring: tracefs.stats({ instance: this.instance }), holders: tracefs.holdersIn(this.holdDir).map((each) => each.holder) })) : { ring: { unavailable: 'no ring' }, holders: [] };
-    const { ring, holders } = looked;
-    const body = { at: Date.now(), pid: process.pid, scans: this.scans, ring, holders, stalls: this.stalls.length, clockJumps: this.clockJumps.length, reports: this.count };
+    const ring = this.instance ? tracefs.stats({ instance: this.instance }) : { unavailable: 'no ring' };
+    const body = { at: Date.now(), pid: process.pid, scans: this.scans, ring, stalls: this.stalls.length, clockJumps: this.clockJumps.length, reports: this.count };
     // written whole or not at all: the monitor reads this file while it is written, and a half-written one must not look like a missing one
     try {
       const file = join(this.out, `heartbeat-${this.root}-${process.pid}.json`);
@@ -334,11 +326,10 @@ export class Watchdog {
     } else if (this.instance) {
       this.rings += 1;
       const ring = join(this.out, `${name}-kernel.txt.gz`);
-      // the snapshot holds the ring paused while it reads (its hold file is down first, so the monitor never sees a pause without it) and releases it on
-      // every outcome: the ring records again for the reds after this one
-      // the ring's file and the hold and lock files it makes are owned too, whatever the snapshot does (finally)
+      // the snapshot is read from the live ring, which goes on recording (ring snapshot), under the ring lock; the lock, the segments and the ring's file
+      // are owned too, whatever the snapshot does (finally)
       const snapshotBegan = Date.now();
-      const kept = await tracefs.snapshot({ instance: this.instance, out: ring, lines: RING_LINES, dir: this.holdDir, holder: `watchdog-${process.pid}-${this.rings}` }).finally(() => { this.written = true; this.own(); });
+      const kept = await tracefs.snapshot({ instance: this.instance, out: ring, lines: RING_LINES, dir: this.ringDir }).finally(() => { this.written = true; this.own(); });
       body.kernelRing = kept;
       const analysisBegan = Date.now();
       if (kept.file && futex) body.futex.ring = await futexAnalysis(ring, { address: futex.address, tid: pid }).catch((error) => ({ error: String(error && error.message || error) }));
@@ -363,7 +354,7 @@ export class Watchdog {
 // node flight-watchdog.js <root pid> <out dir> [<ring instance> [<sustain ms> [<match>]]]: until the root is gone
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [root, out, instance, sustain, match, marker] = [Number(process.argv[2]), process.argv[3], process.argv[4] || undefined, Number(process.argv[5]) || SUSTAIN_MS, process.argv[6] || undefined, process.argv[7] || undefined];
-  const dog = new Watchdog({ root, out, instance, sustainMs: sustain, match, holdDir: marker });
+  const dog = new Watchdog({ root, out, instance, sustainMs: sustain, match, ringDir: marker });
   const origin = performance.now();
   const ticker = setInterval(() => dog.tick(performance.now() - origin, Date.now()), TICK_MS);
   // on a timer of its own: a report that takes seconds (the ring written, the stacks) must not look like a dead watchdog
