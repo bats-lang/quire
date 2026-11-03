@@ -215,6 +215,9 @@ export function processState(pid, proc = '/proc') {
   } catch (gone) { return null; }
 }
 
+/** A duration or a cadence that is the instrument's own (a stop held for a span, a poll every so often): a timer with a body, which is what is measured, not a wait for a step of the runner (quire#976, keyword: window). */
+export const lasting = (ms) => new Promise((resolve) => { setTimeout(() => { resolve(); }, ms); });
+
 /**
  * Continues processes that were stopped until none is stopped, and says which still are (quire#908, run 40705566021). One SIGCONT is not enough for a
  * `sudo` that wraps a stopped command: sudo stops itself when it sees its command stopped (job control), and it may see that after the SIGCONT it was
@@ -225,7 +228,7 @@ export async function resumeUntilRunning(pids, { send, stateOf = processState, r
   let stopped = [...pids];
   for (let round = 0; round < rounds; round += 1) {
     for (const pid of round === 0 ? pids : stopped) { try { send(pid); } catch (gone) { /* it ended */ } }
-    await new Promise((resolve) => setTimeout(resolve, everyMs));
+    await lasting(everyMs);
     stopped = pids.filter((pid) => /^[Tt]$/.test(stateOf(pid) || ''));
     if (!stopped.length) return [];
   }

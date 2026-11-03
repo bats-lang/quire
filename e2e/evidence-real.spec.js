@@ -15,7 +15,7 @@ import { gunzipSync } from 'node:zlib';
 import { test, expect } from './fixtures.js';
 import { OUT_VARIABLE, INSTANCE_VARIABLE, isRoot, pauseInstance, removeInstance, ringSeen, silenceInstance, wanted } from './flight-recorder.js';
 import { processTable, tree } from './flight-watchdog.js';
-import { resumeUntilRunning } from './preflight.js';
+import { lasting, resumeUntilRunning } from './preflight.js';
 
 test.describe.configure({ mode: 'parallel' });
 
@@ -340,12 +340,12 @@ test('heartbeat: the runner and the watchdog stopped together, for longer than t
     parent = Number((await run.until(/the watchdog (\d+) \(child and heartbeat\)/))[1]);
     owned = [...new Set([run.child.pid, parent, watchdog])].map((pid) => ownOfRun(run, pid));
     for (const pid of pids()) kill(pid, 'SIGSTOP');
-    await new Promise((resolve) => setTimeout(resolve, 7000));
+    await lasting(7000); // the length of the stop is what is tested (quire#908)
     // the runner returns first, as in the observed stall (its timer ran before the watchdog's): the monitor's tick finds the beat written before the stop
     // (a process the old rule ended with the run is gone: the expectations below then say so, not a kill)
     const resume = (pid) => { try { kill(pid, 'SIGCONT'); } catch (gone) { /* it ended with the run */ } };
     resume(run.child.pid);
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    await lasting(600); // the span the runner is alone before the watchdog resumes
     // the watchdog before its `sudo` (CI's user), and each until it is running: a sudo that saw its command stopped stops itself and one SIGCONT may come before that
     const stillStopped = await resumeUntilRunning([run.child.pid, watchdog, parent].filter((pid) => owned.includes(pid)), { send: (pid) => kill(pid, 'SIGCONT') });
     expect(stillStopped, 'every process stopped for the test is running again').toEqual([]);
