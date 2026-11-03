@@ -740,14 +740,16 @@ datatype duplicate_answer = ReplaceIt | SkipIt
 implement $P.dispose<duplicate_answer>(_) = ()
 
 (* How an import went: the book added (or put back over its old file),
-   by its key; it was already in the library and kept as it was; or it
-   failed (why is already said) *)
-#pub datavtype import_outcome = Added of Int | Kept of () | Failed of ()
+   by its key; it was already in the library and kept as it was after the
+   reader said skip (Kept); it was already in the library and, as a file
+   handed to the app, was not asked about but is that book, by its key
+   (Held, keyword: handed-intent); or it failed (why is already said) *)
+#pub datavtype import_outcome = Added of Int | Kept of () | Held of Int | Failed of ()
 
 (* An import's outcome let go: what it was is already reported *)
 #pub fn import_outcome_free (outcome: import_outcome): void
 implement import_outcome_free (outcome) =
-  case+ outcome of ~Added(_) => () | ~Kept() => () | ~Failed() => ()
+  case+ outcome of ~Added(_) => () | ~Kept() => () | ~Held(_) => () | ~Failed() => ()
 
 implement $P.dispose<import_outcome>(outcome) = import_outcome_free(outcome)
 
@@ -927,8 +929,50 @@ in
     | other => _import_finish(other, id_high, id_low))
 end
 
+(* A book already in the library, brought again by the reader's own pick: asked whether it replaces
+   the one held *)
+fn _import_asking {file_size:pos} (book_file: $BF.infile(file_size), file_size: int file_size, id_high: Int, id_low: Int, library_index: Int): $P.promise(import_outcome, $P.Chained) = let
+    val @(answer_promise, resolver) = $P.create<duplicate_answer>()
+    val () = _duplicate_put(Asked(book_file, file_size, id_high, id_low, library_index, resolver))
+    val @(title, title_len) = lib_text(library_index, TitleText())
+    val message = $A.alloc<byte>(320)
+    val () = _copy_into(title, title_len, message, 0, 0)
+    val () = $A.free<byte>(title)
+    val text_end = _put_string(message, title_len, " is already in your library.")
+    val () = $P.finish<reply>(modal_open(QDuplicate(), "Already in library"), llam(reply_given) =>
+      case+ reply_given of
+      | Accepted() => _duplicate_answer(true)
+      | Declined() => _duplicate_answer(false))
+    val () = modal_text(message, text_end)
+  in
+    $P.and_then<duplicate_answer><import_outcome>($P.vow(answer_promise), llam(answer) =>
+      case+ _duplicate_take() of
+      | ~NoDuplicate() => let
+          val () = ui_show("import-progress", false)
+        in $P.ret<import_outcome>(Failed()) end
+      | ~Asked(waiting_file, _, _, _, _, waiting_resolver) => let
+          val () = $BF.file_close(waiting_file)
+          val () = $P.resolve<duplicate_answer>(waiting_resolver, SkipIt())
+          val () = ui_show("import-progress", false)
+        in $P.ret<import_outcome>(Failed()) end
+      | ~Answered(waiting_file, waiting_size, waiting_high, waiting_low, waiting_index) =>
+        (case+ answer of
+        | ReplaceIt() => _import_go(waiting_file, waiting_size, waiting_high, waiting_low, waiting_index)
+        | SkipIt() => let
+            val () = $BF.file_close(waiting_file)
+            val () = ui_show("import-progress", false)
+          in $P.ret<import_outcome>(Kept()) end))
+  end
+
+(* What a file already in the library is answered with: asked, when the
+   reader picked it (they may mean a corrected file), or that book, when
+   the file was handed to the app from outside it (an intent, the share
+   target): the same bytes, so nothing to replace, and the reader asked
+   for the book, not a question (keyword: handed-intent) *)
+datatype held_policy = AskReader | OpenHeld
+
 (* Imports book_file, of file_size bytes, whose name is kept *)
-fn _import_file {file_size:nat} (book_file: $BF.infile(file_size), file_size: int file_size): $P.promise(import_outcome, $P.Chained) =
+fn _import_file {file_size:nat} (book_file: $BF.infile(file_size), file_size: int file_size, policy: held_policy): $P.promise(import_outcome, $P.Chained) =
   (* a book added to a library that could not be read could not be kept
      without saving that library over the one stored (#174) *)
   if ~storage_savable(LibraryRecord()) then let
@@ -953,40 +997,18 @@ in
     else (case+ lib_nums(library_index) of
       | ~$R.none() => _import_go(book_file, file_size, id_high, id_low, ~1)
       | ~$R.some(record) =>
-        (* An archived book is restored by importing it again *)
+        (* An archived book is restored by importing it again, and so is
+           one in the Trash that was handed over (the reader asked for it) *)
         if same_shelf(record.shelf, Archived()) then _import_go(book_file, file_size, id_high, id_low, library_index)
-        else let
-          val @(answer_promise, resolver) = $P.create<duplicate_answer>()
-          val () = _duplicate_put(Asked(book_file, file_size, id_high, id_low, library_index, resolver))
-          val @(title, title_len) = lib_text(library_index, TitleText())
-          val message = $A.alloc<byte>(320)
-          val () = _copy_into(title, title_len, message, 0, 0)
-          val () = $A.free<byte>(title)
-          val text_end = _put_string(message, title_len, " is already in your library.")
-          val () = $P.finish<reply>(modal_open(QDuplicate(), "Already in library"), llam(reply_given) =>
-            case+ reply_given of
-            | Accepted() => _duplicate_answer(true)
-            | Declined() => _duplicate_answer(false))
-          val () = modal_text(message, text_end)
-        in
-          $P.and_then<duplicate_answer><import_outcome>($P.vow(answer_promise), llam(answer) =>
-            case+ _duplicate_take() of
-            | ~NoDuplicate() => let
-                val () = ui_show("import-progress", false)
-              in $P.ret<import_outcome>(Failed()) end
-            | ~Asked(waiting_file, _, _, _, _, waiting_resolver) => let
-                val () = $BF.file_close(waiting_file)
-                val () = $P.resolve<duplicate_answer>(waiting_resolver, SkipIt())
-                val () = ui_show("import-progress", false)
-              in $P.ret<import_outcome>(Failed()) end
-            | ~Answered(waiting_file, waiting_size, waiting_high, waiting_low, waiting_index) =>
-              (case+ answer of
-              | ReplaceIt() => _import_go(waiting_file, waiting_size, waiting_high, waiting_low, waiting_index)
-              | SkipIt() => let
-                  val () = $BF.file_close(waiting_file)
-                  val () = ui_show("import-progress", false)
-                in $P.ret<import_outcome>(Kept()) end))
-        end)
+        else (case+ policy of
+          | AskReader() => _import_asking(book_file, file_size, id_high, id_low, library_index)
+          | OpenHeld() =>
+            if same_shelf(record.shelf, Trash()) then _import_go(book_file, file_size, id_high, id_low, library_index)
+            else let
+              val () = $BF.file_close(book_file)
+              val () = _kept_name_put(NoKeptName())
+              val () = ui_show("import-progress", false)
+            in $P.ret<import_outcome>(Held(record.key)) end))
   end
 end
 
@@ -1011,7 +1033,7 @@ fn _import_opened (opened: $BF.opened): $P.promise(import_outcome, $P.Chained) =
   | ~$BF.Opened(book_file) => let
       val file_size = $BF.file_size(book_file)
       val () = _keep_name_of(book_file)
-    in _import_file(book_file, file_size) end
+    in _import_file(book_file, file_size, AskReader()) end
 
 (* Imports book_file, of file_size bytes, fetched from a catalogue: its
    name (for its progress and errors) is name[0, name_len), the book's
@@ -1026,7 +1048,7 @@ implement import_fetched (book_file, file_size, name, name_len) = let
       val name_bytes = $A.alloc<byte>(kept_len)
       val () = _copy_into(name, kept_len, name_bytes, 0, 0)
     in _kept_name_put(KeptName(name_bytes, kept_len)) end)
-in _import_file(book_file, file_size) end
+in _import_file(book_file, file_size, AskReader()) end
 
 (* fixture: where-picked-files-come-from-the *)
 (* Where picked files come from: the file input import-file, or the
@@ -1095,7 +1117,9 @@ in _import_seq(EmptyFileInput(), 0, file_count) end
 implement import_dropped () = _import_seq(Dropped(), 0, $BF.dropped_count())
 
 (* Imports a file handed to the app from outside it; the promise
-   resolves when its import is done, as an import's does *)
+   resolves when its import is done, as an import's does. A book the
+   library already holds is not asked about: Held, with its key
+   (handed-intent) *)
 #pub fn import_external (handed: $BE.external): $P.promise(import_outcome, $P.Chained)
 
 (* ignored: the import's result is already reported, as each one's of
@@ -1109,7 +1133,7 @@ implement import_external (handed) =
   | ~$BE.External(book_file, name) => let
       val file_size = $BF.file_size(book_file)
       val () = _keep_name(name)
-    in _import_file(book_file, file_size) end
+    in _import_file(book_file, file_size, OpenHeld()) end
 
 (* ============================================================
    Reopening a stored book

@@ -3,6 +3,7 @@ paths:
   - src/text_encoding.bats
   - src/text_tables.bats
   - src/text_relation.bats
+  - src/text_proved.bats
   - src/text_labels.bats
   - src/text_codes.bats
   - src/language.bats
@@ -64,7 +65,7 @@ implementation of them that takes a `cborrow`: `text_plan_proved` (the plan and 
 `text_convert_size` (how many bytes the conversion makes, with the relation) and `text_convert_fill`
 (writes them into an array whose cells then hold them: `HOLDS`). `text_plan_of`, `text_converted_size`
 and `text_convert_into` (plain `borrow`, no cells in their types) stay beside them, marked deprecated, until
-`take_text` moves to the proved ones (#848); the removal of the old forms is quire#865 (p2). The two are
+`take_text` moves to the proved ones (the callers' move is a ticket of its own; `take_text_proved` of #848 is beside `take_text`, below); the removal of the old forms is quire#865 (p2). The two are
 separate code with the same structure; that they decide alike is neither proved nor yet tested:
 `e2e/encodings.spec.js` reads documents through the old ones, and runs through the proved ones when
 `take_text` moves. What is proved is each relation's functionality and that the proved functions return
@@ -215,3 +216,35 @@ is not restyled; a load that cannot make its map shows the chapter without sizes
 * Calibre rescales to the most common size; KOReader's switches are on or off and
   ignoring sizes also drops heading sizes (koreader#13295); Readium CSS keeps
   relative sizes scaled from the user's and leaves absolute units.
+
+## An entry's text with INFLATES and TEXTOF (#848, a piece of #608; keyword: text-proved)
+
+`src/text_proved.bats` has `take_text_proved`, beside `take_text` (which stays and is not changed): it takes an
+entry's data, a `barr` of `n` bytes (at most 1048576, the decoder's bound) whose cells `cs` are in its type, and its
+method as `entry_method(kind)` (`entry_method_of` makes it from zip's `compression`), and gives the array back with a
+`text_taken(kind, cs)`:
+
+* **Taken** (`TextTaken`): `INFLATES(kind, cs, output)` (zip's relation), `TEXTOF(output, plan, TOUT_bytes(octets))`
+  (text_relation's) and the text's array holds exactly the octets (`HOLDS(text, 0, octets, count)`), over the same
+  `output` cells. A deflated entry is inflated by zip's `inflate_cells_proved` (the in-memory decoder that returns
+  `INFLATES`; the reader and writer form, `inflate_proved`, is native only and quire is wasm); a stored entry
+  is a copy of its data (`barr_copy`, `INFLATES_stored`). The document is read by `text_plan_proved`; as it is, the
+  text's array is the inflated array itself (`HOLDS` from the `TEXTOF`), and when it needs a conversion
+  `text_convert_size` and `text_convert_fill` write it into a new array.
+* **The other outcomes** each have a constructor: `TextRefused` (the document is refused, with its `TEXTOF`),
+  `TextEmpty` (the data inflates to nothing, with its `INFLATES`), `TextMalformed` (the decoder refuses the data) and
+  `TextTooLarge` (the inflated data, or its conversion, is over 1048576 bytes: a branch, not an assertion, since the
+  array's size is bounded by its type).
+* **Lemma** `text_taken_functional`: the same compressed cells by the same method inflate to the same cells
+  (`inflates_functional`), so the `TEXTOF` of the two have one plan and one output (`textof_functional`): two takes of
+  one entry's cells are provably the same text, as the same plan and the same octets (`EQPLAN`, `EQB`).
+  `tests/static/accept/text-proved-two-takes-one-text` takes one entry twice and applies it;
+  `reject/text-proved-functional-other-entry` (two entries' cells), `-other-method` (stored and deflated) and
+  `reject/text-proved-held-other-octets` (a text array claimed to hold other octets) refuse the misuse.
+* **The array is a `barr`, not an arena piece**, because the decoder's output is one (`barr_alloc`); a caller that
+  reads it with a plain borrow freezes it and takes `cborrow_view`. Nothing calls `take_text_proved` yet: moving
+  `take_text`'s callers is a ticket of its own, and `take_text` and the platform's `decompress` stay until then.
+* **Tested, not proved:** that `inflate_cells_proved` and `text_plan_proved` run as their relations say is each
+  package's own (zip's `tests/dynamic/inflate`, this module's functions are the text_relation ones above); the glue
+  here (the freeze and thaw, the copy of a stored entry) has no test of its own beyond the static fixtures, because
+  no caller reaches it yet.

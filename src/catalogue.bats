@@ -579,7 +579,9 @@ fn _got {index:nat} (got: fetched, index: int index, request: int): void =
         case+ outcome of
         | ~Added(_) => _say("Added to your library.")
         | ~Failed() => _say("This book could not be imported.")
-        | ~Kept() => _quiet())
+        | ~Kept() => _quiet()
+        (* a fetched book is asked about, never held: Held is a handed-over file's *)
+        | ~Held(_) => _quiet())
     end
   | ~Blocked() =>
     if request = !_request then let

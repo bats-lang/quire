@@ -114,7 +114,7 @@ export default defineConfig({
     },
     {
       name: 'mobile-landscape',
-      testMatch: /(layout|library-grouping|smoke|page-turn|relaunch|relaunch-sync)\.spec\.js/,
+      testMatch: /(layout|library-grouping|smoke|page-turn|relaunch|relaunch-sync|touch-selection)\.spec\.js/,
       use: {
         browserName: 'chromium',
         viewport: { width: 667, height: 375 },

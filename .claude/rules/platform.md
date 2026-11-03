@@ -99,3 +99,15 @@ control is shown only where its platform has it**, by its own `data-hide`.
   `LIBRARY_READ`, which only `_library_read` makes, so a book is never added to
   the library the read then replaces. When the library could not be read each
   file is kept (`_handed_kept`, linear) and not added, and the banner says so.
+* **A handed-over file opens its book** (#959, keyword: handed-intent): when the
+  import ends, `_intent_settled` (`src/bin/quire.bats`) matches `import_outcome`
+  with `case+`: `Added` (new) and `Held` (the library already holds that file, by
+  its content hash: not asked about, since nothing is replaced; a book in the Trash
+  or archived is imported over, as the reader asked for it) open the book at the place
+  the library keeps for it (its first page when new), after closing every layer
+  and a question over the app; `Failed` and `Kept` leave the screen as it was, a
+  book that was open being opened again at its place (`_intent_restore`). While a
+  book is being opened or its place is settling (`reader_settling`) the import
+  waits (`_intent_import`), and the view kept by the last run waits for the import
+  (`intent_phase`), since both use the book cell. Other readers do the same
+  (research in the PR of #959).

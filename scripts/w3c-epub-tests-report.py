@@ -144,7 +144,7 @@ VERDICTS = {
     'nav-spine_in-spine-no-list-style': (T, 'the contents panel is not numbered'),
     'nav-spine_not-in-spine': (T, ''),
     # Open Container Format
-    'ocf-font_obfuscation': (F, "the book's own CSS is dropped by design, so an embedded font is never used"),
+    'ocf-font_obfuscation': (F, "the book's own CSS, which says what text uses the embedded font, is dropped by design; the font is used only when the reader chooses Font: Book"),
     'ocf-font_obfuscation_bis': (T, 'the font is not displayed (no embedded font is ever used)'),
     'ocf-metainf-inc': (T, ''),
     'ocf-metainf-manifest': (T, ''),
@@ -284,8 +284,25 @@ def others(clone):
     return seen
 
 
-# failures left for the maintainer's decision, not bugs to fix
-DECISIONS = {'mol-css'}
+# the failing should tests, each decided not to be followed (quire#829): the reason and what the
+# reading systems of the suite's reports answer. The counts are the table's "others" column
+# (the suite's reports at the commit above) and the names are those reports'.
+DECISIONS = {
+    'css-epub-hyphens': "the reader's Hyphenation setting is the only hyphenation, and it applies to every book (#411); of the reading systems 7 pass (Apple Books iOS and macOS, Kobo iOS, Tolino, ACCESS, VitalSource iOS and Mac) and 11 do not (Thorium, Colibrio, Google Play, VOYAGER, Kobo eReader and web)",
+    'css-epub-line-break': "the book's CSS is not applied (#411); 3 pass (Apple Books iOS, Kobo iOS, Thorium), 12 do not (ACCESS, Colibrio, Kobo eReader and web, Tolino, VitalSource, VOYAGER)",
+    'css-epub-text-align-last': "the book's CSS is not applied (#411), and the page is justified or not by the reader's Justify setting; 1 passes (Apple Books iOS), 18 do not (Thorium, Kobo, Colibrio, Google Play, VitalSource, Tolino, VOYAGER, ACCESS, Apple Books macOS)",
+    'css-epub-text-combine-horizontal': "the book's CSS is not applied (#411); 3 pass (Apple Books iOS, both VOYAGER builds), 13 do not (Thorium, Kobo, Colibrio, Tolino, VitalSource, ACCESS, Apple Books macOS)",
+    'css-epub-text-emphasis': "the book's CSS is not applied (#411); 3 pass (Colibrio, Kobo iOS, Thorium), 14 do not (Apple Books, Google Play, Kobo eReader and web, Tolino, VitalSource, VOYAGER, ACCESS)",
+    'css-epub-text-orientation': "vertical text is set from the book's language and reading direction, as Readium sets it (e2e/vertical.spec.js), because the page is one CSS column flow whose direction and turn are Quire's: a book's rule that switched a chapter or an element would split that flow, as pkg-dir_but_not_content says of direction; 15 pass (Thorium, Apple Books, Kobo, Colibrio, Google Play, Tolino, VitalSource, VOYAGER, ACCESS), 2 do not (Kobo eReader, VitalSource Windows), so this is the one of these ten where Quire is with the minority",
+    'css-epub-text-transform': "the book's CSS is not applied (#411); -epub-fullwidth is the prefixed form of full-width; 2 pass (Apple Books iOS, Thorium), 9 do not (ACCESS, Apple Books macOS, Colibrio, Google Play, Kobo, Tolino, VOYAGER)",
+    'css-epub-text-underline-position': "the book's CSS is not applied (#411); 4 pass (Colibrio, Kobo web, Thorium, Tolino), 12 do not (Apple Books, Kobo eReader and iOS, VitalSource, VOYAGER, ACCESS)",
+    'css-epub-word-break': "the book's CSS is not applied (#411); 8 pass (Thorium, Colibrio, Kobo eReader and iOS, Google Play Android, ACCESS, Apple Books macOS, VOYAGER web), 9 do not (Apple Books iOS, Kobo web, Tolino, VitalSource, VOYAGER dev)",
+    'css-epub-writing-mode': "vertical text is set from the book's language and reading direction (see css-epub-text-orientation); 14 pass (Thorium, Apple Books iOS, Kobo, Colibrio, Tolino, VitalSource, VOYAGER web, ACCESS), 2 do not (Apple Books macOS, VOYAGER dev), so Quire is with the minority here too",
+    'lay-pp-xhtml-icb_invalid_meta': "Quire does attempt to extract the width and height from a viewport meta whose syntax is invalid (900 by 600, measured), which is what the test's description asks; what it cannot do is draw the grid the page's CSS draws (#411). No reading system has reported this test; the deprecated twin with the same description, lay-fxl-xhtml-icb_invalid_meta, is passed by 7 of 10 (Thorium, ACCESS, Kobo web, VitalSource Android, iOS, Mac and Windows)",
+    'mol-css': "the colours are the app's, each text and ground pair proven 4.5:1 in each theme, which a book's media:active-class colour would break (#411); 2 pass (Colibrio, Tolino), 6 do not (Thorium, Apple Books iOS and macOS, Kobo iOS and web, ACCESS)",
+    'ocf-font_obfuscation': "the obfuscation is undone (#410, which OCF 3.3 requires, and ocf-font_obfuscation_bis shows it), and the package's first font is the text's when the reader chooses Font: Book; which text the font is for is the book's @font-face and class (#411); 7 pass (Thorium, Apple Books iOS and macOS, Colibrio, Kobo eReader and iOS, VOYAGER web), 8 do not (ACCESS, Kobo web, Tolino, VitalSource)",
+    'pkg-manifest-unlisted-resource': "an image the manifest does not list is shown because the zip is read by name: hiding it would blank the images of a book whose manifest is merely incomplete, and nothing is fetched or run that the book did not carry (epub-format.md); 4 hide it (Thorium, Apple Books iOS and macOS, ACCESS), 11 show it (Kobo, Colibrio, Tolino, VitalSource, VOYAGER dev)",
+}
 
 
 def covered(spec):
@@ -375,13 +392,14 @@ def main(clone):
             passed, answered = answers.get(id, (0, 0))
             policy = 'dropped by design' in VERDICTS[id][1] or 'not implemented' in VERDICTS[id][1] or 'by decision' in VERDICTS[id][1]
             platform = 'decoder' in VERDICTS[id][1]
-            e2e = 'yes' if id in tested else ('policy' if policy else ('platform' if platform else ('decision' if id in DECISIONS else 'next')))
-            lines.append(f'| `{id}` | {level} | {VERDICTS[id][1]} | {passed}/{answered} | {e2e} |')
+            e2e = 'yes' if id in tested else ('decision' if id in DECISIONS else ('policy' if policy else ('platform' if platform else 'next')))
+            why = VERDICTS[id][1] + (f'. Decided not to be followed (quire#829): {DECISIONS[id]}' if id in DECISIONS else '')
+            lines.append(f'| `{id}` | {level} | {why} | {passed}/{answered} | {e2e} |')
     lines += [
         '',
         'A failure marked `next` is a bug whose e2e test is written with its fix, in the area of fixes it belongs to (so a branch',
-        'carries only tests that pass). A `decision` is a failure settled by research and kept (#419; keyword: the book\'s CSS is not applied): `mol-css` (the book\'s own highlight CSS,',
-        'dropped by design, #411).',
+        'carries only tests that pass). A `decision` is a failure settled by research and kept (#419, #829; keyword: the book\'s CSS is not applied): each of the 14 failing `should` tests,',
+        'with the reason and the answers of the other reading systems in its row.',
     ]
     lines += ['', '## Not applicable', '', '| test | level | why |', '| --- | --- | --- |']
     for id in sorted(tests):
