@@ -34,9 +34,13 @@ def findings(files, allowed=''):
     return ew.lint(tree(files, allowed))[0]
 
 
+def spans(files):
+    return ew.lint(tree(files))[3]
+
+
 class FixedWaits(unittest.TestCase):
     def test_the_repository_is_clean(self):
-        found, total, _ = ew.lint(ROOT)
+        found, total, _, _ = ew.lint(ROOT)
         self.assertEqual(found, [])
         self.assertEqual(total, 0, 'quire#985 migrated every wait: the allowance list holds none')
 
@@ -50,6 +54,24 @@ class FixedWaits(unittest.TestCase):
                      "await new Promise((resolve) => setTimeout(() => resolve(), 500));", "setTimeout(done , 10);"):
             with self.subTest(line=line):
                 self.assertEqual(len(findings({'a.spec.js': line + '\n'})), 1)
+
+    def test_a_braced_sleep_is_refused(self):
+        for line in ("await new Promise((resolve) => { setTimeout(() => { resolve(); }, ms); });",
+                     "setTimeout(() => {resolve()}, 500);"):
+            with self.subTest(line=line):
+                self.assertEqual(len(findings({'a.spec.js': line + '\n'})), 1)
+
+    def test_a_limit_whose_handle_is_kept_is_not_a_sleep(self):
+        line = "await new Promise((resolve) => { waiters.push(resolve); limit = setTimeout(() => { resolve(); }, remaining); });\n"
+        self.assertEqual(findings({'a.spec.js': line}), [])
+
+    def test_the_span_helper_is_defined_once_and_its_calls_are_listed(self):
+        helper = "export const lasting = (ms) => new Promise((resolve) => { setTimeout(() => { resolve(); }, ms); });\n"
+        self.assertEqual(findings({'p.js': helper + "await lasting(600);\n"}), [])
+        self.assertEqual(spans({'p.js': helper + "await lasting(600);\n"}), [('e2e/p.js', 2, '600')])
+        found = findings({'p.js': helper, 'q.js': helper})
+        self.assertEqual(len(found), 1)
+        self.assertIn('defined 2 times', found[0])
 
     def test_a_budget_a_limit_and_a_comment_are_not_waits(self):
         text = ("test.setTimeout(300000);\n"

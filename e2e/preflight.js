@@ -222,7 +222,7 @@ export function processState(pid, proc = '/proc') {
   } catch (gone) { return null; }
 }
 
-/** A duration or a cadence that is the instrument's own (a stop held for a span, a poll every so often): a timer with a body, which is what is measured, not a wait for a step of the runner (quire#976, keyword: window). */
+/** The one span helper of e2e/: a duration or a cadence that is the instrument's own (a stop held for a span, the CPU window, a poll every so often), which is what is measured, not a wait for a step of the runner (quire#976, keyword: window). The lint (tests/static/e2e_waits.py) sees this timer, allows its one definition and prints every call as a span. */
 export const lasting = (ms) => new Promise((resolve) => { setTimeout(() => { resolve(); }, ms); });
 
 /**

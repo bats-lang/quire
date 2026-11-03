@@ -29,7 +29,14 @@ ALLOWED = 'tests/static/e2e_waits_allowed.tsv'
 WAIT_FOR_TIMEOUT = re.compile(r'\bwaitForTimeout\s*\(')
 # setTimeout( not preceded by a dot (test.setTimeout is a budget), its first argument a name or an arrow that only resolves
 # a delay of 0 is a yield to the event loop, not a wait (`setTimeout(spinForever, 0)` in the page code of a fixture)
-SLEEP = re.compile(r'(?<![.\w])setTimeout\s*\(\s*(?:[A-Za-z_$][\w$]*\s*,|\(\s*\)\s*=>\s*(?:r|res|resolve|done|ok|fulfill)\s*\(\s*\)\s*,)(?!\s*0\s*[,)])')
+# the callback may have a braced body that only resolves: `() => { resolve(); }` (a sleep under another spelling, quire#976)
+RESOLVER = r'(?:r|res|resolve|done|ok|fulfill)'
+SLEEP = re.compile(r'(?<![.\w])setTimeout\s*\(\s*(?:[A-Za-z_$][\w$]*\s*,|\(\s*\)\s*=>\s*(?:' + RESOLVER + r'\s*\(\s*\)|\{\s*' + RESOLVER + r'\s*\(\s*\)\s*;?\s*\})\s*,)(?!\s*0\s*[,)])')
+# the one span helper: `const lasting = (ms) => new Promise(...)`, defined once in e2e/; its calls are listed as spans
+# a timer whose handle is kept (`limit = setTimeout(...)`) is a limit that is cleared when the event comes, not a sleep
+KEPT = re.compile(r'[\w$.]+\s*=\s*setTimeout\s*\(')
+SPAN_DEFINITION = re.compile(r'\bconst\s+lasting\s*=')
+SPAN_CALL = re.compile(r'(?<![.\w])lasting\s*\(([^)]*)\)')
 FIXME = re.compile(r'\.fixme\s*\(')
 FIXME_GOOD = re.compile(r'\.fixme\s*\(\s*(?:true\s*,\s*)?([\'"`])[^\n]*#\d+')
 TICKET = re.compile(r'(?:[\w.-]+/[\w.-]+)?#\d+')
@@ -53,13 +60,25 @@ def sources(root):
 
 
 def waits_of(text):
-    """(line number, line) of each fixed wait."""
+    """(line number, line) of each fixed wait. The definition of the span helper is not one (spans_of lists its calls)."""
     found = []
     for number, line in enumerate(text.split('\n'), 1):
         code = code_of(line)
-        if WAIT_FOR_TIMEOUT.search(code) or SLEEP.search(code):
+        if WAIT_FOR_TIMEOUT.search(code) or (SLEEP.search(code) and not SPAN_DEFINITION.search(code) and not KEPT.search(code)):
             found.append((number, line.strip()))
     return found
+
+
+def spans_of(text):
+    """(line number, argument) of each call of the span helper, and the number of its definitions."""
+    calls, definitions = [], 0
+    for number, line in enumerate(text.split('\n'), 1):
+        code = code_of(line)
+        if SPAN_DEFINITION.search(code):
+            definitions += 1
+        else:
+            calls.extend((number, match.group(1).strip()) for match in SPAN_CALL.finditer(code))
+    return calls, definitions
 
 
 def load_allowed(root):
@@ -84,10 +103,15 @@ def load_allowed(root):
 def lint(root):
     allowed, findings = load_allowed(root)
     seen = {}
+    spans = []
+    defined = []
     total = 0
     for relative in sources(root):
         with open(os.path.join(root, relative), encoding='utf-8') as handle:
             text = handle.read()
+        calls, definitions = spans_of(text)
+        spans.extend((relative, number, argument) for number, argument in calls)
+        defined.extend([relative] * definitions)
         waits = waits_of(text)
         total += len(waits)
         seen[relative] = len(waits)
@@ -104,16 +128,20 @@ def lint(root):
     for relative in allowed:
         if relative not in seen:
             findings.append(f'{ALLOWED}: {relative} is not a file of e2e/: drop the line')
-    return findings, total, seen
+    if len(defined) > 1:
+        findings.append(f'the span helper `lasting` is defined {len(defined)} times ({", ".join(defined)}): one definition, imported (quire#976)')
+    return findings, total, seen, spans
 
 
 def main(arguments):
     root = arguments[0] if arguments else os.path.dirname(os.path.dirname(HERE))
-    findings, total, seen = lint(root)
+    findings, total, seen, spans = lint(root)
     for finding in findings:
         print(finding)
     if not findings:
         print(f'ok: {total} fixed wait(s) in {sum(1 for count in seen.values() if count)} file(s) of e2e/, all listed with their ticket')
+    for relative, number, argument in spans:
+        print(f'span: {relative}:{number}: lasting({argument}) (an instrument\'s own duration or cadence, not a wait for a step)')
     return 1 if findings else 0
 
 

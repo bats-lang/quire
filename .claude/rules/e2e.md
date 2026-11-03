@@ -115,8 +115,11 @@ each blocked an unrelated PR while their p0 tickets were open. Three rules:
     release reached it.
   * **A window or a cadence is the instrument's own duration** (keyword: window): the renderers'
     CPU read over `CPU_WINDOW_MS`, the profile sampled over `PROFILE_MS`, the probe that asks
-    every `PROBE_EVERY_MS` (`lasting` in `e2e/stall-capture.js`, a timer with a body, as a limit
-    is). The time is what is measured, so no event can stand for it.
+    every `PROBE_EVERY_MS` (`lasting`, defined once in `e2e/preflight.js`). The time is what is measured, so no event
+    can stand for it. The lint sees the helper's braced timer (`() => { resolve(); }`), allows its one
+    definition and prints every call as `span: file:line: lasting(...)`: a new call shows in the
+    output, and a second definition is refused (a timer whose handle is kept, `limit = setTimeout(`,
+    is a limit, not a sleep).
   * **A clock handed in** where a test needs time to have passed: `keepKernel(out, env, false,
     clock)` takes the time the red is taken at, so a ring left paused is shown to be old by a
     clock three seconds later, not by sleeping three seconds.

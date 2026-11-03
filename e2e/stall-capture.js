@@ -49,10 +49,14 @@ import { execFile } from 'node:child_process';
 import { accessSync, closeSync, constants, existsSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, isAbsolute, join } from 'node:path';
 import { bindAttempts } from './attempt-log.js';
+import { lasting } from './preflight.js';
 import { keepHistory } from './page-history.js';
 import { keepBoth, startBrowserTrace, traceReady, wanted, ROOT_MOST_MS, TRACE_END_MS } from './flight-recorder.js';
 import { diskEvidence, futexEvidence, futexWordMemory, missingEvidence, pageProbes, sanitizerReports, symbolEvidence } from './evidence.js';
 import { runnerLoad, sampleRunner } from './runner-load.js';
+
+// the duration of an instrument (the CPU window, the profile, the probe's cadence) is `lasting` of preflight.js, the one span helper (quire#976, keyword: window)
+export { lasting };
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
 const PROBE_EVERY_MS = 2000;
@@ -137,10 +141,6 @@ export const FLIGHT_MOST_MS = ROOT_MOST_MS + 2 * TRACE_END_MS; // the kernel's r
 export const NATIVE_MOST_MS = FLIGHT_MOST_MS + COMMAND_MS + (3 * COMMAND_MS + CPU_WINDOW_MS) + HELPER_MS + 8 * HELPER_MS + GDB_MS + GZIP_MS + 2 * FALLBACK_MS
   + 2 * FALLBACK_MS; // the browser's and the GPU's fallback tools
 
-/** The duration of an instrument, not a wait for a step to end (quire#985, keyword: window): the CPU time read over
-    CPU_WINDOW_MS, the profile sampled over PROFILE_MS, the probe that asks every PROBE_EVERY_MS. What is measured is
-    the time itself, so the span is the thing the timer is for; its callback has a body, as a limit's does. */
-export const lasting = (ms) => new Promise((resolve) => { setTimeout(() => { resolve(); }, ms); });
 
 /** How a promise ended within `ms`: { answered, ms, value } or { error } or { answered: false }. */
 async function within(promise, ms) {
