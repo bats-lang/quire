@@ -422,7 +422,7 @@ Keyword: ring reach. A watchdog report keeps the whole ring (`LINES_KEPT`, and t
 
 `'reaches'` when `ringCompleteFrom <= notBefore` (every CPU holds all its events from before the wait), `'misses'` when `ringStart > notAfter` (or no event), else `'unknown'`: the spec asserts the wait for the first, a null `lastWait` for the second, nothing for the third. `heldMs` (the report's) is not the rule: it is measured from the scan that saw the hold, after the wait began, and the ring ends at the pause, after it was measured. A report's `timings` say what the snapshot (the ring paused) and the analysis took.
 
-Cost, measured (quire#993): a snapshot of the 4.9M-line ring of run 40705566021 (a synthetic trace file of that size, the real `snapshot` and `futexAnalysis`, 4 busy loops) took 5.5 s (the read, under the ring lock; the ring goes on recording) and the analysis 9.2 s, with the longest gap between two heartbeats of the process that did both 1003 ms (the limit is `HEARTBEAT_STALE_MS`, 6 s).
+Cost, measured (quire#993) on the code before #910, where `snapshot` read `trace` with the ring paused: a snapshot of the 4.9M-line ring of run 40705566021 (a synthetic trace file of that size, the real `snapshot` and `futexAnalysis`, 4 busy loops) took 5.5 s (the read, under the ring lock) and the analysis 9.2 s, with the longest gap between two heartbeats of the process that did both 1003 ms (the limit is `HEARTBEAT_STALE_MS`, 6 s). The snapshot read of #910 (the ring goes on recording) is not yet measured; the CI run on the ready head of #910 is where it will be.
 
 ## Ring hold: the monitor judges a stop by the heartbeat's own holders (quire#993)
 
