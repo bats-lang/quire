@@ -120,6 +120,11 @@ each blocked an unrelated PR while their p0 tickets were open. Three rules:
   * **A clock handed in** where a test needs time to have passed: `keepKernel(out, env, false,
     clock)` takes the time the red is taken at, so a ring left paused is shown to be old by a
     clock three seconds later, not by sleeping three seconds.
+  * **The pause between two tries of a poll that has a limit** (keyword: poll-interval):
+    `withRingLockAsync` in `e2e/flight-tracefs.js` tries the ring lock and pauses 2 ms
+    (`sleep` of `node:timers/promises`) until the lock is taken or `LOCK_MOST_MS` passes, as
+    `withRingLock` pauses with `nap(2)`. The wait is for the lock, an event, with the limit of its
+    budget; the 2 ms is how often it is looked at, never how long a step takes.
   * **A nested run says when** (`e2e/nested/*.case.js`): `QUIRE_NESTED_GO` makes a case wait for
     the file `go` in its directory (`fileAppears`), which the run that holds it makes after it has
     acted; a hung case waits for the request to reach its server.

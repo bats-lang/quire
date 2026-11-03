@@ -491,14 +491,15 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   error. Beside bats's fixtures, a source module (`src/**`) selects `check` and `checkers`; every
   other path selects what CI's table says (a note, a spec, a fixture's directory); a path for
   which CI runs the whole static population (the CI files, the pins, an unknown path, `assets/**`)
-  is said (`CI runs the whole static population for: ...`) and left to the sample. A spec reads
+  is said (`CI runs the whole static population for: ...`) and left to CI, which runs it. A spec reads
   the built app, so a source change selects every spec. **One relation between the list and the
   run** (the ruling recorded on the ticket, until the owner says otherwise): the worker
   runs from the list only what finishes in a few minutes (`.claude/agents/worker.md`, quire#911);
   CI runs the rest and is the evidence for it. `--run <repository>` runs the selection:
   `tests/static/run.sh`, then `./dist/debug/gen-pwa test -- <specs>` (the build steps and the env
-  file below come first), which is for a selection that is short; the options `--specs N`,
-  `--sample N` and `--seed S` bound it. The PR's Evidence has the command
+  file below come first), which is for a selection that is short (what finishes in a few minutes, the
+  rule above); the options `--specs N`, `--sample N` and `--seed S` cut a selection down to that, and
+  what they leave out is CI's. The PR's Evidence has the command
   and its output; a reviewer sends back a PR without it. Tested: `LocalRun`, `LocalCommand` and
   `ListedFixtures` in `tests/static/affected_test.py`, with a stand-in for bats (the list is
   bats's, tested in bats: `tests/fixtures/list.sh`); the brief line: `tests/static/guidelines.py`
