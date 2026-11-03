@@ -136,13 +136,16 @@ for _r in quire bats pwa bridge dom gestures arith array zip sha256 capacitor-pl
   if [ "$_b" != main ] || [ -n "$(git -C "$_d" status --porcelain | head -1)" ]; then echo "STRAY-WORK $_d (the orchestrator's checkout) [${_b:-detached}] dirty=$(git -C "$_d" status --porcelain | wc -l): no worker works here; move the work to its own worktree, then fast-forward to main"; fi
 done
 # the pre-push hook (.githooks/pre-push, quire#973): a checkout that has it and whose core.hooksPath is not .githooks pushes with none of its checks
-for d in /home/user/* ; do
+# (QSWEEP_CHECKOUTS and QSWEEP_TRANSCRIPTS name other places for the test, tests/static/pre_push_test.py)
+for d in ${QSWEEP_CHECKOUTS:-/home/user/*} ; do
   [ -e "$d/.githooks/pre-push" ] || continue
+  # workers make their checkouts with `git worktree add` (a pitboss brief, not a quire script), so the setting is made here, in the repository's own config, which every worktree inherits
+  git -C "$d" config --local core.hooksPath .githooks
   _hp=$(git -C "$d" config --get core.hooksPath)
-  [ "$_hp" = .githooks ] || echo "HOOKS-NOT-INSTALLED $d core.hooksPath=${_hp:-unset}: run git -C $d config core.hooksPath .githooks (the worktree's creation sets it, worker.md)"
+  [ "$_hp" = .githooks ] || echo "HOOKS-NOT-INSTALLED $d core.hooksPath=${_hp:-unset}: its effective core.hooksPath is not the repository's (a worktree-level config or an include overrides it)"
 done
 # a --no-verify on a git push or commit in a transcript of the last two days skips that hook (quire#973); the transcript is named with the count
-for _t in $(find /root/.claude/projects -name '*.jsonl' -mtime -2 2>/dev/null); do
+for _t in $(find ${QSWEEP_TRANSCRIPTS:-/root/.claude/projects} -name '*.jsonl' -mtime -2 2>/dev/null); do
   _n=$(grep -c -E '"command": ?"[^"]*(git|qsweep)[^"]* (push)[^"]* (--no-verify)( |\\"|")' "$_t" 2>/dev/null)
   [ "${_n:-0}" -gt 0 ] && echo "NO-VERIFY $_t: $_n command(s) skipped the hooks"
 done

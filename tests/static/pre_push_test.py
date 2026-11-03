@@ -354,5 +354,44 @@ class Hook(Fixtures):
         self.assertEqual(deleted.returncode, 0, deleted.stderr)
 
 
+class SweepHooks(unittest.TestCase):
+    """qsweep sets core.hooksPath .githooks in the repository's own config, which a worktree made by `git worktree add` inherits,
+    and reports a checkout whose effective value differs and a transcript with a push --no-verify (quire#973)."""
+
+    def run_section(self, checkouts, transcripts):
+        text = (ROOT / '.claude/skills/sweep/qsweep').read_text()
+        section = text[text.index('# the pre-push hook'):text.index('echo "stragglers: sweep done"')]
+        environment = dict(os.environ, QSWEEP_CHECKOUTS=' '.join(str(c) for c in checkouts), QSWEEP_TRANSCRIPTS=str(transcripts))
+        return subprocess.run(['bash', '-c', section], env=environment, capture_output=True, text=True).stdout
+
+    def test_the_setting_is_inherited_by_a_worktree_and_an_override_and_a_no_verify_are_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            temp = Path(temp)
+            main = temp / 'main'
+            main.mkdir()
+            git('init', '-q', '-b', 'main', cwd=main)
+            (main / '.githooks').mkdir()
+            (main / '.githooks/pre-push').write_text('#!/bin/sh\n')
+            git('add', '-A', cwd=main)
+            git('commit', '-q', '-m', 'hook', cwd=main)
+            git('worktree', 'add', '-q', '-b', 'work', str(temp / 'work'), cwd=main)
+            transcripts = temp / 'transcripts'
+            transcripts.mkdir()
+            (transcripts / 'quiet.jsonl').write_text('{"command": "git push origin work"}\n')
+            self.assertEqual(subprocess.run(['git', 'config', '--get', 'core.hooksPath'], cwd=temp / 'work', capture_output=True, text=True).stdout, '')
+            out = self.run_section([temp / 'work'], transcripts)
+            self.assertEqual(out, '')
+            for place in (main, temp / 'work'):
+                self.assertEqual(git('config', '--get', 'core.hooksPath', cwd=place), '.githooks')
+            (transcripts / 'bad.jsonl').write_text('{"command": "git push --no-verify origin work"}\n')
+            out = self.run_section([temp / 'work'], transcripts)
+            self.assertIn('NO-VERIFY ' + str(transcripts / 'bad.jsonl') + ': 1 command(s)', out)
+            self.assertNotIn('quiet.jsonl', out)
+            git('config', '--local', 'extensions.worktreeConfig', 'true', cwd=main)
+            git('config', '--worktree', 'core.hooksPath', '/nowhere', cwd=temp / 'work')
+            out = self.run_section([temp / 'work'], transcripts)
+            self.assertIn('HOOKS-NOT-INSTALLED ' + str(temp / 'work') + ' core.hooksPath=/nowhere', out)
+
+
 if __name__ == '__main__':
     unittest.main()

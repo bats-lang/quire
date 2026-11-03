@@ -1284,6 +1284,13 @@ class NoBackgroundNoSleep(unittest.TestCase):
         brief = brief.replace('Start the static suite with run_in_background and poll it with sleep 60 until it ends.', 'Hand back at once after the push.')
         self.assertEqual(gl.lint_brief(brief, ticket, PHRASES), [])
 
+    def test_the_template_fixture_is_refused_exactly_as_its_expect_says(self):
+        directory = os.path.join(HERE, 'guidelines', 'reject', 'template-runs-in-background')
+        template, expect = [open(os.path.join(directory, name)).read() for name in ('template.txt', 'expect')]
+        self.assertEqual('\n'.join(gl.lint_brief_templates(template, 'template', PHRASES)) + '\n', expect)
+        self.assertEqual(len(expect.strip().split('\n')), 3)
+        self.assertEqual(gl.lint_brief_templates(template.replace('run the rest in the background and read its log', 'CI runs the rest').replace('start the checks with nohup bats check & and poll the log with sleep 60 until the reviewer sees the result', 'read the check runs of the head'), 'template', PHRASES), [])
+
     def test_a_template_line_in_a_code_span_is_refused(self):
         line = 'Sample: a local run over a population is a seeded sample; run the rest in the background and read its log.'
         found = gl.lint_brief_templates('* `' + line + '`\n', 'orchestration.md', PHRASES)

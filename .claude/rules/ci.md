@@ -430,9 +430,10 @@ overrides. A failure prints `pre-push: check <n> (<name>) failed:` with what is 
   process. `qsweep push` sources the env file for the push (tested: `test_qsweep_push_passes_the_env_file`); a
   plain `git push` gets them from `bats with-env ~/quire.env git push` or the shell's profile.
 * **Every compiler a worker already has** needs its `bats.pin` written once (the recipe below), or check 3 refuses.
-* **Install:** `git config core.hooksPath .githooks` in the checkout (a worktree's creation, `worker.md`). The
-  sweep prints `HOOKS-NOT-INSTALLED` for a checkout that has the hook and a different `core.hooksPath`, and
-  `NO-VERIFY` for a transcript with `git push --no-verify`. `qsweep push` keeps the pressure hold only.
+* **Install:** workers make their checkouts with `git worktree add` (a pitboss brief, not a quire script), so
+  `qsweep` sets `core.hooksPath .githooks` in the repository's own config (`git config --local`), which every
+  worktree inherits. The sweep prints `HOOKS-NOT-INSTALLED` for a checkout whose effective `core.hooksPath` differs, and
+  `NO-VERIFY` for a transcript with `git push --no-verify` (tested: `SweepHooks` in `tests/static/pre_push_test.py`). `qsweep push` keeps the pressure hold only.
 * **Check 3's record:** a binary does not carry its commit, so the compiler's directory holds `bats.pin`,
   `<commit> <sha256 of the binary>`, written when it is built from the bats checkout at the pin:
   `printf '%s %s\n' "$(git rev-parse HEAD)" "$(sha256sum release/bats | cut -d' ' -f1)" > release/bats.pin`.
@@ -492,13 +493,12 @@ or with `BATS_REPOSITORY=<the clone>` and no flag (the flag wins).
   which CI runs the whole static population (the CI files, the pins, an unknown path, `assets/**`)
   is said (`CI runs the whole static population for: ...`) and left to the sample. A spec reads
   the built app, so a source change selects every spec. **One relation between the list and the
-  run** (the ruling recorded on the ticket, until the owner says otherwise): the static members
-  run whole; the specs run whole when they are at most `--specs N` (default 12, about 10 minutes of
-  e2e), else a sample of N of the selected specs is drawn with a printed seed; CI runs the rest.
-  `--run <repository>` does both: `tests/static/run.sh`, then `./dist/debug/gen-pwa test --
-  <specs>` (the build steps and the env file below come first). The worker writes the seed, the
-  sample and why it suffices in the PR. `--sample N` adds N other fixtures with the printed
-  `--seed`, beside the affected ones and never in their place. The PR's Evidence has the command
+  run** (the ruling recorded on the ticket, until the owner says otherwise): the worker
+  runs from the list only what finishes in a few minutes (`.claude/agents/worker.md`, quire#911);
+  CI runs the rest and is the evidence for it. `--run <repository>` runs the selection:
+  `tests/static/run.sh`, then `./dist/debug/gen-pwa test -- <specs>` (the build steps and the env
+  file below come first), which is for a selection that is short; the options `--specs N`,
+  `--sample N` and `--seed S` bound it. The PR's Evidence has the command
   and its output; a reviewer sends back a PR without it. Tested: `LocalRun`, `LocalCommand` and
   `ListedFixtures` in `tests/static/affected_test.py`, with a stand-in for bats (the list is
   bats's, tested in bats: `tests/fixtures/list.sh`); the brief line: `tests/static/guidelines.py`
