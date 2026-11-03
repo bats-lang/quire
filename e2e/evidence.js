@@ -279,6 +279,18 @@ export async function pageState(page, ms = 2000) {
 }
 
 /**
+ * The page's DOM as it is when a test fails (#1008: the failing check of vertical.spec.js:238 needs what the page held when the
+ * dialog did not appear). Bounded to `ms`; a page that cannot answer gives the reason as text, so the attachment always exists
+ * and a missing one means the capture did not run. Keyword: failure capture.
+ */
+export async function pageDom(page, ms = 3000) {
+  if (page.isClosed()) return 'not available: the page was already closed';
+  const read = await within(page.content(), ms);
+  if (!read.answered) return `not available: no answer within ${ms} ms`;
+  return read.error ? `not available: ${read.error}` : read.value;
+}
+
+/**
  * What a run can do that bears on the classes it cannot see, read each run and written to the job's log: the facts the proof that rr
  * cannot be used on a hosted runner stands on (whether the hardware counters it needs are there, `perf stat` on cycles; and whether rr
  * itself, installed by the job, runs: its own CPU and counter checks, `rr record`), and whether a symbol file now exists for the Chrome
