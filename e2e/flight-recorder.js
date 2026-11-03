@@ -184,7 +184,7 @@ export function readSyscall(pid) { return asRoot('readsyscall', { pid }); }
 // FUTEX_WAIT 0, WAKE 1, REQUEUE 3, WAKE_OP 5, WAIT_BITSET 9, WAKE_BITSET 10 (flags 0x80 private and 0x100 realtime are masked off)
 const FUTEX_WAITS = new Set([0, 9, 11, 13]);
 const FUTEX_WAKES = new Set([1, 3, 4, 5, 10, 12]);
-const RING_LINE = /^\s*(.+)-(\d+)\s+\[(\d+)\]\s+\S+\s+(\d+\.\d+):\s+(.*)$/;
+const { RING_LINE } = tracefs; // the one reading of a ring line (flight-tracefs.js), the task to the first `-<pid> [<cpu>]`
 // the kernel prints the arguments in hex with a 0x on some versions (6.18) and without on others (7.0, the runners'): both are read
 const FUTEX_CALL = /sys_futex\(uaddr: (?:0x)?([0-9a-f]+), op: (?:0x)?([0-9a-f]+), val: (\S+), utime: (\S+?),/;
 

@@ -41,6 +41,18 @@ export const LINES_KEPT = 12000000;
 const writeSnapshotFile = (instance, value) => writeFileSync(`${instance}/snapshot`, value, { flag: constants.O_WRONLY });
 const attempt = (what, action) => { try { return action(); } catch (error) { return `${what}: ${String((error && error.code) || (error && error.message) || error)}`; } };
 
+// The reader of the ring is not in the ring (#910, keyword: ring self-noise). The instance records the process tree of the test run (set_event_pid, event-fork), and
+// the root call of a capture is in that tree (a child of sudo, a child of the worker): its cat and gzip, and its own node, each write and read the text of the ring they
+// are reading, and every one of those calls is an event of the ring. CI's run 41621724921 (job 125870674455): the capture of a 4.95 million event ring left 4.2 million
+// events of its own (cat 344,711, gzip 221,897, the helper's node and libuv workers) in 21 s, which overwrote the ring's oldest events (entries 4,726,064 of 8,898,171
+// written) before the next capture: the renderer's wait, begun 0.4 s after the first snapshot, was among those overwritten, and the file of the next capture had no
+// event at all between 650.99 s and 656.28 s. tracefs `set_event_notrace_pid` wins over `set_event_pid` and, with event-fork, is inherited by the children: a pid
+// written there, and everything it starts, is not recorded. The file is opened for writing and never made, like the snapshot's.
+/** Takes `pid` (and with event-fork, its children) out of what the instance records. Answers nothing, or what went wrong (a kernel with no such file: the ring is as noisy as before). */
+export function leaveRing({ instance, pid }) {
+  return attempt('set_event_notrace_pid', () => { writeFileSync(`${instance}/set_event_notrace_pid`, String(pid), { flag: constants.O_WRONLY }); return null; });
+}
+
 // The ring is never stopped for a capture (#910; keyword: ring snapshot). A capture asks tracefs for a snapshot of the running ring
 // (the `snapshot` file of the instance, "to take a snapshot of the current running trace", the kernel's documentation; LTTng's snapshot
 // mode is the same design for a flight recorder) and reads that; every worker goes on recording into the live ring meanwhile. The snapshot
@@ -194,7 +206,15 @@ export function pause({ instance }) {
   return bad ? { error: bad } : { paused: true };
 }
 
-const RING_STAMP = /^\s*.+-\d+\s+\[\d+\]\s+\S+\s+(\d+\.\d+):/;
+/**
+ * One line of the ring: (task)-(pid) [cpu] flags stamp: text. The task is read to the FIRST `-<pid> [<cpu>]`: a greedy task read the stamp of a line that a traced write
+ * carries in its buffer (the ring records the text of a ring being written, and a line that holds `node-1 [000] ..... 898.2138742784:` as the string of a sys_write is the
+ * write's, stamped where the write was). In CI's run 41621724921 the greedy read gave 246,920 lines of one capture a stamp 20 s early, and CI's run 41611800728 a silence of
+ * 2657 s between two lines of another test's stand-in ring. Keyword: ring line.
+ */
+export const RING_LINE = /^\s*(.+?)-(\d+)\s+\[(\d+)\]\s+\S+\s+(\d+\.\d+):\s+(.*)$/;
+/** The stamp of a ring line: the fourth group of RING_LINE, with the same task rule. */
+export const RING_STAMP = /^\s*.+?-\d+\s+\[\d+\]\s+\S+\s+(\d+\.\d+):/;
 
 /** Takes the snapshot: the live ring and the snapshot buffer exchange places (tracefs `snapshot`, 1). Answers { swapped } or { error }. */
 export function takeSnapshot({ instance }) {
@@ -296,6 +316,8 @@ async function capture({ instance, out, lines, dir, swap, clear }) {
     if (tee) gzip.stdout.pipe(tee, { end: false });
     gzip.stdin.write(`${header}\n# the snapshot of the ring taken for this capture, after ${earlier.length} earlier ones; clock: ${clock}\n`);
     reader = spawn('cat', [`${instance}/snapshot`], { stdio: ['ignore', 'pipe', 'inherit'] });
+    // in a root worker (no sudo between) the capture runs in the worker, which stays in the ring: only its two readers leave it (the sudo call is out whole, above)
+    for (const child of [reader, gzip]) { if (child.pid) leaveRing({ instance, pid: child.pid }); }
     // the end of the text passes by here: the last event's time says whether the file reaches as far as the red
     let end = Buffer.alloc(0);
     reader.stdout.on('data', (piece) => { end = Buffer.concat([end, piece]).subarray(-16384); });
@@ -385,7 +407,10 @@ const ops = { start, pause, snapshot, stop, readmem, readsyscall, resume, state,
 // `sudo -n node flight-tracefs.js <op> <json>`: the answer is one line of JSON
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [op, json] = process.argv.slice(2);
-  Promise.resolve(ops[op] ? ops[op](JSON.parse(json || '{}')) : { error: `no such op: ${op}` })
+  const args = JSON.parse(json || '{}');
+  // this process, and the cat and gzip it starts, are not events of the ring they read (see leaveRing); before the first thing the op does
+  if (args.instance && op !== 'stop') leaveRing({ instance: args.instance, pid: process.pid });
+  Promise.resolve(ops[op] ? ops[op](args) : { error: `no such op: ${op}` })
     .then((answer) => process.stdout.write(`${JSON.stringify(answer)}\n`))
     .catch((error) => process.stdout.write(`${JSON.stringify({ error: String(error) })}\n`));
 }

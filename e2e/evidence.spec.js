@@ -28,7 +28,7 @@ import { RING_LINES, Watchdog } from './flight-watchdog.js';
 import { heartbeatLimitMs, heartbeatQuiet, processState, resumeUntilRunning } from './preflight.js';
 import { startBlockedProcess } from './blocked-process.js';
 import { memoryReclaim, runnerLoad } from './runner-load.js';
-import { LINES_KEPT, LOCK_NAME, LOCK_UNREADABLE_MS, lockFailuresIn, segmentsIn, withRingLock } from './flight-tracefs.js';
+import { LINES_KEPT, LOCK_NAME, RING_LINE, RING_STAMP, LOCK_UNREADABLE_MS, leaveRing, lockFailuresIn, segmentsIn, withRingLock } from './flight-tracefs.js';
 import { COST_FILE } from './preflight.js';
 
 function desktopOnly(testInfo) {
@@ -961,15 +961,17 @@ test('a capture whose file cannot be written ends at once, with no reader of the
 
 /**
  * The widest silence of a kept ring from `since` to `until` (CLOCK_MONOTONIC seconds): { seconds, from }, read a line at a time. A pause of the ring is a silence of its
- * length. The window is the test's own clock, both ends: a line stamped outside it is not an event of this window (CI's run 41611800728 read a silence of 2657 s between two lines
- * stamped 898.2 and 3555.7 on a machine up for about 700 s; they are lines 898 and 3555 of the stand-in ring of the test of a capture whose file cannot be written).
+ * length. The window is the test's own clock, both ends (the silence after the first capture's snapshot, not the ring's whole length). The stamp is the line's own (RING_STAMP):
+ * CI's run 41611800728 read a silence of 2657 s between two lines "stamped" 898.2 and 3555.7 on a machine up for about 700 s; those are the lines 898 and 3555 of the stand-in ring
+ * of the test of a capture whose file cannot be written, which a traced `cat` of the stand-in's snapshot wrote into the real ring as the string of a sys_write, and the greedy
+ * task of the old reading took the stamp inside the string. Not another test's file: the one ring of the worker holds the text of every ring text written in its tree.
  */
 async function widestSilence(file, since, until) {
   const reader = createInterface({ input: createReadStream(file).pipe(createGunzip()), crlfDelay: Infinity });
   let previous = null;
   let widest = { seconds: 0, from: null };
   for await (const line of reader) {
-    const found = /^\s*.+-\d+\s+\[\d+\]\s+\S+\s+(\d+\.\d+):/.exec(line);
+    const found = RING_STAMP.exec(line);
     if (!found || Number(found[1]) < since || Number(found[1]) > until) continue;
     const at = Number(found[1]);
     if (previous !== null && at - previous > widest.seconds) widest = { seconds: at - previous, from: previous };
@@ -981,7 +983,11 @@ async function widestSilence(file, since, until) {
 // The ticket's event (#910, run 40313494155): a capture of one worker held the ring paused for 13 s, a renderer in the other worker began its untimed
 // wait in that window, and the ring never held the wait. The capture here is real (keepKernel, the root step and all) and cannot end: its file is a pipe
 // that nobody reads, so it holds the ring lock and has taken its snapshot, and stays in the middle of reading the ring until the test reads the pipe.
-test('a capture is reading the ring while a renderer in another page begins an untimed futex wait: the wait is in the ring (#910)', async ({ playwright, launchOptions }, testInfo) => {
+test('a capture is reading the ring while a renderer in another page begins an untimed futex wait: the wait is in the ring (#910)', async ({ page, playwright, launchOptions }, testInfo) => {
+  // `page` is asked for so that a failure of this test has the capture of every test (Playwright's screenshot, the fixture's page-dom and page-history, #1008): a test that
+  // takes no page fixture left none of the three (CI's run 41621724921: "failed and left no screenshot, no page-dom, no page-history"). The page that hangs is the one of
+  // the browser made below, which the stall watch of the fixture does not watch; this one stays idle.
+  void page;
   desktopOnly(testInfo);
   await recorderOn();
   test.setTimeout(testInfo.timeout + CAPTURE_MOST_MS + 60000);
@@ -1049,6 +1055,26 @@ test('a capture is reading the ring while a renderer in another page begins an u
     await draining.catch(() => {});
     await own.close().catch(() => {});
   }
+});
+
+test('a line of the ring is read at its own task, pid and stamp, though a write it records carries the text of another ring line; the reader of the ring leaves the ring (#910)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  // the lines of CI's run 41621724921: a node's write whose buffer is the text of a ring line of 20 s before
+  const written = '            node-7521    [002] .....   636.473446: sys_write(fd: 0x17, buf: 0x1213f250 (31) "    libuv-worker-7420    [002] .....   616.404719: sys_futex(", count: 4096)';
+  const parts = RING_LINE.exec(written);
+  expect([parts[1].trim(), parts[2], parts[3], parts[4]], 'the write is the write of node 7521 at 636.47, not the line inside its buffer').toEqual(['node', '7521', '002', '636.473446']);
+  expect(RING_STAMP.exec(written)[1]).toBe('636.473446');
+  const named = RING_LINE.exec('  .NET TP Worker-6408    [002] d..2.   636.527921: sched_switch: prev_comm=.NET TP Worker');
+  expect([named[1].trim(), named[2], named[4]], 'a task with a space and a hyphen is read whole').toEqual(['.NET TP Worker', '6408', '636.527921']);
+  expect(RING_LINE.exec('   libuv-worker-7420    [003] .....   636.5: sys_futex(uaddr: 0x6b563ec)')[1].trim(), 'a task with a hyphen').toBe('libuv-worker');
+  // the reader leaves the ring by tracefs `set_event_notrace_pid`: written where the file is, made nowhere (a stand-in instance gets no stray file)
+  const instance = testInfo.outputPath('instance');
+  mkdirSync(instance, { recursive: true });
+  expect(leaveRing({ instance, pid: 4242 }), 'a kernel or a stand-in with no such file says so').toMatch(/^set_event_notrace_pid: ENOENT/);
+  expect(readdirSync(instance), 'and no file is made').toEqual([]);
+  writeFileSync(join(instance, 'set_event_notrace_pid'), '');
+  expect(leaveRing({ instance, pid: 4242 }), 'where the file is, the pid is written').toBeNull();
+  expect(readFileSync(join(instance, 'set_event_notrace_pid'), 'utf8')).toBe('4242');
 });
 
 test('the job-level check with --require-capture: a failed test names each part of its capture that is missing, and the summary lists them (#1008)', async ({}, testInfo) => {
