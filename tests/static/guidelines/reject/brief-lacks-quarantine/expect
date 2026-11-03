@@ -1,0 +1,1 @@
+brief: it names a failing test and has no line "Quarantine: ..." (the test is test.fixme(#N) on every project from the commit that files its p0 ticket; the line lists it, quire#976; CLAUDE.md-level rule in .claude/rules/e2e.md, "Quarantine and race fixes")

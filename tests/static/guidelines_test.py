@@ -489,6 +489,12 @@ class QuarantineAndRace(unittest.TestCase):
         found = gl.lint_brief(self.BRIEF + 'The gdb teardown test fails on the runner.\n', self.TICKET, PHRASES)
         self.assertTrue(any('Quarantine: ...' in line for line in found), found)
 
+    def test_the_fixture_is_refused_exactly_as_its_expect_says(self):
+        directory = os.path.join(HERE, 'guidelines', 'reject', 'brief-lacks-quarantine')
+        brief, ticket, expect = [open(os.path.join(directory, name)).read() for name in ('brief.txt', 'ticket.txt', 'expect')]
+        self.assertEqual('\n'.join(gl.lint_brief(brief, ticket, PHRASES)) + '\n', expect)
+        self.assertEqual(gl.lint_brief(brief + 'Quarantine: stall-capture.spec.js test.fixme(#807) on every project, removed by the fix.\n', ticket, PHRASES), [])
+
     def test_a_brief_about_a_failing_test_with_the_line_passes(self):
         brief = self.BRIEF + 'The gdb teardown test fails on the runner.\nQuarantine: stall-capture.spec.js test.fixme(#807) on every project, removed by the fix.\n'
         self.assertEqual(gl.lint_brief(brief, self.TICKET, PHRASES), [])
