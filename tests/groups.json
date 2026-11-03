@@ -183,6 +183,7 @@
       "accept/cut-same-cells-same-count",
       "accept/page-height-whole",
       "accept/sheet-scrolls-most",
+      "accept/text-proved-two-takes-one-text",
       "reject/aloud-placement-unmatched",
       "reject/back-forged-proof",
       "reject/bytes-from-other-cells",
@@ -327,7 +328,10 @@
       "reject/text-textof-refused-run-and-scan-of-two-places",
       "reject/text-textof-unsupported-wide-of-an-ascii-run",
       "reject/text-unit16-in-len-two-bytes-on",
-      "reject/text-utf8-scan-bad-is-ascii"
+      "reject/text-utf8-scan-bad-is-ascii",
+      "reject/text-proved-functional-other-entry",
+      "reject/text-proved-functional-other-method",
+      "reject/text-proved-held-other-octets"
     ],
     "accepts-data": [
       "accept/cfi-side-matched",
@@ -502,6 +506,9 @@
     ],
     "mutation-text-codes": [
       "mutation/text_codes"
+    ],
+    "mutation-text-proved": [
+      "mutation/text_proved"
     ]
   }
 }
