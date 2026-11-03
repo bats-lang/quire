@@ -1266,7 +1266,8 @@ test('the state of a process is read from its stat file, a name with brackets an
   const sleeper = spawn('sleep', ['30']);
   try {
     spawnSync('kill', ['-STOP', String(sleeper.pid)]);
-    expect(processState(sleeper.pid), 'a stopped process is T, not D').toBe('T');
+    // kill returns when the signal is queued; the stop happens when the kernel next schedules the process, so on a loaded runner the first read is still R
+    await expect.poll(() => processState(sleeper.pid), { message: 'a stopped process is T, not D', timeout: 10000 }).toBe('T');
   } finally { sleeper.kill('SIGKILL'); }
 });
 
