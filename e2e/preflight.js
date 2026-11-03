@@ -25,6 +25,10 @@ const FIRST_HEARTBEAT_MS = 20000;
 const MONITOR_EVERY_MS = 2000;
 export const COST_FILE = 'cost.json';
 const RING_QUIET_MS = 60000;
+// A watchdog in uninterruptible sleep (state D) may be silent this long before the run is ended (keyword: blocked watchdog, quire#972): 3 of the
+// 10 s probe periods that Kubernetes' liveness default (periodSeconds 10, failureThreshold 3) takes to give up on a container, 3 times the longest
+// block measured (9580 ms). The kernel's hung-task detector (`hung_task_timeout_secs`, a tunable whose Kconfig default is 120 s) reports a task stuck in D only after that timeout; the 30 s is not derived from it.
+const BLOCKED_BEAT_STALE_MS = 30000;
 // The specs' way to see an end condition without waiting for its real limit (evidence-real.spec.js; nothing else sets these): the limit, in ms,
 // that the variable names, in place of the constant. The condition and the code that ends the run are the real ones.
 const limit = (env, name, fallback) => (Number(env[name]) > 0 ? Number(env[name]) : fallback);
@@ -180,22 +184,73 @@ export function fatal(part, why, out) {
   process.exit(1);
 }
 
+/**
+ * How long a watchdog's heartbeat may be silent before it is a watchdog gone quiet (keyword: blocked watchdog, quire#972). A watchdog in state D is
+ * blocked in the kernel, on the disk or on the lock every tracefs instance of the host shares (wchan `submit_bio_wait`, `folio_wait_bit_common`,
+ * `tracing_check_open_get_tr`), at the heartbeat's own write or ring reading: it has no beat to write and is not dead, so it gets `blockedStaleMs`; one
+ * that is asleep, stopped or gone gets `staleMs`, and one that stays in D past `blockedStaleMs` is still ended. Numbers in, a number out.
+ */
+export function heartbeatLimitMs({ watchdogState, staleMs, blockedStaleMs }) {
+  return watchdogState === 'D' ? Math.max(staleMs, blockedStaleMs) : staleMs;
+}
+
+/**
+ * Whether a watchdog's last heartbeat is too old to be a live one (host stall): its age less the time this monitor was itself late.
+ * When the whole machine stops, the monitor's timer runs before the watchdog's on its return and finds the old beat; that is the machine's
+ * stop, recorded by the watchdog as a host stall, not a watchdog gone quiet. A watchdog stopped alone leaves the monitor on time.
+ */
+export function heartbeatQuiet({ beatAgeMs, monitorLateMs, staleMs }) { return beatAgeMs - Math.max(0, monitorLateMs) > staleMs; }
+
+/**
+ * The state letter of a process (R, S, D, T, Z ...) from `<proc>/<pid>/stat`, or null when it cannot be read (keywords: blocked watchdog, quire#972;
+ * quire#908). The name in the file may hold spaces and brackets: the state follows its last bracket. /proc/<pid>/stat is readable by every user, root's processes too.
+ */
+export function processState(pid, proc = '/proc') {
+  try {
+    const stat = readFileSync(`${proc}/${pid}/stat`, 'utf8');
+    const state = stat[stat.lastIndexOf(')') + 2];
+    return /^[A-Za-z]$/.test(state) ? state : null;
+  } catch (gone) { return null; }
+}
+
+/**
+ * Continues processes that were stopped until none is stopped, and says which still are (quire#908, run 40705566021). One SIGCONT is not enough for a
+ * `sudo` that wraps a stopped command: sudo stops itself when it sees its command stopped (job control), and it may see that after the SIGCONT it was
+ * sent, so it stays stopped, keeps the run's output pipe and the run never closes (the stopped-alone test kills it for the same reason, quire#749).
+ * `pids` is in the order to continue first; `send(pid)` signals one, `stateOf(pid)` is its state letter or null.
+ */
+export async function resumeUntilRunning(pids, { send, stateOf = processState, rounds = 40, everyMs = 250 }) {
+  let stopped = [...pids];
+  for (let round = 0; round < rounds; round += 1) {
+    for (const pid of round === 0 ? pids : stopped) { try { send(pid); } catch (gone) { /* it ended */ } }
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
+    stopped = pids.filter((pid) => /^[Tt]$/.test(stateOf(pid) || ''));
+    if (!stopped.length) return [];
+  }
+  return stopped;
+}
+
 /** Watches the parts while the run goes on. Returns a function that ends the watching. Logs a line at its start and a summary at its end (or at its fatal). */
-export function startMonitor(started, env = process.env) {
+export function startMonitor(started, env = process.env, stateOf = processState) {
   if (!started || env.QUIRE_FLIGHT_MONITOR === 'off') return () => {};
   const { watchdog, out } = started;
   const staleMs = limit(env, 'QUIRE_FLIGHT_BEAT_STALE_MS', HEARTBEAT_STALE_MS);
   const ringQuietMs = limit(env, 'QUIRE_FLIGHT_RING_QUIET_MS', RING_QUIET_MS);
+  const blockedStaleMs = limit(env, 'QUIRE_FLIGHT_BLOCKED_STALE_MS', BLOCKED_BEAT_STALE_MS);
   const began = Date.now();
   let lastWritten = null;
   let lastMoved = Date.now();
   let unreadable = 0;
-  const seen = { checks: 0, beats: new Set(), lastRing: null, lastScans: null };
-  const summary = () => `${seen.checks} checks in ${Math.round((Date.now() - began) / 1000)} s; ${seen.beats.size} distinct heartbeats of the watchdog read (last: ${seen.lastScans === null ? 'none' : `${seen.lastScans} scans`}); ${seen.lastRing === null ? 'no reading of the ring was made' : `the ring had written ${seen.lastRing} events at the last reading`}`;
+  let lastTick = began;
+  const seen = { stalls: 0, checks: 0, beats: new Set(), lastRing: null, lastScans: null };
+  const summary = () => `${seen.checks} checks in ${Math.round((Date.now() - began) / 1000)} s; ${seen.beats.size} distinct heartbeats of the watchdog read (last: ${seen.lastScans === null ? 'none' : `${seen.lastScans} scans`}); ${seen.lastRing === null ? 'no reading of the ring was made' : `the ring had written ${seen.lastRing} events at the last reading`}${seen.stalls ? `; the monitor itself was late ${seen.stalls} time(s) (host stall)` : ''}`;
   const die = (part, why) => { console.error(`[monitor] ended the run: ${summary()}`); return fatal(part, why, out); };
   console.error(`[monitor] started (${serialRun() ? 'the @serial run' : 'the run'}): every ${MONITOR_EVERY_MS} ms the watchdog ${started.watchdog.child ? started.watchdog.child.pid : '?'} (child and heartbeat), the ring ${started.kernel.instance} (on, taking events: no capture stops it)`);
   const timer = setInterval(() => {
     seen.checks += 1;
+    const monitorLateMs = Date.now() - lastTick - MONITOR_EVERY_MS;
+    lastTick = Date.now();
+    if (monitorLateMs >= staleMs) seen.stalls += 1;
     if (watchdog.exited && !watchdog.stopping) return die('watchdog', `exited during the run (code ${watchdog.exited.code}, signal ${watchdog.exited.signal})`);
     // a capture that went without the ring lock (flight-tracefs.js, ring lock) may have swapped the snapshot while another capture read it: its record is then not to be trusted
     const unlocked = lockFailuresIn(out);
@@ -205,7 +260,11 @@ export function startMonitor(started, env = process.env) {
     unreadable = 0;
     seen.beats.add(beat.at);
     seen.lastScans = beat.scans;
-    if (Date.now() - beat.at > staleMs) return die('watchdog', `no heartbeat for ${Date.now() - beat.at} ms`);
+    const beatAgeMs = Date.now() - beat.at;
+    // the monitor's own lateness comes off the age first (a stop of the whole machine, quire#908), then the limit is the plain one or, for a watchdog in D, the longer one (quire#972)
+    const quietAgeMs = beatAgeMs - Math.max(0, monitorLateMs);
+    const watchdogState = quietAgeMs > staleMs ? stateOf(beat.pid) : null; // read only when the beat is old
+    if (heartbeatQuiet({ beatAgeMs, monitorLateMs, staleMs: heartbeatLimitMs({ watchdogState, staleMs, blockedStaleMs }) })) return die('watchdog', `no heartbeat for ${beatAgeMs} ms (the watchdog's state: ${watchdogState === null ? 'not read or gone' : watchdogState})`);
     const ring = beat.ring || {};
     if (ring.error) return die('kernel ring', `unreadable by the watchdog: ${ring.error}`);
     if (ring.written !== undefined) seen.lastRing = ring.written;

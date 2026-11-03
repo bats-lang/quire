@@ -1,7 +1,9 @@
 # Android app
 
 CI builds Quire's Android app (a Capacitor shell around the PWA) on every
-push to main and every pull request: the `android` job of
+push to main and every pull request that is not a draft, whenever the app
+passes `bats check` (a run whose check fails stops before it; `check` is
+red then, see `.claude/rules/ci.md`, keyword: checked app): the `android` job of
 `.github/workflows/check.yml`. It runs the pwa package's reusable
 workflow (`bats-lang/pwa/.github/workflows/android.yml`) on the project
 `gen-pwa` writes to `dist/android`. Every run builds and signs the app
@@ -32,8 +34,9 @@ the page, which imports it. Its launcher icon is the PWA's
 The app id is `dev.middlefield.quire`, the one Quire is published under.
 The version name and code come from the commit (CLAUDE.md, "The version
 is the commit's"): the name is `YEAR.MONTH.DAY.SECONDS (sha)`, and the code
-is the commit's time in minutes since 2025, so it grows from release to
-release as Google Play needs.
+is the number of commits reachable from it plus 1000000 (above every code
+the earlier minutes scheme gave Play), so it grows from release to release as
+Google Play needs and no two commits share one.
 
 ## Signing secrets
 

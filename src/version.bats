@@ -23,12 +23,33 @@ implement quire_version () = $F.bats_commit_version()
 
 implement quire_commit_short () = $F.bats_commit_short()
 
-(* Android's version code: the commit's time in minutes since 2025, so
-   it grows from release to release *)
-#pub fn quire_version_code (): int
+(* Android's version code is the number of commits reachable from the
+   commit built from, plus this offset (#989, #979). A count only grows along
+   main, so the queue's merges a minute apart give different codes (the
+   minutes scheme gave two of them 955894, and Play refused the second). The
+   offset is above the highest code Play holds (the minutes scheme kept
+   releasing: 961586 on 2026-10-30, 1440 more a day) with room for the days
+   until the merge; check it again right before merge. It never changes
+   afterwards, so one commit always gives one code
+   (keyword: version code, .claude/rules/release.md) *)
+#pub stadef VERSION_CODE_OFFSET = 1000000
+
+(* The code, or that the clone is shallow and cannot count (the answer the
+   facts give, kept: a number that is wrong is never made) *)
+#pub datavtype version_code =
+  | {code:pos | code > VERSION_CODE_OFFSET} VersionCode of int code
+  | VersionCodeShallow of ()
+
+#pub fn quire_version_code (): version_code
+
+(* The offset as a number: its type is the stadef above, so the compiler
+   holds the two literals equal (keyword: version code) *)
+fn _version_code_offset (): int(VERSION_CODE_OFFSET) = 1000000
 
 implement quire_version_code () =
-  ($F.bats_commit_time() - 1735689600) / 60 (* wide *)
+  case+ $F.bats_commit_count() of
+  | ~$F.CommitCounted(count) => VersionCode(count + _version_code_offset())
+  | ~$F.CommitHistoryShallow() => VersionCodeShallow()
 
 (* The longest version text: a version under 32 bytes, " (", the short
    SHA and ")" *)

@@ -233,13 +233,33 @@ footnote popup, the toolbar's place and a tap that ends a selection. Decisions:
 * **The toolbar is for the chapter's text**: it shows only when the selection
   starts in a content node of the page (`annot_selection_in_page`); a control that
   cannot work is not shown.
-* **The toolbar lies over neither the text nor the handles.** It is placed from
-  the selection's rectangle on every `selectionchange` (`_toolbar_place`,
-  `ui_toolbar_at`, which writes only `--seltb-top` and `--seltb-height`): above
-  with an 8 px gap, else below the end handle with 20 px clearance; `.seltb`
-  clamps to the window and the safe area. Wasm cannot read the inset, so a hidden
-  probe (`selection-toolbar-floor`) is as tall as `max(8px, var(--safe-top))` and
-  is measured.
+* **The toolbar lies over neither the text, the handles nor the system's menu
+  (keyword: selection-menu-band).** It is placed from the selection's rectangle
+  on every `selectionchange` (`_toolbar_place`, `ui_toolbar_at`, which writes only
+  `--seltb-top` and `--seltb-height`) outside the band, in this order: above the
+  band (the selection's top minus `SELECTION_MENU_BAND` minus the 8 px gap) where
+  it fits under the window's top and the safe area; else, when the menu is above
+  the selection, below the end handle with 20 px clearance; else, when the menu
+  is below, below the menu (the handle clearance, the band and the gap under the
+  selection's bottom). `.seltb` clamps to the window and the safe area. Wasm
+  cannot read the inset, so a hidden probe (`selection-toolbar-floor`) is as tall
+  as `max(8px, var(--safe-top))` and is measured.
+* **The band** (keyword: selection-menu-band) is where Android's floating
+  selection menu (`ActionMode.TYPE_FLOATING`, the platform's floating toolbar,
+  about 48 dp tall: the framework's `floating_toolbar_height`) is drawn: the strip `SELECTION_MENU_BAND`
+  (48 CSS px, equal to dp in a WebView) high just above the selection's top edge,
+  or, when there is no room above (the strip would reach above the window's top
+  or the safe area), the strip of that height just below the handles. The system
+  draws it over the page, so a toolbar inside it has its buttons covered (quire#753:
+  the menu hid the second row and Copy). Chromium cannot draw that menu, so
+  `e2e/touch-selection.spec.js` ("floating menu band") computes the band from the
+  selection's rectangle and fails when the toolbar's rectangle meets it, for a
+  selection on the first line, in the middle and on the last line of a page, at a
+  font scale of 100% and 200% (`e2e/font-scale.js`'s `scaledBy`) in a portrait
+  and a landscape window; the real WebView is the `android` job's emulator run,
+  which long-presses a word and taps every toolbar button at its centre
+  (`android/smoke-select-point.js`, `smoke-tap-points.js`, `smoke-tap-result.js`,
+  pwa#205), and fails naming the buttons the page saw no click on.
 * **A selection stops at the page**: the page does not turn while a handle is
   held at its edge; a highlight across two pages is two highlights.
 * **Tapping a highlight selects it** (`annot_tap_select`, the page's click in

@@ -86,8 +86,8 @@ paths:
   gives the bar (`.bot.rtl`) and the scrubber (`.trk.rtl`) their class and swaps
   the page-turn buttons' arrows; every drawing along the reading axis takes
   `_drawn_at`, and a drag's x is turned back by `_track_at`. `expectBarFollows`
-  (`e2e/helpers.js`) checks it; `vertical.spec.js` needs a Japanese font (CI installs
-  `fonts-noto-cjk`).
+  (`e2e/helpers.js`) checks it; `vertical.spec.js` needs a Japanese font (CI gets one from the
+  `japanese-font` input of pwa's `e2e-setup`).
 * **A bookmarked page shows its mark once the bars hide** (#388): a ribbon
   (`bookmark-mark`, `.bmk`) in the page's top-right corner, in the accent (proven
   as text is, `S_accent_bg`); `annot_star`, the one place the bookmark's state
