@@ -33,8 +33,10 @@ WAIT_FOR_TIMEOUT = re.compile(r'\bwaitForTimeout\s*\(')
 RESOLVER = r'(?:r|res|resolve|done|ok|fulfill)'
 SLEEP = re.compile(r'(?<![.\w])setTimeout\s*\(\s*(?:[A-Za-z_$][\w$]*\s*,|\(\s*\)\s*=>\s*(?:' + RESOLVER + r'\s*\(\s*\)|\{\s*' + RESOLVER + r'\s*\(\s*\)\s*;?\s*\})\s*,)(?!\s*0\s*[,)])')
 # the one span helper: `const lasting = (ms) => new Promise(...)`, defined once in e2e/; its calls are listed as spans
-# a timer whose handle is kept (`limit = setTimeout(...)`) is a limit that is cleared when the event comes, not a sleep
-KEPT = re.compile(r'[\w$.]+\s*=\s*setTimeout\s*\(')
+# a timer whose handle is kept (`limit = setTimeout(...)`) is a limit when the handle is cleared within CLEARED_WITHIN lines
+# of it (`clearTimeout(limit)`, the event came first); a kept handle never cleared (`nap = setTimeout(r, 5000)`) is a sleep
+KEPT = re.compile(r'([\w$]+)\s*=\s*setTimeout\s*\(')
+CLEARED_WITHIN = 15
 SPAN_DEFINITION = re.compile(r'\bconst\s+lasting\s*=')
 SPAN_CALL = re.compile(r'(?<![.\w])lasting\s*\(([^)]*)\)')
 FIXME = re.compile(r'\.fixme\s*\(')
@@ -59,12 +61,22 @@ def sources(root):
                 yield os.path.relpath(os.path.join(directory, name), root)
 
 
+def cleared(lines, number, code):
+    """True when the line keeps its timer's handle and clears it within CLEARED_WITHIN lines either side."""
+    kept = KEPT.search(code)
+    if not kept:
+        return False
+    clear = re.compile(r'\bclearTimeout\s*\(\s*' + re.escape(kept.group(1)) + r'\s*\)')
+    return any(clear.search(code_of(line)) for line in lines[max(number - 1 - CLEARED_WITHIN, 0):number + CLEARED_WITHIN])
+
+
 def waits_of(text):
     """(line number, line) of each fixed wait. The definition of the span helper is not one (spans_of lists its calls)."""
     found = []
-    for number, line in enumerate(text.split('\n'), 1):
+    lines = text.split('\n')
+    for number, line in enumerate(lines, 1):
         code = code_of(line)
-        if WAIT_FOR_TIMEOUT.search(code) or (SLEEP.search(code) and not SPAN_DEFINITION.search(code) and not KEPT.search(code)):
+        if WAIT_FOR_TIMEOUT.search(code) or (SLEEP.search(code) and not SPAN_DEFINITION.search(code) and not cleared(lines, number, code)):
             found.append((number, line.strip()))
     return found
 

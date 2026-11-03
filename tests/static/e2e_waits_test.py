@@ -61,9 +61,18 @@ class FixedWaits(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertEqual(len(findings({'a.spec.js': line + '\n'})), 1)
 
-    def test_a_limit_whose_handle_is_kept_is_not_a_sleep(self):
-        line = "await new Promise((resolve) => { waiters.push(resolve); limit = setTimeout(() => { resolve(); }, remaining); });\n"
-        self.assertEqual(findings({'a.spec.js': line}), [])
+    def test_a_limit_whose_handle_is_cleared_is_not_a_sleep(self):
+        text = ("await new Promise((resolve) => { waiters.push(resolve); limit = setTimeout(() => { resolve(); }, remaining); });\n"
+                "clearTimeout(limit);\n")
+        self.assertEqual(findings({'a.spec.js': text}), [])
+
+    def test_a_kept_handle_that_is_never_cleared_is_a_sleep(self):
+        for text in ("await new Promise((r) => { nap = setTimeout(r, 5000); });\n",
+                     "await new Promise((resolve) => { nap = setTimeout(() => { resolve(); }, 5000); });\n",
+                     "await new Promise((r) => { nap = setTimeout(r, 5000); });\n" + "\n" * 30 + "clearTimeout(nap);\n",
+                     "await new Promise((r) => { nap = setTimeout(r, 5000); });\nclearTimeout(other);\n"):
+            with self.subTest(text=text[:60]):
+                self.assertEqual(len(findings({'a.spec.js': text})), 1)
 
     def test_the_span_helper_is_defined_once_and_its_calls_are_listed(self):
         helper = "export const lasting = (ms) => new Promise((resolve) => { setTimeout(() => { resolve(); }, ms); });\n"

@@ -81,7 +81,7 @@ usage:
                                        tests/static/run.sh (bats on PATH), then the selected specs
                                        with `dist/debug/gen-pwa test -- <specs>` (built as in
                                        .claude/rules/ci.md, under the env file): whole when they
-                                       are at most --specs N (default 12; a selection that would run over a few minutes is CI's, quire#911), else
+                                       are at most --specs N (default 12), else
                                        N of them drawn with the seed S, printed with the sample;
                                        CI runs the rest
   scripts/ci-groups.py members <kind> <group>
@@ -126,7 +126,7 @@ def static_members():
     return found
 
 
-#: How many specs a local run takes of the selected ones: a cap on the e2e a worker runs (quire#911: only what finishes in a few minutes; the rest is CI's)
+#: How many specs a local run takes of the selected ones: a count of specs; the rest of the selection is CI's (quire#911)
 E2E_CAP = 12
 
 NARROWING = ('testMatch', 'testIgnore', 'grep', 'grepInvert')

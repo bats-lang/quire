@@ -118,8 +118,8 @@ each blocked an unrelated PR while their p0 tickets were open. Three rules:
     every `PROBE_EVERY_MS` (`lasting`, defined once in `e2e/preflight.js`). The time is what is measured, so no event
     can stand for it. The lint sees the helper's braced timer (`() => { resolve(); }`), allows its one
     definition and prints every call as `span: file:line: lasting(...)`: a new call shows in the
-    output, and a second definition is refused (a timer whose handle is kept, `limit = setTimeout(`,
-    is a limit, not a sleep).
+    output, and a second definition is refused (a timer whose handle is kept and cleared within 15 lines,
+    `limit = setTimeout(` ... `clearTimeout(limit)`, is a limit; `nap = setTimeout(r, 5000)` with no clear is a sleep).
   * **A clock handed in** where a test needs time to have passed: `keepKernel(out, env, false,
     clock)` takes the time the red is taken at, so a ring left paused is shown to be old by a
     clock three seconds later, not by sleeping three seconds.
