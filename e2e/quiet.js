@@ -73,6 +73,13 @@ export function trackRequests(context) {
     page.on('request', request => open.add(request));
     page.on('requestfinished', request => open.delete(request));
     page.on('requestfailed', request => open.delete(request));
+    // a document that is gone takes its requests with it: one that was held (a route that never answers) is
+    // neither finished nor failed after the page goes elsewhere, and would be waited for to the limit. The
+    // navigation request of the new document is kept; it is begun before the frame commits.
+    page.on('framenavigated', frame => {
+      if (frame !== page.mainFrame()) return;
+      for (const request of open) if (!request.isNavigationRequest()) open.delete(request);
+    });
   };
   context.on('page', watch);
   for (const page of context.pages()) watch(page);

@@ -86,8 +86,9 @@ test('the mouse wheel turns pages', async ({ page }) => {
   await rawMouse(page, 'move', box.x + box.width / 2, box.y + box.height / 2);
   await rawMouse(page, 'wheel', 0, 120);
   await expect.poll(async () => (await place(page)).p).toBe(2);
-  // the scroll to the page has come to rest before the wheel goes back
+  // the scroll to the page has come to rest and the wheel's pause (the app's 250 ms timer) is over before the wheel goes back
   await scrollRested(bookPage(page));
+  await quiet(page);
   await rawMouse(page, 'wheel', 0, -120);
   await expect.poll(async () => (await place(page)).p).toBe(1);
 });
