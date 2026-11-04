@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import {
   start, readBook, bookPage, place, showChrome, topBar, control, readingSettings, openReadingSettings,
   rawMouse, exportedBackup, toLibrary, openBook, reload, oneColumn, rawFile, dialog,
-  librarySettings, settingsButton, restoreInput, clockNow,
+  librarySettings, settingsButton, restoreInput, clockNow, touchPath,
 } from './helpers.js';
 
 const sentences = k => `Sentence ${k} one is said here. Then comes a second one, which is a little longer than the first. Last of the three ends.`;
@@ -225,17 +225,7 @@ test('a tap between the sides on another line moves the ruler there, and a tap o
 });
 
 // pointer events of one finger on the page, as the reader's listener gets them
-const finger = (page, x, ys, id) =>
-  bookPage(page).evaluate(async (el, [x, ys, id]) => {
-    const event = (type, y) => el.dispatchEvent(new PointerEvent(type, {
-      bubbles: true, pointerId: id, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y,
-    }));
-    const wait = t => new Promise(r => setTimeout(r, t));
-    event('pointerdown', ys[0]);
-    for (const y of ys.slice(1)) { await wait(16); event('pointermove', y); }
-    await wait(16);
-    event('pointerup', ys[ys.length - 1]);
-  }, [x, ys, id]);
+const finger = (page, x, ys, id) => touchPath(bookPage(page), ys.map(y => [x, y]), 16, { id });
 
 test('a finger on the band drags it from line to line, and the page does not turn', async ({ page }) => {
   await start(page);

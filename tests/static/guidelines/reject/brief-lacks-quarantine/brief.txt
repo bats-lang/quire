@@ -1,0 +1,2 @@
+The tests pass.
+The gdb teardown test fails on the runner.

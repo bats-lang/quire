@@ -8,7 +8,7 @@ import { test, expect } from './fixtures.js';
 import { silentWav } from './create-epub.js';
 import {
   start, readBook, place, bookPage, chapterTitle, control, dialog, openSettings, reload, startsOnPage,
-  readingSettings, openReadingSettings,
+  readingSettings, openReadingSettings, framesPassed,
 } from './helpers.js';
 
 const CLIP = 0.6;
@@ -187,7 +187,8 @@ test('pausing stops the audio, and Read aloud goes on from the same phrase', asy
   const phrase = await marked(page);
   const { time, paused } = await audio(page);
   expect(paused).toBe(true);
-  await page.waitForTimeout(500);
+  // paused, it plays no more: the frames in which it would have
+  await framesPassed(page);
   expect((await audio(page)).time).toBe(time);
   expect(await marked(page)).toBe(phrase);
   await readAloud(page).click();

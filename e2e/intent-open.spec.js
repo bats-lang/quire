@@ -25,7 +25,7 @@ const handedAtStart = (page, name, fileName) => page.addInitScript(([n, f]) => {
   sessionStorage.setItem('handed-at-start-' + n, 'yes');
   const handOverNow = () => {
     if (globalThis.batsNative) globalThis.batsNative.deliverFile('/_capacitor_file_/' + n, f);
-    else setTimeout(handOverNow, 20);
+    else requestAnimationFrame(handOverNow);
   };
   handOverNow();
 }, [name, fileName]);

@@ -80,14 +80,16 @@ export const REACH_SLACK_S = 0.5;
  * Writes the kernel ring's record to `out` (gzipped): a snapshot of the live ring, which goes on recording (ring snapshot, flight-tracefs.js). A capture
  * stops nothing, so a freeze that begins in another worker while this one reads is in the ring.
  * The answer has `reach` (the red's time, the last event's time, whether the file reaches the red).
+ * `clock` is the time the red is taken at, in the ring's seconds (a test of a ring a fault stopped gives a clock later than the
+ * ring's last event, so that no time is waited for the gap, quire#985).
  * QUIRE_FLIGHT_LOCK_MOST_MS: the spec's way to see a lock that is not had without waiting its whole limit; nothing else sets it.
  */
-export async function keepKernel(out, env = process.env) {
+export async function keepKernel(out, env = process.env, clock = nowSeconds) {
   const instance = env[INSTANCE_VARIABLE];
   if (!instance) return { unavailable: wanted(env) ? 'the kernel ring did not start (no tracefs, or sudo refused: see the run\'s first lines)' : 'not recording (neither CI nor QUIRE_FLIGHT=1, or QUIRE_NO_RECORDER)' };
   const dir = env[OUT_VARIABLE];
   const lockMost = Number(env.QUIRE_FLIGHT_LOCK_MOST_MS) > 0 ? Number(env.QUIRE_FLIGHT_LOCK_MOST_MS) : null;
-  const redAt = nowSeconds();
+  const redAt = clock();
   let kept;
   try { kept = await asRoot('snapshot', { instance, out, dir, ...(lockMost ? { lockMost } : {}) }); } catch (error) { kept = { error: String((error && error.message) || error) }; }
   if (kept.file) {

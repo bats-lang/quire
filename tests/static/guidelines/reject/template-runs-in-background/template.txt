@@ -1,0 +1,2 @@
+* `Sample: a local run over a population is a seeded sample; run the rest in the background and read its log.`
+* `Review: start the checks with nohup bats check & and poll the log with sleep 60 until the reviewer sees the result.`

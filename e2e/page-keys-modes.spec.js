@@ -17,7 +17,7 @@
 import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, fixedPlace, readFixed, fixedLayoutBook, japaneseChapters, chapters, bookPage,
-  openReadingSettings, readingSettings, oneColumn,
+  openReadingSettings, readingSettings, oneColumn, framesPassed,
 } from './helpers.js';
 
 const book = { title: 'Keyed Modes', author: 'Keys', rawChapters: chapters(1, 300) };
@@ -181,6 +181,6 @@ test('Enter turns no page, with no link focused, in a paged book', async ({ page
   await oneColumn(page);
   const first = await place(page);
   await page.keyboard.press('Enter');
-  await page.waitForTimeout(300);
+  await framesPassed(page);
   expect(await place(page)).toEqual(first);
 });

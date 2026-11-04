@@ -21,8 +21,9 @@ import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, indicator, bookPage, dialog, openReadingSettings, readingSettings,
   selectionButton, marks, epubFile, importFiles, toLibrary, control, clickControl, cards, card, bareFrameMs,
-  rawMouse,
+  rawMouse, framesPassed,
 } from './helpers.js';
+import { timersDrained } from './quiet.js';
 import { pageMargins } from './page-margins.js';
 import {
   tableBook, novelBook, nestedBook, shortParagraphsBook, unbrokenBook, singleFileChapter, plainChapter, book,
@@ -135,16 +136,16 @@ const screens = async (page) => {
   return bookPage(page).evaluate(doc => Math.ceil(doc.scrollHeight / doc.clientHeight));
 };
 
-/** Waits for the page's layout to hold still: the same place and count for
-    300 ms (a chapter's pages are counted again as it is shown, for 3 s) */
+/** Waits for the page's layout to hold still: the app has no short timer left
+    (a chapter's pages are counted again as it is shown, by a chain of timers,
+    for 3 s, and each count is made once the one before has ended), and the
+    place and count are the same a frame later */
 async function settled(page) {
-  let last = '';
+  await timersDrained(page, { timeout: 30000 });
   await expect.poll(async () => {
-    const now = (await indicator(page).textContent()).trim();
-    const same = now === last;
-    last = now;
-    await page.waitForTimeout(300);
-    return same;
+    const first = (await indicator(page).textContent()).trim();
+    await framesPassed(page);
+    return first === (await indicator(page).textContent()).trim();
   }, { timeout: 30000 }).toBe(true);
 }
 

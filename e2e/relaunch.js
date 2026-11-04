@@ -23,7 +23,8 @@
 
 import { writeFileSync } from 'node:fs';
 import { test, expect, onAndroid, androidInsets } from './fixtures.js';
-import { indicator, librarySearch, libraryShown, rawMouse, bareReader } from './helpers.js';
+import { indicator, librarySearch, libraryShown, rawMouse, bareReader, framesPassed } from './helpers.js';
+import { requestsDone } from './quiet.js';
 
 /** The time the tests' clock stands at */
 export const FIXED_TIME = new Date('2026-06-01T10:00:00Z');
@@ -110,6 +111,14 @@ export async function writesDone(page) {
   });
 }
 
+/** Every request the page made has ended, every write the app started has reached IndexedDB and the
+    frames after are drawn: a sync, a hand-over or an import has done all it does (quire#985) */
+export async function ioDone(page) {
+  await requestsDone(page);
+  await writesDone(page);
+  await framesPassed(page);
+}
+
 /** The time the app is given to rest in `rested`: more than its longest
     debounce (a scroll's 150 ms, a resize's 200 ms) and its `_settle`
     re-counts (250 ms, 12 times) that a place waits for */
@@ -119,8 +128,7 @@ const REST_MS = 1500;
     as `fixedClock` and `page.clock.install()` do) runs REST_MS ahead, so
     every debounce and re-count the app has pending fires in order, and
     then every write they started has reached IndexedDB (#657). It
-    replaces `waitForTimeout(1500)`, which waited the same time in real
-    time and wrote nothing down */
+    replaces a real-time wait of the same length, which wrote nothing down */
 export async function rested(page) {
   await page.clock.runFor(REST_MS);
   await writesDone(page);
@@ -139,7 +147,12 @@ export async function settled(page) {
   const deadline = Date.now() + 30000;
   while (still < 3) {
     if (Date.now() > deadline) throw new Error('the app did not settle within 30 s');
-    await page.waitForTimeout(500);
+    // the next step of the app: its timers due in the next 500 ms run on the
+    // fake clock (`fixedClock` and `page.clock.install()` both make one), a
+    // frame is drawn after them, and every write they started has reached
+    // IndexedDB (#985: no real time is waited)
+    if (await page.evaluate(() => globalThis.__pwClock !== undefined)) await page.clock.runFor(500);
+    await framesPassed(page);
     await writesDone(page);
     const now = JSON.stringify(await stored(page));
     still = now === last ? still + 1 : 0;
@@ -411,7 +424,7 @@ async function strayForensics(page, screen) {
   const again = await page.screenshot({ animations: 'disabled', caret: 'hide' });
   report.again = await strayPixels(page, again);
   await page.evaluate(() => { document.getElementById('page-turn').style.display = 'none'; });
-  await page.waitForTimeout(300);
+  await framesPassed(page);
   const without = await page.screenshot({ animations: 'disabled', caret: 'hide' });
   report.turnRemoved = await strayPixels(page, without);
   await info.attach('stray-turn-removed.png', { body: without, contentType: 'image/png' });

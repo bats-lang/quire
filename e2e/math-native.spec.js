@@ -9,7 +9,7 @@
 // the theme's text colour in every theme.
 
 import { test, expect } from './fixtures.js';
-import { start, bookPage, place, toLibrary, colours, rawMouse } from './helpers.js';
+import { start, bookPage, place, toLibrary, colours, rawMouse, framesPassed } from './helpers.js';
 import { readMathBook, setSize, sizeRange, chooseTheme, inkIn, turnTo, MATHML_NAMESPACE } from './math-helpers.js';
 
 // the page's fake clock is installed before each test's page opens, so the
@@ -239,7 +239,7 @@ test('a display equation wider than the column scrolls inside itself: the page h
     await devtools.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: at.x + 100, y: at.y }] });
     for (let step = 1; step <= 12; step++) {
       await devtools.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: at.x + 100 - step * 17, y: at.y }] });
-      await page.waitForTimeout(16);
+      await framesPassed(page, 1);
     }
     await devtools.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await devtools.detach();

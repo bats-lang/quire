@@ -12,8 +12,10 @@ import { test, expect, clientsServed } from './fixtures.js';
 import { KEY, dropbox } from './dropbox-server.js';
 import {
   epubFile, importFiles, openBook, place, toLibrary, chapters, dialog,
-  librarySearch, librarySettings, settingsButton, settingsScreen, libraryShown,
+  librarySearch, librarySettings, settingsButton, settingsScreen, libraryShown, quiet,
 } from './helpers.js';
+import { ioDone } from './relaunch.js';
+import { observe } from './quiet.js';
 
 /** The app's Capacitor, played: Browser (when browser is true) and App
     (when app is true).
@@ -48,6 +50,7 @@ function capacitor({ browser, app }) {
     (none: key '') */
 async function device(browser, server, { key = KEY, tab = true, app = true } = {}) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
+  await observe(context);
   await context.addInitScript(capacitor, { browser: tab, app });
   await context.route('https://api.dropboxapi.com/**', server.api);
   await context.route('https://content.dropboxapi.com/**', server.api);
@@ -226,7 +229,8 @@ test('in the app, a return from Dropbox that starts the app again is taken once 
   // sign-in: no exchange, nothing said
   const said = await status(a.page).textContent();
   await a.page.evaluate(url => window.__openApp(url), back);
-  await a.page.waitForTimeout(500);
+  await ioDone(a.page);
+  await quiet(a.page);
   expect(server.exchanged).toHaveLength(1);
   await expect(status(a.page)).toHaveText(said);
   expect(unexpected(a)).toEqual([]);

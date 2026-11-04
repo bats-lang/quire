@@ -8,14 +8,17 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, importFiles, openBook, place, toLibrary, chapters, dialog, menuItem, libraryMenu,
   selectText, selectionButton, showChrome, control, clickControl, oneColumn, pageShown, cards,
-  librarySettings, settingsButton, settingsScreen, restoreInput, exportedBackup, reload, jumpBack,
+  librarySettings, settingsButton, settingsScreen, restoreInput, exportedBackup, reload, jumpBack, quiet,
 } from './helpers.js';
+import { ioDone } from './relaunch.js';
+import { observe } from './quiet.js';
 import { webdav, folder, USER, PASSWORD } from './sync-stores.js';
 import { progressBooks } from './progress-books.js';
 
 /** A device: a browser context of its own, the folder routed in it */
 async function device(browser, server, time) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
+  await observe(context);
   await googleStubbed(context);
   await context.route('**/dav/books/quire-sync.json', server.handle);
   const page = await context.newPage();
@@ -127,7 +130,7 @@ async function hiddenSynced(d, server) {
   const puts = server.puts;
   await hide(d.page);
   await expect.poll(() => server.puts).toBeGreaterThan(puts);
-  await d.page.waitForTimeout(300);
+  await ioDone(d.page);
 }
 
 test('the latest place is taken, and offered for a book that is open', async ({ browser }) => {
@@ -192,12 +195,14 @@ test('another device\'s place is offered once; dismissed, only a later one of it
   await toLibrary(a.page);
   await syncNow(a.page);
   await openBook(a.page, 'Shared Book');
-  await a.page.waitForTimeout(1000);
+  await ioDone(a.page);
+  await quiet(a.page);
   expect(await offered(a.page)).toBe(false);
   expect((await place(a.page)).ch).toBe(1);
   await reload(a.page);
   await pageShown(a.page);
-  await a.page.waitForTimeout(1000);
+  await ioDone(a.page);
+  await quiet(a.page);
   expect(await offered(a.page)).toBe(false);
   expect((await place(a.page)).ch).toBe(1);
   // B reads on: that place is offered, once
@@ -244,7 +249,8 @@ test('a jump to a far chapter and back leaves no far place: not after a reopen, 
   // reopened
   await reload(a.page);
   await pageShown(a.page);
-  await a.page.waitForTimeout(1000);
+  await ioDone(a.page);
+  await quiet(a.page);
   expect((await place(a.page)).ch).toBe(1);
   expect(await offered(a.page)).toBe(false);
   // synced from the library, and opened

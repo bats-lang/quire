@@ -137,7 +137,8 @@ test('the Zoom buttons zoom in and out, within the least and the most', async ({
 const touches = (page, steps) =>
   page.evaluate(async steps => {
     const target = document.getElementById('image-box');
-    const wait = ms => new Promise(r => setTimeout(r, ms));
+    // a finger's events come one for each frame the page draws
+    const frame = () => new Promise(next => requestAnimationFrame(next));
     const down = new Set();
     for (const step of steps) {
       for (const [type, id, x, y] of step) {
@@ -148,9 +149,10 @@ const touches = (page, steps) =>
         }));
         if (type === 'pointerup' || type === 'pointercancel') down.delete(id);
       }
-      await wait(24);
+      await frame();
     }
-    await wait(80);
+    await frame();
+    await frame();
   }, steps);
 
 test('a pinch zooms about the fingers\' middle, and the fingers moving together move the picture', async ({ page }) => {

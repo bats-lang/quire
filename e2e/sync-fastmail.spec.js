@@ -9,7 +9,9 @@
 // mock that lets the page's origin in).
 
 import { test, expect, onAndroid } from './fixtures.js';
-import { start, dialog, librarySearch, librarySettings, settingsButton, settingsScreen, libraryShown } from './helpers.js';
+import { start, dialog, librarySearch, librarySettings, settingsButton, settingsScreen, libraryShown, quiet } from './helpers.js';
+import { ioDone } from './relaunch.js';
+import { observe } from './quiet.js';
 
 const SERVER = 'https://myfiles.fastmail.com';
 const FILE = '/quire/quire-sync.json';
@@ -72,6 +74,7 @@ const syncRow = page => settingsScreen(page).getByRole('group', { name: 'Sync' }
     context. Its page, and the page's errors */
 async function app(browser, server) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
+  await observe(context);
   await context.addInitScript(() => { window.Capacitor = { isNativePlatform: () => true, Plugins: {} }; });
   await context.route(`${SERVER}/**`, server.handle);
   const page = await context.newPage();
@@ -107,7 +110,8 @@ test('in a browser, Fastmail is not listed, and nothing is sent to it', async ({
   await panel(page).getByRole('button', { name: 'Back' }).click();
   await settingsButton(page, 'Sync').click();
   await expect(panel(page)).toBeVisible();
-  await page.waitForTimeout(500);
+  await ioDone(page);
+  await quiet(page);
   expect(sent).toEqual([]);
   expect(server.requests).toEqual([]);
   expect(errors).toEqual([]);

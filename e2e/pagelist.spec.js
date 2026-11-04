@@ -5,7 +5,7 @@
 // are in pagelist-books.js.
 
 import { test, expect } from './fixtures.js';
-import { start, readBook, place, showChrome, control, dialog } from './helpers.js';
+import { start, readBook, place, showChrome, control, dialog, framesPassed } from './helpers.js';
 import { cutOff } from './controls-shown.js';
 import { pagelistBooks } from './pagelist-books.js';
 
@@ -29,7 +29,7 @@ async function goTo(page, rows, index) {
 /** What the footer says of the page shown (shown with the t key) */
 async function footerText(page) {
   await page.keyboard.press('t');
-  await page.waitForTimeout(150);
+  await framesPassed(page);
   return (await footer(page).count()) ? (await footer(page).textContent()) : null;
 }
 

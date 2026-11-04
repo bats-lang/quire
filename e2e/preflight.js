@@ -16,12 +16,15 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync
 import { request } from 'node:https';
 import { join } from 'node:path';
 import { capabilities } from './evidence.js';
+import { directoryChanged } from './changed.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, WATCHDOG_DIRECTORY, pauseInstance, resumeInstance, ringStats, serialRun, settleOutstanding, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { HEARTBEAT_STALE_MS } from './flight-watchdog.js';
 import { LOCK_FAILED_PREFIX, lockFailuresIn } from './flight-tracefs.js';
 
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 const FIRST_HEARTBEAT_MS = 20000;
+/** The most the ring is given to take an event of this process (the limit of a wait for it, not its expectation) */
+const RECORDING_MOST_MS = 5000;
 const MONITOR_EVERY_MS = 2000;
 export const COST_FILE = 'cost.json';
 const RING_QUIET_MS = 60000;
@@ -144,9 +147,13 @@ async function prove(env, { cwd = process.cwd(), version = '149.0.7827.55', laun
   if (kernel.missing && kernel.missing.length) throw new PreflightFailed('kernel ring', `${kernel.missing.join('; ')} could not be set (a kernel without these events cannot answer the question)`);
   // recording: this process is in the ring's tree, so what it does (a few reads, a timer) must add events
   const before = await ringStats(env);
-  readFileSync('/proc/self/stat');
-  await new Promise((resolve) => setTimeout(resolve, 150));
-  const after = await ringStats(env);
+  // read again until the ring has taken an event of this process, or the limit (quire#985: no fixed wait for the ring)
+  const recordingBy = Date.now() + RECORDING_MOST_MS;
+  let after = before;
+  do {
+    readFileSync('/proc/self/stat');
+    after = await ringStats(env);
+  } while (!after.error && after.on === '1' && !(after.written > before.written) && Date.now() < recordingBy);
   if (before.error || after.error || after.on !== '1' || !(after.written > before.written)) throw new PreflightFailed('kernel ring', `made but not recording: before ${JSON.stringify(before)}, after ${JSON.stringify(after)}`);
   // the watchdog: its child alive and its first heartbeat read back
   const watchdog = startWatchdog(kernel.instance, env, out);
@@ -159,7 +166,9 @@ async function prove(env, { cwd = process.cwd(), version = '149.0.7827.55', laun
     if (watchdog.exited) throw new PreflightFailed('watchdog', `exited at start (code ${watchdog.exited.code}, signal ${watchdog.exited.signal})`);
     first = heartbeats(out).find((each) => each.file.startsWith(`heartbeat-${process.pid}-`));
     if (first) break;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // the watchdog's first heartbeat is a file made in the directory
+    // (or the watchdog's end, which is looked at at the top of the loop)
+    await directoryChanged(out, deadline - Date.now(), watchdog.child ? [[watchdog.child, 'exit'], [watchdog.child, 'error']] : []);
   }
   if (!first) throw new PreflightFailed('watchdog', `no heartbeat in ${firstHeartbeatMs} ms`);
   if (first.ring && first.ring.on !== '1') throw new PreflightFailed('watchdog', `its first reading of the ring: ${JSON.stringify(first.ring)}`);
@@ -213,6 +222,9 @@ export function processState(pid, proc = '/proc') {
   } catch (gone) { return null; }
 }
 
+/** The one span helper of e2e/: a duration or a cadence that is the instrument's own (a stop held for a span, the CPU window, a poll every so often), which is what is measured, not a wait for a step of the runner (quire#976, keyword: window). The lint (tests/static/e2e_waits.py) sees this timer, allows its one definition and prints every call as a span. */
+export const lasting = (ms) => new Promise((resolve) => { setTimeout(() => { resolve(); }, ms); });
+
 /**
  * Continues processes that were stopped until none is stopped, and says which still are (quire#908, run 40705566021). One SIGCONT is not enough for a
  * `sudo` that wraps a stopped command: sudo stops itself when it sees its command stopped (job control), and it may see that after the SIGCONT it was
@@ -223,7 +235,7 @@ export async function resumeUntilRunning(pids, { send, stateOf = processState, r
   let stopped = [...pids];
   for (let round = 0; round < rounds; round += 1) {
     for (const pid of round === 0 ? pids : stopped) { try { send(pid); } catch (gone) { /* it ended */ } }
-    await new Promise((resolve) => setTimeout(resolve, everyMs));
+    await lasting(everyMs);
     stopped = pids.filter((pid) => /^[Tt]$/.test(stateOf(pid) || ''));
     if (!stopped.length) return [];
   }

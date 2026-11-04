@@ -9,8 +9,9 @@ import {
   librarySettings, settingsButton, settingsScreen, continueReading,
   emptyImportInput, openSortMenu, sortMenu, chooseInSortMenu, sortMenuChecked,
   openShelf, shelfTitle, shelfBack, emptyTrash, emptyTrashDialog,
-  rawMouse,
+  rawMouse, quiet,
 } from './helpers.js';
+import { requestsDone } from './quiet.js';
 
 const empty = /Import an EPUB file/;
 
@@ -653,6 +654,14 @@ test('a file handed over by the host is imported', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+/** A file the host handed over has been taken in: the import has ended, no request of it is open, the app has nothing
+    short pending and a frame is drawn, so a second import (the thing the callers look for) would have begun (#985) */
+async function handedOver(page) {
+  await importEnded(page);
+  await requestsDone(page);
+  await quiet(page);
+}
+
 // As the Android app is started with a file (#247): its activity hands
 // the file over once, as soon as the page has bridge's batsNative, and
 // nothing when it is recreated (here, the page loaded again). The book
@@ -677,7 +686,7 @@ test('a file the app is started with is imported once, and one handed over while
     sessionStorage.setItem('launch-handed-over', 'yes');
     const handOver = () => {
       if (globalThis.batsNative) globalThis.batsNative.deliverFile('/_capacitor_file_/started', 'started.epub');
-      else setTimeout(handOver, 20);
+      else requestAnimationFrame(handOver);
     };
     handOver();
   });
@@ -688,18 +697,18 @@ test('a file the app is started with is imported once, and one handed over while
   await page.goto('/');
   await handedBookOpened(page);
   await expect(card(page, 'Started With It')).toBeVisible({ timeout: 30000 });
-  await page.waitForTimeout(500);
+  await handedOver(page);
   await expect(cards(page)).toHaveCount(1);
   await expect(dialog(page, 'Already in library')).toBeHidden();
   await page.reload();
   await expect(card(page, 'Started With It')).toBeVisible({ timeout: 30000 });
-  await page.waitForTimeout(500);
+  await handedOver(page);
   await expect(cards(page)).toHaveCount(1);
   await expect(dialog(page, 'Already in library')).toBeHidden();
   await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/opened', 'opened.epub'));
   await handedBookOpened(page);
   await expect(card(page, 'Opened While Open')).toBeVisible({ timeout: 30000 });
-  await page.waitForTimeout(500);
+  await handedOver(page);
   await expect(cards(page)).toHaveCount(2);
   await expect(dialog(page, 'Already in library')).toBeHidden();
   expect(fetched).toEqual({ started: 1, opened: 1 });
@@ -759,7 +768,7 @@ test('a file handed over before the stored library is read is imported once, bes
   await handedBookOpened(page);
   await expect(card(page, 'Handed At Start')).toBeVisible({ timeout: 30000 });
   await expect(card(page, 'Already Here')).toBeVisible();
-  await page.waitForTimeout(1000);
+  await handedOver(page);
   await expect(cards(page)).toHaveCount(2);
   expect(fetched).toBe(1);
   // and it is in the stored library: a reload shows both
@@ -1212,7 +1221,7 @@ test('the storage is asked to be kept once, after the first book is imported', a
   await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/second', 'second.epub'));
   await handedBookOpened(page);
   await expect(card(page, 'Second Kept')).toBeVisible({ timeout: 30000 });
-  await page.waitForTimeout(300);
+  await quiet(page);
   expect(await page.evaluate(() => window.persistCalls)).toBe(1);
   await librarySettings(page);
   await expect(storageLine(page)).toHaveText(/^This browser may clear your books/);

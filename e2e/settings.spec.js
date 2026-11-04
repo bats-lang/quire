@@ -3,8 +3,9 @@
 
 import { test, expect, onAndroid } from './fixtures.js';
 import { start, readBook, toLibrary, openBook, chapters, bookPage, dialog, openSettings, colours, reload,
-  readingSettings, openReadingSettings,
+  readingSettings, openReadingSettings, quiet,
 } from './helpers.js';
+import { writesDone } from './relaunch.js';
 import { TINY_PNG } from './create-epub.js';
 
 const para = page => bookPage(page).locator('p').first();
@@ -432,7 +433,7 @@ test('in the Android app, the screen: full screen hides both bars while reading,
   // turned on in the in-book menu: the switch is on, the bars stay (quire#348)
   await full.click();
   await expect.poll(() => switchOn(full)).toBe('on');
-  await page.waitForTimeout(300);
+  await quiet(page);
   expect(await page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
   // the menu put away, the reader's own bars gone: the page is immersive and the system's bars go
   await page.keyboard.press('Escape');
@@ -447,7 +448,7 @@ test('in the Android app, the screen: full screen hides both bars while reading,
   await expect.poll(() => switchOn(full)).toBe('off');
   await page.keyboard.press('Escape');
   await page.keyboard.press('t');
-  await page.waitForTimeout(300);
+  await quiet(page);
   expect(await page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
   await openReadingSettings(page, 'Page');
   // the lock is offered, and works: shown and enabled (quire#355)
@@ -552,7 +553,9 @@ test('in a browser, full screen is not kept: the page opened again starts out of
   await full.click();
   await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
   await expect(full).toHaveAttribute('aria-pressed', 'true');
-  await page.waitForTimeout(500);
+  // every write the app started has reached the store, and the record is as it was
+  await quiet(page);
+  await writesDone(page);
   expect(await record()).toEqual(before);
   await reload(page);
   await openReadingSettings(page, 'Page');
@@ -576,7 +579,7 @@ test('in the Android app, bars the system brought back stay until the next page,
   await page.keyboard.press('t');
   await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
   await page.evaluate(() => window.systemShows());
-  await page.waitForTimeout(500);
+  await quiet(page);
   expect(await page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
   await page.keyboard.press('ArrowRight');
   await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
@@ -584,7 +587,7 @@ test('in the Android app, bars the system brought back stay until the next page,
   await openReadingSettings(page, 'Page');
   expect(await switchOn(full)).toBe('on');
   await page.evaluate(() => window.systemShows());
-  await page.waitForTimeout(300);
+  await quiet(page);
   expect(await switchOn(full)).toBe('on');
 });
 
@@ -674,7 +677,7 @@ test.describe('auto at night, to the minute', () => {
     // 21:59:30: still the day
     await page.clock.runFor('00:30');
     await turn();
-    await page.waitForTimeout(100);
+    await quiet(page);
     expect(await theme()).toContain('th-light');
     // 22:00
     await page.clock.runFor('00:30');
@@ -683,7 +686,7 @@ test.describe('auto at night, to the minute', () => {
     // 06:59
     await page.clock.runFor('08:59:00');
     await turn();
-    await page.waitForTimeout(100);
+    await quiet(page);
     expect(await theme()).toContain('th-night');
     // 07:00
     await page.clock.runFor('01:00');

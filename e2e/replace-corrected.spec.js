@@ -16,7 +16,7 @@ import {
   cards, card, titles, place, oneColumn, clickControl, reload, bookPage, startsOnPage,
   expectBannerSaysWhatToDo,
 } from './helpers.js';
-import { stored, settled } from './relaunch.js';
+import { stored, settled, FIXED_TIME } from './relaunch.js';
 import { statSync } from 'node:fs';
 import { marks } from './helpers.js';
 import { replaceBook, correctedBook, correctedCover, restructuredBook } from './replace-books.js';
@@ -62,6 +62,9 @@ async function readThreeChapters(page, notes) {
 }
 
 test('a corrected file of a book in the library replaces it: the place, the notes whose nodes are there, the shelf and the collection are kept, and a note whose text is gone is listed as not found', async ({ page }) => {
+  // the library's stamp of a record is the clock's seconds (#510): the clock is the test's, so that the
+  // seconds between the two writes are run on it below, not waited for in real time (#985)
+  await page.clock.install({ time: FIXED_TIME });
   const errors = await start(page);
   const original = epubFile(replaceBook);
   const corrected = epubFile(correctedBook);
@@ -74,6 +77,8 @@ test('a corrected file of a book in the library replaces it: the place, the note
   const before = await stored(page);
   const order = await titles(page);
 
+  // the record's stamp is in seconds: the replace writes it at least two seconds on, whatever the machine's speed
+  await page.clock.runFor(2000);
   await replaceWithNewer(page, corrected);
   // the cover is made once the card is drawn, after the answer: wait for it, then for storage
   await expect.poll(() => card(page, 'Replace Me').locator('img').evaluate(img => img.naturalWidth)).toBe(8);

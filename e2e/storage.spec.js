@@ -7,8 +7,9 @@ import {
   expectBannerSaysWhatToDo, chapterTitle, start, readBook, toLibrary, openBook, chapters, reload, importFiles, epubFile, cards, card,
   selectText, selectionButton, marks, dialog, openSettings, bookPage, librarySearch,
   librarySettings, libraryMenu, menuItem, settingsButton,
-  readingSettings, openReadingSettings, showChrome, settingsScreen, pageShown, libraryShown,
+  readingSettings, openReadingSettings, showChrome, settingsScreen, pageShown, libraryShown, quiet,
 } from './helpers.js';
+import { requestsDone } from './quiet.js';
 import { webdav, folder, USER, PASSWORD } from './sync-stores.js';
 import { coveredByBanner } from './controls-shown.js';
 import { failReads, healReads, failLibrary, stubReads } from './storage-stub.js';
@@ -341,7 +342,9 @@ test('a sync and the stored view wait for Try again, and happen once the library
   await reload(page);
   await expectUnreadable(page, 'Quire could not read your library this time.');
   const before = server.gets;
-  await page.waitForTimeout(1500);
+  // the app has nothing short pending and no request is open: a sync would have been asked for
+  await quiet(page);
+  await requestsDone(page);
   expect(server.gets, 'no sync before the library is read').toBe(before);
   await expect(bookPage(page)).toBeHidden();
   await tryAgain(page).click();

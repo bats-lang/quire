@@ -9,13 +9,14 @@ import {
   chapterTitle, bareReader, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
   readingSettings, openReadingSettings, openShelf, emptyTrashDialog, shelfTitle, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
-  rawMouse,
+  rawMouse, fontsReady, framesPassed,
 } from './helpers.js';
 import { failLibrary, healReads, stubReads } from './storage-stub.js';
 import { legacyLibrary, bookKey, store, put, forgetRecords, syncEnded, reloadSettled } from './legacy-library.js';
 import { checkPageMargins } from './page-margins.js';
 import { coveredByBanner, textContrastShort, cardMoreBoxes, switchNotesShown, switchNotesMissing } from './controls-shown.js';
 import { fits } from './fits.js';
+import { timersDrained } from './quiet.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
 import { walkEveryScreen, appPlayed, syncSteps } from './walk.js';
@@ -578,7 +579,8 @@ test('the place stays when the reading area changes, into full screen and out of
   await devtools.send('Emulation.setSafeAreaInsetsOverride', { insets: bars });
   // settle the fonts and the count before the place is chosen
   await expect.poll(async () => (await place(page)).t).toBeGreaterThan(10);
-  await page.waitForTimeout(3500);
+  await fontsReady(page);
+  await timersDrained(page);
   for (let i = 0; i < 14; i++) await page.keyboard.press('ArrowRight');
   const first = (await startsOnPage(page))[0];
   expect(first, 'a paragraph at the page\'s head').toMatch(/^Para 1\./);
@@ -589,7 +591,9 @@ test('the place stays when the reading area changes, into full screen and out of
     // that follows (bridge's batsNative.systemBars), no resize with it
     const shown = insets.top > 0;
     await page.evaluate(shown => globalThis.batsNative.systemBars(shown, shown), shown);
-    await page.waitForTimeout(1500);
+    // the layout made anew (the debounced relayout, then the recount of the pages) has ended
+    await timersDrained(page);
+    await framesPassed(page);
     expect(await onPage(page, anchor), `"${anchor}" is on the page after the area changed`).toBe(true);
   }
 });
@@ -611,7 +615,8 @@ async function openedDeep(page, title) {
   await start(page);
   await readBook(page, { title, author: 'X', rawChapters: chapters(1, 400) });
   await expect.poll(async () => (await place(page)).t).toBeGreaterThan(10);
-  await page.waitForTimeout(3500);
+  await fontsReady(page);
+  await timersDrained(page);
   for (let k = 0; k < 14; k++) await page.keyboard.press('ArrowRight');
   const anchor = (await startsOnPage(page))[0];
   expect(anchor, 'a paragraph at the page\'s head').toMatch(/^Para 1\./);
@@ -621,7 +626,9 @@ async function openedDeep(page, title) {
 /** The paragraph is on the page, and still is a moment later */
 async function staysOn(page, anchor, what) {
   await expect.poll(() => onPage(page, anchor), { message: `"${anchor}" is on the page after ${what}` }).toBe(true);
-  await page.waitForTimeout(700);
+  // settled: the app's timers (the recount of the pages) have all fired
+  await timersDrained(page);
+  await framesPassed(page);
   expect(await onPage(page, anchor), `"${anchor}" is still on the page after ${what}, settled`).toBe(true);
 }
 

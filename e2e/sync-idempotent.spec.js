@@ -16,8 +16,10 @@
 import { test, expect } from './fixtures.js';
 import { writeFileSync } from 'node:fs';
 import {
-  epubFile, dialog, librarySettings, settingsButton, restoreInput, exportedBackup,
+  epubFile, dialog, librarySettings, settingsButton, restoreInput, exportedBackup, framesPassed,
 } from './helpers.js';
+import { ioDone } from './relaunch.js';
+import { requestsDone } from './quiet.js';
 import {
   book, NOON, minutesLater, clockFixed, stores, sync, hiddenSync, hide, importFiles, openBook, toLibrary,
   highlight, shown, agree, inBook, reopen, changedPaths, withoutStamps, unexpected, annotationsDialog,
@@ -161,7 +163,7 @@ test('sync now ten times and the app\'s own sync points a dozen times with nothi
     // laid out again (_settle in src/reader.bats) sends the pages and
     // place as left, not as counted so far (#448)
     if (kind !== 'hidden') await hiddenSync(store, server, a);
-    await a.page.waitForTimeout(300);
+    await ioDone(a.page);
     const moved = changedPaths(settledFile, server.json());
     expect(moved.filter(path => !allowed.includes(path)), `after ${kind} (${n + 1})`).toEqual([]);
     // the annotations themselves are never touched
@@ -409,7 +411,9 @@ for (const how of ['abort', 'lost', 'hold']) {
     await hide(a.page);
     await expect.poll(() => a.fate.seen).toBe(1);
     await expect.poll(() => server.gets).toBeGreaterThan(gets);
-    await a.page.waitForTimeout(500);
+    // the cut request has ended (a held one never does: the page goes away with it)
+    if (how !== 'hold') await requestsDone(a.page);
+    await framesPassed(a.page);
     if (how === 'lost') expect(server.body).not.toBe(before);
     else expect(server.body).toBe(before);
     if (how === 'hold') {

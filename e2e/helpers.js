@@ -8,6 +8,7 @@
 import { expect } from '@playwright/test';
 import { createEpub, solidPng } from './create-epub.js';
 import { attempted, noted } from './attempt-log.js';
+import { timersDrained } from './quiet.js';
 import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -359,6 +360,93 @@ export async function placeChanged(page, before) {
   return place(page);
 }
 
+/** Resolves once the page has drawn `count` frames after now (quire#985):
+    what the step before did has been styled, laid out and painted, and the
+    handlers of the events it sent have run. The event is the page's own
+    frame, so no time is chosen: a runner that is slow draws its frames later
+    and this waits for them. For a step whose effect is a thing to look for,
+    wait for the thing; this is for "nothing happens" (the frames in which
+    it would have) and for a read that follows a paint */
+export function framesPassed(page, count = 2) {
+  return page.evaluate(wanted => new Promise(done => {
+    const next = left => (left === 0 ? done() : requestAnimationFrame(() => next(left - 1)));
+    next(wanted);
+  }), count);
+}
+
+/** A pointer's path on the element, as touch pointer events, one move for each
+    frame the page draws, the gestures recognizer's input being the events' time
+    stamps (bridge reads `timeStamp`): each event is stamped `ms` after the one
+    before, as a finger moving at that pace makes them, so how fast the drag is
+    does not depend on how fast the runner draws its frames (quire#985: a sleep
+    between the events made the pace the runner's). Ends with a pointerup, or a
+    pointercancel. With `scrolls` it answers where the element was scrolled (left and
+    top) after each move, the drag's own effect on it */
+export function touchPath(locator, points, ms, { cancel = false, id = 31, scrolls = false } = {}) {
+  return locator.evaluate(async (el, [path, pace, cancelled, pointerId, scrolled]) => {
+    const frame = () => new Promise(next => requestAnimationFrame(next));
+    const begun = new Event('begun').timeStamp;
+    let step = 0;
+    const send = (type, [x, y]) => {
+      const event = new PointerEvent(type, {
+        bubbles: true, pointerId, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y,
+      });
+      Object.defineProperty(event, 'timeStamp', { value: begun + step * pace });
+      el.dispatchEvent(event);
+    };
+    const held = [];
+    send('pointerdown', path[0]);
+    for (const point of path.slice(1)) {
+      await frame();
+      step++;
+      send('pointermove', point);
+      if (scrolled) held.push([el.scrollLeft, el.scrollTop]);
+    }
+    await frame();
+    step++;
+    send(cancelled ? 'pointercancel' : 'pointerup', path[path.length - 1]);
+    await frame();
+    return held;
+  }, [points, ms, cancel, id, scrolls]);
+}
+
+/** The points of a straight drag from x0 to x1 along y, in `steps` moves */
+export function straight(x0, x1, y, steps = 4) {
+  return Array.from({ length: steps + 1 }, (_, i) => [x0 + ((x1 - x0) * i) / steps, y]);
+}
+
+/** Resolves when the scroller has come to rest: its position is the same a frame
+    later and a frame after that (a wheel or a key scrolls it smoothly, frame by
+    frame, and a step that follows waits for the end of it) */
+export async function scrollRested(locator) {
+  await expect.poll(() => locator.evaluate(el => new Promise(done => {
+    const at = () => `${el.scrollLeft},${el.scrollTop}`;
+    const before = at();
+    requestAnimationFrame(() => requestAnimationFrame(() => done(at() === before)));
+  }))).toBe(true);
+}
+
+/** Resolves when the app has nothing short pending (quire#985): its timers due
+    in under a second (a debounce, a tap's wait for a second tap, the recount of
+    a chapter's pages) have all fired and none is set (e2e/quiet.js), and the
+    frames after them are drawn. For "nothing happens": what would have
+    happened has had its chance, and a runner that is slow gets more time, not
+    less */
+export async function quiet(page) {
+  await timersDrained(page);
+  await framesPassed(page);
+}
+
+/** Resolves once the page has no font loading: a frame is drawn first (a
+    face the page's styles name starts loading when they are applied), then
+    the page's `document.fonts.ready`, then a frame for the text set in what
+    came (quire#985; a face that never arrives is a load that ended) */
+export async function fontsReady(page) {
+  await framesPassed(page);
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  await framesPassed(page);
+}
+
 /** The first words of each paragraph or heading that starts on the
     page shown */
 export async function startsOnPage(page) {
@@ -601,7 +689,7 @@ export async function showChrome(page, { layoutMs = 0, again = true } = {}) {
       // the library is shown) is no page to tap: the wait is the click's
       const box = await bookPage(page).boundingBox({ timeout: 2000 });
       await rawMouse(page, 'click', box.x + box.width / 2, box.y + box.height / 2);
-      await page.waitForTimeout(150);
+      await framesPassed(page);
       // a tap between the zones on a highlight selects it, with its toolbar
       // (quire#428), and brings up no bars: the selection is ended and the
       // t key, which toggles them, brings them up
@@ -609,7 +697,7 @@ export async function showChrome(page, { layoutMs = 0, again = true } = {}) {
         note.set({ why: 'a selection held the tap: it was ended and the t key pressed' });
         await page.evaluate(() => getSelection().removeAllRanges());
         await page.keyboard.press('t');
-        await page.waitForTimeout(150);
+        await framesPassed(page);
       }
     });
   }

@@ -1,0 +1,4 @@
+#!/bin/sh
+# The checks of CI's first minute, run before any push (quire#973, keyword: pre-push);
+# the detail is scripts/pre-push.py and .claude/rules/ci.md, "The pre-push hook".
+exec python3 -I "$(git rev-parse --show-toplevel)/scripts/pre-push.py" "$@"

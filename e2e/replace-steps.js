@@ -3,7 +3,7 @@
 
 import { expect } from './fixtures.js';
 import {
-  importInput, importEnded, showChrome, toLibrary, dialog, menuItem, bookMenu, place, placeChanged, selectText, selectionButton, clickControl, bookPage,
+  importInput, importEnded, showChrome, toLibrary, dialog, menuItem, bookMenu, place, placeChanged, selectText, selectionButton, clickControl, bookPage, visibleText,
 } from './helpers.js';
 
 export const panel = page => dialog(page, 'Annotations');
@@ -160,8 +160,9 @@ const beginning = page => bookPage(page).evaluate(doc => {
     before it is taken then) */
 export async function selectLastText(page, from, to) {
   for (let back = 0; back < 5 && (await beginning(page)) === 0; back++) {
+    const shown = await visibleText(page);
     await page.keyboard.press('ArrowLeft');
-    await page.waitForTimeout(400);
+    await expect.poll(() => visibleText(page)).not.toBe(shown);
   }
   await bookPage(page).evaluate((doc, [from, to]) => {
     const c = doc.getBoundingClientRect();

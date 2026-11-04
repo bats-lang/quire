@@ -10,6 +10,7 @@ import { constants, chmodSync, closeSync, createReadStream, createWriteStream, e
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { setTimeout as sleep } from 'node:timers/promises'; // the pause between two tries of a poll that ends at its limit (`most`), not a wait for a duration
 
 export const TRACEFS = '/sys/kernel/tracing';
 // What is recorded, by what the question is: who woke whom and who slept (sched), which futex a thread waited on or woke
@@ -82,7 +83,6 @@ export const LOCK_FAILED_PREFIX = 'ring-lock-failed-';
 // The birth is only compared for equality, never against the clock (ring lock, unreadable lock; #870).
 const lockIdentity = (path) => { const found = statSync(path, { bigint: true }); return `${found.ino}:${found.birthtimeNs}:${readFileSync(path, 'utf8')}`; };
 const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The records of locks that were not had: [{ name, text }], in the output directory `dir`. */
 export function lockFailuresIn(dir) {
