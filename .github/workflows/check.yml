@@ -516,14 +516,29 @@ jobs:
       # Chromium's public AddressSanitizer build (pinned by file and SHA-256; position 1625077, Chromium 149.0.7827.0, the
       # branch of the headless shell the suite runs; the server's md5 of the file was checked against the download), run on
       # the app's first screen: a memory error in the browser is named where a release build hangs or dies later
-      # (#575). A STOPGAP with the rest of the evidence tooling: it belongs in pwa's e2e-setup (bats-lang/pwa#132)
+      # (#575). A STOPGAP with the rest of the evidence tooling: it belongs in pwa's e2e-setup (bats-lang/pwa#132), and
+      # quire#1049 (this step's disk and time limits) moves there with it.
+      # The runner's disk was full here after the whole e2e run (#1049: "No space left on device", and a stalled download):
+      # the extracted browser is about 4.4 GB, so the step shows `df -h /`, frees the toolchains of the image this job never
+      # uses (.NET, Android SDK, GHC, CodeQL; none is read by the e2e suite), and fails, naming the numbers, unless more
+      # than 2 GB is left after the browser is unpacked. curl has time limits per attempt and the step has a timeout.
       - name: Download Chromium's AddressSanitizer build
         if: always() && env.GROUP_RUN == 'yes' && matrix.group == 'reading-tools'
+        timeout-minutes: 15
         run: |
-          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/asan.zip" https://storage.googleapis.com/chromium-browser-asan/linux-release/asan-linux-release-1625077.zip
+          echo "disk before freeing space:"
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          echo "disk before the download:"
+          df -h /
+          curl -fsSL --connect-timeout 30 --max-time 600 --retry 5 --retry-all-errors -o "$RUNNER_TEMP/asan.zip" https://storage.googleapis.com/chromium-browser-asan/linux-release/asan-linux-release-1625077.zip
           echo "1e4744f206e8a2eca53b3184ff673e1dbed7cdcad146a0f2efc42bdde65749bc  $RUNNER_TEMP/asan.zip" | sha256sum -c -
           unzip -q "$RUNNER_TEMP/asan.zip" -d "$RUNNER_TEMP/asan" chrome '*.pak' icudtl.dat '*.bin' '*.so' libvulkan.so.1 'locales/*' chrome_crashpad_handler vk_swiftshader_icd.json
           rm "$RUNNER_TEMP/asan.zip"
+          echo "disk after the browser is unpacked:"
+          df -h /
+          free_kb=$(df --output=avail -k / | tail -1 | tr -d ' ')
+          if [ "$free_kb" -le 2097152 ]; then echo "::error::only $free_kb KB free after unpacking the AddressSanitizer build (more than 2 GB is required)"; exit 1; fi
           sudo apt-get install -y -q libpci3
 
       - name: Run the app's first screen under AddressSanitizer
