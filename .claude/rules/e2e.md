@@ -77,7 +77,7 @@ each blocked an unrelated PR while their p0 tickets were open. Three rules:
   holds on every project (desktop, mobile-portrait and the rest of `playwright.config.js`).
   `tests/static/e2e_waits.py` refuses a `.fixme(` that names no ticket or holds a project
   condition. The ticket's close requires the mark's removal: the fix PR deletes the mark, and
-  `guidelines.py --pr-body` (the text-lint workflow reads the PR's files) refuses a body that says
+  `guidelines.py --pr-body` (the guidelines-lint workflow reads the PR's files) refuses a body that says
   `Fixes #N` while a mark citing #N is left. The fix PR's body has a line `Quarantine: ...` listing
   each quarantined test (spec, test title, ticket) and saying the mark is removed in the PR.
   A brief, a body or a review that names a failing test and lacks its `Quarantine:` line

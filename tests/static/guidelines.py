@@ -21,16 +21,17 @@ them, and nothing refused the text that made them. This checks, without a compil
   line with "Reviewed:" and exactly one with "Verdict:" (bridge#200). A review never
   reproduces a banned phrase: it paraphrases or points at the place, and a code span in a
   review is linted as text (an exit clause in backticks is refused; quire#943);
-* `--github`: what the text-lint workflow runs, from the event's payload: the PR's body
-  against its head, and the newest review comment, set as the commit status `text-lint` on the
-  head (a ticket's body, its table rows included, with its code spans as quotations: a
+* `--github`: what the guidelines-lint workflow runs (on `issue_comment` and `issues`), from the
+  event's payload: the PR's body against its head, and the newest review comment, set as the
+  commit status `guidelines-lint` on the head (the status `text-lint` is the shared lint's, which
+  reads the PR body in text-lint.yml; quire#1047) (a ticket's body, its table rows included, with its code spans as quotations: a
   comment on the ticket, since a ticket has no head); a bot's PR and a relock branch are exempt;
   an approval of the head needs the newest `check` run of that head completed and green (quire#978);
 * `--brief FILE --ticket FILE`: the text rules, and that every line of the ticket's
   Done-when is in the brief word for word (a brief never restates it).
 
 Stopgap (CLAUDE.md, "Pipeline and tooling improvements belong in bats or pwa"): a second
-bats app would copy this lint and the workflow that runs it (the text-lint workflow),
+bats app would copy this lint and the workflow that runs it (the guidelines-lint workflow),
 so they move to bats (bats-lang/bats#431). The avenue exhausted for non-bats code
 (quire#646): bats has no command that reads markdown or the text of a comment, and
 bats#431 is the ticket that adds one.
@@ -375,6 +376,8 @@ def lint_brief(brief, ticket, phrases):
 
 TRUSTED = ('OWNER', 'MEMBER', 'COLLABORATOR')
 MARKER = '<!-- text-lint -->'
+# the status this script writes; `text-lint` is the shared lint's alone (quire#1047), so two workflows never write one status
+STATUS_CONTEXT = 'guidelines-lint'
 EXEMPT_BRANCHES = ('relock/', 'dependabot/')
 # the one first line of a review in a repository without a review gate (reviewer.md), and the gate's own
 UNGATED_FIRST = re.compile(r'Independent review \(a separate reviewer agent, not the author\) of head ([0-9a-f]{40}): (approved|changes needed)')
@@ -540,7 +543,7 @@ def github(event_name, event, repository, api, phrases, run_url=''):
                 findings += [f'{finding} (the review comment {review["html_url"]})' for finding in lint_review_checks(review['body'], head, check_runs(api, repository, head))]
         description = status_description(findings[0] if findings else 'the PR body and the newest review are in form')
     api(f'repos/{repository}/statuses/{head}', 'POST', {
-        'state': 'failure' if findings else 'success', 'context': 'text-lint',
+        'state': 'failure' if findings else 'success', 'context': STATUS_CONTEXT,
         'description': description, 'target_url': run_url})
     return findings
 

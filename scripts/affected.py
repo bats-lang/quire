@@ -224,8 +224,8 @@ RULES = [
     # The agents' guidelines (CLAUDE.md and `.claude/`: rules, orchestration notes, agents,
     # skills and settings) are read by one static checker, guidelines.py (#751), which refuses
     # the phrases that made the agents' mistakes come back (#680 first had them read by none);
-    # text-lint.yml is read by its test (no draft condition, #943)
-    Rule('the agents\' guidelines', ['CLAUDE.md', '.claude/**', '.github/workflows/text-lint.yml'], NONE, only_checkers),
+    # text-lint.yml and guidelines-lint.yml are read by the test of the lint (no draft condition, #943; #1047)
+    Rule('the agents\' guidelines', ['CLAUDE.md', '.claude/**', '.github/workflows/text-lint.yml', '.github/workflows/guidelines-lint.yml'], NONE, only_checkers),
     # Notes nothing reads, and the workflows that are runs of their own
     Rule('docs and other workflows', [
         'README.md', 'ANDROID.md', 'implementation-plan.md', 'plan.txt',
