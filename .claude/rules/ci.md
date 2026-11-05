@@ -27,7 +27,10 @@ The rule that every input is pinned, and the relock, are pitboss's `ci.md`; quir
 * The relock moves a workflow pin with `RELOCK_TOKEN` (set in quire) and lists it as not
   moved without one. It moves each pin's `uses:` line, and with `pin-copies` in `relock.yml`
   (`bats-lang/pwa/.github/workflows/android.yml pwa-ref` and `.../play-release.yml pwa-ref`, area
-  pwa-ref, #851) every `pwa-ref:` line of the files that call the pin to the same commit. `pwa-ref` repeats the pin because a reusable workflow
+  pwa-ref, #851) every `pwa-ref:` line of the files that call the pin to the same commit. The same
+  holds for the text-lint pin: `bats-lang/repository-prototype/.github/workflows/text-lint-check.yml`
+  is in `workflow-pins`, and `.../text-lint-check.yml tools-ref` is in `pin-copies`, so the relock writes the
+  new commit into `text-lint.yml`'s `uses:` line and its `tools-ref:` line (#1048). `pwa-ref` repeats the pin because a reusable workflow
   cannot read its own ref, and pwa's workflows check pwa out at it; two copies of one commit
   drift at every relock unless one tool writes both (#821). So every `pwa-ref:` of `check.yml`
   equals the commit of its `android.yml@` pin and of its `play-release.yml@` pin (`play-internal`'s), and a `pwa-ref` line
