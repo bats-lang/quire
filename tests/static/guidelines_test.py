@@ -700,6 +700,34 @@ class GitHub(unittest.TestCase):
         self.assertNotIn('draft', code.lower())
         self.assertIn('pull_request_target', code)
 
+    def test_the_script_writes_the_status_guidelines_lint_and_never_text_lint(self):
+        # quire#1047: the shared lint (text-lint.yml) alone writes `text-lint`, so two workflows never write one status
+        api = FakeApi()
+        self.run_event('pull_request_target', {'pull_request': PULL}, api)
+        self.assertEqual(self.status(api)['context'], 'guidelines-lint')
+        contexts = [call[2].get('context') for call in api.calls if call[1].startswith('repos/o/r/statuses/')]
+        self.assertEqual(contexts, ['guidelines-lint'])
+
+    def test_the_guidelines_workflow_runs_on_comments_and_tickets_only(self):
+        # quire#1047: the PR body is the shared lint's; this workflow reads what the shared one does not
+        text = read_root('.github', 'workflows', 'guidelines-lint.yml')
+        code = '\n'.join(line for line in text.split('\n') if not line.lstrip().startswith('#'))
+        self.assertIn('issue_comment:', code)
+        self.assertIn('issues:', code)
+        self.assertNotIn('pull_request', code)
+        self.assertNotIn('draft', code.lower())
+        self.assertIn('tests/static/guidelines.py --github', code)
+
+    def test_the_text_lint_workflow_is_the_template_caller_with_one_commit(self):
+        # quire#1047: text-lint.yml is repository-prototype's template filled, both holes one commit; it runs no script of ours
+        text = read_root('.github', 'workflows', 'text-lint.yml')
+        commits = set(re.findall(r'[0-9a-f]{40}', text))
+        self.assertEqual(len(commits), 1, commits)
+        self.assertEqual(len(re.findall(r'text-lint-check\.yml@' + next(iter(commits)) + r' # repository-prototype main ' + next(iter(commits))[:7] + r'\n', text)), 1)
+        self.assertEqual(len(re.findall(r'tools-ref: ' + next(iter(commits)) + r'\n', text)), 1)
+        code = '\n'.join(line for line in text.split('\n') if not line.lstrip().startswith('#'))
+        self.assertNotIn('guidelines.py', code)
+
     def approval_status(self, runs, review=GOOD_REVIEW, head=HEAD):
         api = FakeApi([{'author_association': 'OWNER', 'body': review, 'html_url': 'u'}], runs)
         pull = dict(PULL, head={'sha': head, 'ref': 'x'}, body=GOOD_BODY.replace(HEAD, head))

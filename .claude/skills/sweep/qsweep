@@ -45,7 +45,7 @@ _read_pr(){  # $1 repository, $2 PR number: sets _st _sha _ref _t _am _created _
   _skipped=$(echo "$cr" | jq '[.check_runs[]|select(.conclusion=="skipped" or .conclusion=="neutral")]|length')
   _total=$(echo "$cr" | jq '.check_runs|length')
   _checkok=$(echo "$cr" | jq '[.check_runs[]|select(.name=="check" and .status=="completed" and .conclusion=="success")]|length')
-  # commit statuses (text-lint, adversarial-review): one that failed or errored is a fix
+  # commit statuses (text-lint, guidelines-lint, adversarial-review): one that failed or errored is a fix
   _badstatus=$(_gh "repos/bats-lang/$r/commits/$_sha/status" --jq '[.statuses[]|select(.state=="failure" or .state=="error")|.context]|join(",")') || return 1
   # the newest review comment of a trusted author, by its FIRST line only (reviewer.md, "The comment"); both forms, in every repository:
   #   Independent review (a separate reviewer agent, not the author) of head <40 hex>: approved|changes needed     (ungated repositories)

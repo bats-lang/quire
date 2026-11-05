@@ -348,7 +348,7 @@ each kind selects) and prints each path's reason in its summary. Rules:
   path filter: GitHub leaves a required check "Pending" for ever then.
 * **Fail closed**: a path no rule names, a diff that cannot be read, an empty
   diff, a deletion under `e2e/` select everything. The guideline files (`CLAUDE.md`,
-  `.claude/**`, and `text-lint.yml`, which the test of the lint reads) select the `checkers` group only (`tests/static/guidelines.py` reads them,
+  `.claude/**`, and `text-lint.yml` and `guidelines-lint.yml`, which the test of the lint reads) select the `checkers` group only (`tests/static/guidelines.py` reads them,
   #751), and nothing else. A merge queue's group, a push, the nightly run and a dispatch run
   every group; the mutation groups keep their own rule.
 * A new path, spec or fixture kind needs its rule: `tests/static/affected_test.py`
@@ -390,7 +390,7 @@ each kind selects) and prints each path's reason in its summary. Rules:
   run), so a ready head's newest `check` run is the whole check. A draft's green `check` is enough for the
   Plan to be reviewed and never for a code review: the reviewer starts a code review on a PR that
   left draft, with every check finished and green (reviewer.md; `qsweep` prints
-  `WAIT-FOR-CI` for a head with no completed green `check`). `guidelines.py --github` (the `text-lint`
+  `WAIT-FOR-CI` for a head with no completed green `check`). `guidelines.py --github` (the `guidelines-lint`
   status) refuses a review that approves a head whose newest `check` run is missing, unfinished or
   not green. Push, `workflow_dispatch`, `schedule` and `merge_group` are unchanged. Libraries: the
   condition is repository-prototype#525, their callers' types the tickets of #939.
