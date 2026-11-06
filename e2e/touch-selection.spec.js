@@ -597,7 +597,7 @@ test('a selection across the gap between two columns is whole, and is one highli
 test('a selection across an image is whole: the text before it, the picture and the text after', async ({ page }, testInfo) => {
   await open(page, 'picture', { oneColumn: true });
   await expect.poll(() => bookPage(page).getByRole('img', { name: 'the map' }).evaluate(i => i.naturalWidth)).toBe(120);
-  // a margin of 12 px, not 40: in a 375 px window the picture leaves no word below it 40 px clear of the page's foot (#1033)
+  // a margin of 12 px, not 40: in a 375 px window (a reading area of 291 px) the book's low picture leaves room for the next paragraph, but not 40 px clear of the page's foot (#1033)
   const words = await pageWords(page, 12);
   const picture = await bookPage(page).getByRole('img', { name: 'the map' }).boundingBox();
   const above = words.filter(w => w.bottom <= picture.y);
