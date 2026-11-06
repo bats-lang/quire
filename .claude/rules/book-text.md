@@ -223,7 +223,7 @@ is not restyled; a load that cannot make its map shows the chapter without sizes
 ## An entry's text with INFLATES and TEXTOF (#848, a piece of #608; keyword: text-proved)
 
 `src/text_proved.bats` has `take_text_proved`, beside `take_text` (which stays and is not changed): it takes an
-entry's data, a `barr` of `n` bytes (at most 1048576, the decoder's bound) whose cells `cs` are in its type, and its
+entry's data, a `barr` of `n` bytes (at most 1048576) whose cells `cs` are in its type, and its
 method as `entry_method(kind)` (`entry_method_of` makes it from zip's `compression`), and gives the array back with a
 `text_taken(kind, cs)`:
 
@@ -237,8 +237,13 @@ method as `entry_method(kind)` (`entry_method_of` makes it from zip's `compressi
 * **The other outcomes** each have a constructor: `TextRefused` (the document is refused, with its `TEXTOF`),
   `TextEmpty` (the data inflates to nothing, with its `INFLATES`), `TextMalformed` (the decoder refuses the data, or, for
   `take_text_proved_sum`, the CRC-32 of the inflated cells is not the sum given) and
-  `TextTooLarge` (the inflated data, or its conversion, is over 1048576 bytes: a branch, not an assertion, since the
-  array's size is bounded by its type).
+  `TextTooLarge` (the compressed data is over 1048576 bytes, the inflated data over 16 MiB, or the conversion of a text is
+  over 1 MiB: a branch, not an assertion, since the array's size is bounded by its type). A text inflated over 1 MiB
+  (`inflated_cells_too_large`) is inflated again by zip's `inflate_cells_arena_proved` (class 16 MiB, zip#95); the walks read
+  an array of exactly the text's cells, so `_text_of_arena` copies the output to a piece of an arena of its own size
+  (`_copy_down`, from the last cell to the first), `AGREED` says which cells agree, `_eq_of_agreed` makes the copy the output's
+  cells (`CELLS_EQ`), and the text is read from it as from any inflated cells. The array's `text_owner` (`text_give_back`)
+  says whether it goes back to the heap (`barr_free`) or to that arena (keyword: arena-text).
 * **`take_text_proved_sum`** (#849), beside `take_text_proved` (additive: `take_text_proved` keeps its type): the same take
   that compares `crc_of_cborrow`'s sum of the inflated cells (the `output` that `INFLATES` names, frozen before the text is
   read) with the two halves the archive states (`book_entry_sum`), and is `TextMalformed` when they differ. Both are
@@ -250,7 +255,7 @@ method as `entry_method(kind)` (`entry_method_of` makes it from zip's `compressi
   `tests/static/accept/text-proved-two-takes-one-text` takes one entry twice and applies it;
   `reject/text-proved-functional-other-entry` (two entries' cells), `-other-method` (stored and deflated) and
   `reject/text-proved-held-other-octets` (a text array claimed to hold other octets) refuse the misuse.
-* **The array is a `barr`, not an arena piece**, because the decoder's output is one (`barr_alloc`); a caller that
+* **The array is a `barr`** (an arena piece lent as one when the text is over 1 MiB, `TextTaken`'s `text_owner`); a caller that
   reads it with a plain borrow freezes it and takes `cborrow_view`. The five chapter loads of `src/reader.bats` call it
   (#849: render and the facing page by `take_text_proved_sum`, which checks the entry's CRC-32 on the inflated cells,
   search, the places pass and read aloud by `take_text_proved`); the other callers of `take_text` (the font cipher, the

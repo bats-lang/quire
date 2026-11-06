@@ -27,16 +27,34 @@ implement entry_method_of (method) =
   | $Z.Stored() => MethodStored()
   | $Z.Deflated() => MethodDeflated()
 
-(* What taking an entry's data as text gave. The array of the text is a barr (the decoder's own output or a conversion of it),
-   not an arena piece, and holds at most 1048576 bytes (the decoder's bound). Taken: the entry inflates by its method to the
+(* What a text's array is given back to: the heap (barr_free), or the arena whose piece it is (a text over 1 MiB, which no barr_alloc
+   makes: the copy of an arena's output, #849; keyword: arena-text) *)
+#pub datavtype text_owner(l:addr, n:int) =
+  | text_owner_heap(l, n) of ()
+  | {la:agz}{max,used:nat} text_owner_arena(l, n) of ($A.arrx_lent(l, n, la) | $A.arena(byte, la, max, used, 1))
+
+(* The array of a text, given back to what it came from *)
+#pub fn text_give_back {l:agz}{n:nat}{cs:$A.cells} (owner: text_owner(l, n), array: $A.barr(l, n, cs)): void
+
+implement text_give_back {l}{n}{cs} (owner, array) =
+  case+ owner of
+  | ~text_owner_heap() => $A.barr_free(array)
+  | ~text_owner_arena(lent | arena) => let
+      val () = $A.arena_return<byte>(arena, $A.barr_to_arrx(lent | array))
+    in $A.arena_destroy<byte>(arena) end
+
+(* What taking an entry's data as text gave. The array of the text is a barr (the decoder's own output or a conversion of it, or
+   the copy of an arena's output when the entry inflates to more than 1 MiB, up to 16 MiB: text_owner says which it gives back to).
+   Taken: the entry inflates by its method to the
    cells output (INFLATES), the document in them needs the plan and becomes the octets (TEXTOF), and the array holds exactly
    those octets (HOLDS). Refused: the document is in the cells and is refused (TEXTOF). Empty: the entry inflates to nothing.
    Malformed: the decoder refuses the data, or (take_text_proved_sum) the sum the archive states is not the CRC-32 of what it
-   inflated to. Too large: the data or its conversion is over the bound *)
+   inflated to. Too large: the data is over the bound (1048576 bytes of compressed data; 16 MiB inflated), or the conversion of it
+   is over 1 MiB *)
 #pub datavtype text_taken($Z.inflate_kind, $A.cells) =
-  | {kind:$Z.inflate_kind}{compressed,output,text:$A.cells}{plan:plan}{octets:bytes}{count:pos | count <= 1048576}{l:agz}
+  | {kind:$Z.inflate_kind}{compressed,output,text:$A.cells}{plan:plan}{octets:bytes}{count:pos}{l:agz}
     TextTaken(kind, compressed) of ($Z.INFLATES(kind, compressed, output), TEXTOF(output, plan, TOUT_bytes(octets)),
-      HOLDS(text, 0, octets, count), $A.CLEN(text, count) | $A.barr(l, count, text), int count)
+      HOLDS(text, 0, octets, count), $A.CLEN(text, count) | text_owner(l, count), $A.barr(l, count, text), int count)
   | {kind:$Z.inflate_kind}{compressed,output:$A.cells}{out:textout}
     TextRefused(kind, compressed) of ($Z.INFLATES(kind, compressed, output), TEXTOF(output, PlanRefused(), out) | )
   | {compressed:$A.cells}
@@ -69,8 +87,8 @@ prfn _as_is_holds {cells:$A.cells}{n:pos}{out:textout}
     in (TEXTOF_single_as_is(detect, plan_length, run, held), held) end
 
 (* The inflated cells, read as text *)
-fn _read_text {kind:$Z.inflate_kind}{compressed,output:$A.cells}{n:pos | n <= 1048576}{l:agz}
-  (inflates: $Z.INFLATES(kind, compressed, output), length: $A.CLEN(output, n) | inflated: $A.barr(l, n, output), n: int n)
+fn _read_text {kind:$Z.inflate_kind}{compressed,output:$A.cells}{n:pos}{l:agz}
+  (inflates: $Z.INFLATES(kind, compressed, output), length: $A.CLEN(output, n) | owner: text_owner(l, n), inflated: $A.barr(l, n, output), n: int n)
   : text_taken(kind, compressed) = let
   val @(frozen, view) = $A.barr_freeze(inflated)
   val (plan | which) = text_plan_proved(length | view, n)
@@ -80,18 +98,18 @@ in
       prval (as_is, held) = _as_is_holds(plan, length)
       val () = $A.cborrow_drop(frozen, view)
       val back = $A.barr_thaw(frozen)
-    in TextTaken(inflates, as_is, held, length | back, n) end
+    in TextTaken(inflates, as_is, held, length | owner, back, n) end
   | ProvedRefused() => let
       val () = $A.cborrow_drop(frozen, view)
       val back = $A.barr_thaw(frozen)
-      val () = $A.barr_free(back)
+      val () = text_give_back(owner, back)
     in TextRefused(inflates, plan | ) end
   | ProvedConvert() =>
     (case+ text_convert_size(length | view, n) of
      | ~TextNoConversion() => let
          val () = $A.cborrow_drop(frozen, view)
          val back = $A.barr_thaw(frozen)
-         val () = $A.barr_free(back)
+         val () = text_give_back(owner, back)
        in TextMalformed() end
      | ~TextSized(converting, total_length | count) =>
        if count <= 1048576 then let
@@ -99,12 +117,12 @@ in
          val (held, written_length | written) = text_convert_fill(length, converting, total_length, text_length | view, n, text, count)
          val () = $A.cborrow_drop(frozen, view)
          val back = $A.barr_thaw(frozen)
-         val () = $A.barr_free(back)
-       in TextTaken(inflates, converting, held, written_length | written, count) end
+         val () = text_give_back(owner, back)
+       in TextTaken(inflates, converting, held, written_length | text_owner_heap(), written, count) end
        else let
          val () = $A.cborrow_drop(frozen, view)
          val back = $A.barr_thaw(frozen)
-         val () = $A.barr_free(back)
+         val () = text_give_back(owner, back)
        in TextTooLarge() end)
 end
 
@@ -116,26 +134,116 @@ fn _sum_is {lb:agz}{n:pos}{cs:$A.cells}
 in sum_high = want_high && sum_low = want_low end
 
 (* The inflated cells, read as text when the CRC-32 of them is the sum; else they are freed and the take is malformed *)
-fn _read_text_summed {kind:$Z.inflate_kind}{compressed,output:$A.cells}{n:pos | n <= 1048576}{l:agz}
-  (inflates: $Z.INFLATES(kind, compressed, output), length: $A.CLEN(output, n) | inflated: $A.barr(l, n, output), n: int n,
+fn _read_text_summed {kind:$Z.inflate_kind}{compressed,output:$A.cells}{n:pos}{l:agz}
+  (inflates: $Z.INFLATES(kind, compressed, output), length: $A.CLEN(output, n) | owner: text_owner(l, n), inflated: $A.barr(l, n, output), n: int n,
    want_high: int, want_low: int): text_taken(kind, compressed) = let
   val @(frozen, view) = $A.barr_freeze(inflated)
   val matches = _sum_is(length | view, n, want_high, want_low)
   val () = $A.cborrow_drop(frozen, view)
   val back = $A.barr_thaw(frozen)
 in
-  if matches then _read_text(inflates, length | back, n)
+  if matches then _read_text(inflates, length | owner, back, n)
   else let
-    val () = $A.barr_free(back)
+    val () = text_give_back(owner, back)
   in TextMalformed() end
 end
 
 (* The inflated cells read as text, checked against the sum when check *)
-fn _read_checked {kind:$Z.inflate_kind}{compressed,output:$A.cells}{n:pos | n <= 1048576}{l:agz}
-  (inflates: $Z.INFLATES(kind, compressed, output), length: $A.CLEN(output, n) | inflated: $A.barr(l, n, output), n: int n,
+fn _read_checked {kind:$Z.inflate_kind}{compressed,output:$A.cells}{n:pos}{l:agz}
+  (inflates: $Z.INFLATES(kind, compressed, output), length: $A.CLEN(output, n) | owner: text_owner(l, n), inflated: $A.barr(l, n, output), n: int n,
    check: bool, want_high: int, want_low: int): text_taken(kind, compressed) =
-  if check then _read_text_summed(inflates, length | inflated, n, want_high, want_low)
-  else _read_text(inflates, length | inflated, n)
+  if check then _read_text_summed(inflates, length | owner, inflated, n, want_high, want_low)
+  else _read_text(inflates, length | owner, inflated, n)
+
+(* ===== an arena's output, copied to a piece of its own size (#849; keyword: arena-text) =====
+   zip's decode above 1 MiB gives the output in the first size cells of an arena's piece of max cells (APPEND(output, junk, buffer)),
+   and the walks of the text read an array of exactly the text's cells (the parser, the cut and the page are indexed by its length).
+   The output is copied to a piece of an arena of its own, from the last cell to the first, and AGREED says which cells of the copy
+   are the output's; the copy that is whole is the output's cells (CELLS_EQ), so the text is read from it as from any inflated cells *)
+
+(* AGREED(first, second, from, to): cell i of first and of second is one value, for every i from from up to (not including) to *)
+dataprop AGREED($A.cells, $A.cells, int, int) =
+  | {first,second:$A.cells}{to:nat} AGREED_end(first, second, to, to)
+  | {first,second:$A.cells}{from,to:nat | from < to}{value:int}
+    AGREED_more(first, second, from, to) of ($A.NTH(first, from, value), $A.NTH(second, from, value), AGREED(first, second, from + 1, to))
+
+(* Setting a cell before the ones agreed on leaves them agreed on *)
+prfun _agreed_after_set {first,second,second_after:$A.cells}{at,from,to:nat | at < from; from <= to}{value:int} .<to - from>.
+  (cells_set: $A.SETC(second, at, value, second_after), agreed: AGREED(first, second, from, to)): AGREED(first, second_after, from, to) =
+  case+ agreed of
+  | AGREED_end() => AGREED_end()
+  | AGREED_more(first_cell, second_cell, rest) =>
+    AGREED_more(first_cell, $A.setc_nth_other(cells_set, second_cell), _agreed_after_set(cells_set, rest))
+
+(* Cells that are agreed on from i + 1 are, after their first cell, agreed on from i *)
+prfun _agreed_shift {first_head,second_head:int}{first,second:$A.cells}{from,to:nat | from <= to} .<to - from>.
+  (agreed: AGREED($A.ccons(first_head, first), $A.ccons(second_head, second), from + 1, to + 1)): AGREED(first, second, from, to) =
+  case+ agreed of
+  | AGREED_end() => AGREED_end()
+  | AGREED_more(first_cell, second_cell, rest) =>
+    (case+ first_cell of
+     | $A.NTH_there(first_there) =>
+       (case+ second_cell of
+        | $A.NTH_there(second_there) => AGREED_more(first_there, second_there, _agreed_shift(rest))))
+
+(* Cells of one length that are agreed on from the first to the last are one list of cells *)
+prfun _eq_of_agreed {first,second:$A.cells}{n:nat} .<n>.
+  (first_len: $A.CLEN(first, n), second_len: $A.CLEN(second, n), agreed: AGREED(first, second, 0, n)): $A.CELLS_EQ(first, second) =
+  case+ first_len of
+  | $A.CLEN_nil() => (case+ second_len of $A.CLEN_nil() => $A.CELLS_EQ_refl())
+  | $A.CLEN_cons(first_rest) =>
+    (case+ second_len of
+     | $A.CLEN_cons(second_rest) =>
+       (case+ agreed of
+        | AGREED_more(first_cell, second_cell, rest) =>
+          (case+ first_cell of
+           | $A.NTH_here() =>
+             (case+ second_cell of
+              | $A.NTH_here() => let
+                  prval $A.CELLS_EQ_refl() = _eq_of_agreed(first_rest, second_rest, _agreed_shift(rest))
+                in $A.CELLS_EQ_refl() end))))
+
+(* The cells of the arena's output, copied from cell i - 1 down to cell 0 into the piece target, whose cells from i on are agreed on *)
+fun _copy_down {l,m:agz}{max,n:pos | n <= max}{output,junk,buffer,filled:$A.cells}{i:nat | i <= n} .<i>.
+  (output_len: $A.CLEN(output, n), appended: $A.APPEND(output, junk, buffer), filled_len: $A.CLEN(filled, n),
+   agreed: AGREED(output, filled, i, n) | source: !$A.barr(l, max, buffer), target: $A.barr(m, n, filled), i: int i)
+  : [done:$A.cells] ($A.CLEN(done, n), AGREED(output, done, 0, n) | $A.barr(m, n, done)) =
+  if i > 0 then let
+    val (found | value) = $Z.inflated_arena_get(output_len, appended | source, i - 1)
+    val (updated | target2) = $A.barr_set(target, i - 1, value)
+    prval agreed2 = _agreed_after_set(updated, agreed)
+    prval agreed3 = AGREED_more(found, $A.setc_nth_same(updated), agreed2)
+    prval len2 = $A.setc_len(updated, filled_len)
+  in _copy_down(output_len, appended, len2, agreed3 | source, target2, i - 1) end
+  else (filled_len, agreed | target)
+
+(* The output of zip's decode above 1 MiB, copied to a piece of its own size and read as text (the arena of the decode is given
+   back; a copy that cannot be made is too large) *)
+fn _text_of_arena {cs:$A.cells}
+  (inflating: $Z.inflated_cells_arena(cs), check: bool, want_high: int, want_low: int)
+  : text_taken($Z.inflate_deflated(), cs) =
+  case+ inflating of
+  | ~$Z.inflated_arena_done(inflates, output_len, appended, lent | arena, buffer, size) =>
+    (case+ $A.arena_class_of(size) of
+     | ~$A.arena_too_large() => let
+         val () = $Z.inflated_arena_release(lent | arena, buffer)
+       in TextTooLarge() end
+     | ~$A.arena_fits(class | max) =>
+       (case+ $A.arena_create_class<byte>(class | max) of
+        | ~$A.arena_none() => let
+            val () = $Z.inflated_arena_release(lent | arena, buffer)
+          in TextTooLarge() end
+        | ~$A.arena_some(target_arena) => let
+            val piece = $A.arena_alloc<byte>(target_arena, size)
+            val (piece_len, piece_lent | target) = $A.barr_of_arrx(piece)
+            val (copied_len, agreed | filled) = _copy_down(output_len, appended, piece_len, AGREED_end() | buffer, target, size)
+            val () = $Z.inflated_arena_release(lent | arena, buffer)
+            prval $A.CELLS_EQ_refl() = _eq_of_agreed(output_len, copied_len, agreed)
+          in _read_checked(inflates, output_len | text_owner_arena(piece_lent | target_arena), filled, size, check, want_high, want_low) end))
+  | ~$Z.inflated_arena_empty(inflates | ) => TextEmpty(inflates | )
+  | ~$Z.inflated_arena_malformed() => TextMalformed()
+  | ~$Z.inflated_arena_too_large() => TextTooLarge()
+  | ~$Z.inflated_arena_no_memory() => TextTooLarge()
 
 (* take_text_proved and take_text_proved_sum are this: the sum is checked when check *)
 fn _take {kind:$Z.inflate_kind}{l:agz}{n:pos | n <= 1048576}{cs:$A.cells}
@@ -144,7 +252,7 @@ fn _take {kind:$Z.inflate_kind}{l:agz}{n:pos | n <= 1048576}{cs:$A.cells}
   case+ method of
   | MethodStored() => let
       val copy = $A.barr_copy(compressed, n)
-    in @(compressed, _read_checked($Z.INFLATES_stored{cs}(), length | copy, n, check, want_high, want_low)) end
+    in @(compressed, _read_checked($Z.INFLATES_stored{cs}(), length | text_owner_heap(), copy, n, check, want_high, want_low)) end
   | MethodDeflated() => let
       val @(frozen, view) = $A.barr_freeze(compressed)
       val inflating = $Z.inflate_cells_proved(length | view, n)
@@ -153,10 +261,15 @@ fn _take {kind:$Z.inflate_kind}{l:agz}{n:pos | n <= 1048576}{cs:$A.cells}
     in
       case+ inflating of
       | ~$Z.inflated_cells_done(inflates, output_length | output, size) =>
-        @(back, _read_checked(inflates, output_length | output, size, check, want_high, want_low))
+        @(back, _read_checked(inflates, output_length | text_owner_heap(), output, size, check, want_high, want_low))
       | ~$Z.inflated_cells_empty(inflates | ) => @(back, TextEmpty(inflates | ))
       | ~$Z.inflated_cells_malformed() => @(back, TextMalformed())
-      | ~$Z.inflated_cells_too_large() => @(back, TextTooLarge())
+      (* over 1 MiB inflated: into an arena of 16 MiB, the largest class (zip#95) *)
+      | ~$Z.inflated_cells_too_large() => let
+          val @(again_frozen, again_view) = $A.barr_freeze(back)
+          val big = $Z.inflate_cells_arena_proved(length, $A.Arena16MiB() | again_view, n, 16777216)
+          val () = $A.cborrow_drop(again_frozen, again_view)
+        in @($A.barr_thaw(again_frozen), _text_of_arena(big, check, want_high, want_low)) end
     end
 
 (* An entry's data (the array `compressed`, whose cells are cs) taken as text: inflated by zip's decoder that proves INFLATES
@@ -197,7 +310,7 @@ primplement text_taken_functional {kind}{compressed,first,second}{first_plan,sec
 
 implement text_taken_free {kind}{cs} (taken) =
   case+ taken of
-  | ~TextTaken(_, _, _, _ | array, _) => $A.barr_free(array)
+  | ~TextTaken(_, _, _, _ | owner, array, _) => text_give_back(owner, array)
   | ~TextRefused(_, _ | ) => ()
   | ~TextEmpty(_ | ) => ()
   | ~TextMalformed() => ()

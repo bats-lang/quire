@@ -4602,8 +4602,8 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
          val facing_sum = book_entry_sum(serial, chapter_name_offset)
          val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
          (* the entry's bytes are lent as a barr and taken with the proofs the walks take (#849), the sum
-            compared on the inflated cells; an unknown sum, or an entry over the take's bound (1048576
-            bytes), is no text *)
+            compared on the inflated cells; an unknown sum, or an entry of over 1048576 compressed bytes
+            (the take's bound; a text inflated over 1 MiB is taken whole, arena-text), is no text *)
          val taken_text = (case+ facing_sum of
            | ~SumUnknown() => let
                val () = piece_free(compressed_owner, compressed)
@@ -4619,9 +4619,9 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
              in TextTooLarge{$Z.inflate_stored()}{$A.cnil()}() end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
        in
          (case+ taken_text of
-           | ~TextTaken(inflates, text_of, held, length | xhtml, xhtml_size) =>
+           | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) =>
              if generation <> !_load_generation then let
-               val () = $A.barr_free(xhtml)
+               val () = text_give_back(text_array_owner, xhtml)
              in $P.ret<load_outcome>(ChapterSuperseded()) end
              else let
                (* the text is the barr of the take, whose proof the walks take (#849):
@@ -4644,7 +4644,7 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
                val () = _load_images(serial, file_size, chapter_name_offset, dir_len, xhtml_bytes, xhtml_size, found, generation, facing_index)
                val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
                val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
-               val () = $A.barr_free($A.barr_thaw(xhtml_frozen))
+               val () = text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen))
                val () = _fixed_fit()
              in $P.ret<load_outcome>(ChapterShown()) end
            | other => let
@@ -4693,7 +4693,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
             in
               (* Stage 3: parse HTML and render *)
               (case+ taken_text of
-                | ~TextTaken(inflates, text_of, held, length | xhtml, xhtml_size) => let
+                | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
                   (* the text is the barr of the take, as the facing page's is (#568, #849) *)
                   prval taken = TAKEN_of(inflates, text_of, held)
                   val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
@@ -4707,7 +4707,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   | Malformed() => let
                       val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
                       val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
-                      val () = $A.barr_free($A.barr_thaw(xhtml_frozen))
+                      val () = text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen))
                       val () = _overlay_pending_put(NoOverlayPending())
                     in $P.ret<load_outcome>(ChapterNotRead()) end
                   | WellFormed() => let
@@ -4768,7 +4768,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val () = _load_images(serial, file_size, chapter_name_offset, dir_len, xhtml_bytes, xhtml_size, found, generation, chapter_index)
                   val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
                   val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
-                  val () = $A.barr_free($A.barr_thaw(xhtml_frozen))
+                  val () = text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen))
 
                   val () = (case+ reading_get() of
                     | @(page, page_count, _, chapter_count) => reading_set(@(page, page_count, chapter_index + 1, chapter_count)))
@@ -6076,7 +6076,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
        | ~Piece(compressed_owner, compressed) => let
            val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
            (* the entry's bytes are lent as a barr and taken with the proofs the walks take (#849); an entry
-              over the take's bound (1048576 bytes) is no text *)
+              of over 1048576 compressed bytes (the take's bound) is no text *)
            val taken_text = (if compressed_size <= 1048576 then let
                val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
                val @(compressed_back, text) = take_text_proved(compressed_length | entry_method_of(method), compressed_barr, compressed_size)
@@ -6086,7 +6086,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
                val () = piece_free(compressed_owner, compressed)
              in TextTooLarge{$Z.inflate_stored()}{$A.cnil()}() end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
            val () = (case+ taken_text of
-             | ~TextTaken(inflates, text_of, held, length | xhtml, xhtml_size) => let
+             | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
                  prval taken = TAKEN_of(inflates, text_of, held)
                  val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                  val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
@@ -6095,7 +6095,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
                  val () = $X.free_nodes(nodes)
                  val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
                  val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
-               in $A.barr_free($A.barr_thaw(xhtml_frozen)) end
+               in text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen)) end
              | other => text_taken_free(other))
          in _search_chapters(serial, chapter + 1, chapter_count, generation) end))
 
@@ -6144,7 +6144,7 @@ fun _places_chapters {after:int | after >= ~1}{bound:nat} .<max(bound - after, 0
                  val () = piece_free(compressed_owner, compressed)
                in TextTooLarge{$Z.inflate_stored()}{$A.cnil()}() end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
              val () = (case+ taken_text of
-               | ~TextTaken(inflates, text_of, held, length | xhtml, xhtml_size) => let
+               | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
                    prval taken = TAKEN_of(inflates, text_of, held)
                    val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                    val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
@@ -6154,7 +6154,7 @@ fun _places_chapters {after:int | after >= ~1}{bound:nat} .<max(bound - after, 0
                    val () = $X.free_nodes(nodes)
                    val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
                    val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
-                 in $A.barr_free($A.barr_thaw(xhtml_frozen)) end
+                 in text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen)) end
                | other => text_taken_free(other))
            in _places_chapters(serial, chapter, bound, generation) end))
   end
@@ -7765,7 +7765,7 @@ in
            in TextTooLarge{$Z.inflate_stored()}{$A.cnil()}() end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
        in
          (case+ taken_text of
-           | ~TextTaken(inflates, text_of, held, length | xhtml, xhtml_size) => let
+           | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
                prval taken = TAKEN_of(inflates, text_of, held)
                val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
@@ -7774,7 +7774,7 @@ in
                val () = $X.free_nodes(nodes)
                val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
                val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
-               val () = $A.barr_free($A.barr_thaw(xhtml_frozen))
+               val () = text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen))
              in $P.ret<script>(script) end
            | other => let
                val () = text_taken_free(other)

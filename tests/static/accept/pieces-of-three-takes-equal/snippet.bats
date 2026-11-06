@@ -7,11 +7,11 @@ fn _static_three_takes {kind:$Z.inflate_kind}{l:agz}{n:pos | n <= 1048576}{cs:$A
   val @(twice, search) = take_text_proved(length | method, once, n)
   val @(thrice, aloud) = take_text_proved(length | method, twice, n)
   val () = (case+ render of
-    | ~TextTaken(render_inflates, render_textof, render_held, _ | render_array, render_size) =>
+    | ~TextTaken(render_inflates, render_textof, render_held, _ | render_owner, render_array, render_size) =>
       (case+ search of
-       | ~TextTaken(search_inflates, search_textof, search_held, _ | search_array, search_size) =>
+       | ~TextTaken(search_inflates, search_textof, search_held, _ | search_owner, search_array, search_size) =>
          (case+ aloud of
-          | ~TextTaken(aloud_inflates, aloud_textof, aloud_held, _ | aloud_array, aloud_size) => let
+          | ~TextTaken(aloud_inflates, aloud_textof, aloud_held, _ | aloud_owner, aloud_array, aloud_size) => let
               prval render_taken = TAKEN_of(render_inflates, render_textof, render_held)
               prval search_taken = TAKEN_of(search_inflates, search_textof, search_held)
               prval aloud_taken = TAKEN_of(aloud_inflates, aloud_textof, aloud_held)
@@ -33,17 +33,17 @@ fn _static_three_takes {kind:$Z.inflate_kind}{l:agz}{n:pos | n <= 1048576}{cs:$A
               val () = $A.cborrow_drop(render_frozen, render_cells)
               val () = $A.cborrow_drop(search_frozen, search_cells)
               val () = $A.cborrow_drop(aloud_frozen, aloud_cells)
-              val () = $A.barr_free($A.barr_thaw(render_frozen))
-              val () = $A.barr_free($A.barr_thaw(search_frozen))
-            in $A.barr_free($A.barr_thaw(aloud_frozen)) end
+              val () = text_give_back(render_owner, $A.barr_thaw(render_frozen))
+              val () = text_give_back(search_owner, $A.barr_thaw(search_frozen))
+            in text_give_back(aloud_owner, $A.barr_thaw(aloud_frozen)) end
           | other => let
               val () = text_taken_free(other)
-              val () = $A.barr_free(render_array)
-            in $A.barr_free(search_array) end)
+              val () = text_give_back(render_owner, render_array)
+            in text_give_back(search_owner, search_array) end)
        | other => let
            val () = text_taken_free(other)
            val () = text_taken_free(aloud)
-         in $A.barr_free(render_array) end)
+         in text_give_back(render_owner, render_array) end)
     | other => let
         val () = text_taken_free(other)
         val () = text_taken_free(search)

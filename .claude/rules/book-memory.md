@@ -64,9 +64,9 @@ rendered.
 **Where content is allocated**: everything read from an archive, a backup, a
 dictionary, a catalogue, the sync file (refused over 16 MiB, `SYNC_MAX_BYTES`),
 read aloud's script and a narrated chapter's SMIL is a `piece`, except the text of a
-chapter at its five loads (#849): the `barr` of `take_text_proved` (`barr_alloc`, so at most
-1 MiB), which lives while the chapter is rendered, searched, counted or made a script and is
-freed with `barr_free` at the end of the load; the compressed bytes it is taken from are
+chapter at its five loads (#849): the `barr` of `take_text_proved` (`barr_alloc` up to 1 MiB; a text
+over 1 MiB, up to 16 MiB, is a piece of an arena of its own, the copy of zip's arena decode), which lives while the chapter is rendered, searched, counted or made a script and is
+given back with `text_give_back` (its `text_owner`) at the end of the load; the compressed bytes it is taken from are
 still a piece, lent as a `barr` for the take and given back. `alloc` holds
 only the archive's tail and local headers while a book is opened, its central
 directory (at most 1 MiB, kept for entry names, `book_index_make`), and small
@@ -141,9 +141,10 @@ machine slows both. Standing decisions:
     `_text_count`, `_skip_spans`) and each function that reaches one takes the proof of the
     take (`TAKEN`, `src/text_proved.bats`: the `INFLATES`, `TEXTOF` and `HOLDS` of the
     `TextTaken`), so a chapter read any other way does not type-check. An entry whose
-    compressed bytes or inflated text are over 1048576 bytes is `TextTooLarge` (a limit of
-    the take's types) and the chapter is not read, as an undecodable one is; the arena form
-    of zip's decode (zip#95, #97) is the way past it.
+    compressed bytes are over 1048576 bytes, or whose text is over 16 MiB, is `TextTooLarge` (a limit of
+    the take's types) and the chapter is not read, as an undecodable one is; a text inflated over
+    1 MiB is taken through the arena form of zip's decode (zip#95, #97) and copied to a piece of its own size
+    (`_text_of_arena`, `src/text_proved.bats`), which `e2e/pathological.spec.js` and `e2e/reader.spec.js` ("a chapter over 1 MiB is shown whole") run.
   * **Proved** (#849): `pieces_of_taken_functional` (`src/cut.bats`). Two takes of one
     entry's cells by one method hold one list of octets (`text_taken_functional`), so a cell of
     one is the cell of the other at its place, and a `BREAKBACK`, a `CUTC` and a `PIECES`

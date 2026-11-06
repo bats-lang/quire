@@ -4,8 +4,8 @@ fn _static_held_other_octets {kind:$Z.inflate_kind}{l:agz}{n:pos | n <= 1048576}
   val () = $A.barr_free(back)
 in
   case+ taken of
-  | ~TextTaken{k}{c,o,t}{p}{octets}{count}{la}(_, _, held, _ | array, _) => let
+  | ~TextTaken{k}{c,o,t}{p}{octets}{count}{la}(_, _, held, _ | owner, array, _) => let
       prval wrong: HOLDS(t, 0, other, count) = held
-    in $A.barr_free(array) end
+    in text_give_back(owner, array) end
   | other_taken => text_taken_free(other_taken)
 end
