@@ -1031,7 +1031,6 @@ test('a pause that stops in a client\'s script is named in the capture\'s summar
   const keepStarting = (async () => {
     while (starting) {
       await client.send('Runtime.evaluate', { expression: '1' }).catch(() => {});
-      await new Promise((resolve) => setTimeout(resolve, 5));
     }
   })();
   const result = await capture(page, armed, 'a capture asked for', browser);
