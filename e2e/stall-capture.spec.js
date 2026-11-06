@@ -26,7 +26,7 @@ import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
 import { gunzipSync } from 'node:zlib';
 import { keepBrowserTrace, keepKernel, ringSeen, serialRun, startBrowserTrace, startKernel, stopKernel, wanted } from './flight-recorder.js';
-import { arm, capture, lasting, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
+import { arm, capture, clientScript, lasting, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
 
 /** Resolves when the child has been started (its program is running). */
 const started = (child) => once(child, 'spawn');
@@ -1008,6 +1008,17 @@ test('every page of a test about to time out is captured', async ({ page, stallW
   expect(capture.native).toBeUndefined();
   // and the pause it asked for is dropped: the page still runs script
   expect(await page.evaluate(() => 1 + 1)).toBe(2);
+});
+
+// A pause that stops in a script a debugger client made (the watch's own probe, quire#1072) is not where the page is.
+test('a pause in a script of the watch or the first statement of a client\'s script is not the page\'s, and one in the page\'s function is', () => {
+  const at = (functionName, url, line, column) => ({ functionName, url, line, column });
+  expect(clientScript([at('(anonymous)', 'quire-stall-watch/task.js', 1, 1)])).toContain('quire-stall-watch/task.js');
+  expect(clientScript([at('(anonymous)', '', 1, 1)])).toContain('no URL');
+  expect(clientScript([at('spinForever', '', 2, 41)])).toBeNull();
+  expect(clientScript([at('(anonymous)', '', 1, 1), at('caller', '', 3, 1)])).toBeNull();
+  expect(clientScript([at('(anonymous)', 'http://127.0.0.1/app.js', 1, 1)])).toBeNull();
+  expect(clientScript([])).toBeNull();
 });
 
 // ---- the evidence for a page that was slow, not frozen (#600) ----

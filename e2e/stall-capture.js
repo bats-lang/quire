@@ -168,12 +168,48 @@ async function within(promise, ms) {
 const NO_ARM = 'QUIRE_NO_STALL_ARM';
 const armingOff = () => !['', '0'].includes(process.env[NO_ARM] || '');
 
+// Keyword: own script (#1072). The watch asks the page to run script of its
+// own (the probe's evaluate, the harvest, the task a capture asks for). A
+// Debugger.pause is taken by the next script the page runs, whoever made it, so
+// the capture of a page that answers reported "paused" in the watch's own
+// probe: an anonymous function at line 1 column 1 with no URL. The scripts the
+// watch sends through DevTools carry this sourceURL, every call of its own is
+// noted while it runs (`ownCall`), the capture waits for them before it pauses,
+// and a pause of a page that answers which stopped in a script of a debugger
+// client (clientScript) is not the page's: it is `clientPause`, not `paused`.
+const OWN_SCRIPT = 'quire-stall-watch/';
+const sourceUrlOf = (name) => `\n//# sourceURL=${OWN_SCRIPT}${name}.js`;
+
+/** Notes a page-side call of the watch's own while it runs, and gives the promise back. */
+function ownCall(armed, name, promise) {
+  const call = { name, settled: Promise.resolve(promise).then(() => {}, () => {}) };
+  armed.running.add(call);
+  call.settled.then(() => armed.running.delete(call));
+  return promise;
+}
+
+/**
+ * Whether a pause stopped in a script a debugger client made, not in one the
+ * page runs: the watch's own (by its sourceURL), or the first statement of a
+ * script with no URL, no function and no caller (what Runtime.evaluate of a
+ * client starts as: line 1 column 1). It names the script, else null.
+ */
+export function clientScript(frames) {
+  const top = frames[0];
+  if (!top) return null;
+  if (top.url.startsWith(OWN_SCRIPT)) return top.url;
+  if (frames.length === 1 && !top.url && top.functionName === '(anonymous)' && top.line === 1 && top.column === 1) {
+    return 'a script with no URL, made by a debugger client (line 1 column 1, no caller)';
+  }
+  return null;
+}
+
 /**
  * A page's DevTools session, made while the page still answers, with
  * the debugger enabled; `scripts` maps a script id to its URL.
  */
 export async function arm(page) {
-  const armed = { session: null, scripts: new Map(), error: null, pausing: false, history: armingOff() ? null : keepHistory(page) };
+  const armed = { session: null, scripts: new Map(), error: null, pausing: false, running: new Set(), history: armingOff() ? null : keepHistory(page) };
   if (armingOff()) {
     // the capture then says the page was not armed (`armed: false`, this reason)
     armed.error = `not armed: ${NO_ARM}=${process.env[NO_ARM]} (the debugger is never enabled)`;
@@ -184,7 +220,9 @@ export async function arm(page) {
     const session = await page.context().newCDPSession(page);
     armed.session = session;
     session.on('Debugger.scriptParsed', (event) => {
-      if (event.url) armed.scripts.set(event.scriptId, event.url);
+      // a script made with a sourceURL comment (OWN_SCRIPT) has that name
+      const url = event.url || event.sourceURL;
+      if (url) armed.scripts.set(event.scriptId, url);
     });
     // a pause no capture waits for (one asked for that came too late) is
     // ended at once, so the page never stays paused
@@ -223,7 +261,7 @@ const OBSERVE_LONG_TASKS = `(() => { try {
   for (const type of ['longtask', 'long-animation-frame']) {
     try { new PerformanceObserver((list) => list.getEntries().forEach(note)).observe({ type, buffered: true }); } catch (unsupported) { /* this browser lacks the type */ }
   }
-} catch (failure) { /* the page goes on without it */ } })()`;
+} catch (failure) { /* the page goes on without it */ } })()${sourceUrlOf('observe')}`;
 
 async function watchTiming(page, armed) {
   const timing = { entries: [], longTasks: [], notes: [], unavailable: null };
@@ -255,8 +293,9 @@ async function watchTiming(page, armed) {
   // the long tasks seen since the last harvest: the page keeps them, this takes them
   // `answering`: the probe has just had an answer from the page, whatever the last read did
   timing.harvest = async (answering = false) => {
-    if (page.isClosed() || (!answering && harvestDeaf())) return;
-    const read = await within(page.evaluate(() => { const kept = globalThis.__quireStall; return kept ? kept.splice(0) : []; }), HARVEST_MS);
+    // not while the page is captured: a pause asked for then would stop in this evaluate (#1072)
+    if (page.isClosed() || armed.capturing || (!answering && harvestDeaf())) return;
+    const read = await within(ownCall(armed, 'harvest evaluate', page.evaluate(() => { const kept = globalThis.__quireStall; return kept ? kept.splice(0) : []; })), HARVEST_MS);
     harvestDeafSince = read.answered ? 0 : Date.now();
     if (Array.isArray(read.value)) {
       timing.longTasks.push(...read.value);
@@ -969,14 +1008,14 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
   if (session && !armed.error) {
     // An interrupting command (answered while script runs) and a task
     const interrupt = await within(session.send('Debugger.setBreakpointsActive', { active: false }), COMMAND_MS);
-    const task = await within(session.send('Runtime.evaluate', { expression: '1' }), COMMAND_MS);
+    const task = await within(ownCall(armed, 'task evaluate', session.send('Runtime.evaluate', { expression: `1${sourceUrlOf('task')}` })), COMMAND_MS);
     result.answers = {
       interrupt: { answered: interrupt.answered, ms: interrupt.ms, error: interrupt.error },
       task: { answered: task.answered, ms: task.ms, error: task.error },
     };
     answers = task.answered;
   } else {
-    const evaluated = await within(page.evaluate(() => 1), COMMAND_MS);
+    const evaluated = await within(ownCall(armed, 'unarmed evaluate', page.evaluate(() => 1)), COMMAND_MS);
     result.evaluate = { answered: evaluated.answered, ms: evaluated.ms, error: evaluated.error };
     answers = evaluated.answered;
   }
@@ -1027,21 +1066,31 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
     }
   }
   if (session && !armed.error) {
+    // the watch's own calls into the page end first, so none is left to take the pause (#1072, keyword: own script)
+    // (a page that answers nothing keeps its calls pending, and is not waited for)
+    if (answers) await within(Promise.all([...armed.running].map((call) => call.settled)), COMMAND_MS);
     armed.pausing = true;
     const paused = new Promise((resolve) => session.once('Debugger.paused', resolve));
     const pause = await within(session.send('Debugger.pause'), COMMAND_MS);
     const stop = await within(paused, PAUSE_MS);
     armed.pausing = false;
+    let clientPause = null;
     if (stop.value) {
-      result.paused = { reason: stop.value.reason, frames: stop.value.callFrames.map((frame) => frameOf(frame, armed.scripts)) };
+      const frames = stop.value.callFrames.map((frame) => frameOf(frame, armed.scripts));
+      // a page that answers a task runs no script of its own: a pause in a client's script is not where it is
+      clientPause = answers ? clientScript(frames) : null;
+      if (clientPause) result.clientPause = { reason: stop.value.reason, script: clientPause, frames, ownCallsRunning: [...armed.running].map((call) => call.name) };
+      else result.paused = { reason: stop.value.reason, frames };
       await within(session.send('Debugger.resume'), COMMAND_MS);
-    } else {
+    }
+    if (!stop.value || clientPause) {
       // the pause asked for is still pending: disabling the debugger
       // drops it, so the page's next script does not stop in it
       await within(session.send('Debugger.disable'), COMMAND_MS);
       await within(session.send('Debugger.enable'), COMMAND_MS);
       await within(session.send('Debugger.setBreakpointsActive', { active: false }), COMMAND_MS);
-      result.pauseError = pause.error || (pause.answered ? `did not pause within ${PAUSE_MS} ms` : 'Debugger.pause was not answered');
+      result.pauseError = clientPause ? `the page ran no script of its own: the pause stopped in ${clientPause}`
+        : pause.error || (pause.answered ? `did not pause within ${PAUSE_MS} ms` : 'Debugger.pause was not answered');
       const enabled = await within(session.send('Profiler.enable'), COMMAND_MS);
       const started = enabled.answered && !enabled.error && await within(session.send('Profiler.start'), COMMAND_MS);
       if (started && started.answered && !started.error) {
@@ -1106,6 +1155,10 @@ export function summary(result) {
   if (result.answers) lines.push(`  answers: interrupt ${result.answers.interrupt.answered}, task ${result.answers.task.answered}`);
   if (result.paused) for (const frame of result.paused.frames.slice(0, 12)) {
     lines.push(`    at ${frame.functionName} (${frame.url}:${frame.line}:${frame.column})`);
+  }
+  if (result.clientPause) {
+    const own = result.clientPause.ownCallsRunning;
+    lines.push(`  pause stopped in ${result.clientPause.script} (reason ${result.clientPause.reason}; the watch's own calls running: ${own.length ? own.join(', ') : 'none'}), so the page runs no script of its own`);
   }
   if (result.profile && result.profile.top) for (const entry of result.profile.top.slice(0, 3)) {
     lines.push(`    ${entry.samples} samples: ${entry.stack.map((frame) => frame.functionName).join(' < ')}`);
@@ -1238,7 +1291,7 @@ export function stallWatch(browser, testInfo) {
 
   const record = async (page, reason) => {
     const arming = await within(armed.get(page), COMMAND_MS);
-    const armedPage = arming.value || { session: null, scripts: new Map(),
+    const armedPage = arming.value || { session: null, scripts: new Map(), running: new Set(),
       error: 'the page was still being armed: it stopped answering before its debugger was enabled' };
     count += 1;
     const path = testInfo.outputPath(`stall-capture-${count}.json`);
@@ -1297,7 +1350,8 @@ export function stallWatch(browser, testInfo) {
     while (!stopped && !page.isClosed()) {
       // not while the page is captured: its pause would stop in the probe
       if (ready.has(page) && ready.get(page).capturing) { await lasting(PROBE_EVERY_MS); continue; }
-      const answer = await within(page.evaluate(() => 1), ANSWER_MS);
+      const evaluating = page.evaluate(() => 1);
+      const answer = await within(ready.has(page) ? ownCall(ready.get(page), 'probe evaluate', evaluating) : evaluating, ANSWER_MS);
       if (stopped || page.isClosed()) return;
       if (!answer.answered) {
         start(page, `page did not answer an evaluate within ${ANSWER_MS / 1000} s`);
