@@ -6,7 +6,7 @@
  * EPUB parsing failures without needing a browser.
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { indexedDB, IDBKeyRange } from 'fake-indexeddb';
 import { readFileSync } from 'node:fs';
@@ -19,6 +19,18 @@ let wasmBytes;
 
 beforeAll(() => {
   wasmBytes = readFileSync(wasmPath);
+});
+
+// The app goes on working after a test has seen what it needs (the import
+// pipeline, the bridge's logging), and vitest sends each console call to its
+// main process over an RPC channel. A call made while the worker is torn
+// down fails with EnvironmentTeardownError and fails the run whatever the
+// tests said (quire#1053). So the console calls are given up deliberately
+// once the last test is done, and nothing reaches the channel after it.
+afterAll(() => {
+  for (const name of ['log', 'info', 'warn', 'error', 'debug', 'trace']) {
+    console[name] = () => {};
+  }
 });
 
 function setupGlobals(dom) {
