@@ -47,7 +47,7 @@ The hourly slot check runs this section: run `ListAgents`, fill each empty row o
 
 ## Checkouts
 
-The checkouts the agents load are `/home/user/<repo>` for each repository: quire, bats, pwa, bridge, dom, gestures, arith, array, zip, sha256, capacitor-plugins, repository-prototype; the 14 files an agent loads are those 12 repositories' CLAUDE.md and the `.claude/rules/bats.md` of bats and of dom (quire#732). `qsweep` prints `STRAY-WORK` for one that is off main or not clean. Keep the shared browsers directory and the GMP ATS2 install. Under pressure `qsweep` lists the stragglers, and `qsweep clean` removes a worktree at 90 percent disk.
+The checkouts the agents load are `/home/user/<repo>` for each repository: quire, bats, pwa, bridge, dom, gestures, arith, array, zip, sha256, capacitor-plugins, repository-prototype; the 14 files an agent loads are those 12 repositories' CLAUDE.md and the `.claude/rules/bats.md` of bats and of dom (quire#732). `qsweep` prints `STRAY-WORK` for one that is off main or not clean. Keep the shared browsers directory and the GMP ATS2 install.
 
 ## The orchestrator's own working rules (not the owner's)
 
