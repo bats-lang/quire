@@ -1021,6 +1021,32 @@ test('a pause in a script of the watch or the first statement of a client\'s scr
   expect(clientScript([])).toBeNull();
 });
 
+// Forces the pause (quire#1072, Done-when 1): a client of the page's DevTools session keeps starting scripts of its own while the
+// capture asks for a pause, so the pause stops in one, and the summary names it. Its log line is `pause stopped in `.
+test('a pause that stops in a client\'s script is named in the capture\'s summary and is not reported as paused', async ({ page, browser }) => {
+  await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
+  const armed = await arm(page);
+  const client = await page.context().newCDPSession(page);
+  let starting = true;
+  const keepStarting = (async () => {
+    while (starting) {
+      await client.send('Runtime.evaluate', { expression: '1' }).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  })();
+  const result = await capture(page, armed, 'a capture asked for', browser);
+  starting = false;
+  await keepStarting;
+  await armed.session.detach();
+  const text = summary(result);
+  console.log(text.split('\n').filter((line) => line.includes('pause stopped in ')).join('\n'));
+  expect(result.paused).toBeUndefined();
+  expect(result.clientPause.frames[0].url).toBe('');
+  expect(result.clientPause.frames[0].line).toBe(1);
+  expect(result.clientPause.frames[0].column).toBe(1);
+  expect(text).toContain('pause stopped in a script with no URL, made by a debugger client (line 1 column 1, no caller)');
+});
+
 // ---- the evidence for a page that was slow, not frozen (#600) ----
 //
 // A test that fails on a page that answered slowly keeps what tells a slow
