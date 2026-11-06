@@ -25,7 +25,9 @@ export const selectionBooks = {
           '<p>After the picture there are some more words to end a selection in.</p>' + filler },
     ],
     toc: [{ label: 'Picture', href: 'chapter1.xhtml' }],
-    extraImages: [{ name: 'images/map.png', data: solidPng(120, 120) }] } },
+    // 120 by 40: the reading area of a 375 px high window is 291 px, and with a
+    // 120 px picture the paragraph after it did not fit below it (#1033)
+    extraImages: [{ name: 'images/map.png', data: solidPng(120, 40) }] } },
 
   /** A note reference, and the footnote it opens in a popup */
   footnote: { valid: true, opts: {

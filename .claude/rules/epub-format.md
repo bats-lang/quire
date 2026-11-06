@@ -154,8 +154,10 @@ text and its fallback never followed).
   `href` that starts with `/` names the entry from the root of the zip, not from the
   document's directory (`ocf-url_link-path-absolute`).
 * **An image given as a data URL is shown** (`src/dataurl.bats`):
-  `data:image/<png|jpeg|gif|webp|svg+xml>;base64,...` is decoded by Quire
-  (`base64_decode`, `_load_data_image`) because the dom package refuses a `data:` URL
+  `data:image/<png|jpeg|gif|webp|svg+xml>[;parameters],...`, in base64 (the last parameter
+  is `;base64`) or percent-encoded (RFC 2397), is decoded by Quire
+  (`data_url_decode`: `base64_decode` or the percent-decoding `_unescape`, whose output
+  index is proven in range; `_load_data_image`) because the dom package refuses a `data:` URL
   as an attribute. One over 512 KiB of text (alloc's bound is 1 MiB) or of another
   type is not shown, and is not offered to the image viewer.
 * **A navigation link holding an image is labelled by the image's alt text, else its

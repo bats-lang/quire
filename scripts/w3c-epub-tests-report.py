@@ -208,7 +208,7 @@ VERDICTS = {
     'pub-cmt-webp': (T, ''),
     # Publication Resources, Manifest Fallbacks
     'pub-data-urls_browsing-context': (T, 'an img with a data: URL of png, jpeg, gif, webp or svg in base64 is shown (decoded here, up to 512 KiB of text); not offered to the image viewer'),
-    'pub-data-urls_top-level-content': (F, 'an img whose src is a data: URL of a percent-encoded (not base64) svg is replaced by an empty data URL (src="data:,"), so the picture is not drawn; measured on the test\'s own fixed-layout page (quire#827; a base64 data URL, as pub-data-urls_browsing-context uses, is drawn)'),
+    'pub-data-urls_top-level-content': (T, 'an img with a data: URL of an svg written percent-encoded (RFC 2397), with or without parameters such as ;charset=utf-8, is shown (decoded here, as the base64 form is)'),
     'pub-external-links': (T, 'a link out asks first, in the note overlay, and opens in a new tab on the reader\'s word'),
     'pub-external-links_consent': (T, 'a mailto: link asks first, in the note overlay, and opens the mail application on the reader\'s word'),
     'pub-file-urls': (T, 'iframes are not shown, so no file: URL is loaded'),
