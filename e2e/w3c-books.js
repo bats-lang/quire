@@ -113,6 +113,8 @@ const SVG_DOCUMENT = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 6
 </svg>`;
 
 const PAGE_TEXT = 'The text of the page.';
+// An svg 60 by 40, percent-encoded as a data URL carries it (single quotes: it sits in a double-quoted attribute)
+const PERCENT_SVG = "%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='40' viewBox='0 0 60 40'%3E%3Crect width='60' height='40' fill='%23652d59'/%3E%3C/svg%3E";
 const FALLBACK_TEXT = 'The fallback page is shown.';
 const fallbackItem = page('fallback', `<p>${FALLBACK_TEXT}</p>`);
 const closing = page('closing', '<p>The last page.</p>');
@@ -231,6 +233,11 @@ export const w3cBooks = {
   'data-url-image': book(() => packageEpub({
     title: 'Image as a data URL',
     items: [page('one', `<p>The image below is a data URL.</p><p><img src="data:image/png;base64,${TINY_PNG.toString('base64')}" alt="A pixel" width="40" height="40"/></p>`)],
+    spine: [{ idref: 'one' }],
+  })),
+  'data-url-percent-encoded': book(() => packageEpub({
+    title: 'Images as percent-encoded data URLs',
+    items: [page('one', `<p>The images below are percent-encoded data URLs.</p><p><img src="data:image/svg+xml,${PERCENT_SVG}" alt="Plain"/> <img src="data:image/svg+xml;charset=utf-8,${PERCENT_SVG}" alt="With a charset"/> <img src="data:image/svg+xml;charset=utf-8;base64,${Buffer.from(decodeURIComponent(PERCENT_SVG)).toString('base64')}" alt="Base64 after a charset"/></p>`)],
     spine: [{ idref: 'one' }],
   })),
   // Navigation Documents
