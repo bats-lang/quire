@@ -133,11 +133,11 @@ in sheet end
 
 implement short_screen_rules (sheet) = let
   val sheet = media(sheet, "(max-height:500px) and (orientation:landscape)")
-  (* the Undo toast sits at the foot, over the least of the page: a short
-     window has no room to lift it 112 px clear of the bars *)
-  val sheet = rule(sheet, ".toast")
-  val sheet = lay(sheet, Bottom(), "calc(env(safe-area-inset-bottom) + 8px)")
-  val sheet = close(sheet)
+  (* the Undo toast keeps its 112 px lift clear of the reader's bottom bar
+     in a short window too (#1033): at 8 px it lay over the bar's
+     Annotations button, and a toast over a button is a defect for a
+     reader of a phone turned sideways, not only for a test. The library
+     has no bar and its own 16 px (`.toast.in-library`) *)
   val sheet = rule(sheet, ".sheet:not([data-side])")
   val sheet = lay(sheet, Left(), "auto")
   val sheet = spaced(sheet, Margin(), SpaceNone())

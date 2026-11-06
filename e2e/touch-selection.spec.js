@@ -110,18 +110,6 @@ async function expectEvent(page, type) {
 }
 const arrived = page => page.evaluate(() => window.__eventArrived);
 
-// The landscape project (667 x 375) runs this file for the floating menu band
-// case alone (#1029). Run whole there, three cases fail, for causes of the
-// window's 375 px of height: the image case finds no word below the picture
-// (`pageWords` keeps words 40 px clear of the page's edges), and the two
-// re-selection cases click Annotations under the Undo toast, which lies over the
-// bottom bar's button in a window that short (Playwright: "undo-toast subtree
-// intercepts pointer events"). Both are the project's to widen later.
-test.beforeEach(({}, testInfo) => {
-  test.skip(testInfo.project.name === 'mobile-landscape' && !testInfo.title.startsWith('floating menu band'),
-    'the landscape project runs the floating menu band case');
-});
-
 /** A finger: mouse events made touch events by Chromium, which is the way
     to a long press in Chromium. Not awaited on a press, which is not
     answered until the long press has been decided. */
@@ -182,8 +170,8 @@ const touch = testInfo => ['android', 'mobile-portrait', 'mobile-landscape'].inc
 /** A word on the page, as a pointer finds it: its text, where it is on the
     screen and where it is in the page's text (the text node's number among the
     page's, and the offsets) */
-async function pageWords(page) {
-  return bookPage(page).evaluate(doc => {
+async function pageWords(page, clear = 40) {
+  return bookPage(page).evaluate((doc, clear) => {
     const box = doc.getBoundingClientRect();
     const nodes = [];
     const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
@@ -198,7 +186,7 @@ async function pageWords(page) {
         const b = r.getClientRects()[0];
         if (!b) continue;
         // wholly on the page shown (and clear of its running footer and top edge)
-        if (b.left < box.left + 1 || b.right > box.right - 1 || b.top < box.top + 40 || b.bottom > box.bottom - 40) continue;
+        if (b.left < box.left + 1 || b.right > box.right - 1 || b.top < box.top + clear || b.bottom > box.bottom - clear) continue;
         words.push({
           text: m[0], node, start: m.index, end: m.index + m[0].length,
           x: b.x + b.width / 2, y: b.y + b.height / 2, left: b.left, right: b.right, top: b.top, bottom: b.bottom,
@@ -206,7 +194,7 @@ async function pageWords(page) {
       }
     });
     return words;
-  });
+  }, clear);
 }
 
 /** The words of the page in lines: the words of each line, top to bottom */
@@ -609,7 +597,8 @@ test('a selection across the gap between two columns is whole, and is one highli
 test('a selection across an image is whole: the text before it, the picture and the text after', async ({ page }, testInfo) => {
   await open(page, 'picture', { oneColumn: true });
   await expect.poll(() => bookPage(page).getByRole('img', { name: 'the map' }).evaluate(i => i.naturalWidth)).toBe(120);
-  const words = await pageWords(page);
+  // a margin of 12 px, not 40: in a 375 px window (a reading area of 291 px) the book's low picture leaves room for the next paragraph, but not 40 px clear of the page's foot (#1033)
+  const words = await pageWords(page, 12);
   const picture = await bookPage(page).getByRole('img', { name: 'the map' }).boundingBox();
   const above = words.filter(w => w.bottom <= picture.y);
   const below = words.filter(w => w.top >= picture.y + picture.height);
