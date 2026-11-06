@@ -3766,7 +3766,7 @@ fn _data_mime (kind: data_image): [mime_len:pos | mime_len <= 24] string mime_le
   | DataSvg() => "image/svg+xml"
 
 (* The image of a content node given as a data URL data[src_start, src_start + src_len)
-   of an image of kind: decoded from base64 and shown as any entry's bytes are; one over
+   of an image of kind: decoded (base64 or percent-encoded) and shown as any entry's bytes are; one over
    512 KiB of text (alloc's bound is 1 MiB) is not shown. It is not kept for the image viewer *)
 fn _load_data_image {l:agz}{n:pos}{src_start,src_len:nat | src_start + src_len <= n}{node:nat}
   (node: int node, generation: int, kind: data_image, data: !$A.borrow(byte, l, n), src_start: int src_start, src_len: int src_len): void =
@@ -3778,7 +3778,7 @@ fn _load_data_image {l:agz}{n:pos}{src_start,src_len:nat | src_start + src_len <
     if count <= 0 then ()
     else let
       val buf = $A.alloc<byte>(count)
-      val decoded = base64_decode(data, src_start + from, count, buf)
+      val decoded = data_url_decode(data, src_start, src_len, from, buf)
     in
       if decoded <= 0 then $A.free<byte>(buf)
       else let

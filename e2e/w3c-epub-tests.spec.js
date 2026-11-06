@@ -177,6 +177,18 @@ test('pub-data-urls_browsing-context (must): an image given as a base64 data URL
   expect((await pictures(page))[0].loaded).toBe(true);
 });
 
+test('pub-data-urls_top-level-content (must): an image given as a percent-encoded data URL, with or without a charset, is shown in the page', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'data-url-percent-encoded', 'Images as percent-encoded data URLs');
+  await expect.poll(async () => (await pictures(page)).length).toBe(3);
+  await expect.poll(async () => (await pictures(page)).every(picture => picture.settled)).toBe(true);
+  const drawn = await bookPage(page).locator('img').evaluateAll(images => images.map(i => ({
+    alt: i.alt, width: i.naturalWidth, height: i.naturalHeight, source: i.currentSrc || i.src,
+  })));
+  expect(drawn.map(i => [i.alt, i.width, i.height])).toEqual([['Plain', 60, 40], ['With a charset', 60, 40], ['Base64 after a charset', 60, 40]]);
+  for (const picture of drawn) expect(picture.source, `the source of "${picture.alt}" is not the empty data URL`).not.toBe('data:,');
+});
+
 // ---- Navigation Documents ----
 
 test('nav-non-text_img, nav-non-text_img_title (should): a navigation link that holds an image is labelled by the image\'s alt text', async ({ page }) => {

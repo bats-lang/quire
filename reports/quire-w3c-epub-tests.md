@@ -20,11 +20,11 @@ Deflate archive that cannot show the case.
 
 | level | pass | fail | n/a | total |
 | --- | ---: | ---: | ---: | ---: |
-| must | 113 | 11 | 16 | 140 |
+| must | 114 | 10 | 16 | 140 |
 | should | 19 | 14 | 5 | 38 |
 | may | 1 | 0 | 0 | 1 |
 | deprecated | 17 | 9 | 1 | 27 |
-| all | 150 | 34 | 22 | 206 |
+| all | 151 | 33 | 22 | 206 |
 
 The suite lists `deprecated` tests (the `fxl-*` and `lay-fxl-*` ones, which the `lay-pp-*` ones replace); they are in
 the table too, and in `reports/quire.json`, as the suite's own template has them.
@@ -47,7 +47,6 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 | `pkg-dir_but_not_content` | must | a Hebrew book's page is set right to left, as its reading direction is (by decision, quire#416: a book in Hebrew or Arabic whose spine names no direction reads right to left, as Readium reads it; the page is one CSS column flow, so its direction is the columns' order, and a list or a paragraph in the book inherits it). The suite's pass criterion is a content document with no dir staying left to right, which 13 of the 13 reading systems that answered meet by laying each document out on its own; Quire's single flow cannot without giving up the Hebrew heuristic or marking every block | 13/13 | policy |
 | `pkg-lang_but_not_content` | must | the OPF's dc:language is the page's language where the chapter names none, so a q gets French quotation marks in a French book (by decision: browsers hyphenate and pick quotation marks only for text whose language is known, and the package's language is the only one a book declares; the earlier test in reader.spec.js holds it, and a book that names none is 'und', not English). 11 of the 15 reading systems that answered show a content document with no language in their own, the suite's criterion | 11/15 | policy |
 | `pub-cmt-jxl` | must | the image is not decoded: Chromium (and Android's WebView) have no JPEG XL decoder | 0/2 | platform |
-| `pub-data-urls_top-level-content` | must | an img whose src is a data: URL of a percent-encoded (not base64) svg is replaced by an empty data URL (src="data:,"), so the picture is not drawn; measured on the test's own fixed-layout page (quire#827; a base64 data URL, as pub-data-urls_browsing-context uses, is drawn) | 14/15 | next |
 | `css-epub-hyphens` | should | the book's own CSS is dropped by design (the reader's Hyphenation setting is the reader's). Decided not to be followed (quire#829): the reader's Hyphenation setting is the only hyphenation, and it applies to every book (#411); of the reading systems 7 pass (Apple Books iOS and macOS, Kobo iOS, Tolino, ACCESS, VitalSource iOS and Mac) and 11 do not (Thorium, Colibrio, Google Play, VOYAGER, Kobo eReader and web) | 7/18 | decision |
 | `css-epub-line-break` | should | the book's own CSS is dropped by design. Decided not to be followed (quire#829): the book's CSS is not applied (#411); 3 pass (Apple Books iOS, Kobo iOS, Thorium), 12 do not (ACCESS, Colibrio, Kobo eReader and web, Tolino, VitalSource, VOYAGER) | 3/15 | decision |
 | `css-epub-text-align-last` | should | the book's own CSS is dropped by design. Decided not to be followed (quire#829): the book's CSS is not applied (#411), and the page is justified or not by the reader's Justify setting; 1 passes (Apple Books iOS), 18 do not (Thorium, Kobo, Colibrio, Google Play, VitalSource, Tolino, VOYAGER, ACCESS, Apple Books macOS) | 1/19 | decision |
@@ -197,6 +196,7 @@ Caveats of a pass, where there is one:
 * `pub-cmt-mp4`: an audio element is made with the browser's controls and the book's entry as its source (AAC in MP4 is played by the engine; Chromium's headless build, which the e2e suite runs, has no AAC decoder, so the e2e test plays the mp3 and checks the controls of all)
 * `pub-cmt-opus`: an audio element is made with the browser's controls and the book's entry as its source (Opus is played by the engine; Chromium's headless build, which the e2e suite runs, has no AAC decoder, so the e2e test plays the mp3 and checks the controls of all)
 * `pub-data-urls_browsing-context`: an img with a data: URL of png, jpeg, gif, webp or svg in base64 is shown (decoded here, up to 512 KiB of text); not offered to the image viewer
+* `pub-data-urls_top-level-content`: an img with a data: URL of an svg written percent-encoded (RFC 2397), with or without parameters such as ;charset=utf-8, is shown (decoded here, as the base64 form is)
 * `pub-external-links`: a link out asks first, in the note overlay, and opens in a new tab on the reader's word
 * `pub-external-links_consent`: a mailto: link asks first, in the note overlay, and opens the mail application on the reader's word
 * `pub-file-urls`: iframes are not shown, so no file: URL is loaded
