@@ -18,7 +18,7 @@ import { pipeline } from 'node:stream/promises';
 import { createGunzip, createGzip, gunzipSync } from 'node:zlib';
 import { createInterface } from 'node:readline';
 import { test, expect } from './fixtures.js';
-import { arm, capture, CAPTURE_MOST_MS, NATIVE_MOST_MS, stallWatch as makeWatch } from './stall-capture.js';
+import { arm, capture, CAPTURE_MOST_MS, CRASH_RECORD_MOST_MS, NATIVE_MOST_MS, stallWatch as makeWatch } from './stall-capture.js';
 import { capabilities, diskEvidence, missingEvidence, pageState, parseBlocked, symbolEvidence } from './evidence.js';
 import { pixelDiff } from './relaunch.js';
 import { captureSummary, missingFields } from './evidence-check.js';
@@ -181,6 +181,8 @@ test('a memory error a sanitizer finds in a process of the run: its report is in
 test('a browser process killed: the ring holds the signal and the exit, and the trace says why it is not there', async ({ playwright, launchOptions }, testInfo) => {
   desktopOnly(testInfo);
   await recorderOn();
+  // the record of a dead browser may take as long as its own limits (CRASH_RECORD_MOST_MS), and a record that is not made says why (quire#1055)
+  test.setTimeout(testInfo.timeout + CRASH_RECORD_MOST_MS);
   const own = await playwright.chromium.launch(launchOptions);
   const watch = makeWatch(own, testInfo);
   try {
@@ -188,7 +190,7 @@ test('a browser process killed: the ring holds the signal and the exit, and the 
     await context.newPage();
     const browserPid = (await processes(own)).find((each) => each.type === 'browser').id;
     process.kill(browserPid, 'SIGSEGV');
-    await expect.poll(() => watch.state.flight, { timeout: 60000 }).toBeTruthy();
+    await watch.crashRecorded(browserPid);
     const seenBrowser = await ringHas(watch.state.flight.kernel.file, { signal: new RegExp(`signal_generate: sig=11 .*pid=${browserPid} `), exit: new RegExp(`sched_process_exit: .*pid=${browserPid} `) });
     expect(seenBrowser.signal, 'the signal is in the ring').not.toBeNull();
     expect(seenBrowser.exit, 'the exit is in the ring').not.toBeNull();

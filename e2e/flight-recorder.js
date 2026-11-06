@@ -162,8 +162,20 @@ export async function keepBrowserTrace(browser, out) {
 
 /** Both records for one capture, kernel first (its snapshot is taken at once); each says why when it cannot. Neither ring stops. */
 export async function keepBoth(browser, pathFor, env = process.env) {
+  return keepBothStaged(browser, pathFor, env, () => {});
+}
+
+/**
+ * keepBoth that says which step it is in: `stage('kernel ring')` before the ring's snapshot (which waits for the ring lock, up to LOCK_MOST_MS, and then
+ * reads the ring) and `stage('browser trace')` before the browser's trace (up to two TRACE_END_MS), so a caller that waits for the record can name the step
+ * that held it (quire#1055: a record not made in 60 s after a browser was killed said nothing of why).
+ */
+export async function keepBothStaged(browser, pathFor, env, stage) {
+  stage('kernel ring');
   const kernel = await keepKernel(pathFor('kernel.txt.gz'), env);
+  stage('browser trace');
   const browserTrace = await keepBrowserTrace(browser, pathFor('browser-trace.json.gz'));
+  stage('restarting the trace');
   // the trace starts again for the tests that follow (the first record is kept; a later failure has a record of its own)
   if (typeof browser.isConnected === 'function' && browser.isConnected()) { traces.delete(browser); startBrowserTrace(browser, env); }
   return { kernel, browserTrace };
