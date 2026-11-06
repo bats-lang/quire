@@ -21,15 +21,24 @@
    ones it was found in. Each relation is functional (breakback_functional,
    cutc_functional, pieces_functional): two cuts, or two counts, of the same
    cells and offset are equal, so two walks over one array cannot disagree.
-   What this does not show is that the three walks read one array: render,
-   search and read aloud each decode the chapter from separate pieces (the
-   same bytes is tested, not proved) *)
+   The three walks do not read one array: render, search and read aloud each
+   take the chapter from a take_text_proved of the entry (#849), and each
+   walk takes the proof of that take (text_proved's TAKEN). Two takes of one
+   entry by one method hold the same octets (text_taken_functional), and
+   pieces_of_taken_functional shows that a count over the cells of one is the
+   count over the cells of the other, so the three number a text's pieces
+   alike as a proof *)
 
 #target wasm begin
 
 #include "share/atspre_staload.hats"
 
 #use array as A
+#use zip as Z
+
+staload "bytes.sats"
+staload "bytesarr.sats"
+staload "text_proved.sats"
 
 (* WHITE(code): code is a space, a tab or a line feed; NOTWHITE(code):
    it is none of them (three ranges, so no disjunction is asked of the
@@ -324,5 +333,88 @@ fun _pieces_find {l:agz}{n:pos}{cs:$A.cells}{offset,text_len:nat | offset + text
 
 implement pieces_find {l}{n}{cs}{offset,text_len} (bytes, offset, text_len) =
   _pieces_find(bytes, offset, text_len)
+
+(* ===== two takes of one entry are cut alike (#849) =====
+   The cells a relation is decided from are the cells of the array read, and two takes of one entry, by one method, are two
+   arrays (the walks of render, search and read aloud each take their own). They hold one list of octets (text_taken_functional),
+   so a cell of one is the cell of the other at the same place, and a cut, a count of pieces found over the cells of one is the
+   same over the cells of the other. *)
+
+(* The octets a HOLDS says are a list of the count it says *)
+prfun _holds_len {cells:$A.cells}{i:nat}{octets:bytes}{count:nat} .<count>.
+  (held: HOLDS(cells, i, octets, count)): LEN(octets, count) =
+  case+ held of
+  | HOLDS_nil(_) => LEN_nil()
+  | HOLDS_cons(_, rest) => LEN_cons(_holds_len(rest))
+
+(* A cell of the first cells, within the count they hold the octets for, is the cell of the second cells that holds the octets *)
+prfun _nth_across {first_cells,second_cells:$A.cells}{i,at:nat | i <= at}{value:int}{octets:bytes}{count:nat | at < i + count} .<at - i>.
+  (first: HOLDS(first_cells, i, octets, count), second: HOLDS(second_cells, i, octets, count), cell: $A.NTH(first_cells, at, value))
+  : $A.NTH(second_cells, at, value) =
+  case+ first of
+  | HOLDS_nil(_) =/=> ()
+  | HOLDS_cons(first_cell, first_rest) =>
+    (case+ second of
+     | HOLDS_cons(second_cell, second_rest) =>
+       sif at == i then let
+         prval () = $A.nth_functional(first_cell, cell)
+       in second_cell end
+       else _nth_across(first_rest, second_rest, cell))
+
+prfun _breakback_across {first_cells,second_cells:$A.cells}{offset,at:nat}{floor,back:int}{octets:bytes}{count:nat | offset + at < count} .<at>.
+  (first: HOLDS(first_cells, 0, octets, count), second: HOLDS(second_cells, 0, octets, count),
+   proof: BREAKBACK(first_cells, offset, at, floor, back)): BREAKBACK(second_cells, offset, at, floor, back) =
+  case+ proof of
+  | BREAKBACK_start() => BREAKBACK_start()
+  | BREAKBACK_floor() => BREAKBACK_floor()
+  | BREAKBACK_white(cell, white) => BREAKBACK_white(_nth_across(first, second, cell), white)
+  | BREAKBACK_other(cell, not_white, rest) =>
+    BREAKBACK_other(_nth_across(first, second, cell), not_white, _breakback_across(first, second, rest))
+
+prfn _cutc_across {first_cells,second_cells:$A.cells}{offset:nat}{text_len,cut:int}{octets:bytes}{count:nat | offset + text_len <= count; 65536 <= text_len}
+  (first: HOLDS(first_cells, 0, octets, count), second: HOLDS(second_cells, 0, octets, count),
+   proof: CUTC(first_cells, offset, text_len, cut)): CUTC(second_cells, offset, text_len, cut) =
+  case+ proof of
+  | CUTC_break(back) => CUTC_break(_breakback_across(first, second, back))
+  | CUTC_65535(back, cell, starts) =>
+    CUTC_65535(_breakback_across(first, second, back), _nth_across(first, second, cell), starts)
+  | CUTC_65534(back, cell, continues, second_cell, second_starts) =>
+    CUTC_65534(_breakback_across(first, second, back), _nth_across(first, second, cell), continues,
+               _nth_across(first, second, second_cell), second_starts)
+  | CUTC_65533(back, cell, continues, second_cell, second_continues, third_cell, third_starts) =>
+    CUTC_65533(_breakback_across(first, second, back), _nth_across(first, second, cell), continues,
+               _nth_across(first, second, second_cell), second_continues, _nth_across(first, second, third_cell), third_starts)
+  | CUTC_none_starts(back, cell, continues, second_cell, second_continues, third_cell, third_continues) =>
+    CUTC_none_starts(_breakback_across(first, second, back), _nth_across(first, second, cell), continues,
+                     _nth_across(first, second, second_cell), second_continues, _nth_across(first, second, third_cell), third_continues)
+
+prfun _pieces_across {first_cells,second_cells:$A.cells}{offset,text_len:nat}{pieces:int}{octets:bytes}{count:nat | offset + text_len <= count} .<text_len>.
+  (first: HOLDS(first_cells, 0, octets, count), second: HOLDS(second_cells, 0, octets, count),
+   proof: PIECES(first_cells, offset, text_len, pieces)): PIECES(second_cells, offset, text_len, pieces) =
+  case+ proof of
+  | PIECES_last() => PIECES_last()
+  | PIECES_more(cut, rest) => PIECES_more(_cutc_across(first, second, cut), _pieces_across(first, second, rest))
+
+(* A count of the pieces of a text over the cells of one take of an entry is the count over the cells of any other take of it by
+   the same method: two takes of one entry, by one method, are cut alike. The cells of the two takes are the arrays of two
+   walks, so this is what makes render, search and read aloud number a text's pieces alike (and a stored place, the piece's
+   content node and an offset in it, the same place in all three) *)
+#pub prfun pieces_of_taken_functional {kind:$Z.inflate_kind}{compressed,first_text,second_text:$A.cells}{first_count,second_count:nat}
+  {offset,text_len:nat | offset + text_len <= first_count}{first,second:int}
+  (TAKEN(kind, compressed, first_text, first_count), TAKEN(kind, compressed, second_text, second_count),
+   PIECES(first_text, offset, text_len, first), PIECES(second_text, offset, text_len, second)): [first == second] void
+
+primplement pieces_of_taken_functional {kind}{compressed,first_text,second_text}{first_count,second_count}{offset,text_len}{first,second}
+  (first_taken, second_taken, first_pieces, second_pieces) =
+  case+ first_taken of
+  | TAKEN_of(first_inflates, first_textof, first_held) =>
+    (case+ second_taken of
+     | TAKEN_of(second_inflates, second_textof, second_held) => let
+         prval (_, EQB_refl()) = text_taken_functional(first_inflates, second_inflates, first_textof, second_textof)
+         prval EQI_refl() = len_functional(_holds_len(first_held), _holds_len(second_held))
+         prval second_over_first = _pieces_across(second_held, first_held, second_pieces)
+       in pieces_functional(first_pieces, second_over_first) end)
+
+(* fixture: pieces-of-taken-text *)
 
 end

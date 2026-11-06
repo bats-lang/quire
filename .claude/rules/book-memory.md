@@ -63,7 +63,11 @@ rendered.
 
 **Where content is allocated**: everything read from an archive, a backup, a
 dictionary, a catalogue, the sync file (refused over 16 MiB, `SYNC_MAX_BYTES`),
-read aloud's script and a narrated chapter's SMIL is a `piece`. `alloc` holds
+read aloud's script and a narrated chapter's SMIL is a `piece`, except the text of a
+chapter at its five loads (#849): the `barr` of `take_text_proved` (`barr_alloc`, so at most
+1 MiB), which lives while the chapter is rendered, searched, counted or made a script and is
+freed with `barr_free` at the end of the load; the compressed bytes it is taken from are
+still a piece, lent as a `barr` for the take and given back. `alloc` holds
 only the archive's tail and local headers while a book is opened, its central
 directory (at most 1 MiB, kept for entry names, `book_index_make`), and small
 buffers: element ids, event names, storage keys, paths, titles. The EPUB file
@@ -124,14 +128,35 @@ machine slows both. Standing decisions:
   the array read from (array's `cborrow`, `cborrow_get`): `BREAKBACK`, `CUTC` and `PIECES`,
   each taking the `NTH` of the cells it was decided from and each functional.
   `tests/static/reject/cut-*` and `pieces-*` reject a cut claimed over other cells, a forged
-  cut, and two counts of the same cells. `cut_find` and `pieces_find` return those proofs; a
-  chapter's piece is lent for this at each load (`barr_of_arrx`, `barr_freeze`,
-  `cborrow_view`, array#47).
-  * **Tested, not proved**: that the three walks read the same bytes (each decodes the chapter
-    from the compressed entry on its own; inflate, the CRC check and `_text_of_content` are not
-    yet proved relations of their cells). The proof is owed (#608; no trusted primitive is
-    needed or allowed); `e2e/giant-text-highlights.spec.js`, `pathological.spec.js` and
-    `search.spec.js` test it meanwhile.
+  cut, and two counts of the same cells. `cut_find` and `pieces_find` return those proofs.
+  * **The five chapter loads take the text by `take_text_proved`** (#849; `src/reader.bats`:
+    render in `_chapter_render`, the facing page in `_facing_open`, search in
+    `_search_chapters`, the places pass in `_places_chapters`, read aloud in
+    `reader_script_load`). The entry's compressed bytes are lent as a `barr`
+    (`barr_of_arrx`, array#47), inflated by zip's proved decode and read as text by
+    `text_relation`'s proved functions; the text is the `barr` of the take, frozen and given
+    to the walks as `cborrow_view` (`barr_freeze`). Render and the facing page take it by
+    `take_text_proved_sum`, which compares the entry's CRC-32 with `crc_of_cborrow` over the
+    cells `INFLATES` names. Every walk entry (`_text_spans`, `_scan_text`, `_runs_text`,
+    `_text_count`, `_skip_spans`) and each function that reaches one takes the proof of the
+    take (`TAKEN`, `src/text_proved.bats`: the `INFLATES`, `TEXTOF` and `HOLDS` of the
+    `TextTaken`), so a chapter read any other way does not type-check. An entry whose
+    compressed bytes or inflated text are over 1048576 bytes is `TextTooLarge` (a limit of
+    the take's types) and the chapter is not read, as an undecodable one is; the arena form
+    of zip's decode (zip#95, #97) is the way past it.
+  * **Proved** (#849): `pieces_of_taken_functional` (`src/cut.bats`). Two takes of one
+    entry's cells by one method hold one list of octets (`text_taken_functional`), so a cell of
+    one is the cell of the other at its place, and a `BREAKBACK`, a `CUTC` and a `PIECES`
+    over the cells of one are the same over the cells of the other: the counts of render,
+    search and read aloud are equal, and so are their cuts, as a proof and not by the walks
+    sharing a function. `tests/static/accept/pieces-of-three-takes-equal` takes one entry three
+    times (one by `take_text_proved_sum`) and applies it; `reject/pieces-of-other-entry` and
+    `reject/pieces-of-other-method` refuse takes of two entries, and of one entry by two methods.
+  * **Tested, not proved**: that the three loads read the same compressed bytes of an entry
+    (each reads the entry's span of the book into a piece of its own, and the cells of that
+    piece are not known: `compressed` in the three proofs are three names for it). The proof
+    is owed to the book's reads; `e2e/giant-text-highlights.spec.js`, `pathological.spec.js`
+    and `search.spec.js` test it meanwhile.
   * Trusted (array's, tested there): the unsafe core of `barr_of_arrx`, `cborrow_view`,
     `cborrow_get`. `white_not_white` and `starts_not_continues` prove `1 == 0` from an
     impossible pair, so the mutation check accepts them mutated to any statement; each premise

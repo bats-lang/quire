@@ -33,13 +33,15 @@ entry whose data span is proven, or missing) are kept in the book
 (`book_spine_set`); the OPF is not read again.
 
 **A chapter's data is checked against its CRC-32** (#529): the central directory
-record states it (offset 16, `book_entry_sum`), and `take_text_sum` (in place of
-`take_text`) computes the CRC-32 of the inflated bytes before they are made UTF-8
-and answers no content for a mismatch or an unknown sum, so the chapter is
-`ChapterNotRead` and the others read (libzip, Python's `zipfile` and Java's
-`ZipFile` check the same sum). The chapter shown and the facing page are checked;
-the OPF, container, images and the chapter reads for search, notes and read aloud
-are not (yet). `e2e/containers.spec.js` ("a chapter whose CRC is not its data's").
+record states it (offset 16, `book_entry_sum`), and `take_text_proved_sum`
+(`src/text_proved.bats`, #849) computes the CRC-32 of the inflated cells before they are
+read as text and answers `TextMalformed` for a mismatch (an unknown sum is no take
+either, `_entry_take_sum` in `src/reader.bats`), so the chapter is `ChapterNotRead` and
+the others read (libzip, Python's `zipfile` and Java's `ZipFile` check the same sum).
+Render and the facing page check the sum; the OPF, container, images and the
+chapter reads for search, notes and read aloud do not (yet). `take_text_sum` (in
+`src/book.bats`, `take_text` and a sum) is called only by `src/publisher_size.bats`.
+`e2e/containers.spec.js` ("a chapter whose CRC is not its data's").
 
 ### The CRC-32 table method is proved (#553), and it is the call's
 
@@ -61,12 +63,15 @@ type-check; `tests/codec` runs the check value of "123456789" and arrays of ever
 length 1 to 300 and 4000 against the fold, as a check of the boundaries, not as the
 proof.
 
-The call (`take_text_sum`, `_sum_matches` in `src/book.bats`): the inflated piece, an
-arena's `arrx(byte, l, n, arena)`, is lent as a `barr` by array's `barr_of_arrx`
-(its `arrx_lent` proof keeps the owner: the arena cannot be destroyed while lent,
-and `barr_to_arrx` gives it back only as the same piece), frozen, read, thawed and
-given back before the piece is freed or made text. **Proved**: the sum compared
-with the entry's is `crcfrom`'s fold over the bytes the piece holds. **Trusted, not
+The call (`take_text_proved_sum`, `_sum_is` in `src/text_proved.bats`; `take_text_sum`,
+`_sum_matches` in `src/book.bats` for `src/publisher_size.bats`): the cells to sum are the
+inflated cells themselves, the `barr` the decode gives (`INFLATES` names its cells), frozen,
+read, thawed and read as text; `take_text_sum` lends its inflated arena piece as a `barr`
+by array's `barr_of_arrx` (its `arrx_lent` proof keeps the owner: the arena cannot be
+destroyed while lent, and `barr_to_arrx` gives it back only as the same piece) for the
+same read. The compressed bytes at the chapter loads are lent by `barr_of_arrx` the same
+way for the decode. **Proved**: the sum compared with the entry's is `crcfrom`'s fold over
+the bytes the cells hold. **Trusted, not
 proved**: array's unsafe core (`barr_of_arrx`, `barr_to_arrx`, `cborrow_get`, tested
 in array), arith's C operators behind `xor_g1` and the prelude's `/` (tested in
 arith), the stored sum `book_entry_sum` reads, that the fold is CRC-32 (polynomial

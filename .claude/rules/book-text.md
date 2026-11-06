@@ -65,10 +65,13 @@ implementation of them that takes a `cborrow`: `text_plan_proved` (the plan and 
 `text_convert_size` (how many bytes the conversion makes, with the relation) and `text_convert_fill`
 (writes them into an array whose cells then hold them: `HOLDS`). `text_plan_of`, `text_converted_size`
 and `text_convert_into` (plain `borrow`, no cells in their types) stay beside them, marked deprecated, until
-`take_text` moves to the proved ones (the callers' move is a ticket of its own; `take_text_proved` of #848 is beside `take_text`, below); the removal of the old forms is quire#865 (p2). The two are
+the last caller of `take_text` has moved to the proved ones (`take_text_proved` of #848 is beside `take_text`, below; the five chapter
+loads of `src/reader.bats` moved in #849, and the callers that remain, the font cipher, the spine, the overlay's SMIL and the note
+in `src/reader.bats` and those in `src/import.bats`, `src/toc.bats` and `src/publisher_size.bats`, are a ticket of their own);
+the removal of the old forms is quire#865 (p2). The two are
 separate code with the same structure; that they decide alike is neither proved nor yet tested:
-`e2e/encodings.spec.js` reads documents through the old ones, and runs through the proved ones when
-`take_text` moves. What is proved is each relation's functionality and that the proved functions return
+`e2e/encodings.spec.js` reads the chapters through the proved ones (#849) and the other documents through the old ones.
+What is proved is each relation's functionality and that the proved functions return
 the relation of the bytes they read and write the bytes the relation says. The output array is the
 caller's, as a `barr` (its cells model reaches 1048576 bytes with `barr_alloc`; `barr_of_arr` and
 `barr_of_arrx` take any array, whose cells then are not known until they are written).
@@ -232,9 +235,15 @@ method as `entry_method(kind)` (`entry_method_of` makes it from zip's `compressi
   text's array is the inflated array itself (`HOLDS` from the `TEXTOF`), and when it needs a conversion
   `text_convert_size` and `text_convert_fill` write it into a new array.
 * **The other outcomes** each have a constructor: `TextRefused` (the document is refused, with its `TEXTOF`),
-  `TextEmpty` (the data inflates to nothing, with its `INFLATES`), `TextMalformed` (the decoder refuses the data) and
+  `TextEmpty` (the data inflates to nothing, with its `INFLATES`), `TextMalformed` (the decoder refuses the data, or, for
+  `take_text_proved_sum`, the CRC-32 of the inflated cells is not the sum given) and
   `TextTooLarge` (the inflated data, or its conversion, is over 1048576 bytes: a branch, not an assertion, since the
   array's size is bounded by its type).
+* **`take_text_proved_sum`** (#849), beside `take_text_proved` (additive: `take_text_proved` keeps its type): the same take
+  that compares `crc_of_cborrow`'s sum of the inflated cells (the `output` that `INFLATES` names, frozen before the text is
+  read) with the two halves the archive states (`book_entry_sum`), and is `TextMalformed` when they differ. Both are
+  `_take` in `src/text_proved.bats` with the check on or off. The static fixture
+  `accept/pieces-of-three-takes-equal` calls it, and the chapter loads of render and the facing page.
 * **Lemma** `text_taken_functional`: the same compressed cells by the same method inflate to the same cells
   (`inflates_functional`), so the `TEXTOF` of the two have one plan and one output (`textof_functional`): two takes of
   one entry's cells are provably the same text, as the same plan and the same octets (`EQPLAN`, `EQB`).
@@ -242,9 +251,15 @@ method as `entry_method(kind)` (`entry_method_of` makes it from zip's `compressi
   `reject/text-proved-functional-other-entry` (two entries' cells), `-other-method` (stored and deflated) and
   `reject/text-proved-held-other-octets` (a text array claimed to hold other octets) refuse the misuse.
 * **The array is a `barr`, not an arena piece**, because the decoder's output is one (`barr_alloc`); a caller that
-  reads it with a plain borrow freezes it and takes `cborrow_view`. Nothing calls `take_text_proved` yet: moving
-  `take_text`'s callers is a ticket of its own, and `take_text` and the platform's `decompress` stay until then.
+  reads it with a plain borrow freezes it and takes `cborrow_view`. The five chapter loads of `src/reader.bats` call it
+  (#849: render and the facing page by `take_text_proved_sum`, which checks the entry's CRC-32 on the inflated cells,
+  search, the places pass and read aloud by `take_text_proved`); the other callers of `take_text` (the font cipher, the
+  spine, the overlay's SMIL, the note, `src/import.bats`, `src/toc.bats`, `src/publisher_size.bats`) are a ticket of
+  their own, and `take_text` and the platform's `decompress` stay until then. A walk of the text takes the proof of the
+  take (`TAKEN`: the `INFLATES`, `TEXTOF` and `HOLDS` of the `TextTaken` as one proof), and `pieces_of_taken_functional`
+  (`src/cut.bats`) shows that two takes of one entry by one method are cut alike (`.claude/rules/book-memory.md`).
 * **Tested, not proved:** that `inflate_cells_proved` and `text_plan_proved` run as their relations say is each
   package's own (zip's `tests/dynamic/inflate`, this module's functions are the text_relation ones above); the glue
-  here (the freeze and thaw, the copy of a stored entry) has no test of its own beyond the static fixtures, because
-  no caller reaches it yet.
+  here (the freeze and thaw, the copy of a stored entry, the sum's check of `take_text_proved_sum`) is run by the five
+  chapter loads, and `e2e/containers.spec.js` ("a chapter whose CRC is not its data's"), `e2e/encodings.spec.js` and the
+  specs of long chapters read through it.

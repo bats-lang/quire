@@ -11,6 +11,7 @@
 
 staload "bytes.sats"
 staload "bytesarr.sats"
+staload "crc.sats"
 staload "text_relation.sats"
 
 (* How an entry's data is stored, as a value of its static index (zip's inflate_kind) *)
@@ -30,7 +31,8 @@ implement entry_method_of (method) =
    not an arena piece, and holds at most 1048576 bytes (the decoder's bound). Taken: the entry inflates by its method to the
    cells output (INFLATES), the document in them needs the plan and becomes the octets (TEXTOF), and the array holds exactly
    those octets (HOLDS). Refused: the document is in the cells and is refused (TEXTOF). Empty: the entry inflates to nothing.
-   Malformed: the decoder refuses the data. Too large: the data or its conversion is over the bound *)
+   Malformed: the decoder refuses the data, or (take_text_proved_sum) the sum the archive states is not the CRC-32 of what it
+   inflated to. Too large: the data or its conversion is over the bound *)
 #pub datavtype text_taken($Z.inflate_kind, $A.cells) =
   | {kind:$Z.inflate_kind}{compressed,output,text:$A.cells}{plan:plan}{octets:bytes}{count:pos | count <= 1048576}{l:agz}
     TextTaken(kind, compressed) of ($Z.INFLATES(kind, compressed, output), TEXTOF(output, plan, TOUT_bytes(octets)),
@@ -41,6 +43,15 @@ implement entry_method_of (method) =
     TextEmpty($Z.inflate_deflated(), compressed) of ($Z.INFLATES($Z.inflate_deflated(), compressed, $A.cnil()) | )
   | {kind:$Z.inflate_kind}{compressed:$A.cells} TextMalformed(kind, compressed) of ()
   | {kind:$Z.inflate_kind}{compressed:$A.cells} TextTooLarge(kind, compressed) of ()
+
+(* TAKEN(kind, compressed, text, count): the first count cells of text hold the text of the document that the entry compressed
+   inflates to by kind. It is what a TextTaken says of its array, as one proof, so a walk of the text takes it (reader.bats's
+   render, search and read aloud) and two walks are shown to read one text when their proofs are of one entry and one method
+   (pieces_of_taken_functional, src/cut.bats). A TAKEN is made of the three proofs of a TextTaken and of nothing else *)
+#pub dataprop TAKEN($Z.inflate_kind, $A.cells, $A.cells, int) =
+  | {kind:$Z.inflate_kind}{compressed,output,text:$A.cells}{plan:plan}{octets:bytes}{count:int}
+    TAKEN_of(kind, compressed, text, count)
+      of ($Z.INFLATES(kind, compressed, output), TEXTOF(output, plan, TOUT_bytes(octets)), HOLDS(text, 0, octets, count))
 
 (* A document that needs no conversion is its own text: the bytes of the cells *)
 prfn _as_is_holds {cells:$A.cells}{n:pos}{out:textout}
@@ -97,18 +108,43 @@ in
        in TextTooLarge() end)
 end
 
-(* An entry's data (the array `compressed`, whose cells are cs) taken as text: inflated by zip's decoder that proves INFLATES
-   (a stored entry is a copy of its data), read by text_plan_proved and, when it needs one, converted by text_convert_fill. The
-   array is given back as it was *)
-#pub fn take_text_proved {kind:$Z.inflate_kind}{l:agz}{n:pos | n <= 1048576}{cs:$A.cells}
-  (length: $A.CLEN(cs, n) | method: entry_method(kind), compressed: $A.barr(l, n, cs), n: int n)
-  : @($A.barr(l, n, cs), text_taken(kind, cs))
+(* Whether the CRC-32 of the cells is the sum, high and low 16 bits, the archive states for the entry; crc_of_cborrow's proved
+   one, over the cells the proofs of the inflate name *)
+fn _sum_is {lb:agz}{n:pos}{cs:$A.cells}
+  (length: $A.CLEN(cs, n) | bytes: !$A.cborrow(lb, n, cs), n: int n, want_high: int, want_low: int): bool = let
+  val (_, _ | @(sum_high, sum_low)) = crc_of_cborrow(length | bytes, n)
+in sum_high = want_high && sum_low = want_low end
 
-implement take_text_proved {kind}{l}{n}{cs} (length | method, compressed, n) =
+(* The inflated cells, read as text when the CRC-32 of them is the sum; else they are freed and the take is malformed *)
+fn _read_text_summed {kind:$Z.inflate_kind}{compressed,output:$A.cells}{n:pos | n <= 1048576}{l:agz}
+  (inflates: $Z.INFLATES(kind, compressed, output), length: $A.CLEN(output, n) | inflated: $A.barr(l, n, output), n: int n,
+   want_high: int, want_low: int): text_taken(kind, compressed) = let
+  val @(frozen, view) = $A.barr_freeze(inflated)
+  val matches = _sum_is(length | view, n, want_high, want_low)
+  val () = $A.cborrow_drop(frozen, view)
+  val back = $A.barr_thaw(frozen)
+in
+  if matches then _read_text(inflates, length | back, n)
+  else let
+    val () = $A.barr_free(back)
+  in TextMalformed() end
+end
+
+(* The inflated cells read as text, checked against the sum when check *)
+fn _read_checked {kind:$Z.inflate_kind}{compressed,output:$A.cells}{n:pos | n <= 1048576}{l:agz}
+  (inflates: $Z.INFLATES(kind, compressed, output), length: $A.CLEN(output, n) | inflated: $A.barr(l, n, output), n: int n,
+   check: bool, want_high: int, want_low: int): text_taken(kind, compressed) =
+  if check then _read_text_summed(inflates, length | inflated, n, want_high, want_low)
+  else _read_text(inflates, length | inflated, n)
+
+(* take_text_proved and take_text_proved_sum are this: the sum is checked when check *)
+fn _take {kind:$Z.inflate_kind}{l:agz}{n:pos | n <= 1048576}{cs:$A.cells}
+  (length: $A.CLEN(cs, n) | method: entry_method(kind), compressed: $A.barr(l, n, cs), n: int n,
+   check: bool, want_high: int, want_low: int): @($A.barr(l, n, cs), text_taken(kind, cs)) =
   case+ method of
   | MethodStored() => let
       val copy = $A.barr_copy(compressed, n)
-    in @(compressed, _read_text($Z.INFLATES_stored{cs}(), length | copy, n)) end
+    in @(compressed, _read_checked($Z.INFLATES_stored{cs}(), length | copy, n, check, want_high, want_low)) end
   | MethodDeflated() => let
       val @(frozen, view) = $A.barr_freeze(compressed)
       val inflating = $Z.inflate_cells_proved(length | view, n)
@@ -116,11 +152,32 @@ implement take_text_proved {kind}{l}{n}{cs} (length | method, compressed, n) =
       val back = $A.barr_thaw(frozen)
     in
       case+ inflating of
-      | ~$Z.inflated_cells_done(inflates, output_length | output, size) => @(back, _read_text(inflates, output_length | output, size))
+      | ~$Z.inflated_cells_done(inflates, output_length | output, size) =>
+        @(back, _read_checked(inflates, output_length | output, size, check, want_high, want_low))
       | ~$Z.inflated_cells_empty(inflates | ) => @(back, TextEmpty(inflates | ))
       | ~$Z.inflated_cells_malformed() => @(back, TextMalformed())
       | ~$Z.inflated_cells_too_large() => @(back, TextTooLarge())
     end
+
+(* An entry's data (the array `compressed`, whose cells are cs) taken as text: inflated by zip's decoder that proves INFLATES
+   (a stored entry is a copy of its data), read by text_plan_proved and, when it needs one, converted by text_convert_fill. The
+   array is given back as it was *)
+#pub fn take_text_proved {kind:$Z.inflate_kind}{l:agz}{n:pos | n <= 1048576}{cs:$A.cells}
+  (length: $A.CLEN(cs, n) | method: entry_method(kind), compressed: $A.barr(l, n, cs), n: int n)
+  : @($A.barr(l, n, cs), text_taken(kind, cs))
+
+implement take_text_proved {kind}{l}{n}{cs} (length | method, compressed, n) = _take(length | method, compressed, n, false, 0, 0)
+
+(* take_text_proved, but only when the CRC-32 of the inflated cells, before they are read as text, is the sum the archive states
+   for the entry (want_high and want_low, the high and low 16 bits, as book_entry_sum gives them): the sum is compared on the
+   cells INFLATES names, so the walks of the text read the cells that were checked. An entry whose data is not what its sum says
+   is TextMalformed, as an unreadable one is (take_text_sum's none) *)
+#pub fn take_text_proved_sum {kind:$Z.inflate_kind}{l:agz}{n:pos | n <= 1048576}{cs:$A.cells}
+  (length: $A.CLEN(cs, n) | method: entry_method(kind), compressed: $A.barr(l, n, cs), n: int n, want_high: int, want_low: int)
+  : @($A.barr(l, n, cs), text_taken(kind, cs))
+
+implement take_text_proved_sum {kind}{l}{n}{cs} (length | method, compressed, n, want_high, want_low) =
+  _take(length | method, compressed, n, true, want_high, want_low)
 
 (* Two decodes of one entry's cells, by one method, give the same text: the same plan and the same bytes *)
 #pub prfun text_taken_functional {kind:$Z.inflate_kind}{compressed,first,second:$A.cells}{first_plan,second_plan:plan}{first_octets,second_octets:bytes}
