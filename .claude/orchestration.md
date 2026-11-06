@@ -16,9 +16,7 @@ The hourly slot check runs this section: run `ListAgents`, fill each empty row o
 
 ## Tickets
 
-* Every worker brief carries the `No split:` line below.
 * A PR body's `Fixes` and `Refs` lines are checked by `guidelines.py`, which refuses the phrases of `phrases.tsv`.
-* A ticket not labelled `human only` is not for the owner (owner, 2026-10-24T05:21:26Z, transcript line 83016: "if it's not labeled human only IT'S NOT FOR ME").
 
 ## Plan first
 
@@ -53,9 +51,7 @@ The checkouts the agents load are `/home/user/<repo>` for each repository: quire
 
 ## The orchestrator's own working rules (not the owner's)
 
-* Only when the disk is at 90 percent does `qsweep clean` remove another worktree, and only one whose pull request is merged and whose tip is in `origin/main`; otherwise `qsweep` reports it as reusable. The number is the orchestrator's.
 * `.claude/skills/sweep/` holds `qsweep` and `slots` (quire#751): stopgaps until they move into bats (bats-lang/bats#435). quire#573 (p3) keeps them in the repository as a skill; the Python package its comments name (pitboss, in dev-skill-up/pitboss) is not bats and is not that move.
-* The owner wrote (owner, 2026-10-21T10:36:06Z): "I'm not going to install stop hooks manually each session. That is insane." The same message begins with a sentence the orchestrator had written at 2026-10-21T10:34:24Z, which the owner sent back; that sentence is the orchestrator's and is not quoted here.
 
 ## Published APIs
 
@@ -64,7 +60,6 @@ The checkouts the agents load are `/home/user/<repo>` for each repository: quire
 ## How decisions are made
 
 * quire#646: we write bats, not shell. The bootstrap/c regenerate-and-compare check catches a forgotten update; it is not a security check.
-* A command the harness refuses is answered by an allow rule in `.claude/settings.json`, in the PR that needs it.
 * `phrases.tsv` refuses the phrases of an agent that says it did not look.
 
 ## Open work
