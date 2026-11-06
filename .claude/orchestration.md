@@ -61,6 +61,7 @@ The checkouts the agents load are `/home/user/<repo>` for each repository: quire
 
 * quire#646: we write bats, not shell. The bootstrap/c regenerate-and-compare check catches a forgotten update; it is not a security check.
 * `phrases.tsv` refuses the phrases of an agent that says it did not look.
+* **Quire reports nothing to W3C or to epubtest.org** (owner, 2026-11-06T10:53Z: "Drop any mention if reporting to w3c. This snuck in and I didn't catch it, it should never have been there"; 2026-11-06T10:56Z, on the same step in #420: "We can drop reporting in 420, too, sure."). No ticket, spec or script of Quire reports test results to W3C or to epubtest.org: no pull request on w3c/epub-tests, no fork for it, no listing request. Running the suites against Quire for our own use stays (#1069).
 
 ## Open work
 
