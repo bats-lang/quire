@@ -4602,21 +4602,18 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
          val facing_sum = book_entry_sum(serial, chapter_name_offset)
          val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
          (* the entry's bytes are lent as a barr and taken with the proofs the walks take (#849), the sum
-            compared on the inflated cells; an unknown sum, or an entry of over 1048576 compressed bytes
-            (the take's bound; a text inflated over 1 MiB is taken whole, arena-text), is no text *)
+            compared on the inflated cells; an unknown sum is no text, and an entry of over 1048576 bytes, stored
+            or deflated, is taken whole (arena-text) *)
          val taken_text = (case+ facing_sum of
            | ~SumUnknown() => let
                val () = piece_free(compressed_owner, compressed)
              in TextMalformed{$Z.inflate_stored()}{$A.cnil()}() end
            | ~SumKnown(want_high, want_low) =>
-             if compressed_size <= 1048576 then let
+             let
                val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
                val @(compressed_back, text) = take_text_proved_sum(compressed_length | entry_method_of(method), compressed_barr, compressed_size, want_high, want_low)
                val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
-             in text end
-             else let
-               val () = piece_free(compressed_owner, compressed)
-             in TextTooLarge{$Z.inflate_stored()}{$A.cnil()}() end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
+             in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
        in
          (case+ taken_text of
            | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) =>
@@ -4682,14 +4679,11 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                     val () = piece_free(compressed_owner, compressed)
                   in TextMalformed{$Z.inflate_stored()}{$A.cnil()}() end
                 | ~SumKnown(want_high, want_low) =>
-                  if compressed_size <= 1048576 then let
+                  let
                     val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
                     val @(compressed_back, text) = take_text_proved_sum(compressed_length | entry_method_of(method), compressed_barr, compressed_size, want_high, want_low)
                     val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
-                  in text end
-                  else let
-                    val () = piece_free(compressed_owner, compressed)
-                  in TextTooLarge{$Z.inflate_stored()}{$A.cnil()}() end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
+                  in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
             in
               (* Stage 3: parse HTML and render *)
               (case+ taken_text of
@@ -6076,15 +6070,12 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
        | ~Piece(compressed_owner, compressed) => let
            val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
            (* the entry's bytes are lent as a barr and taken with the proofs the walks take (#849); an entry
-              of over 1048576 compressed bytes (the take's bound) is no text *)
-           val taken_text = (if compressed_size <= 1048576 then let
+              of over 1048576 bytes is taken whole too (arena-text) *)
+           val taken_text = (let
                val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
                val @(compressed_back, text) = take_text_proved(compressed_length | entry_method_of(method), compressed_barr, compressed_size)
                val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
-             in text end
-             else let
-               val () = piece_free(compressed_owner, compressed)
-             in TextTooLarge{$Z.inflate_stored()}{$A.cnil()}() end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
+             in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
            val () = (case+ taken_text of
              | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
                  prval taken = TAKEN_of(inflates, text_of, held)
@@ -6135,14 +6126,11 @@ fun _places_chapters {after:int | after >= ~1}{bound:nat} .<max(bound - after, 0
          | ~Piece(compressed_owner, compressed) => let
              val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
              (* taken as the search's is (#849) *)
-             val taken_text = (if compressed_size <= 1048576 then let
+             val taken_text = (let
                  val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
                  val @(compressed_back, text) = take_text_proved(compressed_length | entry_method_of(method), compressed_barr, compressed_size)
                  val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
-               in text end
-               else let
-                 val () = piece_free(compressed_owner, compressed)
-               in TextTooLarge{$Z.inflate_stored()}{$A.cnil()}() end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
+               in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
              val () = (case+ taken_text of
                | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
                    prval taken = TAKEN_of(inflates, text_of, held)
@@ -7755,14 +7743,11 @@ in
      | ~Piece(compressed_owner, compressed) => let
          val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
          (* taken as the search's is (#849) *)
-         val taken_text = (if compressed_size <= 1048576 then let
+         val taken_text = (let
              val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
              val @(compressed_back, text) = take_text_proved(compressed_length | entry_method_of(method), compressed_barr, compressed_size)
              val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
-           in text end
-           else let
-             val () = piece_free(compressed_owner, compressed)
-           in TextTooLarge{$Z.inflate_stored()}{$A.cnil()}() end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
+           in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
        in
          (case+ taken_text of
            | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let

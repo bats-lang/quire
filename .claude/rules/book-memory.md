@@ -141,8 +141,7 @@ machine slows both. Standing decisions:
     `_text_count`, `_skip_spans`) and each function that reaches one takes the proof of the
     take (`TAKEN`, `src/text_proved.bats`: the `INFLATES`, `TEXTOF` and `HOLDS` of the
     `TextTaken`), so a chapter read any other way does not type-check. An entry whose
-    compressed bytes are over 1048576 bytes, or whose text is over 16 MiB, is `TextTooLarge` (a limit of
-    the take's types) and the chapter is not read, as an undecodable one is; a text inflated over
+    text is over 16 MiB is `TextTooLarge` and the chapter is not read, as an undecodable one is; a text inflated over
     1 MiB is taken through the arena form of zip's decode (zip#95, #97) and copied to a piece of its own size
     (`_text_of_arena`, `src/text_proved.bats`), which `e2e/pathological.spec.js` and `e2e/reader.spec.js` ("a chapter over 1 MiB is shown whole") run.
   * **Proved** (#849): `pieces_of_taken_functional` (`src/cut.bats`). Two takes of one

@@ -223,7 +223,7 @@ is not restyled; a load that cannot make its map shows the chapter without sizes
 ## An entry's text with INFLATES and TEXTOF (#848, a piece of #608; keyword: text-proved)
 
 `src/text_proved.bats` has `take_text_proved`, beside `take_text` (which stays and is not changed): it takes an
-entry's data, a `barr` of `n` bytes (at most 1048576) whose cells `cs` are in its type, and its
+entry's data, a `barr` of `n` bytes (any size; over 1048576 it is a piece of an arena) whose cells `cs` are in its type, and its
 method as `entry_method(kind)` (`entry_method_of` makes it from zip's `compression`), and gives the array back with a
 `text_taken(kind, cs)`:
 
@@ -237,8 +237,10 @@ method as `entry_method(kind)` (`entry_method_of` makes it from zip's `compressi
 * **The other outcomes** each have a constructor: `TextRefused` (the document is refused, with its `TEXTOF`),
   `TextEmpty` (the data inflates to nothing, with its `INFLATES`), `TextMalformed` (the decoder refuses the data, or, for
   `take_text_proved_sum`, the CRC-32 of the inflated cells is not the sum given) and
-  `TextTooLarge` (the compressed data is over 1048576 bytes, the inflated data over 16 MiB, or the conversion of a text is
-  over 1 MiB: a branch, not an assertion, since the array's size is bounded by its type). A text inflated over 1 MiB
+  `TextTooLarge` (the text, stored or inflated, is over 16 MiB, or the conversion of a text is
+  over 1 MiB: a branch, not an assertion). A stored entry over 1 MiB is copied to an arena piece (`_text_of_stored_big`,
+  `_copy_stored_down`; the e2e chapter of reader.spec.js is stored, which the first fix missed), a deflated one inflated
+  into the arena directly. A text inflated over 1 MiB
   (`inflated_cells_too_large`) is inflated again by zip's `inflate_cells_arena_proved` (class 16 MiB, zip#95); the walks read
   an array of exactly the text's cells, so `_text_of_arena` copies the output to a piece of an arena of its own size
   (`_copy_down`, from the last cell to the first), `AGREED` says which cells agree, `_eq_of_agreed` makes the copy the output's
