@@ -51,7 +51,7 @@ import { delimiter, isAbsolute, join } from 'node:path';
 import { bindAttempts } from './attempt-log.js';
 import { lasting } from './preflight.js';
 import { keepHistory } from './page-history.js';
-import { keepBoth, startBrowserTrace, traceReady, wanted, ROOT_MOST_MS, TRACE_END_MS } from './flight-recorder.js';
+import { keepBoth, keepBothStaged, startBrowserTrace, traceReady, wanted, ROOT_MOST_MS, TRACE_END_MS } from './flight-recorder.js';
 import { diskEvidence, futexEvidence, futexWordMemory, missingEvidence, pageProbes, sanitizerReports, symbolEvidence } from './evidence.js';
 import { runnerLoad, sampleRunner } from './runner-load.js';
 
@@ -127,6 +127,12 @@ export const TEARDOWN_MOST_MS = TEARDOWN_MS + HELPER_MS + 1500;
  * shorter. 10 x 2 s + 3 s + 2 s + 5 s = 30 s.
  */
 export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS + HELPER_MS;
+/**
+ * The most a crash's record takes after the browser is gone (quire#1055): the kernel ring's snapshot (its sudo call lives ROOT_MOST_MS, the ring lock
+ * inside it up to 40 s, then the read of the whole ring) and the browser's trace (TRACE_END_MS for the end and again for its completion). The test waits
+ * for the record as long as the record may take; the 60 s it waited before was under the sum of the record's own limits.
+ */
+export const CRASH_RECORD_MOST_MS = ROOT_MOST_MS + 2 * TRACE_END_MS;
 
 /**
  * What the native stacks of a frozen page add, every wait run out: an
@@ -1262,8 +1268,10 @@ export function stallWatch(browser, testInfo) {
       const number = count;
       const path = testInfo.outputPath(`crash-${number}.json`);
       state.browserGone = state.browserGone || browserGone;
-      const flight = await keepBoth(browser, (name) => testInfo.outputPath(`flight-${number}-${name}`));
+      state.crashing = { at: Date.now(), stage: 'starting', stageAt: Date.now(), reason };
+      const flight = await keepBothStaged(browser, (name) => testInfo.outputPath(`flight-${number}-${name}`), process.env, (stage) => { state.crashing.stage = stage; state.crashing.stageAt = Date.now(); });
       state.flight = flight;
+      for (const waiter of waiters.splice(0)) waiter();
       state.frozen = true;
       state.captureFile = path;
       const log = await kernelLog(scope).catch((error) => ({ unavailable: String(error) }));
@@ -1394,6 +1402,22 @@ export function stallWatch(browser, testInfo) {
     /** Resolves when `count` probes of the page were answered (the watch asked and the page answered: it is not frozen). */
     async answered(page, count, ms) {
       await waitFor(() => ((answers.get(page) || 0) >= count ? true : undefined), ms, `the page's probes were not answered ${count} times`);
+    },
+    /**
+     * Resolves with the record of a crash (the kernel ring and the browser trace) once it is made, within CRASH_RECORD_MOST_MS. When it is not, the error
+     * names why: whether the browser is still connected and its process still there (`pid`), whether the record began (the browser's `disconnected`
+     * event came) and the step it is in and for how long (quire#1055).
+     */
+    async crashRecorded(pid, ms = CRASH_RECORD_MOST_MS) {
+      try {
+        return await waitFor(() => state.flight || undefined, ms, 'no crash record');
+      } catch (error) {
+        let alive = 'gone';
+        try { alive = `there (${readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^\d+ \(.*\) (\S).*$/s, 'state $1')})`; } catch (gone) { /* /proc/<pid> is not there */ }
+        const crashing = state.crashing;
+        const record = crashing ? `began ${((Date.now() - crashing.at) / 1000).toFixed(1)} s ago and is in "${crashing.stage}" for ${((Date.now() - crashing.stageAt) / 1000).toFixed(1)} s (${crashing.reason})` : 'never began: the browser\'s disconnected event did not come';
+        throw new Error(`${error.message}: the browser is ${browser.isConnected() ? 'still connected' : 'disconnected'}, its process ${pid} is ${alive}, the record ${record}`);
+      }
     },
     /** Resolves when the capture of the page has come to the rings (its questions to the page are over). */
     async ringing(page, ms) {

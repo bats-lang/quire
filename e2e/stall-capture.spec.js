@@ -1188,3 +1188,13 @@ test('an unarmed page notes its attempts and says the metrics are not available'
     if (kept === undefined) delete process.env.QUIRE_NO_STALL_ARM; else process.env.QUIRE_NO_STALL_ARM = kept;
   }
 });
+
+test('crashRecorded: a record that is not made says why', async ({ stallWatch }) => {
+  // the watch never records (nothing crashes), and the pid is this process, which is there: the message names the stage, not just the wait
+  const error = await stallWatch.crashRecorded(process.pid, 300).then(() => null, (thrown) => thrown);
+  expect(error, 'a record that is not made throws').not.toBeNull();
+  expect(error.message).toMatch(/no crash record within 300 ms/);
+  expect(error.message).toContain('the browser is still connected');
+  expect(error.message).toMatch(new RegExp(`its process ${process.pid} is there \\(state [A-Za-z]\\)`));
+  expect(error.message).toContain("the record never began: the browser's disconnected event did not come");
+});
