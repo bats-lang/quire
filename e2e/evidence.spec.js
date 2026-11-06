@@ -129,12 +129,15 @@ test('a script spin: the capture names the function, and no native attach is mad
 test('a renderer that crashes: the browser reports it, and the ring holds the signal and the exit', async ({ browser, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   await recorderOn();
+  // a live browser's trace may use all of its limits, so the record may take CRASH_RECORD_MOST_MS, and a record that is not made says why (quire#1055)
+  test.setTimeout(testInfo.timeout + CRASH_RECORD_MOST_MS);
   const context = await browser.newContext();
   const crashing = await context.newPage();
   await crashing.setContent('<p>about to crash</p>');
   const before = (await processes(browser)).filter((each) => each.type === 'renderer').map((each) => each.id);
+  const browserPid = (await processes(browser)).find((each) => each.type === 'browser').id;
   crashing.goto('chrome://crash').catch(() => {});
-  await expect.poll(() => stallWatch.state.flight, { timeout: 60000 }).toBeTruthy();
+  await stallWatch.crashRecorded(browserPid);
   const gone = before.filter((pid) => !existsSync(`/proc/${pid}`));
   expect(gone.length, 'one renderer died').toBeGreaterThanOrEqual(1);
   const seenGone = await ringHas(stallWatch.state.flight.kernel.file, { gone: new RegExp(`(signal_generate: sig=11 .*pid=(${gone.join('|')}) )|(sched_process_exit: .*pid=(${gone.join('|')}) )`) });
@@ -151,6 +154,8 @@ test('a renderer that crashes: the browser reports it, and the ring holds the si
 test('a memory error a sanitizer finds in a process of the run: its report is in the crash capture', async ({ browser, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   await recorderOn();
+  // a live browser's trace may use all of its limits, so the record may take CRASH_RECORD_MOST_MS, and a record that is not made says why (quire#1055)
+  test.setTimeout(testInfo.timeout + CRASH_RECORD_MOST_MS);
   const directory = testInfo.outputPath('asan');
   mkdirSync(directory, { recursive: true });
   const source = testInfo.outputPath('use-after-free.c');
@@ -166,8 +171,9 @@ test('a memory error a sanitizer finds in a process of the run: its report is in
     const context = await browser.newContext();
     const crashing = await context.newPage();
     await crashing.setContent('<p>about to crash</p>');
+    const browserPid = (await processes(browser)).find((each) => each.type === 'browser').id;
     crashing.goto('chrome://crash').catch(() => {});
-    await expect.poll(() => stallWatch.state.flight, { timeout: 60000 }).toBeTruthy();
+    await stallWatch.crashRecorded(browserPid);
     await expect.poll(() => readdirSync(testInfo.outputDir).some((name) => /^crash-\d+\.json$/.test(name)), { timeout: 30000 }).toBe(true);
     const body = JSON.parse(readFileSync(join(testInfo.outputDir, readdirSync(testInfo.outputDir).find((name) => /^crash-\d+\.json$/.test(name))), 'utf8'));
     expect(body.sanitizer[0].summary).toMatch(/AddressSanitizer: heap-use-after-free/);
