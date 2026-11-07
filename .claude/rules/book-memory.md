@@ -63,7 +63,11 @@ rendered.
 
 **Where content is allocated**: everything read from an archive, a backup, a
 dictionary, a catalogue, the sync file (refused over 16 MiB, `SYNC_MAX_BYTES`),
-read aloud's script and a narrated chapter's SMIL is a `piece`. `alloc` holds
+read aloud's script and a narrated chapter's SMIL is a `piece`, except the text of a
+chapter at its five loads (#849): the `barr` of `take_text_proved` (`barr_alloc` up to 1 MiB; a text
+over 1 MiB, up to 16 MiB, is a piece of an arena of its own, the copy of zip's arena decode), which lives while the chapter is rendered, searched, counted or made a script and is
+given back with `text_give_back` (its `text_owner`) at the end of the load; the compressed bytes it is taken from are
+still a piece, lent as a `barr` for the take and given back. `alloc` holds
 only the archive's tail and local headers while a book is opened, its central
 directory (at most 1 MiB, kept for entry names, `book_index_make`), and small
 buffers: element ids, event names, storage keys, paths, titles. The EPUB file
@@ -124,14 +128,50 @@ machine slows both. Standing decisions:
   the array read from (array's `cborrow`, `cborrow_get`): `BREAKBACK`, `CUTC` and `PIECES`,
   each taking the `NTH` of the cells it was decided from and each functional.
   `tests/static/reject/cut-*` and `pieces-*` reject a cut claimed over other cells, a forged
-  cut, and two counts of the same cells. `cut_find` and `pieces_find` return those proofs; a
-  chapter's piece is lent for this at each load (`barr_of_arrx`, `barr_freeze`,
-  `cborrow_view`, array#47).
-  * **Tested, not proved**: that the three walks read the same bytes (each decodes the chapter
-    from the compressed entry on its own; inflate, the CRC check and `_text_of_content` are not
-    yet proved relations of their cells). The proof is owed (#608; no trusted primitive is
-    needed or allowed); `e2e/giant-text-highlights.spec.js`, `pathological.spec.js` and
-    `search.spec.js` test it meanwhile.
+  cut, and two counts of the same cells. `cut_find` and `pieces_find` return those proofs.
+  * **The five chapter loads take the text by `take_text_proved`** (#849; `src/reader.bats`:
+    render in `_chapter_render`, the facing page in `_facing_open`, search in
+    `_search_chapters`, the places pass in `_places_chapters`, read aloud in
+    `reader_script_load`). The entry's compressed bytes are lent as a `barr`
+    (`barr_of_arrx`, array#47), inflated by zip's proved decode and read as text by
+    `text_relation`'s proved functions; the text is the `barr` of the take, frozen and given
+    to the walks as `cborrow_view` (`barr_freeze`). Render and the facing page take it by
+    `take_text_proved_sum`, which compares the entry's CRC-32 with `crc_of_cborrow` over the
+    cells `INFLATES` names. Every walk entry (`_text_spans`, `_scan_text`, `_runs_text`,
+    `_text_count`, `_skip_spans`) and each function that reaches one takes the proof of the
+    take (`TAKEN`, `src/text_proved.bats`: the `INFLATES`, `TEXTOF` and `HOLDS` of the
+    `TextTaken`), so a chapter read any other way does not type-check. An entry whose
+    text is over 16 MiB is `TextTooLarge` and the chapter is not read, as an undecodable one is; a text inflated over
+    1 MiB is taken through the arena form of zip's decode (zip#95, #97) and copied to a piece of its own size
+    (`_text_of_arena`, `src/text_proved.bats`), which `e2e/pathological.spec.js` and `e2e/reader.spec.js` ("a chapter over 1 MiB is shown whole") run.
+  * **One task for each background load** (#849, keyword: async-yield): the loads that no input waits for
+    (`_search_chapters`, `_places_chapters`, read aloud's `reader_script_load`) read the entry's bytes, give up
+    the main thread with `$P.vow($TM.timer_set(0))` (a `setTimeout`, a new task) and take, make `TAKEN_of`
+    and walk in the continuation, so a search or a places pass over many chapters is one task for each
+    chapter. The proof is made and used inside one continuation and never crosses a task, so the promise
+    carries none. The inflate runs in wasm on the main thread, in that task.
+    `e2e/search-responsive.spec.js` clicks during the search of sixty chapters.
+  * **Render and the facing page take no task of their own** (#849, keyword: async-yield): a chapter shown
+    for a key, a tap or a jump must be whole before the next input of the reader, as on main, where a deflated
+    entry's stream answered within the task that asked and a stored one at once. A task between the read and the
+    render (tried at 1d7ad467) left the page of the old chapter under a second key (a turn computed from the
+    chapter shown, so a burst or a held key in a fixed-layout book lost turns), under a selection (the late
+    render replaced the page and the selection with it) and under a sync point (the place recorded before
+    the chapter was shown). `e2e/page-keys-modes.spec.js`, `vocabulary.spec.js`, `a11y.spec.js`,
+    `folders.spec.js` and `sync-idempotent.spec.js` are the tests.
+  * **Proved** (#849): `pieces_of_taken_functional` (`src/cut.bats`). Two takes of one
+    entry's cells by one method hold one list of octets (`text_taken_functional`), so a cell of
+    one is the cell of the other at its place, and a `BREAKBACK`, a `CUTC` and a `PIECES`
+    over the cells of one are the same over the cells of the other: the counts of render,
+    search and read aloud are equal, and so are their cuts, as a proof and not by the walks
+    sharing a function. `tests/static/accept/pieces-of-three-takes-equal` takes one entry three
+    times (one by `take_text_proved_sum`) and applies it; `reject/pieces-of-other-entry` and
+    `reject/pieces-of-other-method` refuse takes of two entries, and of one entry by two methods.
+  * **Tested, not proved**: that the three loads read the same compressed bytes of an entry
+    (each reads the entry's span of the book into a piece of its own, and the cells of that
+    piece are not known: `compressed` in the three proofs are three names for it). The proof
+    is owed to the book's reads; `e2e/giant-text-highlights.spec.js`, `pathological.spec.js`
+    and `search.spec.js` test it meanwhile.
   * Trusted (array's, tested there): the unsafe core of `barr_of_arrx`, `cborrow_view`,
     `cborrow_get`. `white_not_white` and `starts_not_continues` prove `1 == 0` from an
     impossible pair, so the mutation check accepts them mutated to any statement; each premise

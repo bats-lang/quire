@@ -17,6 +17,7 @@ staload "epub_xml.sats"
 staload "xhtml_parse.sats"
 staload "language.sats"
 staload "cut.sats"
+staload "text_proved.sats"
 staload "book.sats"
 staload "pages.sats"
 staload "paths.sats"
@@ -2382,8 +2383,8 @@ fn _text_into {doc_location,l:agz}{n:pos}{node:nat}{offset,text_len:nat | offset
    time that grows with the square of the columns (a megabyte of one word
    at 390 px: 17 s a frame; the same text as blocks of 64 KiB: 1 s), so no
    run is longer than one piece (#423) *)
-fun _text_spans {doc_location,l:agz}{n:pos}{cs:$A.cells}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n} .<text_len>.
-  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), parent: int parent, offset: int offset, text_len: int text_len, split: bool)
+fun _text_spans {doc_location,l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n} .<text_len>.
+  (taken: TAKEN(kind, compressed, cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), parent: int parent, offset: int offset, text_len: int text_len, split: bool)
   : [count:pos] (PIECES(cs, offset, text_len, count) | int count) = let
   val node = _next_content_node()
   val () = _add_node(doc, parent, node, $D.Span)
@@ -2396,14 +2397,14 @@ in
     val (cut_proof | cut) = cut_find(bytes, offset, text_len)
     val () = _node_attr_literal(doc, node, $D.Class, "run")
     val () = _text_into(doc, node, data, offset, cut)
-    val (rest | count) = _text_spans(doc, data, bytes, parent, offset + cut, text_len - cut, true)
+    val (rest | count) = _text_spans(taken | doc, data, bytes, parent, offset + cut, text_len - cut, true)
   in (PIECES_more(cut_proof, rest) | count + 1) end
 end
 
 (* A text shown as its pieces *)
-fn _text_shown {doc_location,l:agz}{n:pos}{cs:$A.cells}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n}
-  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), parent: int parent, offset: int offset, text_len: int text_len): void = let
-  val (_ | _) = _text_spans(doc, data, bytes, parent, offset, text_len, false)
+fn _text_shown {doc_location,l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n}
+  (taken: TAKEN(kind, compressed, cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), parent: int parent, offset: int offset, text_len: int text_len): void = let
+  val (_ | _) = _text_spans(taken | doc, data, bytes, parent, offset, text_len, false)
 in () end
 
 (* Whether data[offset + i, offset + text_len) is all white space *)
@@ -2420,8 +2421,8 @@ fun _take_nodes {count:nat} .<count>. (count: int count): void =
 (* The numbers _text_spans would give text of text_len bytes, taken: as
    many as pieces_find counts (it stepped by 65533 here and by cut_find
    there, so a text of 131069 or 131070 spaces was numbered two ways, #568) *)
-fn _skip_spans {l:agz}{n:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_len <= n}
-  (bytes: !$A.cborrow(l, n, cs), offset: int offset, text_len: int text_len): void = let
+fn _skip_spans {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{offset,text_len:nat | offset + text_len <= n}
+  (taken: TAKEN(kind, compressed, cs, n) | bytes: !$A.cborrow(l, n, cs), offset: int offset, text_len: int text_len): void = let
   val (_ | count) = pieces_find(bytes, offset, text_len)
 in _take_nodes(count) end
 
@@ -3376,18 +3377,18 @@ end
    borrow operations: nothing is allocated for the page); the <img>
    elements met are added to found *)
 fun _render_nodes
-  {doc_location,l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 1>.
-  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
+  {doc_location,l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 1>.
+  (taken: TAKEN(kind, compressed, cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
    parent: int parent, nodes: !$X.xml_node_list(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val found = _render_node(doc, data, bytes, data_len, parent, node, found, fragment)
-    in _render_nodes(doc, data, bytes, data_len, parent, rest, found, fragment) end
+      val found = _render_node(taken | doc, data, bytes, data_len, parent, node, found, fragment)
+    in _render_nodes(taken | doc, data, bytes, data_len, parent, rest, found, fragment) end
   | $X.xml_nodes_nil() => found
 
 and _render_node
-  {doc_location,l:agz}{n:pos}{cs:$A.cells}{tree_size:pos}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 0>.
-  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
+  {doc_location,l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:pos}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 0>.
+  (taken: TAKEN(kind, compressed, cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
    parent: int parent, node: !$X.xml_node(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
   case+ node of
   | $X.xml_text(offset, text_len) => let
@@ -3395,11 +3396,11 @@ and _render_node
          makes no element: it would be a line of its own; inside a math
          element the text of a token is the token's, any other is not shown *)
       val () = (if !_math_inside > 0 then let
-          val () = _skip_spans(bytes, offset, text_len)
+          val () = _skip_spans(taken | bytes, offset, text_len)
         in (if !_math_inside = 2 then (if parent >= 0 then (if text_len > 0 then (if text_len < 65536 then _node_text(doc, parent, data, offset, text_len) else ()) else ()) else ()) else ()) end
-        else if parent < 0 then (if _blank(data, offset, text_len, 0) then _skip_spans(bytes, offset, text_len)
-          else _text_shown(doc, data, bytes, parent, offset, text_len))
-        else _text_shown(doc, data, bytes, parent, offset, text_len))
+        else if parent < 0 then (if _blank(data, offset, text_len, 0) then _skip_spans(taken | bytes, offset, text_len)
+          else _text_shown(taken | doc, data, bytes, parent, offset, text_len))
+        else _text_shown(taken | doc, data, bytes, parent, offset, text_len))
     in found end
   | $X.xml_element(name_offset, name_len, attrs, children) => let
     var _tag_head = @[char][4]('h', 'e', 'a', 'd')
@@ -3427,10 +3428,10 @@ and _render_node
        their language is the page's *)
     else if xml_name_eq(data, name_offset, name_len, _tag_html, 4) then let
       val () = _root_lang(doc, data, attrs)
-    in _render_nodes(doc, data, bytes, data_len, parent, children, found, fragment) end
+    in _render_nodes(taken | doc, data, bytes, data_len, parent, children, found, fragment) end
     else if xml_name_eq(data, name_offset, name_len, _tag_body, 4) then let
       val () = _root_lang(doc, data, attrs)
-    in _render_nodes(doc, data, bytes, data_len, parent, children, found, fragment) end
+    in _render_nodes(taken | doc, data, bytes, data_len, parent, children, found, fragment) end
     (* Void: br, hr, img *)
     else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then let
       val () = _add_node(doc, parent, _next_content_node(), $D.Br)
@@ -3482,7 +3483,7 @@ and _render_node
       val saved = !_math_inside
       val () = !_math_inside := (if made then (if _math_token(data, name_offset, name_len) then 2 else 1) else 1)
       val child_parent = (if made then content_node else parent): [child:int | child >= ~1] int child
-      val found = _render_nodes(doc, data, bytes, data_len, child_parent, children, found, fragment)
+      val found = _render_nodes(taken | doc, data, bytes, data_len, child_parent, children, found, fragment)
       val () = !_math_inside := saved
     in found end
     else let
@@ -3534,9 +3535,9 @@ and _render_node
       val () = (if xml_name_eq(data, name_offset, name_len, _tag_ruby, 4) then _ruby_mark() else ())
       var _tag_a = @[char][1]('a')
       val found = (if xml_name_eq(data, name_offset, name_len, _tag_a, 1) then let
-          val found = _render_nodes(doc, data, bytes, data_len, content_node, children, found, fragment)
+          val found = _render_nodes(taken | doc, data, bytes, data_len, content_node, children, found, fragment)
         in _link(doc, data, attrs, content_node, !_content_count, found) end
-        else _render_nodes(doc, data, bytes, data_len, content_node, children, found, fragment)): [new_count:nat] images(n, new_count)
+        else _render_nodes(taken | doc, data, bytes, data_len, content_node, children, found, fragment)): [new_count:nat] images(n, new_count)
       (* the clip of the chapter's overlay that reads this element, by its
          id: its content nodes, this one's and its children's *)
       val () = _clip_match(data, attrs, content_node, !_content_count)
@@ -4600,31 +4601,39 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
      | ~Piece(compressed_owner, compressed) => let
          val facing_sum = book_entry_sum(serial, chapter_name_offset)
          val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
-         val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-         val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
-         val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
-         val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
+         (* the entry's bytes are lent as a barr and taken with the proofs the walks take (#849), the sum
+            compared on the inflated cells; an unknown sum is no text, and an entry of over 1048576 bytes, stored
+            or deflated, is taken whole (arena-text) *)
+         val taken_text = (case+ facing_sum of
+           | ~SumUnknown() => let
+               val () = piece_free(compressed_owner, compressed)
+             in TextMalformed{$Z.inflate_stored()}{$A.cnil()}() end
+           | ~SumKnown(want_high, want_low) =>
+             let
+               val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
+               val @(compressed_back, text) = take_text_proved_sum(compressed_length | entry_method_of(method), compressed_barr, compressed_size, want_high, want_low)
+               val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
+             in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
        in
-         $P.and_then<decompressed><load_outcome>(decompressing, llam(inflated) =>
-           case+ take_text_sum(inflated, facing_sum) of
-           | ~NoContentBytes() => $P.ret<load_outcome>(ChapterNotRead())
-           | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) =>
+         (case+ taken_text of
+           | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) =>
              if generation <> !_load_generation then let
-               val () = piece_free(xhtml_owner, xhtml)
+               val () = text_give_back(text_array_owner, xhtml)
              in $P.ret<load_outcome>(ChapterSuperseded()) end
              else let
-               (* the piece is lent as a barr: the cells of the text are in the
-                  type for the cut (#568), and the plain borrow the parser and
-                  the page read through is a view of the same bytes *)
-               val (cells_len, lent | lent_bytes) = $A.barr_of_arrx(xhtml)
-               val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(lent_bytes)
+               (* the text is the barr of the take, whose proof the walks take (#849):
+                  the cells of the text are in the type for the cut (#568), and the
+                  plain borrow the parser and the page read through is a view of the
+                  same bytes *)
+               prval taken = TAKEN_of(inflates, text_of, held)
+               val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
                val () = _size_put(_facing_size, xhtml_viewport(xhtml_bytes, nodes))
                val doc = $D.open_document($A.text_lit("bats-root"), 9)
                val () = !_render_into := IntoFacingBox()
                val no_fragment = FragmentNone()
-               val found = _render_nodes(doc, xhtml_bytes, xhtml_cells, xhtml_size, ~1, nodes, images_nil(), no_fragment)
+               val found = _render_nodes(taken | doc, xhtml_bytes, xhtml_cells, xhtml_size, ~1, nodes, images_nil(), no_fragment)
                val () = _fragment_free(no_fragment)
                val () = !_render_into := IntoPage()
                val () = $D.destroy(doc)
@@ -4632,9 +4641,12 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
                val () = _load_images(serial, file_size, chapter_name_offset, dir_len, xhtml_bytes, xhtml_size, found, generation, facing_index)
                val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
                val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
-               val () = piece_free(xhtml_owner, $A.barr_to_arrx(lent | $A.barr_thaw(xhtml_frozen)))
+               val () = text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen))
                val () = _fixed_fit()
-             in $P.ret<load_outcome>(ChapterShown()) end)
+             in $P.ret<load_outcome>(ChapterShown()) end
+           | other => let
+               val () = text_taken_free(other)
+             in $P.ret<load_outcome>(ChapterNotRead()) end)
        end)
 
 (* Shows chapter chapter_index of book serial, from its chapters, its
@@ -4661,23 +4673,24 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
               (* the CRC-32 the archive states for the chapter (quire#529) *)
               val chapter_sum = book_entry_sum(serial, chapter_name_offset)
               val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
-              val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-              val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
-              val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
-              val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
+              (* taken as the facing page's is (#849) *)
+              val taken_text = (case+ chapter_sum of
+                | ~SumUnknown() => let
+                    val () = piece_free(compressed_owner, compressed)
+                  in TextMalformed{$Z.inflate_stored()}{$A.cnil()}() end
+                | ~SumKnown(want_high, want_low) =>
+                  let
+                    val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
+                    val @(compressed_back, text) = take_text_proved_sum(compressed_length | entry_method_of(method), compressed_barr, compressed_size, want_high, want_low)
+                    val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
+                  in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
             in
               (* Stage 3: parse HTML and render *)
-              $P.and_then<decompressed><load_outcome>(decompressing, llam(inflated) => let
-                val content = take_text_sum(inflated, chapter_sum)
-              in
-                case+ content of
-                | ~NoContentBytes() => let
-                    val () = _overlay_pending_put(NoOverlayPending())
-                  in $P.ret<load_outcome>(ChapterNotRead()) end
-                | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
-                  (* lent as a barr, as the facing page's is (#568) *)
-                  val (cells_len, lent | lent_bytes) = $A.barr_of_arrx(xhtml)
-                  val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(lent_bytes)
+              (case+ taken_text of
+                | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
+                  (* the text is the barr of the take, as the facing page's is (#568, #849) *)
+                  prval taken = TAKEN_of(inflates, text_of, held)
+                  val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                   val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                 in
                   (* A document that is not well formed is an error, as it is
@@ -4688,7 +4701,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   | Malformed() => let
                       val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
                       val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
-                      val () = piece_free(xhtml_owner, $A.barr_to_arrx(lent | $A.barr_thaw(xhtml_frozen)))
+                      val () = text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen))
                       val () = _overlay_pending_put(NoOverlayPending())
                     in $P.ret<load_outcome>(ChapterNotRead()) end
                   | WellFormed() => let
@@ -4737,7 +4750,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val fragment = _fragment_take()
                   (* the sizes the publisher gave its elements, loaded with the chapter *)
                   val () = publisher_sizes_begin(chapter_index, generation)
-                  val found = _render_nodes(doc, xhtml_bytes, xhtml_cells, xhtml_size, ~1, nodes, images_nil(), fragment)
+                  val found = _render_nodes(taken | doc, xhtml_bytes, xhtml_cells, xhtml_size, ~1, nodes, images_nil(), fragment)
                   val () = publisher_sizes_end()
                   val () = !_render_into := IntoPage()
                   val () = _fragment_put(fragment)
@@ -4749,7 +4762,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val () = _load_images(serial, file_size, chapter_name_offset, dir_len, xhtml_bytes, xhtml_size, found, generation, chapter_index)
                   val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
                   val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
-                  val () = piece_free(xhtml_owner, $A.barr_to_arrx(lent | $A.barr_thaw(xhtml_frozen)))
+                  val () = text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen))
 
                   val () = (case+ reading_get() of
                     | @(page, page_count, _, chapter_count) => reading_set(@(page, page_count, chapter_index + 1, chapter_count)))
@@ -4774,7 +4787,10 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   | AloneRight() => $P.ret<load_outcome>(ChapterShown())
                 end
                 end
-              end)
+                | other => let
+                    val () = text_taken_free(other)
+                    val () = _overlay_pending_put(NoOverlayPending())
+                  in $P.ret<load_outcome>(ChapterNotRead()) end)
             end
     end
 
@@ -5724,8 +5740,8 @@ fn _scan_piece {data_location,query_location:agz}{data_size:pos}{offset,piece_le
 
 (* The pieces of text data[offset, offset + text_len), as _text_spans makes them,
    from a content node: their hits, and the next node's number *)
-fun _scan_text {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_len <= data_size}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<text_len>.
-  (data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), offset: int offset, text_len: int text_len, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
+fun _scan_text {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{offset,text_len:nat | offset + text_len <= data_size}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<text_len>.
+  (taken: TAKEN(kind, compressed, cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), offset: int offset, text_len: int text_len, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
    chapter: Int, node: Nat, found: hits(hit_count), hit_count: int hit_count)
   : [count:pos][new_count:nat | new_count <= HIT_MAX] (PIECES(cs, offset, text_len, count) | @(Nat, hits(new_count), int new_count)) =
   if text_len < 65536 then let
@@ -5734,13 +5750,13 @@ fun _scan_text {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{of
   else let
     val (cut_proof | cut) = cut_find(bytes, offset, text_len)
     val @(found_after, new_count) = _scan_piece(data, offset, cut, query, query_len, chapter, node, found, hit_count)
-    val (rest | next) = _scan_text(data, bytes, offset + cut, text_len - cut, query, query_len, chapter, node + 1, found_after, new_count)
+    val (rest | next) = _scan_text(taken | data, bytes, offset + cut, text_len - cut, query, query_len, chapter, node + 1, found_after, new_count)
   in (PIECES_more(cut_proof, rest) | next) end
 
 (* The numbers _scan_text takes for text data[offset, offset + text_len),
    as _text_spans makes its pieces, with nothing searched *)
-fn _text_count {data_location:agz}{data_size:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_len <= data_size}
-  (bytes: !$A.cborrow(data_location, data_size, cs), offset: int offset, text_len: int text_len, node: Nat): Nat = let
+fn _text_count {data_location:agz}{data_size:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{offset,text_len:nat | offset + text_len <= data_size}
+  (taken: TAKEN(kind, compressed, cs, data_size) | bytes: !$A.cborrow(data_location, data_size, cs), offset: int offset, text_len: int text_len, node: Nat): Nat = let
   val (_ | count) = pieces_find(bytes, offset, text_len)
 in node + count end
 
@@ -5796,27 +5812,27 @@ in
   else is(data, ruby_parenthesis, 2)
 end
 
-fun _scan_nodes {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{tree_size:nat}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 1>.
-  (data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), nodes: !$X.xml_node_list(data_size, tree_size), top: bool, searched: bool,
+fun _scan_nodes {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 1>.
+  (taken: TAKEN(kind, compressed, cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), nodes: !$X.xml_node_list(data_size, tree_size), top: bool, searched: bool,
    query: !$A.arr(byte, query_location, query_size), query_len: int query_len, chapter: Int, content_node: Nat, found: hits(hit_count), hit_count: int hit_count)
   : [new_count:nat | new_count <= HIT_MAX] @(Nat, hits(new_count), int new_count) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val @(next_node, found_after, new_count) = _scan_node(data, bytes, node, top, searched, query, query_len, chapter, content_node, found, hit_count)
-    in _scan_nodes(data, bytes, rest, top, searched, query, query_len, chapter, next_node, found_after, new_count) end
+      val @(next_node, found_after, new_count) = _scan_node(taken | data, bytes, node, top, searched, query, query_len, chapter, content_node, found, hit_count)
+    in _scan_nodes(taken | data, bytes, rest, top, searched, query, query_len, chapter, next_node, found_after, new_count) end
   | $X.xml_nodes_nil() => @(content_node, found, hit_count)
 
-and _scan_node {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{tree_size:pos}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 0>.
-  (data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), node: !$X.xml_node(data_size, tree_size), top: bool, searched: bool,
+and _scan_node {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:pos}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 0>.
+  (taken: TAKEN(kind, compressed, cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), node: !$X.xml_node(data_size, tree_size), top: bool, searched: bool,
    query: !$A.arr(byte, query_location, query_size), query_len: int query_len, chapter: Int, content_node: Nat, found: hits(hit_count), hit_count: int hit_count)
   : [new_count:nat | new_count <= HIT_MAX] @(Nat, hits(new_count), int new_count) =
   case+ node of
   | $X.xml_text(offset, text_len) =>
-    if (if top then _blank(data, offset, text_len, 0) else false) then @(_text_count(bytes, offset, text_len, content_node), found, hit_count)
+    if (if top then _blank(data, offset, text_len, 0) else false) then @(_text_count(taken | bytes, offset, text_len, content_node), found, hit_count)
     else if searched then let
-      val (_ | result) = _scan_text(data, bytes, offset, text_len, query, query_len, chapter, content_node, found, hit_count)
+      val (_ | result) = _scan_text(taken | data, bytes, offset, text_len, query, query_len, chapter, content_node, found, hit_count)
     in result end
-    else @(_text_count(bytes, offset, text_len, content_node), found, hit_count)
+    else @(_text_count(taken | bytes, offset, text_len, content_node), found, hit_count)
   | $X.xml_element(name_offset, name_len, _, children) => let
     var _tag_head = @[char][4]('h', 'e', 'a', 'd')
     var _tag_title = @[char][5]('t', 'i', 't', 'l', 'e')
@@ -5847,9 +5863,9 @@ and _scan_node {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{tr
     else if xml_name_eq(data, name_offset, name_len, _tag_style, 5) then @(content_node, found, hit_count)
     else if xml_name_eq(data, name_offset, name_len, _tag_script, 6) then @(content_node, found, hit_count)
     else if xml_name_eq(data, name_offset, name_len, _tag_html, 4) then
-      _scan_nodes(data, bytes, children, top, searched, query, query_len, chapter, content_node, found, hit_count)
+      _scan_nodes(taken | data, bytes, children, top, searched, query, query_len, chapter, content_node, found, hit_count)
     else if xml_name_eq(data, name_offset, name_len, _tag_body, 4) then
-      _scan_nodes(data, bytes, children, top, searched, query, query_len, chapter, content_node, found, hit_count)
+      _scan_nodes(taken | data, bytes, children, top, searched, query, query_len, chapter, content_node, found, hit_count)
     else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then let val () = _tail_reset() in @(content_node + 1, found, hit_count) end
     else if xml_name_eq(data, name_offset, name_len, _tag_hr, 2) then let val () = _tail_reset() in @(content_node + 1, found, hit_count) end
     else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then let val () = _tail_reset() in @(content_node + 1, found, hit_count) end
@@ -5858,7 +5874,7 @@ and _scan_node {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{tr
       (* a block ends the text before it and the text after it *)
       val inline = _inline_element(data, name_offset, name_len)
       val () = (if inline then () else _tail_reset())
-      val @(next_node, found_after, new_count) = _scan_nodes(data, bytes, children, false, (if annotation then false else searched), query, query_len, chapter, content_node + 1, found, hit_count)
+      val @(next_node, found_after, new_count) = _scan_nodes(taken | data, bytes, children, false, (if annotation then false else searched), query, query_len, chapter, content_node + 1, found, hit_count)
       val () = (if inline then () else _tail_reset())
     in @(next_node, found_after, new_count) end
   end
@@ -6016,20 +6032,20 @@ fun _hits_locate {count:nat} .<count>. (found: !hits(count), fresh: Int, chapter
       in end)
 
 (* The hits of the chapter data[0, n) (the chapter given), added *)
-fn _search_add {l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}
-  (data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
+fn _search_add {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}
+  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
   case+ _search_take() of
   | ~SearchNone() => ()
   | ~SearchCell(found, hit_count, query, query_len) => let
       val () = _tail_begin()
-      val @(total_nodes, found_after, count_after) = _scan_nodes(data, bytes, nodes, true, true, query, query_len, chapter, 0, found, hit_count)
+      val @(total_nodes, found_after, count_after) = _scan_nodes(taken | data, bytes, nodes, true, true, query, query_len, chapter, 0, found, hit_count)
       val () = _tail_end()
       val () = _hits_locate(found_after, count_after - hit_count, chapter, total_nodes, layout)
     in _search_put(SearchCell(found_after, count_after, query, query_len)) end
 
-fn _search_add_if {l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}
-  (generation: int, data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
-  if generation = !_search_generation then _search_add(data, bytes, nodes, chapter, layout) else ()
+fn _search_add_if {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}
+  (taken: TAKEN(kind, compressed, cs, n) | generation: int, data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
+  if generation = !_search_generation then _search_add(taken | data, bytes, nodes, chapter, layout) else ()
 
 fn _search_full (): bool =
   case+ _search_take() of
@@ -6053,25 +6069,30 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
        | ~NoPiece() => _search_chapters(serial, chapter + 1, chapter_count, generation)
        | ~Piece(compressed_owner, compressed) => let
            val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
-           val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-           val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
-           val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
-           val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          in
-           $P.finish<decompressed>(decompressing, llam(inflated) => let
-             val () = (case+ take_text(inflated) of
-               | ~NoContentBytes() => ()
-               | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
-                   val (cells_len, lent | lent_bytes) = $A.barr_of_arrx(xhtml)
-                   val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(lent_bytes)
-                   val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
-                   val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
-                   val () = _search_add_if(generation, xhtml_bytes, xhtml_cells, nodes, chapter, layout)
-                   val () = $X.free_nodes(nodes)
-                   val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
-                   val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
-                 in piece_free(xhtml_owner, $A.barr_to_arrx(lent | $A.barr_thaw(xhtml_frozen))) end)
-           in _search_chapters(serial, chapter + 1, chapter_count, generation) end)
+          (* one task for each chapter, as the platform's decompress gave one (#849, async-yield): the take,
+             TAKEN_of and the walk are all in the continuation, so the proof never crosses a task *)
+          $P.finish<Int>($P.vow($TM.timer_set(0)), llam(_) => let
+           (* the entry's bytes are lent as a barr and taken with the proofs the walks take (#849); an entry
+              of over 1048576 bytes is taken whole too (arena-text) *)
+           val taken_text = (let
+               val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
+               val @(compressed_back, text) = take_text_proved(compressed_length | entry_method_of(method), compressed_barr, compressed_size)
+               val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
+             in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
+           val () = (case+ taken_text of
+             | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
+                 prval taken = TAKEN_of(inflates, text_of, held)
+                 val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
+                 val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
+                 val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
+                 val () = _search_add_if(taken | generation, xhtml_bytes, xhtml_cells, nodes, chapter, layout)
+                 val () = $X.free_nodes(nodes)
+                 val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
+                 val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
+               in text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen)) end
+             | other => text_taken_free(other))
+         in _search_chapters(serial, chapter + 1, chapter_count, generation) end)
          end))
 
 (* The pass that counts the content nodes of the chapters that hold
@@ -6080,11 +6101,11 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
 val _places_generation = ref<int>(0)
 
 (* Counts the content nodes of the chapter data[0, n), as render and a search number them *)
-fn _count_nodes {data_location:agz}{n:pos}{cs:$A.cells}{tree_size:nat}
-  (data: !$A.borrow(byte, data_location, n), bytes: !$A.cborrow(data_location, n, cs), nodes: !$X.xml_node_list(n, tree_size)): Nat = let
+fn _count_nodes {data_location:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}
+  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, data_location, n), bytes: !$A.cborrow(data_location, n, cs), nodes: !$X.xml_node_list(n, tree_size)): Nat = let
   val query = $A.alloc<byte>(1)
   val () = _tail_begin()
-  val @(total, found, _) = _scan_nodes(data, bytes, nodes, true, false, query, 1, 0, 0, hits_nil(), 0)
+  val @(total, found, _) = _scan_nodes(taken | data, bytes, nodes, true, false, query, 1, 0, 0, hits_nil(), 0)
   val () = _tail_end()
   val () = hits_free(found)
   val () = $A.free<byte>(query)
@@ -6109,26 +6130,29 @@ fun _places_chapters {after:int | after >= ~1}{bound:nat} .<max(bound - after, 0
          | ~NoPiece() => _places_chapters(serial, chapter, bound, generation)
          | ~Piece(compressed_owner, compressed) => let
              val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
-             val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-             val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
-             val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
-             val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
            in
-             $P.finish<decompressed>(decompressing, llam(inflated) => let
-               val () = (case+ take_text(inflated) of
-                 | ~NoContentBytes() => ()
-                 | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
-                     val (cells_len, lent | lent_bytes) = $A.barr_of_arrx(xhtml)
-                     val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(lent_bytes)
-                     val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
-                     val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
-                     val total = _count_nodes(xhtml_bytes, xhtml_cells, nodes)
-                     val () = (if generation = !_places_generation then annot_total_set(serial, chapter, total) else ())
-                     val () = $X.free_nodes(nodes)
-                     val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
-                     val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
-                   in piece_free(xhtml_owner, $A.barr_to_arrx(lent | $A.barr_thaw(xhtml_frozen))) end)
-             in _places_chapters(serial, chapter, bound, generation) end)
+            (* one task for each chapter, as the search's is (#849, async-yield) *)
+            $P.finish<Int>($P.vow($TM.timer_set(0)), llam(_) => let
+             (* taken as the search's is (#849) *)
+             val taken_text = (let
+                 val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
+                 val @(compressed_back, text) = take_text_proved(compressed_length | entry_method_of(method), compressed_barr, compressed_size)
+                 val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
+               in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
+             val () = (case+ taken_text of
+               | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
+                   prval taken = TAKEN_of(inflates, text_of, held)
+                   val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
+                   val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
+                   val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
+                   val total = _count_nodes(taken | xhtml_bytes, xhtml_cells, nodes)
+                   val () = (if generation = !_places_generation then annot_total_set(serial, chapter, total) else ())
+                   val () = $X.free_nodes(nodes)
+                   val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
+                   val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
+                 in text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen)) end
+               | other => text_taken_free(other))
+           in _places_chapters(serial, chapter, bound, generation) end)
            end))
   end
 
@@ -7320,13 +7344,13 @@ fun _text_runs_reverse {n:int}{count,reversed_count:nat} .<count>.
 (* The pieces of text data[offset, offset + text_len), as _text_spans
    makes them, from a content node on: as runs of block, and the next
    node's number *)
-fun _runs_text {l:agz}{n:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_len <= n}{count:nat} .<text_len>.
-  (bytes: !$A.cborrow(l, n, cs), offset: int offset, text_len: int text_len, block: Nat, node: Nat, found: text_runs(n, count))
+fun _runs_text {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{offset,text_len:nat | offset + text_len <= n}{count:nat} .<text_len>.
+  (taken: TAKEN(kind, compressed, cs, n) | bytes: !$A.cborrow(l, n, cs), offset: int offset, text_len: int text_len, block: Nat, node: Nat, found: text_runs(n, count))
   : [pieces:pos][new_count:nat] (PIECES(cs, offset, text_len, pieces) | @(Nat, text_runs(n, new_count))) =
   if text_len < 65536 then (PIECES_last() | @(node + 1, TextRun(block, node, offset, text_len, found)))
   else let
     val (cut_proof | cut) = cut_find(bytes, offset, text_len)
-    val (rest | next) = _runs_text(bytes, offset + cut, text_len - cut, block, node + 1, TextRun(block, node, offset, cut, found))
+    val (rest | next) = _runs_text(taken | bytes, offset + cut, text_len - cut, block, node + 1, TextRun(block, node, offset, cut, found))
   in (PIECES_more(cut_proof, rest) | next) end
 
 (* A chapter's text read aloud: its nodes walked as _render_nodes shows
@@ -7336,27 +7360,27 @@ fun _runs_text {l:agz}{n:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_l
    not read, nor a ruby's readings and parentheses (rt, rtc, rp), whose
    nodes are counted all the same. The next content node's number, the
    blocks' count, and the runs found (the latest first) *)
-fun _runs_nodes {l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}{count:nat} .<tree_size, 1>.
-  (data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), top: bool, readable: bool,
+fun _runs_nodes {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}{count:nat} .<tree_size, 1>.
+  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), top: bool, readable: bool,
    block: Int, blocks: Nat, content_node: Nat, found: text_runs(n, count))
   : [new_count:nat] @(Nat, Nat, text_runs(n, new_count)) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val @(next_node, next_blocks, found_after) = _runs_node(data, bytes, node, top, readable, block, blocks, content_node, found)
-    in _runs_nodes(data, bytes, rest, top, readable, block, next_blocks, next_node, found_after) end
+      val @(next_node, next_blocks, found_after) = _runs_node(taken | data, bytes, node, top, readable, block, blocks, content_node, found)
+    in _runs_nodes(taken | data, bytes, rest, top, readable, block, next_blocks, next_node, found_after) end
   | $X.xml_nodes_nil() => @(content_node, blocks, found)
 
-and _runs_node {l:agz}{n:pos}{cs:$A.cells}{tree_size:pos}{count:nat} .<tree_size, 0>.
-  (data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), node: !$X.xml_node(n, tree_size), top: bool, readable: bool,
+and _runs_node {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:pos}{count:nat} .<tree_size, 0>.
+  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), node: !$X.xml_node(n, tree_size), top: bool, readable: bool,
    block: Int, blocks: Nat, content_node: Nat, found: text_runs(n, count))
   : [new_count:nat] @(Nat, Nat, text_runs(n, new_count)) =
   case+ node of
   | $X.xml_text(offset, text_len) =>
-    if (if top then _blank(data, offset, text_len, 0) else false) then @(_text_count(bytes, offset, text_len, content_node), blocks, found)
+    if (if top then _blank(data, offset, text_len, 0) else false) then @(_text_count(taken | bytes, offset, text_len, content_node), blocks, found)
     else if (if readable then block >= 0 else false) then let
-      val (_ | @(next_node, found_after)) = _runs_text(bytes, offset, text_len, (if block >= 0 then block else 0): Nat, content_node, found)
+      val (_ | @(next_node, found_after)) = _runs_text(taken | bytes, offset, text_len, (if block >= 0 then block else 0): Nat, content_node, found)
     in @(next_node, blocks, found_after) end
-    else @(_text_count(bytes, offset, text_len, content_node), blocks, found)
+    else @(_text_count(taken | bytes, offset, text_len, content_node), blocks, found)
   | $X.xml_element(name_offset, name_len, attrs, children) => let
     var _tag_head = @[char][4]('h', 'e', 'a', 'd')
     var _tag_title = @[char][5]('t', 'i', 't', 'l', 'e')
@@ -7386,9 +7410,9 @@ and _runs_node {l:agz}{n:pos}{cs:$A.cells}{tree_size:pos}{count:nat} .<tree_size
     else if xml_name_eq(data, name_offset, name_len, _tag_style, 5) then @(content_node, blocks, found)
     else if xml_name_eq(data, name_offset, name_len, _tag_script, 6) then @(content_node, blocks, found)
     else if xml_name_eq(data, name_offset, name_len, _tag_html, 4) then
-      _runs_nodes(data, bytes, children, top, readable, block, blocks, content_node, found)
+      _runs_nodes(taken | data, bytes, children, top, readable, block, blocks, content_node, found)
     else if xml_name_eq(data, name_offset, name_len, _tag_body, 4) then
-      _runs_nodes(data, bytes, children, top, readable, block, blocks, content_node, found)
+      _runs_nodes(taken | data, bytes, children, top, readable, block, blocks, content_node, found)
     else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then @(content_node + 1, blocks, found)
     else if xml_name_eq(data, name_offset, name_len, _tag_hr, 2) then @(content_node + 1, blocks, found)
     else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then @(content_node + 1, blocks, found)
@@ -7408,7 +7432,7 @@ and _runs_node {l:agz}{n:pos}{cs:$A.cells}{tree_size:pos}{count:nat} .<tree_size
       val inner_block = (if separate then (blocks: Int) else block): Int
       val inner_blocks = (if separate then blocks + 1 else blocks): Nat
       val () = (if separate then _block_lang_add(blocks) else ())
-      val result = _runs_nodes(data, bytes, children, false, (if annotation then false else readable), inner_block, inner_blocks, content_node + 1, found)
+      val result = _runs_nodes(taken | data, bytes, children, false, (if annotation then false else readable), inner_block, inner_blocks, content_node + 1, found)
       val () = (if has_own then _lang_drop(_run_lang_swap(previous)) else _lang_drop(previous))
     in result end
   end
@@ -7681,11 +7705,11 @@ implement $P.dispose<script>(script) = script_free(script)
 
 (* The script of the chapter data[0, n), whose nodes are nodes, of
    index chapter *)
-fn _script_make {l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}
-  (data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Nat): script = let
+fn _script_make {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}
+  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Nat): script = let
   val () = _lang_drop(_run_lang_swap(NoBookLang()))
   val () = _block_langs_free(_block_langs_swap(_block_langs_empty()))
-  val @(_, _, found) = _runs_nodes(data, bytes, nodes, true, true, ~1, 0, 0, TextRunsEnd())
+  val @(_, _, found) = _runs_nodes(taken | data, bytes, nodes, true, true, ~1, 0, 0, TextRunsEnd())
   val () = _lang_drop(_run_lang_swap(NoBookLang()))
   val runs = _text_runs_reverse(found, TextRunsEnd())
   val total = _runs_total(runs, 0)
@@ -7727,25 +7751,32 @@ in
      | ~NoPiece() => $P.ret<script>(NoScript())
      | ~Piece(compressed_owner, compressed) => let
          val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
-         val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-         val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
-         val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
-         val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.and_then<decompressed><script>(decompressing, llam(inflated) =>
-           case+ take_text(inflated) of
-           | ~NoContentBytes() => $P.ret<script>(NoScript())
-           | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
-               val (cells_len, lent | lent_bytes) = $A.barr_of_arrx(xhtml)
-               val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(lent_bytes)
+        (* a task of its own, as the search's chapters are (#849, async-yield) *)
+        $P.and_then<Int><script>($P.vow($TM.timer_set(0)), llam(_) => let
+         (* taken as the search's is (#849) *)
+         val taken_text = (let
+             val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
+             val @(compressed_back, text) = take_text_proved(compressed_length | entry_method_of(method), compressed_barr, compressed_size)
+             val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
+           in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
+       in
+         (case+ taken_text of
+           | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
+               prval taken = TAKEN_of(inflates, text_of, held)
+               val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
-               val script = _script_make(xhtml_bytes, xhtml_cells, nodes, chapter)
+               val script = _script_make(taken | xhtml_bytes, xhtml_cells, nodes, chapter)
                val () = $X.free_nodes(nodes)
                val () = $A.cborrow_view_drop(xhtml_frozen, xhtml_bytes)
                val () = $A.cborrow_drop(xhtml_frozen, xhtml_cells)
-               val () = piece_free(xhtml_owner, $A.barr_to_arrx(lent | $A.barr_thaw(xhtml_frozen)))
-             in $P.ret<script>(script) end)
+               val () = text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen))
+             in $P.ret<script>(script) end
+           | other => let
+               val () = text_taken_free(other)
+             in $P.ret<script>(NoScript()) end)
+         end)
        end)
 end
 
