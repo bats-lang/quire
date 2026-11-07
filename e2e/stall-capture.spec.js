@@ -208,7 +208,7 @@ function expectLibraryFramesNamed(frames) {
   expect(library.some((frame) => namedFrame(frame.text)), `a named frame among ${library.map((frame) => frame.text.slice(0, 60)).join(' | ')}`).toBe(true);
 }
 
-test.fixme('#1077 the task is answered in the pause of another DevTools client', async ({ page, stallWatch }) => {
+test('a page in an endless script loop is captured in that loop, and gdb is not attached to it', async ({ page, stallWatch }) => {
   await startLoop(page, stallWatch, 'setTimeout(spinForever, 0)');
   const capture = await stallWatch.next(page, 20000);
   expect(capture.reason).toContain('did not answer');
