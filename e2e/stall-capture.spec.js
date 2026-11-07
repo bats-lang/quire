@@ -26,7 +26,7 @@ import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
 import { gunzipSync } from 'node:zlib';
 import { keepBrowserTrace, keepKernel, ringSeen, serialRun, startBrowserTrace, startKernel, stopKernel, wanted } from './flight-recorder.js';
-import { arm, capture, lasting, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
+import { arm, capture, clientScript, lasting, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
 
 /** Resolves when the child has been started (its program is running). */
 const started = (child) => once(child, 'spawn');
@@ -1008,6 +1008,42 @@ test('every page of a test about to time out is captured', async ({ page, stallW
   expect(capture.native).toBeUndefined();
   // and the pause it asked for is dropped: the page still runs script
   expect(await page.evaluate(() => 1 + 1)).toBe(2);
+});
+
+// A pause that stops in a script a debugger client made (the watch's own probe, quire#1072) is not where the page is.
+test('a pause in a script of the watch or the first statement of a client\'s script is not the page\'s, and one in the page\'s function is', () => {
+  const at = (functionName, url, line, column) => ({ functionName, url, line, column });
+  expect(clientScript([at('(anonymous)', 'quire-stall-watch/task.js', 1, 1)])).toContain('quire-stall-watch/task.js');
+  expect(clientScript([at('(anonymous)', '', 1, 1)])).toContain('no URL');
+  expect(clientScript([at('spinForever', '', 2, 41)])).toBeNull();
+  expect(clientScript([at('(anonymous)', '', 1, 1), at('caller', '', 3, 1)])).toBeNull();
+  expect(clientScript([at('(anonymous)', 'http://127.0.0.1/app.js', 1, 1)])).toBeNull();
+  expect(clientScript([])).toBeNull();
+});
+
+// Forces the pause (quire#1072, Done-when 1): a client of the page's DevTools session keeps starting scripts of its own while the
+// capture asks for a pause, so the pause stops in one, and the summary names it. Its log line is `pause stopped in `.
+test('a pause that stops in a client\'s script is named in the capture\'s summary and is not reported as paused', async ({ page, browser }) => {
+  await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
+  const armed = await arm(page);
+  const client = await page.context().newCDPSession(page);
+  let starting = true;
+  const keepStarting = (async () => {
+    while (starting) {
+      await client.send('Runtime.evaluate', { expression: '1' }).catch(() => {});
+    }
+  })();
+  const result = await capture(page, armed, 'a capture asked for', browser);
+  starting = false;
+  await keepStarting;
+  await armed.session.detach();
+  const text = summary(result);
+  console.log(text.split('\n').filter((line) => line.includes('pause stopped in ')).join('\n'));
+  expect(result.paused).toBeUndefined();
+  expect(result.clientPause.frames[0].url).toBe('');
+  expect(result.clientPause.frames[0].line).toBe(1);
+  expect(result.clientPause.frames[0].column).toBe(1);
+  expect(text).toContain('pause stopped in a script with no URL, made by a debugger client (line 1 column 1, no caller)');
 });
 
 // ---- the evidence for a page that was slow, not frozen (#600) ----
