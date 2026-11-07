@@ -26,7 +26,7 @@ import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
 import { gunzipSync } from 'node:zlib';
 import { keepBrowserTrace, keepKernel, ringSeen, serialRun, startBrowserTrace, startKernel, stopKernel, wanted } from './flight-recorder.js';
-import { arm, capture, clientScript, lasting, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
+import { arm, capture, clientScript, lasting, pausedDuring, taskAnswered, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
 
 /** Resolves when the child has been started (its program is running). */
 const started = (child) => once(child, 'spawn');
@@ -219,6 +219,36 @@ test('a page in an endless script loop is captured in that loop, and gdb is not 
   await endLoop(page, stallWatch);
   // a loop is busy, not frozen: it spends a second of CPU a second
   expectBusyNotFrozen(capture);
+});
+
+// Forces the pause of another client (quire#1077, keyword: other client pause): gen-pwa test arms every page with a DevTools client
+// of its own, which pauses a page that does not answer; the pause lets the queued task run in its nested loop. A second session of
+// the page pauses it all the while the capture asks, and the task, answered all the same, is not counted as the task queue's.
+// Its log line is `the task was answered in a pause of another DevTools client`.
+test('a task answered in the pause of another DevTools client is not the page\'s task queue answering', async ({ page, stallWatch }) => {
+  await page.setContent(LOOPS);
+  const other = await page.context().newCDPSession(page);
+  await other.send('Debugger.enable');
+  await startLoop(page, stallWatch, 'setTimeout(spinForever, 0)');
+  // the probe is not answered first (a pause earlier would answer it), then the other client pauses for as long as the capture asks
+  await stallWatch.started(page, 20000);
+  let pausing = true;
+  const interfering = (async () => {
+    while (pausing) await other.send('Debugger.pause').catch(() => {});
+  })();
+  const capture = await stallWatch.next(page, 30000);
+  pausing = false;
+  await interfering;
+  console.log(summary(capture).split('\n').filter((line) => line.includes('the task was answered in a pause of another DevTools client')).join('\n'));
+  expect(capture.reason).toContain('did not answer');
+  expect(capture.answers.interrupt.answered).toBe(true);
+  expect(capture.answers.task.answered).toBe(false);
+  expect(capture.answers.task.answeredInPauseOfAnotherClient[0].functionName).toBe('spinForever');
+  expect(summary(capture)).toContain('the task was answered in a pause of another DevTools client (in spinForever');
+  expectBusyNotFrozen(capture);
+  // the loop ends first: the other session cannot detach from a page that still spins
+  await endLoop(page, stallWatch);
+  await other.detach();
 });
 
 test('a page in an endless wasm loop is captured in that loop, and gdb is not attached to it', async ({ page, stallWatch }) => {
@@ -1008,6 +1038,20 @@ test('every page of a test about to time out is captured', async ({ page, stallW
   expect(capture.native).toBeUndefined();
   // and the pause it asked for is dropped: the page still runs script
   expect(await page.evaluate(() => 1 + 1)).toBe(2);
+});
+
+// A pause nobody here asked for, in effect while the task is asked (quire#1077, keyword: other client pause), makes the answer no
+// task queue's; no such pause leaves an answer as it was (a task asked of a page with no pause stays answered).
+test('a task answered in a pause nobody here asked for is not the task queue answering, and with no such pause it is', () => {
+  const none = { paused: false, count: 0 };
+  expect(pausedDuring(none, { paused: false, count: 0 })).toBe(false);
+  expect(pausedDuring({ paused: true, count: 1 }, { paused: false, count: 1 })).toBe(true);
+  expect(pausedDuring(none, { paused: true, count: 1 })).toBe(true);
+  expect(pausedDuring(none, { paused: false, count: 1 })).toBe(true);
+  expect(taskAnswered(true, false)).toBe(true);
+  expect(taskAnswered(true, true)).toBe(false);
+  expect(taskAnswered(false, true)).toBe(false);
+  expect(taskAnswered(false, false)).toBe(false);
 });
 
 // A pause that stops in a script a debugger client made (the watch's own probe, quire#1072) is not where the page is.

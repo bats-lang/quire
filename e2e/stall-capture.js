@@ -17,7 +17,8 @@
  * A page that does not answer within 5 s, and every page of a test that
  * is about to time out, is captured (`capture`):
  *   - which DevTools commands its renderer still answers: an
- *     interrupting one (V8 alive) and a task (its main thread free);
+ *     interrupting one (V8 alive) and a task (its main thread free; an answer
+ *     given in another DevTools client's pause is not one, keyword: other client pause);
  *   - Debugger.pause: the call frames it pauses in (script URL, function,
  *     line and column; for wasm, `wasm://` and the byte offset);
  *   - when it does not pause, a 2 s CPU profile (Profiler), if it can be
@@ -180,6 +181,27 @@ const armingOff = () => !['', '0'].includes(process.env[NO_ARM] || '');
 const OWN_SCRIPT = 'quire-stall-watch/';
 const sourceUrlOf = (name) => `\n//# sourceURL=${OWN_SCRIPT}${name}.js`;
 
+// Keyword: other client pause (#1077). A page in a script loop answers no task: its queue is not served. But a Debugger.pause
+// of ANY DevTools client stops the loop in a nested message loop, and that loop answers the commands queued behind it, a task
+// evaluate included. gen-pwa test arms every page with a DevTools client of its own (its page watch, pwa#132: debugger on, a
+// probe every 2 s, a pause when one is not answered), so on CI two watches look at the page and the other's pause can come just
+// before this watch asks its task (run 42343081463: its Debugger.pause 2 ms before the task, which was answered in 8 ms, the
+// page still in spinForever). An answer given in a pause this watch did not ask for says nothing of the task queue, so it is
+// not counted as one (`taskAnswered`), and the capture names the pause (`answeredInPauseOfAnotherClient`).
+
+/**
+ * Whether a pause this watch did not ask for was in effect for any part of a question: when the question began (`before`) or
+ * ends (`after`), or began in between (the count moved). Each is `armed.unaskedPause`: { paused, count }.
+ */
+export function pausedDuring(before, after) {
+  return before.paused || after.paused || after.count !== before.count;
+}
+
+/** Whether the page's own task queue answered: an answer given in a pause nobody here asked for was a nested loop's. */
+export function taskAnswered(answered, pause) {
+  return answered && !pause;
+}
+
 /** Notes a page-side call of the watch's own while it runs, and gives the promise back. */
 function ownCall(armed, name, promise) {
   const call = { name, settled: Promise.resolve(promise).then(() => {}, () => {}) };
@@ -209,7 +231,7 @@ export function clientScript(frames) {
  * the debugger enabled; `scripts` maps a script id to its URL.
  */
 export async function arm(page) {
-  const armed = { session: null, scripts: new Map(), error: null, pausing: false, running: new Set(), history: armingOff() ? null : keepHistory(page) };
+  const armed = { session: null, scripts: new Map(), error: null, pausing: false, running: new Set(), unaskedPause: { paused: false, count: 0, frames: null }, history: armingOff() ? null : keepHistory(page) };
   if (armingOff()) {
     // the capture then says the page was not armed (`armed: false`, this reason)
     armed.error = `not armed: ${NO_ARM}=${process.env[NO_ARM]} (the debugger is never enabled)`;
@@ -224,11 +246,16 @@ export async function arm(page) {
       const url = event.url || event.sourceURL;
       if (url) armed.scripts.set(event.scriptId, url);
     });
-    // a pause no capture waits for (one asked for that came too late) is
-    // ended at once, so the page never stays paused
-    session.on('Debugger.paused', () => {
-      if (!armed.pausing) session.send('Debugger.resume').catch(() => {});
+    // a pause no capture waits for (one asked for that came too late, or another DevTools client's: gen-pwa test's page watch
+    // is one) is noted (keyword: other client pause, #1077) and ended at once, so the page never stays paused
+    session.on('Debugger.paused', (event) => {
+      if (armed.pausing) return;
+      armed.unaskedPause.paused = true;
+      armed.unaskedPause.count += 1;
+      armed.unaskedPause.frames = event.callFrames.slice(0, 3).map((frame) => frameOf(frame, armed.scripts));
+      session.send('Debugger.resume').catch(() => {});
     });
+    session.on('Debugger.resumed', () => { armed.unaskedPause.paused = false; });
     await session.send('Debugger.enable');
     await session.send('Debugger.setBreakpointsActive', { active: false });
   } catch (error) {
@@ -1007,13 +1034,18 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
   let answers = false;
   if (session && !armed.error) {
     // An interrupting command (answered while script runs) and a task
+    const unasked = armed.unaskedPause;
+    const before = { paused: unasked.paused, count: unasked.count };
     const interrupt = await within(session.send('Debugger.setBreakpointsActive', { active: false }), COMMAND_MS);
     const task = await within(ownCall(armed, 'task evaluate', session.send('Runtime.evaluate', { expression: `1${sourceUrlOf('task')}` })), COMMAND_MS);
+    // the pause of another client lets the queued task run in its nested loop (keyword: other client pause, #1077); its event
+    // comes before the answer, on the same pipe
+    const pause = pausedDuring(before, unasked);
+    answers = taskAnswered(task.answered, pause);
     result.answers = {
       interrupt: { answered: interrupt.answered, ms: interrupt.ms, error: interrupt.error },
-      task: { answered: task.answered, ms: task.ms, error: task.error },
+      task: { answered: answers, ms: task.ms, error: task.error, ...(task.answered && pause ? { answeredInPauseOfAnotherClient: unasked.frames } : {}) },
     };
-    answers = task.answered;
   } else {
     const evaluated = await within(ownCall(armed, 'unarmed evaluate', page.evaluate(() => 1)), COMMAND_MS);
     result.evaluate = { answered: evaluated.answered, ms: evaluated.ms, error: evaluated.error };
@@ -1153,6 +1185,10 @@ export function summary(result) {
   const lines = [`[stall-capture] ${result.reason}: ${result.url}`, `  ${result.verdict}`];
   if (result.test) lines.push(`  test: ${result.test} (${result.project}); the page was ${result.pageAgeMs} ms old at the capture, armed after ${result.armedAfterMs} ms`);
   if (result.answers) lines.push(`  answers: interrupt ${result.answers.interrupt.answered}, task ${result.answers.task.answered}`);
+  if (result.answers && result.answers.task.answeredInPauseOfAnotherClient) {
+    const frame = (result.answers.task.answeredInPauseOfAnotherClient[0] || { functionName: 'no frame', url: '', line: 0, column: 0 });
+    lines.push(`  the task was answered in a pause of another DevTools client (in ${frame.functionName}, ${frame.url}:${frame.line}:${frame.column}), so it says nothing of the page's task queue`);
+  }
   if (result.paused) for (const frame of result.paused.frames.slice(0, 12)) {
     lines.push(`    at ${frame.functionName} (${frame.url}:${frame.line}:${frame.column})`);
   }
