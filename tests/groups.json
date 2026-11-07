@@ -79,6 +79,7 @@
       "publisher-sizes.spec.js",
       "reading-ruler.spec.js",
       "search.spec.js",
+      "search-responsive.spec.js",
       "titles-redraw.spec.js",
       "vertical.spec.js",
       "vocabulary.spec.js"

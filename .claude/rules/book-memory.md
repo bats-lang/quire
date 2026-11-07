@@ -144,6 +144,13 @@ machine slows both. Standing decisions:
     text is over 16 MiB is `TextTooLarge` and the chapter is not read, as an undecodable one is; a text inflated over
     1 MiB is taken through the arena form of zip's decode (zip#95, #97) and copied to a piece of its own size
     (`_text_of_arena`, `src/text_proved.bats`), which `e2e/pathological.spec.js` and `e2e/reader.spec.js` ("a chapter over 1 MiB is shown whole") run.
+  * **One task for each load** (#849, keyword: async-yield): each of the five loads reads the entry's
+    bytes, gives up the main thread with `$P.vow($TM.timer_set(0))` (a `setTimeout`, a new task) and takes,
+    makes `TAKEN_of` and walks in the continuation, as the platform's `decompress` gave a task to each
+    chapter before; so a search or a places pass over many chapters is one task for each chapter, and render,
+    the facing page and read aloud decode after the listener that started them has returned. The proof is made
+    and used inside one continuation and never crosses a task, so the promise carries none. The inflate runs in wasm on the main thread, in that task.
+    `e2e/search-responsive.spec.js` clicks during the search of sixty chapters.
   * **Proved** (#849): `pieces_of_taken_functional` (`src/cut.bats`). Two takes of one
     entry's cells by one method hold one list of octets (`text_taken_functional`), so a cell of
     one is the cell of the other at its place, and a `BREAKBACK`, a `CUTC` and a `PIECES`
