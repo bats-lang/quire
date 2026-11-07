@@ -4601,10 +4601,6 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
      | ~Piece(compressed_owner, compressed) => let
          val facing_sum = book_entry_sum(serial, chapter_name_offset)
          val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
-       in
-        (* a task of its own for the take and the walk, as the platform's decompress gave one (#849, async-yield):
-           the take, TAKEN_of and the walk are all in this continuation, so the proof never crosses a task *)
-        $P.and_then<Int><load_outcome>($P.vow($TM.timer_set(0)), llam(_) => let
          (* the entry's bytes are lent as a barr and taken with the proofs the walks take (#849), the sum
             compared on the inflated cells; an unknown sum is no text, and an entry of over 1048576 bytes, stored
             or deflated, is taken whole (arena-text) *)
@@ -4651,7 +4647,6 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
            | other => let
                val () = text_taken_free(other)
              in $P.ret<load_outcome>(ChapterNotRead()) end)
-         end)
        end)
 
 (* Shows chapter chapter_index of book serial, from its chapters, its
@@ -4678,9 +4673,6 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
               (* the CRC-32 the archive states for the chapter (quire#529) *)
               val chapter_sum = book_entry_sum(serial, chapter_name_offset)
               val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
-            in
-              (* a task of its own for the take and the render, as the facing page's is (#849, async-yield) *)
-              $P.and_then<Int><load_outcome>($P.vow($TM.timer_set(0)), llam(_) => let
               (* taken as the facing page's is (#849) *)
               val taken_text = (case+ chapter_sum of
                 | ~SumUnknown() => let
@@ -4799,7 +4791,6 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                     val () = text_taken_free(other)
                     val () = _overlay_pending_put(NoOverlayPending())
                   in $P.ret<load_outcome>(ChapterNotRead()) end)
-            end)
             end
     end
 
