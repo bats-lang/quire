@@ -176,7 +176,4 @@ machine slows both. Standing decisions:
     `cborrow_get`. `white_not_white` and `starts_not_continues` prove `1 == 0` from an
     impossible pair, so the mutation check accepts them mutated to any statement; each premise
     is satisfiable alone.
-* **The spec's long chapters run without Playwright's trace and screenshots** (`heavy` in
-  `e2e/pathological.spec.js`): its snapshotter walks every node at every action. The stall
-  watch stays on. `e2e/page-margins.js` clips a line to the scroll containers inside the page.
 * **A table is one box on one page** (#413): the cell scrolls inside its table.
