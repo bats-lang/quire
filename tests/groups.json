@@ -79,6 +79,7 @@
       "publisher-sizes.spec.js",
       "reading-ruler.spec.js",
       "search.spec.js",
+      "search-responsive.spec.js",
       "titles-redraw.spec.js",
       "vertical.spec.js",
       "vocabulary.spec.js"
@@ -182,6 +183,7 @@
       "accept/crc-complemented",
       "accept/cut-same-cells-same-count",
       "accept/page-height-whole",
+      "accept/pieces-of-three-takes-equal",
       "accept/sheet-scrolls-most",
       "accept/text-proved-two-takes-one-text",
       "reject/aloud-placement-unmatched",
@@ -331,7 +333,9 @@
       "reject/text-utf8-scan-bad-is-ascii",
       "reject/text-proved-functional-other-entry",
       "reject/text-proved-functional-other-method",
-      "reject/text-proved-held-other-octets"
+      "reject/text-proved-held-other-octets",
+      "reject/pieces-of-other-entry",
+      "reject/pieces-of-other-method"
     ],
     "accepts-data": [
       "accept/cfi-side-matched",

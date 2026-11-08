@@ -1,0 +1,3 @@
+function _static_other_entry
+line 6
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Evar(second_compressed(_)); S2Evar(first_compressed(_))))
