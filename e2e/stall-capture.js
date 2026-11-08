@@ -55,6 +55,7 @@ import { keepHistory } from './page-history.js';
 import { keepBoth, keepBothStaged, startBrowserTrace, traceReady, wanted, ROOT_MOST_MS, TRACE_END_MS } from './flight-recorder.js';
 import { diskEvidence, futexEvidence, futexWordMemory, missingEvidence, pageProbes, sanitizerReports, symbolEvidence } from './evidence.js';
 import { runnerLoad, sampleRunner } from './runner-load.js';
+import { pressRecord } from './press-record.js';
 
 // the duration of an instrument (the CPU window, the profile, the probe's cadence) is `lasting` of preflight.js, the one span helper (quire#976, keyword: window)
 export { lasting };
@@ -1317,11 +1318,18 @@ export function stallWatch(browser, testInfo) {
     pending.then((done) => { ready.set(page, done); seen.get(page).armedAfterMs = Date.now() - seen.get(page).at; });
     probe(page);
   };
+  // The press record (press-record.js, quire#1079; moves with pwa#289): the context's DevTools clients are followed from here on, before this
+  // watch makes its own, and its pages report their pointer events through a binding and an init script, with no DevTools client of ours.
+  const press = pressRecord();
+  const listening = new Map(); // context -> the promise of its init script, which a caller waits for before the context makes its first page
   const watchContext = (context) => {
-    if (watchedContexts.has(context)) return;
+    if (watchedContexts.has(context)) return listening.get(context);
     watchedContexts.add(context);
+    press.track(context);
+    listening.set(context, press.listen(context).catch((error) => console.error(`[stall-capture] the press record could not be armed: ${error && error.message || error}`)));
     context.on('page', watchPage);
     for (const page of context.pages()) watchPage(page);
+    return listening.get(context);
   };
   const scan = () => { for (const context of browser.contexts()) watchContext(context); };
 
@@ -1450,7 +1458,7 @@ export function stallWatch(browser, testInfo) {
   const newContext = browser.newContext;
   browser.newContext = async (...options) => {
     const context = await newContext.apply(browser, options);
-    watchContext(context);
+    await watchContext(context);
     return context;
   };
 
@@ -1477,9 +1485,25 @@ export function stallWatch(browser, testInfo) {
     }
   };
 
+  // A test that failed keeps the press record (press-record.js): what the page received of each press, the browser's side from the ring, and the
+  // DevTools clients with their commands. Never fails the teardown; a part it cannot read is said as the reason.
+  const keepPressRecord = async () => {
+    try {
+      const trace = state.flight && state.flight.browserTrace;
+      const inputPath = !trace ? undefined : trace.inputPath || { unavailable: trace.unavailable || trace.error || 'the browser trace holds no input events' };
+      const path = testInfo.outputPath('press-record.json');
+      writeFileSync(path, JSON.stringify(press.snapshot({ test: testInfo.title, project: testInfo.project.name, inputPath }), null, 2));
+      await testInfo.attach('press-record', { path, contentType: 'application/json' });
+    } catch (error) {
+      console.error(`[stall-capture] the press record could not be kept: ${error && error.message || error}`);
+    }
+  };
+
   return {
     captures,
     watchContext,
+    /** The test ended unexpectedly: the DevTools clients attached now are those attached at the failure (press-record.js). */
+    markFailed() { press.markFailed(); },
     /** What a failed test keeps (#600): the runner's load and each page's attempts and long tasks. */
     evidence,
     async next(page, ms) {
@@ -1551,6 +1575,7 @@ export function stallWatch(browser, testInfo) {
         state.flight = await keepBoth(browser, (name) => testInfo.outputPath(`flight-failed-${name}`)).catch((error) => ({ kernel: { error: String(error) }, browserTrace: { error: String(error) } }));
         await attachFlight(testInfo, state.flight);
       }
+      if (failed) await keepPressRecord();
       leaveSampler();
       for (const pending of armed.values()) {
         const arming = await within(pending, COMMAND_MS);

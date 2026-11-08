@@ -503,6 +503,58 @@ test('a failed test keeps its trace, screenshot, DOM and history, and the job-le
   expect(without.code, 'without the flag the check is as it was').toBe(0);
 });
 
+test('a press whose release is lost: the failed test keeps the trace and the press record, with the page\'s events, the browser\'s input path and the DevTools clients and their commands (quire#1079)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  needRecorder();
+  // press.case.js sends mousePressed over a DevTools session of its own and never the release, then expects the click, which fails
+  const run = nested(testInfo, 'press', { QUIRE_NESTED_CAPTURE: 'on' });
+  const { code } = await run.finished;
+  expect(code, run.output()).toBe(1);
+  const attachments = attachmentsOf(run.report());
+  const names = attachments.map((each) => each.name);
+  // (1) the test's own Playwright trace: a zip that holds the trace of its actions
+  const trace = attachments.find((each) => each.name === 'trace');
+  expect(trace && existsSync(trace.path), `trace among ${names}`).toBe(true);
+  const zip = readFileSync(trace.path);
+  expect(zip.subarray(0, 2).toString('latin1')).toBe('PK');
+  expect(zip.includes('.trace'), 'the zip holds the actions\' trace file').toBe(true);
+  const kept = attachments.find((each) => each.name === 'press-record');
+  expect(kept && existsSync(kept.path), `press-record among ${names}`).toBe(true);
+  const record = JSON.parse(readFileSync(kept.path, 'utf8'));
+  // (2) what the page received, from the init script: the press, and no release, no click, no cancel
+  const types = record.events.map((event) => event.type);
+  expect(types, JSON.stringify(types)).toEqual(expect.arrayContaining(['pointerdown', 'mousedown']));
+  for (const lost of ['pointerup', 'mouseup', 'click', 'pointercancel', 'lostpointercapture']) expect(types, `${lost} never reached the page`).not.toContain(lost);
+  for (const event of record.events.filter((each) => each.type === 'pointerdown' || each.type === 'mousedown')) {
+    expect(event.target, 'the element').toBe('button#b');
+    expect(event.isTrusted, 'sent by the browser, not by script').toBe(true);
+    expect(event.defaultPrevented).toBe(false);
+    expect(event.stoppedByWindowCapture, 'no capture listener on window stopped it').toBe(false);
+    expect(typeof event.at, 'its time').toBe('number');
+  }
+  expect(record.lastUnreleasedPress.events).toEqual(['pointerdown', 'mousedown']);
+  expect(record.lastUnreleasedPress.released).toBe(false);
+  // (3) the browser's side, from Chrome's ring: it got the press and sent it on to the renderer, and no release followed
+  expect(Array.isArray(record.inputPath), JSON.stringify(record.inputPath).slice(0, 400)).toBe(true);
+  const forwarded = record.inputPath.filter((each) => each.name === 'RenderWidgetHostImpl::ForwardMouseEvent');
+  expect(forwarded.length, 'the browser received the mouse events').toBeGreaterThan(0);
+  const sent = record.inputPath.filter((each) => each.name === 'InputRouterImpl::FilterAndSendWebInputEvent').map((each) => each.type);
+  expect(sent, 'the press went to the renderer').toContain('MouseDown');
+  expect(sent, 'and the release was never sent').not.toContain('MouseUp');
+  const handled = record.inputPath.filter((each) => each.name === 'MainThreadEventQueue::HandleEvent').map((each) => each.type).join(' ');
+  expect(handled, 'the renderer handled the press').toMatch(/kMouseDown/);
+  expect(handled, 'and never a release').not.toMatch(/kMouseUp/);
+  // (4) the DevTools clients attached at the failure, who made each and what it sent around the press
+  const own = record.devtoolsClients.find((each) => /press\.case\.js/.test(each.createdBy));
+  expect(own, JSON.stringify(record.devtoolsClients.map((each) => each.createdBy))).toBeTruthy();
+  expect(own.attached).toBe(true);
+  const sentBefore = own.commandsBeforePress.map((each) => `${each.method} ${each.detail}`);
+  expect(sentBefore, 'the 5 s before the press').toContain('Input.dispatchMouseEvent mouseMoved');
+  expect([...sentBefore, ...own.commandsSincePress.map((each) => `${each.method} ${each.detail}`)], 'the press itself').toContain('Input.dispatchMouseEvent mousePressed');
+  const watch = record.devtoolsClients.find((each) => /stall-capture\.js/.test(each.createdBy));
+  expect(watch && watch.attached, 'the stall watch\'s own session is listed too').toBe(true);
+});
+
 test('a plain failed test whose ring is gone is EVIDENCE MISSING in the report Playwright wrote, and in the job-level check', async ({}, testInfo) => {
   desktopOnly(testInfo);
   needRecorder();

@@ -141,7 +141,7 @@ export function refuseRawMouse(page) {
 // its own, so a freeze has only what lies outside it (the kernel ring, the watchdog, the runner's reporter). Nothing sets it: evidence-real.spec.js
 // does, to show a freeze is recorded with the stall watch off (the table of quire#575, "a bug that vanishes under recording").
 const noStallWatch = () => !['', '0'].includes(process.env.QUIRE_NO_STALL_WATCH || '');
-const idleWatch = { watchContext() {}, async settle() {}, async ready() {}, async stop() {} };
+const idleWatch = { watchContext() {}, markFailed() {}, async settle() {}, async ready() {}, async stop() {} };
 
 export const test = base.extend({
   stallWatch: [async ({ browser }, use, testInfo) => {
@@ -154,7 +154,8 @@ export const test = base.extend({
   }, { auto: true }],
   // the test's own context is watched before its page is made
   context: async ({ context, stallWatch }, use, testInfo) => {
-    stallWatch.watchContext(context);
+    // waited for: the press record's init script (press-record.js, quire#1079) is in the context before its first page
+    await stallWatch.watchContext(context);
     // every page of the context, made by a spec (newPage, a popup) or by the
     // app, is guarded when it is made; the pages already there are guarded now
     context.on('page', refuseRawMouse);
@@ -173,12 +174,14 @@ export const test = base.extend({
   // and leaves the reader showing a reflowed page, paged or scrolled,
   // with the bars down has that page's head and foot measured (#296),
   // in the phone-sized projects: no spec has to remember to
-  page: async ({ page }, use, testInfo) => {
+  page: async ({ page, stallWatch }, use, testInfo) => {
     refuseRawMouse(page);
     // the page's console, errors and requests, kept in node for a red's capture (#1008)
     const history = keepHistory(page);
     if (onAndroid(testInfo)) await androidInsets(page);
     await use(page);
+    // the DevTools clients attached now are those attached at the failure (the press record, press-record.js, quire#1079)
+    if (testInfo.status && !['passed', 'skipped'].includes(testInfo.status) && testInfo.status !== testInfo.expectedStatus) stallWatch.markFailed();
     // a test that did not end as expected keeps the page's DOM and its console, errors and requests beside Playwright's trace and
     // screenshot (#1008, keyword: failure capture): always attached, a reason as the text when the page cannot answer
     if (testInfo.status && !['passed', 'skipped'].includes(testInfo.status) && testInfo.status !== testInfo.expectedStatus) {

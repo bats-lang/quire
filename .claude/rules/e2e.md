@@ -348,7 +348,7 @@ only for a red. The design, with the research and what each means cannot find, i
   events a second, no slowdown beyond noise (3.9 s against 3.7 s for 30 page cycles). A capture reads a snapshot of the ring, which goes on
   recording (**ring snapshot**, below), and writes it gzipped after the segments of the captures before it (`flight-<n>-kernel.txt.gz`). The teardown removes the instance and the segments.
 * **Chrome's ring** (`startBrowserTrace`, `keepBrowserTrace`): the browser's DevTools `Tracing` domain, `recordContinuously`, categories
-  toplevel, ipc, mojom and sync (`TRACE_CATEGORIES`), 32 MB. Measured over 8 rounds of 30 page cycles (a loop of nothing but IPC) with the kernel ring: 3.88 s with no recorder, 4.09 s with this set (+5%), 4.25 s with nine categories (+10%), so the light set is the default. Ended and read only for
+  toplevel, ipc, mojom, sync, devtools.timeline, input and latencyInfo (`TRACE_CATEGORIES`; the last two are the browser's side of a press, quire#1079, and the `[cost]` line of every job measures the whole set), 32 MB. Measured over 8 rounds of 30 page cycles (a loop of nothing but IPC) with the kernel ring: 3.88 s with no recorder, 4.09 s with this set (+5%), 4.25 s with nine categories (+10%), so the light set is the default. Ended and read only for
   a frozen renderer (`flight-<n>-browser-trace.json.gz`). Measured with one thread of a renderer stopped: `Tracing.end` answers in 79 ms
   and the trace holds the renderer's events up to the freeze, so a frozen main thread does not take the renderer's trace with it.
   A renderer with every thread stopped (SIGSTOP) answers nothing more: the browser's, GPU's and network's events are what is then in it.

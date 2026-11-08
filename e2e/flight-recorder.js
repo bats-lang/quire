@@ -26,7 +26,10 @@ export const TRACE_END_MS = 15000;
 export const TRACE_BUFFER_KB = 32768;
 // the light set: +5% on a loop of page cycles with the kernel ring, the nine-category set +10% (measured, quire#575)
 // devtools.timeline adds ResourceSendRequest and ResourceFinish: a fetch a service worker never answers reaches no network layer, so only these show it (+1%)
-export const TRACE_CATEGORIES = ['toplevel', 'ipc', 'mojom', 'sync', 'devtools.timeline'];
+// input and latencyInfo (quire#1079) hold the browser's side of a press: RenderWidgetHostImpl::ForwardMouseEvent and InputRouterImpl::FilterAndSendWebInputEvent
+// (a MouseUp there is the release reaching the renderer) and the renderer's MainThreadEventQueue::HandleEvent; they cost nothing but while an input event goes through,
+// and the price is the `[cost]` line of every job (the same loop of page cycles, a click each, with this set on); it moves to pwa's preload with pwa#289
+export const TRACE_CATEGORIES = ['toplevel', 'ipc', 'mojom', 'sync', 'devtools.timeline', 'input', 'latencyInfo'];
 
 // QUIRE_FLIGHT_VIA_SUDO=1 takes the runner's path (every root step through `sudo -n`, as on CI's non-root user) even where the machine is root, so a
 // worker's machine reproduces what CI does; no job sets it. Keyword: via sudo.
@@ -156,7 +159,11 @@ export async function keepBrowserTrace(browser, out) {
       }
     })();
     await pipeline(Readable.from(chunks), createGzip({ level: 6 }), createWriteStream(out));
-    return { file: out, bytes: statSync(out).size, dataLoss: !!flushed.dataLossOccurred, ms: Date.now() - began, pendingRequests: pendingRequests(parts.map(String).join('')) };
+    // the text is parsed once for both readings (the requests no one answered, the input events that went through the browser)
+    let events = null;
+    let unreadable = null;
+    try { events = traceEvents(parts.map(String).join('')); } catch (error) { unreadable = { error: String((error && error.message) || error).slice(0, 200) }; }
+    return { file: out, bytes: statSync(out).size, dataLoss: !!flushed.dataLossOccurred, ms: Date.now() - began, pendingRequests: events ? requestsPending(events) : unreadable, inputPath: events ? inputPathOf(events) : unreadable };
   } catch (error) { return { unavailable: `reading the trace failed: ${String((error && error.message) || error).slice(0, 300)}` }; }
 }
 
@@ -349,8 +356,48 @@ export function ringState(env = process.env) {
  */
 export function pendingRequests(text) {
   try {
-    const parsed = JSON.parse(text);
-    const events = Array.isArray(parsed) ? parsed : parsed.traceEvents || [];
+    return requestsPending(traceEvents(text));
+  } catch (error) { return { error: String((error && error.message) || error).slice(0, 200) }; }
+}
+
+/** The events of a Chrome trace's text (the array form, or the object with `traceEvents`). */
+export function traceEvents(text) {
+  const parsed = JSON.parse(text);
+  return Array.isArray(parsed) ? parsed : parsed.traceEvents || [];
+}
+
+// The events of a mouse, a touch or a pointer press on its way through the browser process and into the renderer (quire#1079, categories `input` and `latencyInfo`):
+// the browser got the event (ForwardMouseEvent), sent it on (FilterAndSendWebInputEvent, its `type` MouseDown or MouseUp), the renderer's main thread handled it
+// (HandleEvent, `event_type`) and the browser read the answer (MouseEventHandled, `ack`). A release absent from the renderer's events but present in the browser's was lost between
+// them; absent from both, it was never sent to the browser.
+const INPUT_NAMES = new Set([
+  'RenderWidgetHostImpl::ForwardMouseEvent', 'RenderWidgetHostImpl::ForwardTouchEventWithLatencyInfo', 'RenderWidgetHostImpl::ForwardGestureEventWithLatencyInfo',
+  'InputRouterImpl::FilterAndSendWebInputEvent', 'InputRouterImpl::MouseEventHandled', 'InputRouterImpl::TouchEventHandled', 'InputRouterImpl::GestureEventHandled',
+  'WidgetInputHandlerImpl::DispatchEvent', 'MainThreadEventQueue::HandleEvent', 'InputEventSentBlocking',
+  'InputLatency::MouseDown', 'InputLatency::MouseUp', 'InputLatency::MouseMove',
+]);
+export const INPUT_PATH_MOST = 100;
+
+/**
+ * The last INPUT_PATH_MOST input events of a Chrome trace, oldest first: [{ name, cat, pid, tid, type, ack, msBeforeEnd }], `msBeforeEnd` from the
+ * event to the last event of the trace (the trace's clock is the monotonic one, not the page's epoch, so the press is found by order and by type).
+ */
+export function inputPathOf(events) {
+  let last = 0;
+  const found = [];
+  for (const event of events) {
+    if (event.ts > last) last = event.ts;
+    if (!INPUT_NAMES.has(event.name) || !/input|latencyInfo/.test(event.cat || '')) continue;
+    const args = event.args || {};
+    found.push({ name: event.name, cat: event.cat, pid: event.pid, tid: event.tid, ts: event.ts, ...(args.type !== undefined ? { type: String(args.type) } : {}), ...(args.event_type !== undefined ? { type: String(args.event_type) } : {}), ...(args.ack !== undefined ? { ack: String(args.ack) } : {}) });
+  }
+  // processes write their events into the trace one after the other, so the order of the file is not the order of time
+  return found.sort((a, b) => a.ts - b.ts).slice(-INPUT_PATH_MOST).map(({ ts, ...kept }) => ({ ...kept, msBeforeEnd: Math.round((last - ts) / 1000) }));
+}
+
+/** The requests the renderer began and did not see finish, from a trace's events. */
+export function requestsPending(events) {
+  try {
     const sent = new Map();
     let last = 0;
     for (const event of events) {
