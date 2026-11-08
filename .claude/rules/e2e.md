@@ -442,7 +442,7 @@ so there was nothing to root-cause. Its root cause is quire#1041 (it was #932 it
   `trace` (`trace.zip`: the DOM snapshots before and after every action, the console, the network, the source) and
   `screenshot` (`playwright.config.js`: `trace: 'on'`, `screenshot: 'on'`, which hold for every project), and the page
   fixture's `page-dom` (the HTML as it is when the test ended) and `page-history` (the page's last 100 console messages,
-  page errors and requests, `e2e/page-history.js`, kept in node), next to the existing `page-state` (focus, dialogs, overlays).
+  page errors and requests, `e2e/page-history.js`, kept in node), next to the existing `page-state` (focus, dialogs, overlays) and the stall watch's `press-record` (`e2e/press-record.js`, quire#1079).
   A page that cannot answer gives the reason as the text of `page-dom`, so the file always exists.
 * **Where it goes**: `test-results/` is uploaded by `Upload test screenshots` as `e2e-screenshots-<group>` (every run, 14 days); the
   HTML report, with the same traces, as `e2e-report-<group>` when the job failed; the stall and flight files as
