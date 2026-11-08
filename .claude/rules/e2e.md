@@ -348,7 +348,7 @@ only for a red. The design, with the research and what each means cannot find, i
   events a second, no slowdown beyond noise (3.9 s against 3.7 s for 30 page cycles). A capture reads a snapshot of the ring, which goes on
   recording (**ring snapshot**, below), and writes it gzipped after the segments of the captures before it (`flight-<n>-kernel.txt.gz`). The teardown removes the instance and the segments.
 * **Chrome's ring** (`startBrowserTrace`, `keepBrowserTrace`): the browser's DevTools `Tracing` domain, `recordContinuously`, categories
-  toplevel, ipc, mojom and sync (`TRACE_CATEGORIES`), 32 MB. Measured over 8 rounds of 30 page cycles (a loop of nothing but IPC) with the kernel ring: 3.88 s with no recorder, 4.09 s with this set (+5%), 4.25 s with nine categories (+10%), so the light set is the default. Ended and read only for
+  toplevel, ipc, mojom, sync, devtools.timeline, input and latencyInfo (`TRACE_CATEGORIES`; the last two are the browser's side of a press, quire#1079, and the `[cost]` line of every job measures the whole set), 32 MB. Ended and read only for
   a frozen renderer (`flight-<n>-browser-trace.json.gz`). Measured with one thread of a renderer stopped: `Tracing.end` answers in 79 ms
   and the trace holds the renderer's events up to the freeze, so a frozen main thread does not take the renderer's trace with it.
   A renderer with every thread stopped (SIGSTOP) answers nothing more: the browser's, GPU's and network's events are what is then in it.
@@ -442,7 +442,7 @@ so there was nothing to root-cause. Its root cause is quire#1041 (it was #932 it
   `trace` (`trace.zip`: the DOM snapshots before and after every action, the console, the network, the source) and
   `screenshot` (`playwright.config.js`: `trace: 'on'`, `screenshot: 'on'`, which hold for every project), and the page
   fixture's `page-dom` (the HTML as it is when the test ended) and `page-history` (the page's last 100 console messages,
-  page errors and requests, `e2e/page-history.js`, kept in node), next to the existing `page-state` (focus, dialogs, overlays).
+  page errors and requests, `e2e/page-history.js`, kept in node), next to the existing `page-state` (focus, dialogs, overlays) and the stall watch's `press-record` (`e2e/press-record.js`, quire#1079).
   A page that cannot answer gives the reason as the text of `page-dom`, so the file always exists.
 * **Where it goes**: `test-results/` is uploaded by `Upload test screenshots` as `e2e-screenshots-<group>` (every run, 14 days); the
   HTML report, with the same traces, as `e2e-report-<group>` when the job failed; the stall and flight files as
@@ -452,7 +452,7 @@ so there was nothing to root-cause. Its root cause is quire#1041 (it was #932 it
   names of the three artifacts. Open a trace with `npx playwright show-trace <trace.zip>`.
 * **Tested**: `evidence.spec.js` (`--require-capture`: each part left out, a trace named in the report whose file is gone, the
   summary) and, on the real path, `evidence-real.spec.js` (a nested run that fails an assertion with the repository's settings
-  keeps the four parts and the check exits 0 with the summary; the same failure with trace and screenshot off exits 1 naming
+  keeps its parts and the check exits 0 with the summary; the same failure with trace and screenshot off exits 1 naming
   both). `--require-capture` checks `failed` only: a timeout or a killed worker is the flight recorder's (`EVIDENCE MISSING: kernel ring`).
 * **The summary goes where `$GITHUB_STEP_SUMMARY` says** (root cause of the red `evidence-real.spec.js:384` in run 40820463902): the
   check appends the summary to that file when the variable is set, and prints it only when it is not. A job sets it, so the nested

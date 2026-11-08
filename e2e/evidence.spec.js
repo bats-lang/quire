@@ -22,7 +22,8 @@ import { arm, capture, CAPTURE_MOST_MS, CRASH_RECORD_MOST_MS, NATIVE_MOST_MS, st
 import { capabilities, diskEvidence, missingEvidence, pageState, parseBlocked, symbolEvidence } from './evidence.js';
 import { pixelDiff } from './relaunch.js';
 import { captureSummary, missingFields } from './evidence-check.js';
-import { futexAnalysis, ringContent, ringReach } from './flight-recorder.js';
+import { futexAnalysis, inputPathOf, ringContent, ringReach, traceEvents } from './flight-recorder.js';
+import { callerOf, pressesOf } from './press-record.js';
 import { INSTANCE_VARIABLE, OUT_VARIABLE, keepBoth, keepKernel, nowSeconds, pauseInstance, readSyscall, ringSeen, ringState, ringStats, startBrowserTrace, startKernel, startWatchdog, stopKernel, stopWatchdog, wanted } from './flight-recorder.js';
 import { RING_LINES, Watchdog } from './flight-watchdog.js';
 import { heartbeatLimitMs, heartbeatQuiet, processState, resumeUntilRunning } from './preflight.js';
@@ -1097,10 +1098,10 @@ test('the job-level check with --require-capture: a failed test names each part 
   const file = (name) => { const path = testInfo.outputPath(name); writeFileSync(path, 'x'); return path; };
   const kept = file('flight-1-kernel.txt.gz');
   writeFileSync(`${kept}.reach.json`, JSON.stringify({ redAt: 100, lastAt: 100.2, others: [], reaches: true }));
-  const whole = [{ name: 'flight-kernel', path: kept }, { name: 'flight-kernel-reach', path: `${kept}.reach.json` }, { name: 'trace', path: file('trace.zip') }, { name: 'screenshot', path: file('shot.png') }, { name: 'page-dom', path: file('dom.html') }, { name: 'page-history', path: file('history.json') }];
+  const whole = [{ name: 'flight-kernel', path: kept }, { name: 'flight-kernel-reach', path: `${kept}.reach.json` }, { name: 'trace', path: file('trace.zip') }, { name: 'screenshot', path: file('shot.png') }, { name: 'page-dom', path: file('dom.html') }, { name: 'page-history', path: file('history.json') }, { name: 'press-record', path: file('press-record.json') }];
   const report = (status, attachments) => ({ suites: [{ specs: [{ title: 'the Search dialog opens', file: 'vertical.spec.js', line: 238, tests: [{ projectName: 'desktop', expectedStatus: 'passed', results: [{ status, errors: [{ message: 'Error: expect(locator).toBeVisible()\n at x' }], attachments }] }] }] }] });
   expect(missingFields([report('failed', whole)], [], { requireCapture: true }), 'a whole capture').toEqual([]);
-  for (const part of ['trace', 'screenshot', 'page-dom', 'page-history']) {
+  for (const part of ['trace', 'screenshot', 'page-dom', 'page-history', 'press-record']) {
     const found = missingFields([report('failed', whole.filter((each) => each.name !== part))], [], { requireCapture: true });
     expect(found, `without ${part}`).toEqual([`failure capture (test "the Search dialog opens" failed and left no ${part})`]);
   }
@@ -1543,4 +1544,45 @@ test('a ring that begins between the wait and the scan that saw it, or on one CP
   // 4. no scan before: nothing bounds the wait from below, so a ring never reaches; a ring that begins after the scan that saw it misses
   expect(ringReach({ ringStart: 90.0, ringCompleteFrom: 91.0, waitBegan: { notBefore: null, notAfter: 96.0 } })).toBe('unknown');
   expect(ringReach({ ringStart: 96.5, ringCompleteFrom: 96.5, waitBegan: began })).toBe('misses');
+});
+
+test('the press record reads a press that was released, one that was not, and one that a capture listener on window stopped (quire#1079)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const at = (type, time, more = {}) => ({ type, at: time, page: 1, inFrame: false, pointerId: 1, target: 'button#b', atDocumentCapture: true, stoppedByWindowCapture: false, ...more });
+  const presses = pressesOf([
+    at('pointerdown', 10), at('mousedown', 11), at('pointerup', 90), at('mouseup', 91), at('click', 92),
+    at('pointerdown', 200), at('mousedown', 201),
+    at('pointerdown', 300), at('mousedown', 301, { atDocumentCapture: false, stoppedByWindowCapture: true }),
+  ]);
+  expect(presses.map((press) => [press.downAt, press.released, press.clickAt])).toEqual([[10, true, 92], [200, false, null], [300, false, null]]);
+  expect(presses[1].events, 'a press with no release is only a pointerdown and a mousedown').toEqual(['pointerdown', 'mousedown']);
+  expect(presses[2].stopped, 'the stop is said for the event').toEqual(['mousedown stopped by a capture listener on window']);
+  expect(pressesOf([at('mouseup', 5)]).map((press) => press.released), 'a release with no press before it opens one').toEqual([true]);
+  // who made a DevTools client: the first frame that is not this record, Playwright or node, and a script given to node on its command line
+  const stack = ['Error: who', '    at BrowserContext.newCDPSession (file:///w/e2e/press-record.js:150:35)', '    at async Object.arm (/w/node_modules/playwright/lib/x.js:1:1)', '    at async arm (file:///w/e2e/stall-capture.js:241:20)'].join('\n');
+  expect(callerOf(stack).endsWith('e2e/stall-capture.js:241:20')).toBe(true);
+  expect(callerOf(['Error: who', '    at /w/e2e/press-record.js:1:1', '    at [eval]:9:44'].join('\n'))).toBe('[eval]:9:44');
+  expect(callerOf('Error: who')).toBe('unknown');
+});
+
+test('the browser\'s input path is the last input events of the trace, with the type each carries and how long before its end (quire#1079)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const event = (name, ts, args, cat = 'input') => ({ name, cat, ts, pid: 7, tid: 1, ph: 'X', args });
+  const events = [
+    event('InputRouterImpl::FilterAndSendWebInputEvent', 1000000, { type: 'MouseDown' }),
+    event('MainThreadEventQueue::HandleEvent', 1001000, { event_type: '{kMouseDown, kMouseTypeFirst}' }),
+    event('InputRouterImpl::MouseEventHandled', 1002000, { ack: 'CONSUMED', type: 'MouseDown' }),
+    event('TouchActionFilter::SetTouchAction', 1003000, {}),
+    event('InputRouterImpl::FilterAndSendWebInputEvent', 1004000, { type: 'MouseUp' }, 'other'),
+    event('RunTask', 4000000, {}, 'toplevel'),
+  ];
+  expect(inputPathOf(events)).toEqual([
+    { name: 'InputRouterImpl::FilterAndSendWebInputEvent', cat: 'input', pid: 7, tid: 1, type: 'MouseDown', msBeforeEnd: 3000 },
+    { name: 'MainThreadEventQueue::HandleEvent', cat: 'input', pid: 7, tid: 1, type: '{kMouseDown, kMouseTypeFirst}', msBeforeEnd: 2999 },
+    { name: 'InputRouterImpl::MouseEventHandled', cat: 'input', pid: 7, tid: 1, type: 'MouseDown', ack: 'CONSUMED', msBeforeEnd: 2998 },
+  ]);
+  const many = Array.from({ length: 150 }, (_, index) => event('InputRouterImpl::FilterAndSendWebInputEvent', index * 1000, { type: 'MouseMove' }));
+  expect(inputPathOf(many).length, 'the last hundred').toBe(100);
+  expect(traceEvents('{"traceEvents":[{"name":"a"}]}'), 'the object form').toEqual([{ name: 'a' }]);
+  expect(traceEvents('[{"name":"b"}]'), 'the array form').toEqual([{ name: 'b' }]);
 });

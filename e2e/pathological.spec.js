@@ -49,8 +49,11 @@ const sizedTo = (page) => {
 // Playwright's trace and screenshots snapshot the whole DOM at every action
 // (its snapshotter walks every node, 2 to 3 s on a chapter of 30,000), which
 // is the harness's cost, not the app's, and made the long chapters' steps
-// time out; the stall watch (e2e/stall-capture.js) is unaffected
-test.use({ trace: 'off', screenshot: 'off' });
+// time out; the stall watch (e2e/stall-capture.js) is unaffected.
+// So the trace here keeps the actions and no snapshot (the call log of every click, with the hit-target check's verdict, is in it) and a
+// screenshot is taken once, for a failure only. With both off a red of this spec (quire#1079, run 42389157385) left neither, and the
+// job's check named it EVIDENCE MISSING: failure capture.
+test.use({ trace: { mode: 'on', snapshots: false, screenshots: false }, screenshot: 'only-on-failure' });
 
 /** The reading arrangement: Pages (the default), Scroll, or Two columns */
 async function arrange(page, mode) {
