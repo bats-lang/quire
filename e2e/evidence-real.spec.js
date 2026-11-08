@@ -480,7 +480,7 @@ test('a failed test keeps its trace, screenshot, DOM and history, and the job-le
   const { code } = await run.finished;
   expect(code, run.output()).toBe(1);
   const names = attachmentsOf(run.report()).map((each) => each.name);
-  for (const part of ['trace', 'screenshot', 'page-dom', 'page-history']) expect(names, `${part} among ${names}`).toContain(part);
+  for (const part of ['trace', 'screenshot', 'page-dom', 'page-history', 'press-record']) expect(names, `${part} among ${names}`).toContain(part);
   const check = evidenceCheck(run, ['--require-capture', '--summary', 'e2e-screenshots-nested,e2e-report-nested', '--group', 'nested']);
   expect(check.code, check.text).toBe(0);
   expect(check.text).toMatch(/failed tests and what was kept of each/);

@@ -3,7 +3,7 @@
  * while the e2e run goes on and written out only when a renderer is frozen. Keyword: flight recorder.
  *  - the kernel's ring (flight-tracefs.js): futex waits and wakes, wakeups, switches, signals and
  *    the byte traffic of the run's process tree, in an ftrace instance of its own;
- *  - Chrome's own ring (the DevTools `Tracing` domain, `recordContinuously`): toplevel, ipc, mojom, sync.
+ *  - Chrome's own ring (the DevTools `Tracing` domain, `recordContinuously`): the categories of `TRACE_CATEGORIES`.
  * On in CI, and anywhere with QUIRE_FLIGHT=1; QUIRE_NO_RECORDER=1 turns it off.
  */
 
@@ -24,7 +24,6 @@ const ROOT_MS = 60000;
 export const ROOT_MOST_MS = ROOT_MS;
 export const TRACE_END_MS = 15000;
 export const TRACE_BUFFER_KB = 32768;
-// the light set: +5% on a loop of page cycles with the kernel ring, the nine-category set +10% (measured, quire#575)
 // devtools.timeline adds ResourceSendRequest and ResourceFinish: a fetch a service worker never answers reaches no network layer, so only these show it (+1%)
 // input and latencyInfo (quire#1079) hold the browser's side of a press: RenderWidgetHostImpl::ForwardMouseEvent and InputRouterImpl::FilterAndSendWebInputEvent
 // (a MouseUp there is the release reaching the renderer) and the renderer's MainThreadEventQueue::HandleEvent; they cost nothing but while an input event goes through,

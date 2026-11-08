@@ -1098,10 +1098,10 @@ test('the job-level check with --require-capture: a failed test names each part 
   const file = (name) => { const path = testInfo.outputPath(name); writeFileSync(path, 'x'); return path; };
   const kept = file('flight-1-kernel.txt.gz');
   writeFileSync(`${kept}.reach.json`, JSON.stringify({ redAt: 100, lastAt: 100.2, others: [], reaches: true }));
-  const whole = [{ name: 'flight-kernel', path: kept }, { name: 'flight-kernel-reach', path: `${kept}.reach.json` }, { name: 'trace', path: file('trace.zip') }, { name: 'screenshot', path: file('shot.png') }, { name: 'page-dom', path: file('dom.html') }, { name: 'page-history', path: file('history.json') }];
+  const whole = [{ name: 'flight-kernel', path: kept }, { name: 'flight-kernel-reach', path: `${kept}.reach.json` }, { name: 'trace', path: file('trace.zip') }, { name: 'screenshot', path: file('shot.png') }, { name: 'page-dom', path: file('dom.html') }, { name: 'page-history', path: file('history.json') }, { name: 'press-record', path: file('press-record.json') }];
   const report = (status, attachments) => ({ suites: [{ specs: [{ title: 'the Search dialog opens', file: 'vertical.spec.js', line: 238, tests: [{ projectName: 'desktop', expectedStatus: 'passed', results: [{ status, errors: [{ message: 'Error: expect(locator).toBeVisible()\n at x' }], attachments }] }] }] }] });
   expect(missingFields([report('failed', whole)], [], { requireCapture: true }), 'a whole capture').toEqual([]);
-  for (const part of ['trace', 'screenshot', 'page-dom', 'page-history']) {
+  for (const part of ['trace', 'screenshot', 'page-dom', 'page-history', 'press-record']) {
     const found = missingFields([report('failed', whole.filter((each) => each.name !== part))], [], { requireCapture: true });
     expect(found, `without ${part}`).toEqual([`failure capture (test "the Search dialog opens" failed and left no ${part})`]);
   }

@@ -6,7 +6,7 @@
  *   --require-report   no report at all fails (the step was killed, a worker died, the harness never started)
  *   --sanitizer <dir>  any report a sanitizer wrote there fails, with the report
  *   --require-capture  a test that FAILED must have left Playwright's trace and screenshot and the fixture's page-dom and
- *                      page-history (#1008, keyword: failure capture); a missing one is `EVIDENCE MISSING: failure capture (...)`
+ *                      page-history and the stall watch's press-record (#1008, #1079, keyword: failure capture); a missing one is `EVIDENCE MISSING: failure capture (...)`
  *   --summary <artifacts>  write to $GITHUB_STEP_SUMMARY (else standard output) each failed test and the files of its capture,
  *                      named with the artifacts (comma separated) that hold them; --group <name> titles it
  * For each test that did not end as expected: its report must name a kernel ring (attachment `flight-kernel`, a file with content)
@@ -38,8 +38,8 @@ function testsOf(suite, out) {
 
 const holds = (file) => { try { return statSync(file).size > 0; } catch (error) { return false; } };
 
-/** What a failed test's capture is made of (#1008): Playwright's own (`trace`, `screenshot`: config `trace: 'on'`, `screenshot: 'on'`) and the page fixture's. */
-export const CAPTURE_PARTS = ['trace', 'screenshot', 'page-dom', 'page-history'];
+/** What a failed test's capture is made of (#1008): Playwright's own (`trace`, `screenshot`: config `trace: 'on'`, `screenshot: 'on'`), the page fixture's and the stall watch's `press-record` (quire#1079). */
+export const CAPTURE_PARTS = ['trace', 'screenshot', 'page-dom', 'page-history', 'press-record'];
 
 /** An attachment of a report is there when its file has content, or the report carries its body (the JSON reporter writes one or the other). */
 const captured = (attachment) => Boolean(attachment && ((attachment.path && holds(attachment.path)) || (attachment.body && String(attachment.body).length > 0)));
