@@ -1,0 +1,19 @@
+# A pull request that changes a workflow or issue-template file must leave it canonical
+# (bats-lang/repository-prototype#603): the file in the head is a template with its holes filled or is
+# listed in the allowlist of repository-prototype's default branch. The work is the shared
+# canonical-files-check.yml, called by commit; tools-ref is the same commit (a reusable workflow
+# cannot read its own).
+name: canonical-files
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  canonical-files:
+    uses: bats-lang/repository-prototype/.github/workflows/canonical-files-check.yml@3d260601c3f6728462120cd3fe4c569e79e25eb5 # repository-prototype main 3d26060
+    with:
+      tools-ref: 3d260601c3f6728462120cd3fe4c569e79e25eb5
