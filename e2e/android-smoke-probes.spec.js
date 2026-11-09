@@ -1,0 +1,85 @@
+// The probes of the android job's emulator run (scripts/android/smoke-*.js, pwa#205, pwa#267,
+// quire#1030), played in Chromium: the long press goes to a word, the taps to the centre of each
+// toolbar button, and the result is true only when every button saw its click. The real WebView
+// is the emulator; here the probes' answers are checked, so a probe that answers a point off a
+// word or a button fails in the e2e group and not only in the emulator. Keyword: android-smoke.
+
+import { readFileSync } from 'node:fs';
+import { test, expect } from './fixtures.js';
+import { start, readBook, bookPage } from './helpers.js';
+import { selectionBooks } from './selection-books.js';
+
+const probe = name => readFileSync(new URL(`../scripts/android/${name}`, import.meta.url), 'utf8');
+const toolbar = page => page.getByRole('toolbar', { name: 'Selection' });
+
+/** The book open, a word selected where smoke-select-point.js says (the point in device pixels,
+    read back as the page's coordinates), and the toolbar up */
+async function selectedWord(page) {
+  await start(page);
+  await readBook(page, selectionBooks.prose.opts);
+  await expect.poll(() => page.evaluate(probe('smoke-ready.js'))).toBe('true');
+  const [x, y] = (await page.evaluate(probe('smoke-select-point.js'))).split(' ').map(Number);
+  const word = await page.evaluate(({ px, py }) => {
+    const at = document.caretRangeFromPoint(px / devicePixelRatio, py / devicePixelRatio);
+    if (!at || at.startContainer.nodeType !== Node.TEXT_NODE) return null;
+    const data = at.startContainer.data;
+    let start = at.startOffset, end = at.startOffset;
+    while (start > 0 && /\S/.test(data[start - 1])) start -= 1;
+    while (end < data.length && /\S/.test(data[end])) end += 1;
+    const range = document.createRange();
+    range.setStart(at.startContainer, start);
+    range.setEnd(at.startContainer, end);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    return data.slice(start, end);
+  }, { px: x, py: y });
+  expect(word, 'smoke-select-point.js answered a point on a word').toMatch(/^\S{4,}$/);
+  await expect(toolbar(page)).toBeVisible();
+}
+
+/** The lines <name> <x> <y> of smoke-tap-points.js */
+async function tapPoints(page) {
+  const answer = await page.evaluate(probe('smoke-tap-points.js'));
+  return answer.split('\n').map(l => l.split(' ')).map(([name, x, y]) => ({ name, x: Number(x), y: Number(y) }));
+}
+
+test('the probes long press a word and tap every toolbar button, and the result is true', async ({ page }) => {
+  await selectedWord(page);
+  const dpr = await page.evaluate(() => devicePixelRatio);
+  const points = await tapPoints(page);
+  const names = points.map(p => p.name);
+  expect(names).toEqual(expect.arrayContaining(['selection-highlight', 'selection-note', 'selection-copy', 'selection-more']));
+  for (const p of points) {
+    expect(Number.isFinite(p.x) && Number.isFinite(p.y), `${p.name} has a point`).toBe(true);
+    await page.mouse.click(p.x / dpr, p.y / dpr);
+  }
+  await expect(toolbar(page)).toBeVisible();
+  const result = await page.evaluate(probe('smoke-tap-result.js'));
+  // the row behind More is tapped when it was measured, and said when it was not
+  if (names.includes('selection-yellow')) expect(result).toBe('true');
+  else expect(result).toBe('the-row-behind-More');
+  await expect(bookPage(page)).toBeVisible();
+});
+
+test('the result names a button that saw no click, and none that did', async ({ page }) => {
+  await selectedWord(page);
+  const dpr = await page.evaluate(() => devicePixelRatio);
+  const points = (await tapPoints(page)).filter(p => p.name !== 'selection-note');
+  for (const p of points) await page.mouse.click(p.x / dpr, p.y / dpr);
+  const missed = (await page.evaluate(probe('smoke-tap-result.js'))).split(' ');
+  expect(missed).toContain('selection-note');
+  expect(missed).not.toContain('selection-copy');
+  expect(missed).not.toContain('selection-highlight');
+});
+
+test('a tap that lands off the button is the one the result names', async ({ page }) => {
+  await selectedWord(page);
+  const dpr = await page.evaluate(() => devicePixelRatio);
+  const points = await tapPoints(page);
+  const copy = points.find(p => p.name === 'selection-copy');
+  for (const p of points.filter(q => q !== copy)) await page.mouse.click(p.x / dpr, p.y / dpr);
+  // Copy's tap goes to the page's top-left corner instead of its centre
+  await page.mouse.click(1, 1);
+  const missed = (await page.evaluate(probe('smoke-tap-result.js'))).split(' ');
+  expect(missed).toContain('selection-copy');
+});
