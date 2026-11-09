@@ -234,7 +234,7 @@ fun put_rules {sheet_len:pos}{count:nat}{l:agz} .<count>.
   (data: !$A.borrow(byte, l, sheet_len), rules: !align_rules(sheet_len, count)): void =
   case+ rules of
   | AlignRulesNil() => ()
-  | AlignRulesCons(rule, align, rest) => let
+  | AlignRulesCons(rule, align, _, rest) => let
       val () = print_string("  handled: ")
       val () = put_span(data, rule.selector_at, rule.selector_len, 0)
       val () = println! (" -> ", align_word(align))
@@ -243,12 +243,12 @@ fun put_rules {sheet_len:pos}{count:nat}{l:agz} .<count>.
 fun count_rules {sheet_len:int}{count:nat} .<count>. (rules: !align_rules(sheet_len, count)): int =
   case+ rules of
   | AlignRulesNil() => 0
-  | AlignRulesCons(_, _, rest) => 1 + count_rules(rest)
+  | AlignRulesCons(_, _, _, rest) => 1 + count_rules(rest)
 
 fun rule_align {sheet_len:int}{count:nat}{i:nat} .<count>. (rules: !align_rules(sheet_len, count), i: int i): string =
   case+ rules of
   | AlignRulesNil() => "none"
-  | AlignRulesCons(_, align, rest) => if i = 0 then align_word(align) else rule_align(rest, i - 1)
+  | AlignRulesCons(_, align, _, rest) => if i = 0 then align_word(align) else rule_align(rest, i - 1)
 
 fn selector_reason (read: selector_read): string =
   case+ read of
@@ -288,7 +288,7 @@ in $A.free<byte>($A.thaw<byte>(dropped_frozen)) end
 fun put_words {count:nat} .<count>. (map: !align_map(count)): void =
   case+ map of
   | AlignMapNil() => println! ()
-  | AlignMapCons(_, align, rest) => let
+  | AlignMapCons(_, align, _, rest) => let
       val () = print_string(align_word(align))
       val () = print_string(" ")
     in put_words(rest) end
@@ -305,7 +305,7 @@ fun sequence_is {count:nat}{m:nat}{i:nat | i <= m} .<count>.
   (map: !align_map(count), wanted: string(m), m: int m, i: int i): bool =
   case+ map of
   | AlignMapNil() => i >= m
-  | AlignMapCons(_, align, rest) =>
+  | AlignMapCons(_, align, _, rest) =>
     if i >= m then false
     else if letter_of(align) = char2int0(wanted[i]) then sequence_is(rest, wanted, m, i + 1)
     else false

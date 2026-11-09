@@ -304,23 +304,30 @@ fun _best_rule {ls:agz}{ns:pos}{ld:agz}{nd:pos}{count:nat}{depth:nat} .<count>.
       else _best_rule(sheet, rest, data, facts, chain, best)
     end
 
-typedef best_align = @{found= bool, specificity= int, order= int, align= align_value}
+(* Whether a rule says what is asked: a display (hidden), else an alignment (keyword: publisher hidden) *)
+fn _rule_says (align: align_value, display: display_value, of_display: bool): bool =
+  if of_display then (case+ display of DisplayUnset() => false | DisplayNone() => true | DisplayShown() => true)
+  else (case+ align of AlignNone() => false | AlignLeft() => true | AlignRight() => true | AlignCenter() => true)
 
+typedef best_align = @{found= bool, specificity= int, order= int, align= align_value, display= display_value}
+
+(* The best rule that gives a display (of_display), else an alignment *)
 fun _best_align {ls:agz}{ns:pos}{ld:agz}{nd:pos}{count:nat}{depth:nat} .<count>.
   (sheet: !$A.borrow(byte, ls, ns), rules: !align_rules(ns, count), data: !$A.borrow(byte, ld, nd),
-   facts: element_facts(nd), chain: !ancestors(nd, depth), best: best_align): best_align =
+   facts: element_facts(nd), chain: !ancestors(nd, depth), of_display: bool, best: best_align): best_align =
   case+ rules of
   | AlignRulesNil() => best
-  | AlignRulesCons(rule, align, rest) => let
+  | AlignRulesCons(rule, align, display, rest) => let
       val @{selector_at= selector_at, selector_len= selector_len, specificity= specificity, order= order} = rule
-      val beats = (if ~(best.found) then true
+      val beats = (if ~(_rule_says(align, display, of_display)) then false
+        else if ~(best.found) then true
         else if specificity > best.specificity then true
         else if specificity < best.specificity then false
         else order >= best.order)
       val wins = (if beats then _selector_matches(sheet, selector_at, selector_len, data, facts, chain) else false)
     in
-      if wins then _best_align(sheet, rest, data, facts, chain, @{found= true, specificity= specificity, order= order, align= align})
-      else _best_align(sheet, rest, data, facts, chain, best)
+      if wins then _best_align(sheet, rest, data, facts, chain, of_display, @{found= true, specificity= specificity, order= order, align= align, display= display})
+      else _best_align(sheet, rest, data, facts, chain, of_display, best)
     end
 
 (* ============================================================
@@ -487,7 +494,7 @@ in walk(map, offset) end
 (* The table elements with an alignment of their own, in document order (keyword: publisher alignment) *)
 #pub datavtype align_map(count:int) =
   | AlignMapNil(0) of ()
-  | {count:nat} AlignMapCons(count + 1) of (int, align_value, align_map(count))
+  | {count:nat} AlignMapCons(count + 1) of (int, align_value, bool, align_map(count))
 
 #pub fun align_map_new (): align_map(0)
 
@@ -499,20 +506,21 @@ implement align_map_free {count} (map) = let
   fun walk {count:nat} .<count>. (map: align_map(count)): void =
     case+ map of
     | ~AlignMapNil() => ()
-    | ~AlignMapCons(_, _, rest) => walk(rest)
+    | ~AlignMapCons(_, _, _, rest) => walk(rest)
 in walk(map) end
 
 fun _align_map_reversed {a,b:nat} .<a>. (map: align_map(a), onto: align_map(b)): align_map(a + b) =
   case+ map of
   | ~AlignMapNil() => onto
-  | ~AlignMapCons(offset, align, rest) => _align_map_reversed(rest, AlignMapCons(offset, align, onto))
+  | ~AlignMapCons(offset, align, hidden, rest) => _align_map_reversed(rest, AlignMapCons(offset, align, hidden, onto))
 
-fn _align_map_added {m:nat} (map: align_map(m), offset: int, align: align_value): [more:nat] align_map(more) =
+(* The element is in the map when it is aligned or hidden (keyword: publisher hidden) *)
+fn _align_map_added {m:nat} (map: align_map(m), offset: int, align: align_value, hidden: bool): [more:nat] align_map(more) =
   case+ align of
-  | AlignNone() => map
-  | AlignLeft() => AlignMapCons(offset, AlignLeft(), map)
-  | AlignRight() => AlignMapCons(offset, AlignRight(), map)
-  | AlignCenter() => AlignMapCons(offset, AlignCenter(), map)
+  | AlignNone() => if hidden then AlignMapCons(offset, AlignNone(), true, map) else map
+  | AlignLeft() => AlignMapCons(offset, AlignLeft(), hidden, map)
+  | AlignRight() => AlignMapCons(offset, AlignRight(), hidden, map)
+  | AlignCenter() => AlignMapCons(offset, AlignCenter(), hidden, map)
 
 #pub fun align_map_count {count:nat} (map: !align_map(count)): int count
 
@@ -520,20 +528,21 @@ implement align_map_count {count} (map) = let
   fun walk {count:nat} .<count>. (map: !align_map(count)): int count =
     case+ map of
     | AlignMapNil() => 0
-    | AlignMapCons(_, _, rest) => 1 + walk(rest)
+    | AlignMapCons(_, _, _, rest) => 1 + walk(rest)
 in walk(map) end
 
-(* The alignment of the element whose name is at offset, AlignNone if none (keyword: publisher alignment) *)
-#pub fun align_map_take {count:nat} (map: align_map(count), offset: int): [rest:nat] @(align_value, align_map(rest))
+(* The alignment of the element whose name is at offset, AlignNone if none, and whether the
+   publisher hid it (keyword: publisher alignment, publisher hidden) *)
+#pub fun align_map_take {count:nat} (map: align_map(count), offset: int): [rest:nat] @(align_value, bool, align_map(rest))
 
 implement align_map_take {count} (map, offset) = let
-  fun walk {count:nat} .<count>. (map: align_map(count), offset: int): [rest:nat] @(align_value, align_map(rest)) =
+  fun walk {count:nat} .<count>. (map: align_map(count), offset: int): [rest:nat] @(align_value, bool, align_map(rest)) =
     case+ map of
-    | ~AlignMapNil() => @(AlignNone(), AlignMapNil())
-    | ~AlignMapCons(each, align, rest) =>
+    | ~AlignMapNil() => @(AlignNone(), false, AlignMapNil())
+    | ~AlignMapCons(each, align, hidden, rest) =>
       if each < offset then walk(rest, offset)
-      else if each = offset then @(align, rest)
-      else @(AlignNone(), AlignMapCons(each, align, rest))
+      else if each = offset then @(align, hidden, rest)
+      else @(AlignNone(), false, AlignMapCons(each, align, hidden, rest))
 in walk(map, offset) end
 
 (* ============================================================
@@ -589,8 +598,26 @@ in
   | AlignRight() => AlignRight()
   | AlignCenter() => AlignCenter()
   | AlignNone() => let
-      val best = _best_align(sheet, aligns, data, facts, chain, @{found= false, specificity= 0, order= 0, align= AlignNone()})
+      val best = _best_align(sheet, aligns, data, facts, chain, false, @{found= false, specificity= 0, order= 0, align= AlignNone(), display= DisplayUnset()})
     in if best.found then best.align else AlignNone() end
+end
+
+(* Whether the publisher hid an element: its style attribute's display, else the best rule's, not in an @media (keyword: publisher hidden) *)
+fn _hidden_of {l:agz}{n:pos}{ns:pos}{count:nat}{depth:nat}{attr_count:nat}{ls:agz}
+  (data: !$A.borrow(byte, l, n), sheet: !$A.borrow(byte, ls, ns), aligns: !align_rules(ns, count),
+   facts: element_facts(n), chain: !ancestors(n, depth), attrs: !$X.xml_attr_list(n, attr_count)): bool = let
+  val @(style_at, style_len) = _attr_find(data, attrs, "style", 5)
+  val style_display = (if style_len = 0 then DisplayUnset() else declarations_display_read(data, style_at, style_at + style_len)): display_value
+in
+  case+ style_display of
+  | DisplayNone() => true
+  | DisplayShown() => false
+  | DisplayUnset() => let
+      val best = _best_align(sheet, aligns, data, facts, chain, true, @{found= false, specificity= 0, order= 0, align= AlignNone(), display= DisplayUnset()})
+    in
+      if best.found then (case+ best.display of DisplayNone() => true | DisplayShown() => false | DisplayUnset() => false)
+      else false
+    end
 end
 
 (* The number of elements in a list of nodes *)
@@ -704,7 +731,10 @@ and _walk_node {ld:agz}{nd:pos}{ls:agz}{ns:pos}{sz:pos}{count,align_count:nat}{d
       val align = (case+ goal of
         | GoalTally() => AlignNone()
         | GoalSizes() => (if _is_table_part(data, name_at, name_len) then _align_of_part(data, sheet, aligns, facts, chain, attrs) else AlignNone()))
-      val align_map = _align_map_added(align_map, name_at, align)
+      val hidden = (case+ goal of
+        | GoalTally() => false
+        | GoalSizes() => _hidden_of(data, sheet, aligns, facts, chain, attrs))
+      val align_map = _align_map_added(align_map, name_at, align, hidden)
       val below_shown = (if mapped then computed else shown): size_computed
       val chain = AncestorsCons(facts, chain)
       val ~Walked(chain, tally, map, align_map) = _walk_nodes(data, sheet, rules, aligns, children, Walked(chain, tally, map, align_map), computed, below_root, below_shown, goal, base)

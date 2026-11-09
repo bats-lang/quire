@@ -298,7 +298,7 @@ fun align_rule_at {sheet_len:int}{count:nat}{i:nat} .<count>.
   (rules: !align_rules(sheet_len, count), i: int i): @(int, string) =
   case+ rules of
   | AlignRulesNil() => @(~1, "none")
-  | AlignRulesCons(rule, align, rest) =>
+  | AlignRulesCons(rule, align, _, rest) =>
     if i = 0 then @(rule.selector_len, align_word(align)) else align_rule_at(rest, i - 1)
 
 fn check_align_sheets (): void = let
@@ -311,7 +311,7 @@ fn check_align_sheets (): void = let
     fun count {s:int}{c:nat} .<c>. (rules: !align_rules(s, c)): int =
       case+ rules of
       | AlignRulesNil() => 0
-      | AlignRulesCons(_, _, rest) => 1 + count(rest)
+      | AlignRulesCons(_, _, _, rest) => 1 + count(rest)
   in count(rules) end, 3, "align sheet: three rules")
   val @(first_len, first) = align_rule_at(rules, 0)
   val () = expect_int(first_len, 18, "align sheet: first selector")
@@ -322,6 +322,73 @@ fn check_align_sheets (): void = let
   val @(third_len, third) = align_rule_at(rules, 2)
   val () = expect_int(third_len, 2, "align sheet: third selector")
   val () = expect_text(third, "center", "align sheet: third")
+  val () = align_rules_free(rules)
+  val () = $A.drop<byte>(frozen, view)
+in $A.free<byte>($A.thaw<byte>(frozen)) end
+
+(* ---------------- display (keyword: publisher hidden) ---------------- *)
+
+fn display_word (display: display_value): string =
+  case+ display of
+  | DisplayUnset() => "unset"
+  | DisplayNone() => "none"
+  | DisplayShown() => "shown"
+
+fn display_of {m:pos | m <= 1048576} (block: string(m), wanted: string): void = let
+  val m = g1u2i(string1_length(block))
+  val array = text_array(block, m)
+  val @(frozen, view) = $A.freeze<byte>(array)
+  val () = expect_text(display_word(declarations_display_read(view, 0, m)), wanted, block)
+  val () = $A.drop<byte>(frozen, view)
+in $A.free<byte>($A.thaw<byte>(frozen)) end
+
+fn check_displays (): void = let
+  val () = display_of("display:none", "none")
+  val () = display_of(" DISPLAY : None ; ", "none")
+  val () = display_of("color:red;display:none", "none")
+  val () = display_of("display:block", "shown")
+  val () = display_of("display:inline-block", "shown")
+  val () = display_of("display:none;display:block", "shown")
+  val () = display_of("display:block;display:none", "none")
+  val () = display_of("display:none;display:", "none")
+  val () = display_of("display:none;display:12", "none")
+  val () = display_of("display:none !important", "unset")
+  val () = display_of("display:block !important;display:none", "none")
+  val () = display_of("display:", "unset")
+  val () = display_of("display:12", "unset")
+  val () = display_of("display:nonexistent", "shown")
+  val () = display_of("displays:none", "unset")
+  val () = display_of("visibility:hidden", "unset")
+  val () = display_of(" ", "unset")
+in () end
+
+(* the n-th rule of an alignment sheet: its display word *)
+fun display_rule_at {sheet_len:int}{count:nat}{i:nat} .<count>.
+  (rules: !align_rules(sheet_len, count), i: int i): string =
+  case+ rules of
+  | AlignRulesNil() => "missing"
+  | AlignRulesCons(_, _, display, rest) =>
+    if i = 0 then display_word(display) else display_rule_at(rest, i - 1)
+
+fn check_display_sheets (): void = let
+  (* a media rule is skipped whole, a rule with both is one rule with both, a rule with neither is none *)
+  val sheet = ".gone{display:none} @media x{p.wide{display:none}} td{text-align:right;display:none} q{color:red} em{display:block}"
+  val m = g1u2i(string1_length(sheet))
+  val array = text_array(sheet, m)
+  val @(frozen, view) = $A.freeze<byte>(array)
+  val rules = sheet_aligns_read(view, m)
+  val () = expect_int(let
+    fun count {s:int}{c:nat} .<c>. (rules: !align_rules(s, c)): int =
+      case+ rules of
+      | AlignRulesNil() => 0
+      | AlignRulesCons(_, _, _, rest) => 1 + count(rest)
+  in count(rules) end, 3, "display sheet: three rules")
+  val () = expect_text(display_rule_at(rules, 0), "none", "display sheet: .gone")
+  val () = expect_text(display_rule_at(rules, 1), "none", "display sheet: td")
+  val @(td_len, td_align) = align_rule_at(rules, 1)
+  val () = expect_int(td_len, 2, "display sheet: td selector")
+  val () = expect_text(td_align, "right", "display sheet: td keeps its alignment")
+  val () = expect_text(display_rule_at(rules, 2), "shown", "display sheet: em")
   val () = align_rules_free(rules)
   val () = $A.drop<byte>(frozen, view)
 in $A.free<byte>($A.thaw<byte>(frozen)) end
@@ -511,6 +578,8 @@ implement main0 () = let
   val () = check_selectors()
   val () = check_aligns()
   val () = check_align_sheets()
+  val () = check_displays()
+  val () = check_display_sheets()
   val () = check_sheets()
   val () = check_sizes()
   val () = check_many()
