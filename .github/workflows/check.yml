@@ -68,7 +68,7 @@ jobs:
       - name: Did the merge queue pass this commit
         id: queue
         # pinned like the other pwa calls; the relock moves it (relock.yml's workflow-pins)
-        uses: bats-lang/pwa/.github/actions/queue-passed@d6d38db8f8e7a6131daa0f21dc4f31ca7d56fbd3 # pwa main d6d38db
+        uses: bats-lang/pwa/.github/actions/queue-passed@672da1b5459c36188e96b59e77b32e3b550b2719 # pwa main 672da1b
 
   # The groups the tests run in, side by side (tests/groups.json): every
   # e2e spec and every static test in exactly one, or this fails. And what
@@ -144,7 +144,7 @@ jobs:
           echo "play_signing_sha1=$sha1" >> "$GITHUB_OUTPUT"
 
       - name: Set up bats
-        uses: bats-lang/bats/.github/actions/setup@cbcac0d209a657a26b3bb28dee44ce1d3fb4cc7a # bats main cbcac0d
+        uses: bats-lang/bats/.github/actions/setup@7828ba5e91767bd2213c90609d7872cbeb19ec94 # bats main 7828ba5
 
       # A pull request and the merge queue's group start from the newest
       # build of the same toolchain (main's, or the pull request's own earlier
@@ -277,7 +277,7 @@ jobs:
       # are restored from the cache here
       - name: Set up Node.js and Playwright
         if: steps.app.outcome == 'success'
-        uses: bats-lang/pwa/.github/actions/e2e-setup@d6d38db8f8e7a6131daa0f21dc4f31ca7d56fbd3 # pwa main d6d38db
+        uses: bats-lang/pwa/.github/actions/e2e-setup@672da1b5459c36188e96b59e77b32e3b550b2719 # pwa main 672da1b
         with:
           playwright-minimum: "1.58"
 
@@ -382,7 +382,7 @@ jobs:
 
       - name: Set up bats
         if: env.GROUP_BATS == 'yes'
-        uses: bats-lang/bats/.github/actions/setup@cbcac0d209a657a26b3bb28dee44ce1d3fb4cc7a # bats main cbcac0d
+        uses: bats-lang/bats/.github/actions/setup@7828ba5e91767bd2213c90609d7872cbeb19ec94 # bats main 7828ba5
 
       # What bats keeps of the static run, in the directory run.sh works in
       # (QUIRE_STATIC_WORK): the app's build/, which `build` made and every
@@ -480,7 +480,7 @@ jobs:
       # 1.58 is the least Playwright the suite may run on: its fake clock needs it (keyword: the fake clock)
       - name: Set up Node.js and Playwright
         if: env.GROUP_RUN == 'yes'
-        uses: bats-lang/pwa/.github/actions/e2e-setup@d6d38db8f8e7a6131daa0f21dc4f31ca7d56fbd3 # pwa main d6d38db
+        uses: bats-lang/pwa/.github/actions/e2e-setup@672da1b5459c36188e96b59e77b32e3b550b2719 # pwa main 672da1b
         with:
           playwright-minimum: "1.58"
           stall-tools: "true"
@@ -693,7 +693,7 @@ jobs:
           echo "static, e2e and android are not run for a draft; marking the pull request ready runs the whole check on this head." >> "$GITHUB_STEP_SUMMARY"
       - name: Plan and build passed
         if: github.event_name == 'pull_request' && github.event.pull_request.draft
-        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@c59ae4f22d575c90cc2b3934f84b2fccc849ec4d # repository-prototype main c59ae4f
+        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@2c1e6b518f913073cea8e1d34bdb7fc81f376368 # repository-prototype main 2c1e6b5
         with:
           jobs: plan build
           results: ${{ toJSON(needs) }}
@@ -703,7 +703,7 @@ jobs:
       # check-aggregate, #328, called by commit)
       - name: Every group passed
         if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@c59ae4f22d575c90cc2b3934f84b2fccc849ec4d # repository-prototype main c59ae4f
+        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@2c1e6b518f913073cea8e1d34bdb7fc81f376368 # repository-prototype main 2c1e6b5
         with:
           jobs: plan queue build static e2e
           results: ${{ toJSON(needs) }}
@@ -728,7 +728,7 @@ jobs:
     # (keyword: checked app, #974); the contexts of a ready pull request are all reported (#656)
     if: needs.build.outputs.app == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@d6d38db8f8e7a6131daa0f21dc4f31ca7d56fbd3 # pwa main d6d38db
+    uses: bats-lang/pwa/.github/workflows/android.yml@672da1b5459c36188e96b59e77b32e3b550b2719 # pwa main 672da1b
     secrets: inherit
     with:
       artifact: quire-android
@@ -738,7 +738,7 @@ jobs:
       # quire#623; replaces sync-identity.yml's own steps). pwa-ref is the
       # pin above (a reusable workflow cannot read the commit it was called
       # at; the relock moves it with the pin, #821); the SHA-1 is the committed one (scripts/sync-clients.env)
-      pwa-ref: d6d38db8f8e7a6131daa0f21dc4f31ca7d56fbd3
+      pwa-ref: 672da1b5459c36188e96b59e77b32e3b550b2719
       play-signing-sha1: ${{ needs.build.outputs.play_signing_sha1 }}
       require-signed: true
       publish: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -773,12 +773,12 @@ jobs:
   play-internal:
     needs: [check, android]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: bats-lang/pwa/.github/workflows/play-release.yml@d6d38db8f8e7a6131daa0f21dc4f31ca7d56fbd3 # pwa main d6d38db
+    uses: bats-lang/pwa/.github/workflows/play-release.yml@672da1b5459c36188e96b59e77b32e3b550b2719 # pwa main 672da1b
     permissions:
       contents: read
       id-token: write
     with:
-      pwa-ref: d6d38db8f8e7a6131daa0f21dc4f31ca7d56fbd3
+      pwa-ref: 672da1b5459c36188e96b59e77b32e3b550b2719
       package: dev.middlefield.quire
       workload-identity-provider: projects/162611675413/locations/global/workloadIdentityPools/github/providers/quire
       service-account: quire-play-release@spring-duality-395520.iam.gserviceaccount.com
