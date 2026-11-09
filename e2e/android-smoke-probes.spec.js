@@ -6,7 +6,7 @@
 
 import { readFileSync } from 'node:fs';
 import { test, expect } from './fixtures.js';
-import { start, readBook, bookPage } from './helpers.js';
+import { start, readBook, bookPage, rawMouse } from './helpers.js';
 import { selectionBooks } from './selection-books.js';
 
 const probe = name => readFileSync(new URL(`../scripts/android/${name}`, import.meta.url), 'utf8');
@@ -51,7 +51,7 @@ test('the probes long press a word and tap every toolbar button, and the result 
   expect(names).toEqual(expect.arrayContaining(['selection-highlight', 'selection-note', 'selection-copy', 'selection-more']));
   for (const p of points) {
     expect(Number.isFinite(p.x) && Number.isFinite(p.y), `${p.name} has a point`).toBe(true);
-    await page.mouse.click(p.x / dpr, p.y / dpr);
+    await rawMouse(page, 'click', p.x / dpr, p.y / dpr);
   }
   await expect(toolbar(page)).toBeVisible();
   const result = await page.evaluate(probe('smoke-tap-result.js'));
@@ -65,7 +65,7 @@ test('the result names a button that saw no click, and none that did', async ({ 
   await selectedWord(page);
   const dpr = await page.evaluate(() => devicePixelRatio);
   const points = (await tapPoints(page)).filter(p => p.name !== 'selection-note');
-  for (const p of points) await page.mouse.click(p.x / dpr, p.y / dpr);
+  for (const p of points) await rawMouse(page, 'click', p.x / dpr, p.y / dpr);
   const missed = (await page.evaluate(probe('smoke-tap-result.js'))).split(' ');
   expect(missed).toContain('selection-note');
   expect(missed).not.toContain('selection-copy');
@@ -77,9 +77,9 @@ test('a tap that lands off the button is the one the result names', async ({ pag
   const dpr = await page.evaluate(() => devicePixelRatio);
   const points = await tapPoints(page);
   const copy = points.find(p => p.name === 'selection-copy');
-  for (const p of points.filter(q => q !== copy)) await page.mouse.click(p.x / dpr, p.y / dpr);
+  for (const p of points.filter(q => q !== copy)) await rawMouse(page, 'click', p.x / dpr, p.y / dpr);
   // Copy's tap goes to the page's top-left corner instead of its centre
-  await page.mouse.click(1, 1);
+  await rawMouse(page, 'click', 1, 1);
   const missed = (await page.evaluate(probe('smoke-tap-result.js'))).split(' ');
   expect(missed).toContain('selection-copy');
 });
