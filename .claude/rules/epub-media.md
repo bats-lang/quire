@@ -154,8 +154,6 @@ that wins is named:
   styles by default; Quire is the other way round, on purpose.
 * **The package's language and direction win over `pkg-lang_but_not_content` and
   `pkg-dir_but_not_content`** (`epub-format.md`).
-* **`pub-cmt-jxl`** is the platform's: Chromium and Android's WebView have no JPEG XL
-  decoder. A fallback is followed when the manifest names one (`pub-foreign_image`).
 * **`pkg-manifest-unlisted-resource`**: `epub-format.md`.
 * **The 14 failing `should` tests are decided not to be followed (#829, keyword: should decisions)**:
   `css-epub-*`, `lay-pp-xhtml-icb_invalid_meta`, `mol-css`, `ocf-font_obfuscation` and

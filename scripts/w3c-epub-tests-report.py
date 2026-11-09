@@ -199,7 +199,7 @@ VERDICTS = {
     'pub-cmt-avif': (T, ''),
     'pub-cmt-gif': (T, ''),
     'pub-cmt-jpeg': (T, ''),
-    'pub-cmt-jxl': (F, "the image is not decoded: Chromium (and Android's WebView) have no JPEG XL decoder"),
+    'pub-cmt-jxl': (T, ''),
     'pub-cmt-mp3': (T, 'an audio element is made with the browser\'s controls and the book\'s entry as its source (MP3 is played by the engine; Chromium\'s headless build, which the e2e suite runs, has no AAC decoder, so the e2e test plays the mp3 and checks the controls of all)'),
     'pub-cmt-mp4': (T, 'an audio element is made with the browser\'s controls and the book\'s entry as its source (AAC in MP4 is played by the engine; Chromium\'s headless build, which the e2e suite runs, has no AAC decoder, so the e2e test plays the mp3 and checks the controls of all)'),
     'pub-cmt-opus': (T, 'an audio element is made with the browser\'s controls and the book\'s entry as its source (Opus is played by the engine; Chromium\'s headless build, which the e2e suite runs, has no AAC decoder, so the e2e test plays the mp3 and checks the controls of all)'),

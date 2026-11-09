@@ -3136,7 +3136,7 @@ in listeners end
    screen's controls (the brightness, and full screen entered or left),
    the browser's offer to install the app, and the addresses the app is
    opened at (Dropbox's sign-in coming back) *)
-fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 12) = let
+fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 13) = let
   val listeners = RCons(listeners, OnEl("read-aloud"), "click", llam(_) => let
       val () = aloud_toggle()
     in 0 end)
@@ -3177,6 +3177,10 @@ fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 12) = let
       case+ status of
       | $ME.FontsSettled() => _fonts_arrived()
       | $ME.FontsStillLoading() => _fonts_arrived())
+  (* an image the engine failed to draw (a JPEG XL it cannot decode, or a
+     corrupt file) is shown as its manifest fallback, when it has one
+     (quire#1061) *)
+  val listeners = RImageError(listeners, llam(failed) => reader_image_failed(failed))
 in listeners end
 
 (* ============================================================
