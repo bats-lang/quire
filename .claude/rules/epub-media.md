@@ -144,7 +144,7 @@ A must test stays failing only where two documented behaviours conflict, and the
 that wins is named:
 
 * **The book's CSS is not applied (#411) wins over the suite's CSS tests**
-  (`cnt-svg-css-inclusion`, `nav-spine_in-spine-hidden-toc-css`, `lay-pp-xhtml-icb`,
+  (`cnt-svg-css-inclusion`, `lay-pp-xhtml-icb`,
   `_multi`, `_multi_declarations`, `_repeated-in-meta`, `_units`, the deprecated
   `lay-fxl-*` copies, `css-epub-*`, `mol-css`, `ocf-font_obfuscation`): each asks that a
   rule of the book's style sheet change how its text is drawn. The colours are the app's,
@@ -152,8 +152,8 @@ that wins is named:
   spacing, Justify, Hyphenation and Font settings are the reader's; a book's colours or
   sizes would break the proofs and the settings. Readium CSS (Thorium) keeps publisher
   styles by default; Quire is the other way round, on purpose.
-* **The package's language and direction win over `pkg-lang_but_not_content` and
-  `pkg-dir_but_not_content`** (`epub-format.md`).
+* The package's language and direction win over `pkg-lang_but_not_content`
+   (`epub-format.md`).
 * **`pub-cmt-jxl`** is the platform's: Chromium and Android's WebView have no JPEG XL
   decoder. A fallback is followed when the manifest names one (`pub-foreign_image`).
 * **`pkg-manifest-unlisted-resource`**: `epub-format.md`.

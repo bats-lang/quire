@@ -319,7 +319,7 @@ in map end
 fun align_nth {c:nat} .<c>. (map: !align_map(c), n: int): string =
   case+ map of
   | AlignMapNil() => "none"
-  | AlignMapCons(_, align, rest) =>
+  | AlignMapCons(_, align, _, rest) =>
     if n <= 0 then
       (case+ align of
        | AlignNone() => "none"
@@ -372,10 +372,57 @@ fn check_aligns (): void = let
 
   (* a map is taken in the document's order *)
   val map = align_run("<tr><td style=\"text-align:left\">a</td><td style=\"text-align:right\">b</td></tr>", " ")
-  val @(none, map) = align_map_take(map, 0)
+  val @(none, _, map) = align_map_take(map, 0)
   val () = expect_text(align_text(none), "none", "aligns take: before the first")
-  val @(first, map) = align_map_take(map, 5)
+  val @(first, _, map) = align_map_take(map, 5)
   val () = expect_text(align_text(first), "left", "aligns take: the first cell's name is at 5")
+  val () = align_map_free(map)
+in () end
+
+(* Whether the n-th entry of the map is a hidden element, false when it has fewer *)
+fun hidden_nth {c:nat} .<c>. (map: !align_map(c), n: int): bool =
+  case+ map of
+  | AlignMapNil() => false
+  | AlignMapCons(_, _, hidden, rest) => if n <= 0 then hidden else hidden_nth(rest, n - 1)
+
+fn expect_bool (got: bool, wanted: bool, what: string): void =
+  if got = wanted then () else fail(what)
+
+(* The elements the publisher hid by display:none, outside @media (keyword: publisher hidden) *)
+fn check_hidden (): void = let
+  (* a rule, a style attribute, and what takes it back: a later or a more specific display, and a style attribute's own *)
+  val map = align_run(
+    "<div><p>one</p><p class=\"gone\">two</p><p style=\"display:none\">three</p><p class=\"gone\" style=\"display:block\">four</p><p class=\"gone show\">five</p></div>",
+    ".gone{display:none} p.show{display:block} @media screen{p{display:none}}")
+  val () = expect_int(align_map_count(map), 2, "hidden: two and three only")
+  val () = expect_bool(hidden_nth(map, 0), true, "hidden: the class")
+  val () = expect_bool(hidden_nth(map, 1), true, "hidden: the style attribute")
+  val () = align_map_free(map)
+
+  (* the later rule of the same weight wins, either way *)
+  val map = align_run("<p>a</p>", "p{display:none} p{display:block}")
+  val () = expect_int(align_map_count(map), 0, "hidden: a later display:block shows it")
+  val () = align_map_free(map)
+  val map = align_run("<p>a</p>", "p{display:block} p{display:none}")
+  val () = expect_int(align_map_count(map), 1, "hidden: a later display:none hides it")
+  val () = align_map_free(map)
+
+  (* a rule that is !important is dropped, and so is a media rule *)
+  val map = align_run("<p>a</p><p style=\"display:none !important\">b</p>", "p{display:none !important} @media (min-width:1px){p{display:none}}")
+  val () = expect_int(align_map_count(map), 0, "hidden: !important and @media hide nothing")
+  val () = align_map_free(map)
+
+  (* a hidden cell keeps its alignment's entry, and an element is taken by its name's offset *)
+  val map = align_run("<table><tr><td>a</td></tr></table>", "td{text-align:right;display:none}")
+  val () = expect_int(align_map_count(map), 1, "hidden: one cell")
+  val () = expect_text(align_nth(map, 0), "right", "hidden: the cell is aligned")
+  val () = expect_bool(hidden_nth(map, 0), true, "hidden: the cell is hidden")
+  val () = align_map_free(map)
+  val map = align_run("<p style=\"display:none\">x</p><p>y</p>", " ")
+  val @(_, hidden, map) = align_map_take(map, 1)
+  val () = expect_bool(hidden, true, "hidden take: the first paragraph's name is at 1")
+  val @(_, other, map) = align_map_take(map, 30)
+  val () = expect_bool(other, false, "hidden take: nothing after it")
   val () = align_map_free(map)
 in () end
 
@@ -477,6 +524,7 @@ implement main0 () = let
   val () = check_sources()
   val () = check_map()
   val () = check_aligns()
+  val () = check_hidden()
   val () = fuzz(5000)
 in
   if !_failures = 0 then println! ("all ok")

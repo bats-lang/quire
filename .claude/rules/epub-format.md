@@ -140,17 +140,14 @@ text and its fallback never followed).
   decoded once into a `text_direction` (`_direction_of_code`); the card sets `dir` on
   its title and author (`ADir`). A book imported before this has none until replaced.
   The backup and sync do not carry it.
-* **The package's language and direction are not the content's, by decision; the
-  suite's `pkg-lang_but_not_content` and `pkg-dir_but_not_content` stay failures.** A
+* The package's language and direction are not the content's, by decision;
+  A
   chapter that names no language is shown in the book's (`_page_book_lang`; "und"
   when none): browsers hyphenate and pick quotation marks only for text whose
   language is known, and `dc:language` is the only language a book declares. A Hebrew
   or Arabic book whose spine names no direction reads right to left (#416, as Readium
   reads it): the page is one flow of CSS columns whose order is the page's
-  `direction`. The suite's criterion (a document that names none stays in the reading
-  system's own language and left to right) is met by 11 of 15 reading systems for
-  language and all 13 for direction, which lay each document out on its own; Quire's
-  flow cannot without giving up one of those two decisions.
+  `direction`.
 
 ## Addresses and labels in a book (#419)
 

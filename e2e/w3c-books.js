@@ -254,6 +254,22 @@ export const w3cBooks = {
     spine: [{ idref: 'nav' }, { idref: 'one' }, { idref: 'two' }],
     navBody: '<h1>Contents</h1><nav epub:type="toc"><ol>\n<li><a href="one.xhtml">The first link</a></li>\n<li hidden="hidden"><a href="two.xhtml">The second link</a></li>\n</ol></nav>',
   })),
+  // the same, the entry hidden by display:none in a style attribute (quire#1062)
+  'nav-in-spine-hidden-css': book(() => packageEpub({
+    title: 'Navigation document in the spine, an entry hidden by its style',
+    items: [page('one', '<p>First page.</p>'), page('two', '<p>Second page.</p>')],
+    spine: [{ idref: 'nav' }, { idref: 'one' }, { idref: 'two' }],
+    navBody: '<h1>Contents</h1><nav epub:type="toc"><ol>\n<li><a href="one.xhtml">The first link</a></li>\n<li style="display:none"><a href="two.xhtml">The second link</a></li>\n</ol></nav>',
+  })),
+  // Internationalization: a Hebrew book whose spine names no direction, and a chapter that names none and is in English (quire#1062)
+  'dir-but-not-content': book(() => packageEpub({
+    title: 'Direction of a chapter that names none',
+    language: 'he',
+    packageAttributes: 'xml:lang="he" dir="rtl"',
+    items: [page('one', '<p>Short English paragraph.</p><ul><li>First English item</li><li>Second English item</li></ul>' +
+      Array.from({ length: 40 }, (_, k) => `<p>English filler ${k}. ${'Words to fill the line. '.repeat(10)}</p>`).join(''))],
+    spine: [{ idref: 'one' }],
+  })),
   // Publication Resources: links out of the book are asked about
   'external-links': book(() => packageEpub({
     title: 'Links out of the book',

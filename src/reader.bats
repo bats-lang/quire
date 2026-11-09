@@ -298,6 +298,11 @@ val _scroll_set = ref<int>(0)
 
 val _direction = ref<reading_direction>(LeftToRight())
 
+(* Whether the book reads right to left only because its language is written so, its spine saying
+   nothing: the chapters that name no direction are then set by their own text (keyword: content
+   direction, #1062) *)
+val _direction_inferred = ref<bool>(false)
+
 fn _is_rtl (): bool = case+ !_direction of RightToLeft() => true | LeftToRight() => false
 
 (* The thousandth of a track a place at thousandth is drawn at: from the
@@ -2804,13 +2809,17 @@ fn _size_mark {doc_location:agz}{node:nat} (doc: !$D.document(doc_location), nod
     val () = $A.drop<byte>(frozen, view)
   in $A.free<byte>($A.thaw<byte>(frozen)) end
 
-(* A table element the publisher aligned: data-align says how (keyword: publisher alignment) *)
-fn _align_mark {doc_location:agz}{node:nat} (doc: !$D.document(doc_location), node: int node, align: align_value): void =
-  case+ align of
+(* A table element the publisher aligned: data-align says how (keyword: publisher alignment); an element the
+   publisher hid by display:none outside @media has the class the stylesheet hides, as hidden has (keyword: publisher hidden) *)
+fn _align_mark {doc_location:agz}{node:nat} (doc: !$D.document(doc_location), node: int node, marks: @(align_value, bool)): void = let
+  val () = (if marks.1 then _node_attr_literal(doc, node, $D.Class, "hidden-by-book") else ())
+in
+  case+ marks.0 of
   | AlignNone() => ()
   | AlignLeft() => _node_attr_literal(doc, node, $D.Data("align"), "left")
   | AlignRight() => _node_attr_literal(doc, node, $D.Data("align"), "right")
   | AlignCenter() => _node_attr_literal(doc, node, $D.Data("align"), "center")
+end
 
 (* The attributes of an XHTML element that are kept on its content node:
    dir, lang (and xml:lang), title, colspan and rowspan, and hidden (as a
@@ -3097,6 +3106,49 @@ fn _page_lang {doc_location,l:agz}{n:pos}{offset,lang_len:nat | offset + lang_le
   val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
   val () = $D.set_attr(doc, page_id_bytes, page_id_len, $D.Lang, data, offset, lang_len)
 in release_bytes(page_id_frozen, page_id_bytes) end
+
+(* The direction the chapter's html or body names, when it names one (keyword: content direction) *)
+datatype root_dir = RootDirNone | RootDirLtr | RootDirRtl
+
+val _root_dir = ref<root_dir>(RootDirNone())
+
+(* Whether the chapter being rendered is set by its own text where it names no direction: the page
+   is a right-to-left one because of the book's language alone (keyword: content direction) *)
+val _auto_direction = ref<bool>(false)
+
+(* The direction an html or body element names, kept for the chapter's blocks (keyword: content direction) *)
+fn _root_direction {l:agz}{n:pos}{attr_count:nat}
+  (data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count)): void = let
+  var _attr_dir = @[char][3]('d', 'i', 'r')
+  var _ltr = @[char][3]('l', 't', 'r')
+  var _rtl = @[char][3]('r', 't', 'l')
+in
+  case+ find_attr(data, attrs, _attr_dir, 3) of
+  | ~xspan_none() => ()
+  | ~xspan_at(start, span_len) =>
+    if xml_name_eq(data, start, span_len, _ltr, 3) then !_root_dir := RootDirLtr()
+    else if xml_name_eq(data, start, span_len, _rtl, 3) then !_root_dir := RootDirRtl()
+    else !_root_dir := RootDirNone()
+end
+
+(* A block of the page, the direction of its own text where it names none: the chapter's, else
+   auto, which HTML resolves from the block's first strong character, not from the package
+   (EPUB RS 3.3, confreq-rs-pkg-lang-no-content; keyword: content direction) *)
+fn _block_direction {doc_location:agz}{l:agz}{n:pos}{attr_count:nat}{node:nat}
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count), parent: int, node: int node): void =
+  if parent >= 0 then ()
+  else if ~(!_auto_direction) then ()
+  else let
+    var _attr_dir = @[char][3]('d', 'i', 'r')
+  in
+    case+ find_attr(data, attrs, _attr_dir, 3) of
+    | ~xspan_at(_, _) => ()
+    | ~xspan_none() =>
+      (case+ !_root_dir of
+       | RootDirLtr() => _node_attr_literal(doc, node, $D.Dir, "ltr")
+       | RootDirRtl() => _node_attr_literal(doc, node, $D.Dir, "rtl")
+       | RootDirNone() => _node_attr_literal(doc, node, $D.Dir, "auto"))
+  end
 
 (* An html or body element's language (xml:lang, else lang), when it has
    one, is the page's: the chapter's content goes into the page with no
@@ -3428,22 +3480,29 @@ and _render_node
        their language is the page's *)
     else if xml_name_eq(data, name_offset, name_len, _tag_html, 4) then let
       val () = _root_lang(doc, data, attrs)
+      val () = _root_direction(data, attrs)
     in _render_nodes(taken | doc, data, bytes, data_len, parent, children, found, fragment) end
     else if xml_name_eq(data, name_offset, name_len, _tag_body, 4) then let
       val () = _root_lang(doc, data, attrs)
+      val () = _root_direction(data, attrs)
     in _render_nodes(taken | doc, data, bytes, data_len, parent, children, found, fragment) end
     (* Void: br, hr, img *)
     else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then let
-      val () = _add_node(doc, parent, _next_content_node(), $D.Br)
+      val content_node = _next_content_node()
+      val () = _add_node(doc, parent, content_node, $D.Br)
+      val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
     in found end
     else if xml_name_eq(data, name_offset, name_len, _tag_hr, 2) then let
-      val () = _add_node(doc, parent, _next_content_node(), $D.Hr)
+      val content_node = _next_content_node()
+      val () = _add_node(doc, parent, content_node, $D.Hr)
+      val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
     in found end
     else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then let
       (* An image: shown once its bytes are read from the book
          (_load_images); until then its src is an empty data URL *)
       val content_node = _next_content_node()
       val () = _add_node(doc, parent, content_node, $D.Img)
+      val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
       val () = _node_src_empty(doc, content_node)
       var _attr_alt = @[char][3]('a', 'l', 't')
       val () = (case+ find_attr(data, attrs, _attr_alt, 3) of
@@ -3502,6 +3561,7 @@ and _render_node
       val () = (if svg_end > 0 then !_svg_inside := !_svg_inside + 1 else ())
       val () = _fragment_check(data, attrs, fragment, content_node)
       val () = _pass_attrs(doc, data, attrs, content_node)
+      val () = _block_direction(doc, data, attrs, parent, content_node)
       (* an audio or video element is played, with the browser's own
          controls and never by itself; its source (or its <source>
          children's) is the book's entry, given once the chapter is shown
@@ -3528,8 +3588,11 @@ and _render_node
            else found)
         else found): [new_count:nat] images(n, new_count)
       val () = _size_mark(doc, content_node, publisher_sizes_step(name_offset))
-      val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
-      val () = (if _note_text(data, attrs) then _node_attr_literal(doc, content_node, $D.Class, "note-text") else ())
+      val marks = publisher_aligns_next(name_offset)
+      val () = _align_mark(doc, content_node, marks)
+      (* a note's class replaces the hidden one: both when the publisher hid the note (keyword: publisher hidden) *)
+      val () = (if _note_text(data, attrs) then (if marks.1 then _node_attr_literal(doc, content_node, $D.Class, "note-text hidden-by-book")
+        else _node_attr_literal(doc, content_node, $D.Class, "note-text")) else ())
       val () = _break_check(data, attrs, content_node)
       var _tag_ruby = @[char][4]('r', 'u', 'b', 'y')
       val () = (if xml_name_eq(data, name_offset, name_len, _tag_ruby, 4) then _ruby_mark() else ())
@@ -4447,6 +4510,7 @@ fn _spine_build (serial: int): $P.promise(spine_built, $P.Chained) =
                val () = _narration_offered(case+ book_narrated_after(serial, ~1) of ~$R.some(_) => true | ~$R.none() => false)
                val () = toc_locate(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes)
                val () = _direction_set(if spine_rtl(opf_bytes, opf_nodes) then RightToLeft() else LeftToRight())
+               val () = !_direction_inferred := spine_rtl_inferred(opf_bytes, opf_nodes)
                val () = _vertical_set(spine_vertical(opf_bytes, opf_nodes))
                (* a book that asks to be scrolled (rendition:flow, roll layout) is, until the reader chooses Pages *)
                val () = set_book_scrolls_set(opf_scroll_preferred(opf_bytes, opf_nodes))
@@ -4746,6 +4810,13 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                       | PrePaginated() => ()
                       | Reflowable() => if _is_rtl() then ui_attr("page", AClass, "caf rtl") else ui_attr("page", AClass, "caf")))
                   val () = _rows_set()
+                  val () = !_root_dir := RootDirNone()
+                  val () = !_auto_direction := (case+ _writing() of
+                    | Horizontal() => (case+ layout of
+                      | PrePaginated() => false
+                      | Reflowable() => if _is_rtl() then !_direction_inferred else false)
+                    | VerticalRightToLeft() => false
+                    | VerticalLeftToRight() => false)
                   val () = _page_book_lang(doc)
                   val fragment = _fragment_take()
                   (* the sizes the publisher gave its elements, loaded with the chapter *)

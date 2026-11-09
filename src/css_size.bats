@@ -509,6 +509,70 @@ end
 implement declarations_align_read (data, start, stop) = _align_declarations(data, start, stop, AlignNone())
 
 (* ============================================================
+   Hidden elements (keyword: publisher hidden, #1062)
+   ============================================================ *)
+
+(* What a declaration block says of display: nothing, none, or another value (which
+   takes back an earlier none of the same cascade) *)
+#pub datatype display_value = DisplayUnset | DisplayNone | DisplayShown
+
+(* Whether data[at, stop) holds the byte code *)
+fun _holds_code {l:agz}{n:pos}{at,stop:nat | at <= stop; stop <= n} .<stop - at>.
+  (data: !$A.borrow(byte, l, n), at: int at, stop: int stop, code: int): bool =
+  if at >= stop then false
+  else if _code(data, at) = code then true
+  else _holds_code(data, at + 1, stop, code)
+
+(* The display one value gives; !important is not read, nor a value that does not begin with a letter (keyword: publisher hidden) *)
+fn _display_of_value {l:agz}{n:pos}{start,stop:nat | start <= stop; stop <= n}
+  (data: !$A.borrow(byte, l, n), start: int start, stop: int stop): display_value = let
+  val value_start = _blank_end(data, start, stop, false)
+  val value_stop = _trimmed_end(data, value_start, stop)
+in
+  if value_stop <= value_start then DisplayUnset()
+  else if _holds_code(data, value_start, value_stop, 33) then DisplayUnset()
+  else if _span_is(data, value_start, value_stop, "none", 4) then DisplayNone()
+  else if _is_letter(_code(data, value_start)) then DisplayShown()
+  else DisplayUnset()
+end
+
+(* The display of one declaration "name: value" (keyword: publisher hidden) *)
+fn _declaration_display {l:agz}{n:pos}{start,stop:nat | start <= stop; stop <= n}
+  (data: !$A.borrow(byte, l, n), start: int start, stop: int stop): display_value = let
+  val colon_at = _colon(data, start, stop)
+  val name_stop = _trimmed_end(data, start, colon_at)
+in
+  if colon_at >= stop then DisplayUnset()
+  else if _span_is(data, start, name_stop, "display", 7) then _display_of_value(data, colon_at + 1, stop)
+  else DisplayUnset()
+end
+
+(* The display so far and the next: a valid one replaces it (keyword: publisher hidden) *)
+fn _display_merge (before: display_value, after: display_value): display_value =
+  case+ after of
+  | DisplayUnset() => before
+  | DisplayNone() => DisplayNone()
+  | DisplayShown() => DisplayShown()
+
+fun _display_declarations {l:agz}{n:pos}{at,stop:nat | at <= stop; stop <= n} .<stop - at>.
+  (data: !$A.borrow(byte, l, n), at: int at, stop: int stop, so_far: display_value): display_value = let
+  val [started:int] start = _blank_end(data, at, stop, true)
+in
+  if start >= stop then so_far
+  else let
+    val scanned = _declaration_scan(data, start, stop, 0, 0)
+    val declaration_stop = (if scanned > start then scanned else start + 1): [e:nat | started < e; e <= stop] int e
+    val next = _declaration_display(data, start, declaration_stop)
+  in _display_declarations(data, declaration_stop, stop, _display_merge(so_far, next)) end
+end
+
+(* The display of a declaration block or style attribute (keyword: publisher hidden) *)
+#pub fun declarations_display_read {l:agz}{n:pos}{start,stop:nat | start <= stop; stop <= n}
+  (data: !$A.borrow(byte, l, n), start: int start, stop: int stop): display_value
+
+implement declarations_display_read (data, start, stop) = _display_declarations(data, start, stop, DisplayUnset())
+
+(* ============================================================
    Selectors
    ============================================================ *)
 
@@ -830,13 +894,13 @@ end
 implement sheet_rules_read (data, sheet_len) = _sheet(data, 0, sheet_len, Gathered(RULES_MAX, 0, RulesNil()))
 
 (* ============================================================
-   The rules of a sheet that give a text-align (keyword: publisher alignment)
+   The rules of a sheet that give a text-align or a display (keyword: publisher alignment, publisher hidden)
    ============================================================ *)
 
-(* The rules of a sheet that align, in sheet order (keyword: publisher alignment) *)
+(* The rules of a sheet that align or give a display, in sheet order (keyword: publisher alignment) *)
 #pub datavtype align_rules(sheet_len:int, count:int) =
   | AlignRulesNil(sheet_len, 0) of ()
-  | {count:nat} AlignRulesCons(sheet_len, count + 1) of (css_rule(sheet_len), align_value, align_rules(sheet_len, count))
+  | {count:nat} AlignRulesCons(sheet_len, count + 1) of (css_rule(sheet_len), align_value, display_value, align_rules(sheet_len, count))
 
 #pub fun align_rules_free {sheet_len:int}{count:nat} (rules: align_rules(sheet_len, count)): void
 
@@ -844,14 +908,14 @@ implement align_rules_free {sheet_len}{count} (rules) = let
   fun walk {count:nat} .<count>. (rules: align_rules(sheet_len, count)): void =
     case+ rules of
     | ~AlignRulesNil() => ()
-    | ~AlignRulesCons(_, _, rest) => walk(rest)
+    | ~AlignRulesCons(_, _, _, rest) => walk(rest)
 in walk(rules) end
 
 fun _align_reversed {sheet_len:int}{a,b:nat} .<a>.
   (source: align_rules(sheet_len, a), onto: align_rules(sheet_len, b)): align_rules(sheet_len, a + b) =
   case+ source of
   | ~AlignRulesNil() => onto
-  | ~AlignRulesCons(rule, align, rest) => _align_reversed(rest, AlignRulesCons(rule, align, onto))
+  | ~AlignRulesCons(rule, align, display, rest) => _align_reversed(rest, AlignRulesCons(rule, align, display, onto))
 
 (* The alignment rules so far, last first (keyword: publisher alignment) *)
 datavtype align_gathered(sheet_len:int) =
@@ -859,7 +923,7 @@ datavtype align_gathered(sheet_len:int) =
 
 (* The selectors of a comma-separated list, each with align (keyword: publisher alignment) *)
 fun _align_selectors {l:agz}{n:pos}{at,stop:nat | at <= stop; stop <= n} .<stop - at>.
-  (data: !$A.borrow(byte, l, n), at: int at, stop: int stop, align: align_value, so_far: align_gathered(n)): align_gathered(n) = let
+  (data: !$A.borrow(byte, l, n), at: int at, stop: int stop, align: align_value, display: display_value, so_far: align_gathered(n)): align_gathered(n) = let
   val selector_stop = _comma(data, at, stop)
   val selector_start = _space_end(data, at, selector_stop)
   val selector_end = _trimmed_end(data, selector_start, selector_stop)
@@ -872,11 +936,19 @@ fun _align_selectors {l:agz}{n:pos}{at,stop:nat | at <= stop; stop <= n} .<stop 
       else let
         val order = _bounded(RULES_MAX - budget, RULES_MAX - 1)
         val rule = @{selector_at= selector_start, selector_len= selector_end - selector_start, specificity= weight, order= order}: css_rule(n)
-      in AlignGathered(budget - 1, AlignRulesCons(rule, align, rules)) end): align_gathered(n)
+      in AlignGathered(budget - 1, AlignRulesCons(rule, align, display, rules)) end): align_gathered(n)
 in
-  if selector_stop < stop then _align_selectors(data, selector_stop + 1, stop, align, gathered)
+  if selector_stop < stop then _align_selectors(data, selector_stop + 1, stop, align, display, gathered)
   else gathered
 end
+
+(* Whether a declaration block gives neither an alignment nor a display *)
+fn _declares_nothing (align: align_value, display: display_value): bool =
+  case+ align of
+  | AlignNone() => (case+ display of DisplayUnset() => true | DisplayNone() => false | DisplayShown() => false)
+  | AlignLeft() => false
+  | AlignRight() => false
+  | AlignCenter() => false
 
 fun _align_sheet {l:agz}{n:pos}{at:nat | at <= n} .<n - at>.
   (data: !$A.borrow(byte, l, n), at: int at, stop: int n, so_far: align_gathered(n)): align_gathered(n) = let
@@ -893,12 +965,13 @@ in
       val after = (if block_stop < stop then block_stop + 1 else stop): [after:nat | prelude_end < after; after <= n] int after
     in
       if _code(data, start) = 64 then _align_sheet(data, after, stop, so_far)
-      else
-        (case+ declarations_align_read(data, prelude_stop + 1, block_stop) of
-         | AlignNone() => _align_sheet(data, after, stop, so_far)
-         | AlignLeft() => _align_sheet(data, after, stop, _align_selectors(data, start, prelude_stop, AlignLeft(), so_far))
-         | AlignRight() => _align_sheet(data, after, stop, _align_selectors(data, start, prelude_stop, AlignRight(), so_far))
-         | AlignCenter() => _align_sheet(data, after, stop, _align_selectors(data, start, prelude_stop, AlignCenter(), so_far)))
+      else let
+        val align = declarations_align_read(data, prelude_stop + 1, block_stop)
+        val display = declarations_display_read(data, prelude_stop + 1, block_stop)
+      in
+        if _declares_nothing(align, display) then _align_sheet(data, after, stop, so_far)
+        else _align_sheet(data, after, stop, _align_selectors(data, start, prelude_stop, align, display, so_far))
+      end
     end
   end
 end
