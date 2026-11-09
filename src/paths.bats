@@ -184,6 +184,7 @@ fn _mime_of {l:agz}{path_len:pos} (path: !$A.borrow(byte, l, path_len), path_len
   var jpeg = @[char][5]('.', 'j', 'p', 'e', 'g')
   var gif = @[char][4]('.', 'g', 'i', 'f')
   var svg = @[char][4]('.', 's', 'v', 'g')
+  var jxl = @[char][4]('.', 'j', 'x', 'l')
   var webp = @[char][5]('.', 'w', 'e', 'b', 'p')
   var webm = @[char][5]('.', 'w', 'e', 'b', 'm')
   var m4v = @[char][4]('.', 'm', '4', 'v')
@@ -197,6 +198,7 @@ in
   else if _ends_with(path, path_len, jpg, 4, 0) then "image/jpeg"
   else if _ends_with(path, path_len, gif, 4, 0) then "image/gif"
   else if _ends_with(path, path_len, svg, 4, 0) then "image/svg+xml"
+  else if _ends_with(path, path_len, jxl, 4, 0) then "image/jxl"
   else if _ends_with(path, path_len, m4v, 4, 0) then "video/mp4"
   else if _ends_with(path, path_len, ogv, 4, 0) then "video/ogg"
   else _audio_mime(_audio_type(path, path_len))
@@ -255,7 +257,7 @@ implement mime_of (path, path_len) = _mime_of(path, path_len)
 
 (* An image's type, as a book's cover is kept: NotAnImage for a name of
    no image type (and so for a book with no cover) *)
-#pub datatype image_type = PngImage | JpegImage | GifImage | SvgImage | WebpImage | NotAnImage
+#pub datatype image_type = PngImage | JpegImage | GifImage | SvgImage | WebpImage | JxlImage | NotAnImage
 
 (* Whether t is an image's type *)
 #pub fn is_image (t: image_type): bool
@@ -268,22 +270,22 @@ implement is_image (t) = case+ t of NotAnImage() => false | _ => true
 implement image_mime (t) =
   case+ t of
   | PngImage() => "image/png" | JpegImage() => "image/jpeg" | GifImage() => "image/gif"
-  | SvgImage() => "image/svg+xml" | WebpImage() => "image/webp" | NotAnImage() => "application/octet-stream"
+  | SvgImage() => "image/svg+xml" | WebpImage() => "image/webp" | JxlImage() => "image/jxl" | NotAnImage() => "application/octet-stream"
 
 (* t as the library stores it (QLB): 1 png, 2 jpeg, 3 gif, 4 svg, 5
-   webp, 0 none *)
-#pub fn image_code (t: image_type): [code:nat | code <= 5] int code
+   webp, 6 jxl, 0 none *)
+#pub fn image_code (t: image_type): [code:nat | code <= 6] int code
 
 implement image_code (t) =
   case+ t of
-  | PngImage() => 1 | JpegImage() => 2 | GifImage() => 3 | SvgImage() => 4 | WebpImage() => 5 | NotAnImage() => 0
+  | PngImage() => 1 | JpegImage() => 2 | GifImage() => 3 | SvgImage() => 4 | WebpImage() => 5 | JxlImage() => 6 | NotAnImage() => 0
 
 (* The type a stored code stands for (image_code) *)
 #pub fn image_of_code (code: int): image_type
 
 implement image_of_code (code) =
   if code = 1 then PngImage() else if code = 2 then JpegImage() else if code = 3 then GifImage()
-  else if code = 4 then SvgImage() else if code = 5 then WebpImage() else NotAnImage()
+  else if code = 4 then SvgImage() else if code = 5 then WebpImage() else if code = 6 then JxlImage() else NotAnImage()
 
 (* The image type the name path[0, path_len) says (by its extension) *)
 #pub fn image_type_of {l:agz}{path_len:pos} (path: !$A.borrow(byte, l, path_len), path_len: int path_len)
@@ -295,6 +297,7 @@ implement image_type_of (path, path_len) = let
   var jpeg = @[char][5]('.', 'j', 'p', 'e', 'g')
   var gif = @[char][4]('.', 'g', 'i', 'f')
   var svg = @[char][4]('.', 's', 'v', 'g')
+  var jxl = @[char][4]('.', 'j', 'x', 'l')
   var webp = @[char][5]('.', 'w', 'e', 'b', 'p')
 in
   if path_len >= 5 && _ends_with(path, path_len, jpeg, 5, 0) then JpegImage()
@@ -304,6 +307,7 @@ in
   else if _ends_with(path, path_len, jpg, 4, 0) then JpegImage()
   else if _ends_with(path, path_len, gif, 4, 0) then GifImage()
   else if _ends_with(path, path_len, svg, 4, 0) then SvgImage()
+  else if _ends_with(path, path_len, jxl, 4, 0) then JxlImage()
   else NotAnImage()
 end
 

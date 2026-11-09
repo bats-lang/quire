@@ -112,6 +112,10 @@ const SVG_DOCUMENT = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 6
   <text x="0" y="10">Test passes if you see this text on top of an image.</text>
 </svg>`;
 
+// A JPEG XL image 64 by 48 pixels (lossless, made by libjxl), and a file that is no JPEG XL image
+const JXL_IMAGE = Buffer.from('ff0acb40240800010098004b188b1500d4d889317edcbf4008008004020096eb908104e7118062050441cd4f35b259e201', 'hex');
+const JXL_BROKEN = Buffer.from('JPEG XL, not an image the engine can decode');
+
 const PAGE_TEXT = 'The text of the page.';
 // An svg 60 by 40, percent-encoded as a data URL carries it (single quotes: it sits in a double-quoted attribute)
 const PERCENT_SVG = "%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='40' viewBox='0 0 60 40'%3E%3Crect width='60' height='40' fill='%23652d59'/%3E%3C/svg%3E";
@@ -186,6 +190,42 @@ export const w3cBooks = {
       page('one', '<p>The snowflake below.</p><p><img src="snowflake.psd" alt="A snowflake"/></p>'),
       { id: 'photoshop', href: 'snowflake.psd', type: 'image/vnd.adobe.photoshop', fallback: 'snowflake', data: 'PSD, not an image Quire shows' },
       { id: 'snowflake', href: 'snowflake.png', type: 'image/png', data: solidPng(64, 64) },
+    ],
+    spine: [{ idref: 'one' }],
+  })),
+  // JPEG XL is a core image type the engine decodes (pub-cmt-jxl, quire#1061): the
+  // images below are 64 by 48 pixels, their fallbacks (a PNG) 32 by 32, so which was drawn is told by the width
+  'jxl-image': book(() => packageEpub({
+    title: 'JPEG XL images',
+    items: [
+      page('one', `<p>JPEG XL images.</p><p><img src="photo.jxl" alt="Plain JPEG XL"/></p><p><img src="spare.jxl" alt="JPEG XL with a fallback"/></p>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="48"><image width="64" height="48" xlink:href="vector.jxl"/></svg>
+<picture><source srcset="picture.jxl" type="image/jxl"/><img src="picture.jxl" alt="JPEG XL in a picture"/></picture>`),
+      { id: 'photo', href: 'photo.jxl', type: 'image/jxl', data: JXL_IMAGE },
+      { id: 'spare', href: 'spare.jxl', type: 'image/jxl', fallback: 'spare-png', data: JXL_IMAGE },
+      { id: 'spare-png', href: 'spare.png', type: 'image/png', data: solidPng(32, 32) },
+      { id: 'vector', href: 'vector.jxl', type: 'image/jxl', data: JXL_IMAGE },
+      { id: 'picture', href: 'picture.jxl', type: 'image/jxl', data: JXL_IMAGE },
+    ],
+    spine: [{ idref: 'one' }],
+  })),
+  // a JPEG XL file the engine cannot decode: its fallback is drawn in its place, and one with none stays undrawn
+  'jxl-broken': book(() => packageEpub({
+    title: 'Broken JPEG XL images',
+    items: [
+      page('one', '<p>Broken JPEG XL images.</p><p><img src="broken.jxl" alt="Broken with a fallback"/></p><p><img src="alone.jxl" alt="Broken alone"/></p>'),
+      { id: 'broken', href: 'broken.jxl', type: 'image/jxl', fallback: 'broken-png', data: JXL_BROKEN },
+      { id: 'broken-png', href: 'broken.png', type: 'image/png', data: solidPng(32, 32) },
+      { id: 'alone', href: 'alone.jxl', type: 'image/jxl', data: JXL_BROKEN },
+    ],
+    spine: [{ idref: 'one' }],
+  })),
+  // a JPEG XL cover, shown on the book's card in the library
+  'jxl-cover': book(() => packageEpub({
+    title: 'JPEG XL cover',
+    items: [
+      page('one', '<p>A book whose cover is a JPEG XL image.</p>'),
+      { id: 'cover', href: 'cover.jxl', type: 'image/jxl', properties: 'cover-image', data: JXL_IMAGE },
     ],
     spine: [{ idref: 'one' }],
   })),

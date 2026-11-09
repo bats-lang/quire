@@ -21,6 +21,7 @@ staload SP = "wasm.bats-packages.dev/bridge/src/speech.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload AL = "wasm.bats-packages.dev/bridge/src/app_link.sats"
 staload BB = "wasm.bats-packages.dev/bridge/src/back_button.sats"
+staload IE = "wasm.bats-packages.dev/bridge/src/image_error.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload ME = "wasm.bats-packages.dev/bridge/src/media.sats"
 #use result as R
@@ -1501,7 +1502,8 @@ in _set_attr(id, $D.Aria("labelledby"), by) end
    of the page's fonts ending (RFonts), and the app's system bars as its
    native side reports them (RSystemBars: a swipe from the screen's edge
    brings hidden ones back), and Android's Back in the native app
-   (RBackButton). *)
+   (RBackButton), and an image the engine failed to draw (RImageError:
+   bridge tells which <img> by its id; quire#1061). *)
 #pub datavtype regs(int) =
   | RNil(0)
   | {count:nat}{event_len:pos | event_len < 256} RCons(count + 1) of
@@ -1513,6 +1515,7 @@ in _set_attr(id, $D.Aria("labelledby"), by) end
   | {count:nat} RFonts(count + 1) of (regs(count), ($ME.fonts_status) -<lincloptr1> void)
   | {count:nat} RSystemBars(count + 1) of (regs(count), ($SCR.system_bars) -<lincloptr1> void)
   | {count:nat} RBackButton(count + 1) of (regs(count), () -<lincloptr1> void)
+  | {count:nat} RImageError(count + 1) of (regs(count), ($IE.image_error) -<lincloptr1> void)
 
 fn _listen_one {event_len:pos | event_len < 256}
   (target: on, event: string event_len, listener: $EV.listener_id, callback: ($EV.event_payload) -<lincloptr1> int): void = let
@@ -1569,6 +1572,10 @@ fun _listen_all {count:nat | count <= 127} .<count>. (listeners: regs(count)): i
   | ~RBackButton(rest, callback) => let
       val position = _listen_all(rest)
       val () = $BB.listen_back_button(position, callback)
+    in position + 1 end
+  | ~RImageError(rest, callback) => let
+      val position = _listen_all(rest)
+      val () = $IE.listen_image_error(position, callback)
     in position + 1 end
 
 (* The media query listener's slot (settings' system dark mode): the

@@ -9,6 +9,7 @@
 #use file as F
 #use pwa as P
 #use result as R
+#use wasm.bats-packages.dev/bridge as BR
 
 staload "version.sats"
 
@@ -119,6 +120,16 @@ fn _intent_filters (): bool =
     val () = _write_file("dist/android/intent-filters.xml", b, $F.CreateOrTruncate())
   in true end
 
+(* The page's bridge.js with the image error atom (bridge's
+   produce_bridge_app_image_error, bridge#277): pwa's create_pwa writes the
+   bridge without it, and the reader needs to be told which image the engine
+   failed to draw, to show its manifest fallback (quire#1061).
+   Written over the file pwa wrote, with the same wasm name and root *)
+fn _bridge_with_image_error (): void = let
+  var b = $B.create()
+  val () = $BR.produce_bridge_app_image_error(b, "app.wasm", "bats-root")
+in _write_file("dist/pwa/bridge.js", b, $F.CreateOrTruncate()) end
+
 (* The PWA and the Android project, generated from the app's build *)
 fn _generate (): void = let
   (* The bundled fonts (the stylesheet names them) and the app's icons,
@@ -162,6 +173,7 @@ fn _generate (): void = let
   val () = $P.create_pwa_opening("Quire", "dev.bats.quire",
     "dist/release/quire.wasm", "app.wasm", "dist/pwa",
     assets, n, n, "application/epub+zip", ".epub")
+  val () = _bridge_with_image_error()
   val () = $A.free<byte>(assets)
   val () = println! ("PWA generated in dist/pwa/")
   (* The Capacitor project around it; its id is the one Quire is

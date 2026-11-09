@@ -1144,7 +1144,8 @@ end
    ============================================================ *)
 
 (* Whether the media type data[type_offset, type_offset + type_len) is
-   one of the core image types a browser draws (EPUB 3.3 §3.2 and AVIF) *)
+   one of the core image types a browser draws (EPUB 3.3 §3.2, AVIF and
+   JPEG XL, which the engine decodes: quire#1061) *)
 fn _type_is_core_image
   {l:agz}{n:pos}{type_offset,type_len:nat | type_offset + type_len <= n}
   (data: !$A.borrow(byte, l, n), type_offset: int type_offset, type_len: int type_len): bool = let
@@ -1154,6 +1155,7 @@ fn _type_is_core_image
     var svg_chars = @[char][13]('i', 'm', 'a', 'g', 'e', '/', 's', 'v', 'g', '+', 'x', 'm', 'l')
     var webp_chars = @[char][10]('i', 'm', 'a', 'g', 'e', '/', 'w', 'e', 'b', 'p')
     var avif_chars = @[char][10]('i', 'm', 'a', 'g', 'e', '/', 'a', 'v', 'i', 'f')
+    var jxl_chars = @[char][9]('i', 'm', 'a', 'g', 'e', '/', 'j', 'x', 'l')
 in
   xml_name_eq(data, type_offset, type_len, gif_chars, 9)
   || xml_name_eq(data, type_offset, type_len, jpeg_chars, 10)
@@ -1161,7 +1163,18 @@ in
   || xml_name_eq(data, type_offset, type_len, svg_chars, 13)
   || xml_name_eq(data, type_offset, type_len, webp_chars, 10)
   || xml_name_eq(data, type_offset, type_len, avif_chars, 10)
+  || xml_name_eq(data, type_offset, type_len, jxl_chars, 9)
 end
+
+(* Whether the media type data[type_offset, type_offset + type_len) is a core
+   image type that the engine may fail to draw: JPEG XL, which the engine
+   decodes where it has the decoder (quire#1061). Its manifest
+   fallback is kept for the image the engine fails to draw, not used in its place *)
+fn _type_may_fail
+  {l:agz}{n:pos}{type_offset,type_len:nat | type_offset + type_len <= n}
+  (data: !$A.borrow(byte, l, n), type_offset: int type_offset, type_len: int type_len): bool = let
+    var jxl_chars = @[char][9]('i', 'm', 'a', 'g', 'e', '/', 'j', 'x', 'l')
+in xml_name_eq(data, type_offset, type_len, jxl_chars, 9) end
 
 (* The href of the first item, from the manifest item whose id is
    data[idref_offset, ...) down its chain of fallbacks (at most steps
@@ -1186,10 +1199,12 @@ fun _image_target
   end
 
 (* An image item of the manifest that has a fallback: the span of its
-   href and of its fallback's id; or how many such items are left to skip *)
+   href and of its fallback's id, and whether the engine draws the item's
+   type (the fallback is then for an image it fails to draw, and not
+   in its place); or how many such items are left to skip *)
 #pub datavtype image_fallback(n:int) =
   | {item_offset,item_len,fallback_offset,fallback_len:nat | item_offset + item_len <= n; fallback_offset + fallback_len <= n}
-    ImageFallback(n) of (int item_offset, int item_len, int fallback_offset, int fallback_len)
+    ImageFallback(n) of (int item_offset, int item_len, int fallback_offset, int fallback_len, bool)
   | ImageFallbackSkip(n) of (int)
 
 fun _image_fallback_nodes
@@ -1221,21 +1236,26 @@ and _image_fallback_node
       | ~xspan_at(href_offset, href_len) =>
         (case+ _find_attr_value(data, attrs, media_type_chars, 10) of
          | ~xspan_none() => ImageFallbackSkip(skip)
-         | ~xspan_at(type_offset, type_len) =>
-           if _type_is_core_image(data, type_offset, type_len) then ImageFallbackSkip(skip)
-           else (case+ _find_attr_value(data, attrs, fallback_chars, 8) of
-             | ~xspan_none() => ImageFallbackSkip(skip)
-             | ~xspan_at(fallback_offset, fallback_len) =>
-               if skip <= 0 then ImageFallback(href_offset, href_len, fallback_offset, fallback_len)
-               else ImageFallbackSkip(skip - 1)))
+         | ~xspan_at(type_offset, type_len) => let
+             val drawn = _type_is_core_image(data, type_offset, type_len)
+           in
+             if drawn && ~_type_may_fail(data, type_offset, type_len) then ImageFallbackSkip(skip)
+             else (case+ _find_attr_value(data, attrs, fallback_chars, 8) of
+               | ~xspan_none() => ImageFallbackSkip(skip)
+               | ~xspan_at(fallback_offset, fallback_len) =>
+                 if skip <= 0 then ImageFallback(href_offset, href_len, fallback_offset, fallback_len, drawn)
+                 else ImageFallbackSkip(skip - 1))
+           end)
     end
     else _image_fallback_nodes(data, data_len, children, skip)
   end
   | $X.xml_text(_, _) => ImageFallbackSkip(skip)
 
-(* The skip-th (from 0) manifest item that is not a core image type and
-   has a fallback: an <img> that names it is shown as the image its
-   fallbacks lead to (find_image_target; the suite's pub-foreign_image) *)
+(* The skip-th (from 0) manifest item that is not a core image type, or is
+   one the engine may fail to draw (JPEG XL), and has a fallback: an <img>
+   that names the first is shown as the image its fallbacks lead to
+   (find_image_target; the suite's pub-foreign_image), and one that names the
+   second is shown as that image only when the engine fails to draw it *)
 #pub fn find_image_fallback_n
   {l:agz}{n:pos}{tree_size:nat}
   (data: !$A.borrow(byte, l, n), data_len: int n,

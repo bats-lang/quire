@@ -135,6 +135,35 @@ test('pub-foreign_image (must): an image of a type the reader does not show is r
   expect((await pictures(page))[0].loaded).toBe(true);
 });
 
+/** The images of the page shown, each by its alt text and the width the engine drew it at (0: not drawn) */
+const drawnWidths = page => bookPage(page).locator('img').evaluateAll(images =>
+  Object.fromEntries(images.map(i => [i.alt, i.complete ? i.naturalWidth : -1])));
+
+test('pub-cmt-jxl (must): a JPEG XL image is drawn by the engine, in a chapter, in an svg and in a picture, and a fallback is not used in its place', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'jxl-image', 'JPEG XL images');
+  // 64 pixels wide is the JPEG XL image's own; the PNG fallback of one of them is 32
+  await expect.poll(() => drawnWidths(page)).toEqual({
+    'Plain JPEG XL': 64, 'JPEG XL with a fallback': 64, image: 64, 'JPEG XL in a picture': 64,
+  });
+});
+
+test('pub-cmt-jxl (must): a JPEG XL image the engine fails to draw is replaced by its manifest fallback', async ({ page }) => {
+  const crashed = watchCrash(page);
+  await start(page);
+  await readW3cBook(page, 'jxl-broken', 'Broken JPEG XL images');
+  // the fallback's width is 32; the one with no fallback stays undrawn, as a browser leaves an image it cannot load
+  await expect.poll(() => drawnWidths(page)).toEqual({ 'Broken with a fallback': 32, 'Broken alone': 0 });
+  expect(crashed.value).toBe(false);
+});
+
+test('pub-cmt-jxl (must): a JPEG XL cover is drawn on the book\'s card', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [rawFile('jxl-cover.epub', w3cBooks['jxl-cover'].bytes())], 1);
+  const cover = card(page, 'JPEG XL cover').locator('img');
+  await expect.poll(() => cover.evaluate(i => (i.complete ? i.naturalWidth : -1))).toBe(64);
+});
+
 // ---- Internationalization ----
 
 /** The direction the first card's text holds is drawn in */
