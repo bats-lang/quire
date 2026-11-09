@@ -34,7 +34,7 @@ text	21	stop measuring	stop measuring	The Done-when is measured as written.
 text	21	narrow the measurement	narrow the measurement	The Done-when is measured as written.
 text	10	haven'?t verified	I haven't verified	Run the check and say what it printed.
 guide	22	\bno sed\b	No sed.	The owner's rule is only that checked-in code and YAML do not depend on sed; workers may use any tool to edit.
-guide	22	never redirect output to	never redirect output to the null device	The owner's rule is only: do not create, move, link, delete or truncate anything under /dev.
+guide	22	never redirect output to	never redirect output to the null device	The owner's rule is only: do not delete anything under /dev.
 guide	4	delete the build and clone directories	Delete the build and clone directories	A checkout is persistent: the next ticket is a new branch in it.
 guide	4	deletes its worker clone	the orchestrator deletes its worker clone	A checkout is persistent: the next ticket is a new branch in it.
 guide	5	timeout 598	timeout 598 bats check	The tool's own cap ends a foreground command; a wrapper only kills a cold check at the cap.
