@@ -2,10 +2,20 @@
 (() => {
   const bar = document.getElementById('selection-toolbar');
   if (!bar || bar.getClientRects().length === 0) return 'the selection toolbar is not shown';
-  const state = { clicked: {}, expected: [], unmeasured: [], measuring: false };
+  const sel = getSelection();
+  const state = { clicked: {}, expected: [], unmeasured: [], measuring: false, range: sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null };
   window.__smokeTap = state;
   if (!window.__smokeTapListening) {
     window.__smokeTapListening = true;
+    /* a tap on the web view ends the selection (Chromium's own gesture), as the real device showed: the toolbar went with it and the next tap met nothing. The selection is put back before the app is told it ended, so the toolbar stays for the taps that follow */
+    window.addEventListener('selectionchange', e => {
+      const s = window.__smokeTap;
+      const now = getSelection();
+      if (!s || !s.range || now.toString() !== '') return;
+      e.stopImmediatePropagation();
+      now.removeAllRanges();
+      now.addRange(s.range.cloneRange());
+    }, true);
     document.addEventListener('click', e => {
       const s = window.__smokeTap;
       const b = e.target.closest && e.target.closest('#selection-toolbar button, #selection-toolbar a');

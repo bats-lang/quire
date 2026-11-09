@@ -4,6 +4,8 @@
   if (!page) return 'no page';
   const box = page.getBoundingClientRect();
   const walker = document.createTreeWalker(page, NodeFilter.SHOW_TEXT);
+  const middle = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+  let best = null;
   for (let t; (t = walker.nextNode());) {
     if (t.parentElement.closest('a, rt, rp')) continue;
     for (const m of t.data.matchAll(/\S{4,}/g)) {
@@ -14,10 +16,14 @@
       if (!b) continue;
       const x = b.left + b.width / 2;
       const y = b.top + b.height / 2;
-      if (b.left < box.left + box.width * 0.3 || b.right > box.left + box.width * 0.7) continue;
+      /* the word's centre in the page's middle three fifths (a large font scale makes a word wider than the middle third), clear of the footer and the top */
+      if (x < box.left + box.width * 0.2 || x > box.left + box.width * 0.8) continue;
       if (y < box.top + 150 || y > box.bottom - 140) continue;
-      return Math.round(x * devicePixelRatio) + ' ' + Math.round(y * devicePixelRatio);
+      if (b.left < box.left || b.right > box.right) continue;
+      const d = Math.hypot(x - middle.x, y - middle.y);
+      if (!best || d < best.d) best = { x, y, d };
     }
   }
-  return 'no word';
+  if (!best) return 'no word';
+  return Math.round(best.x * devicePixelRatio) + ' ' + Math.round(best.y * devicePixelRatio);
 })()

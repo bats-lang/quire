@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { test, expect } from './fixtures.js';
 import { start, readBook, bookPage, rawMouse } from './helpers.js';
 import { selectionBooks } from './selection-books.js';
+import { scaledBy } from './font-scale.js';
 
 const probe = name => readFileSync(new URL(`../scripts/android/${name}`, import.meta.url), 'utf8');
 const toolbar = page => page.getByRole('toolbar', { name: 'Selection' });
@@ -82,4 +83,34 @@ test('a tap that lands off the button is the one the result names', async ({ pag
   await rawMouse(page, 'click', 1, 1);
   const missed = (await page.evaluate(probe('smoke-tap-result.js'))).split(' ');
   expect(missed).toContain('selection-copy');
+});
+
+test('the taps still land when each tap ends the selection, as the real WebView does', async ({ page }) => {
+  await selectedWord(page);
+  const dpr = await page.evaluate(() => devicePixelRatio);
+  const points = await tapPoints(page);
+  for (const p of points) {
+    await rawMouse(page, 'click', p.x / dpr, p.y / dpr);
+    // Chromium's tap gesture collapses the selection (android job, quire#1083)
+    await page.evaluate(() => getSelection().removeAllRanges());
+    await expect(toolbar(page)).toBeVisible();
+    await expect.poll(() => page.evaluate(() => getSelection().toString())).not.toBe('');
+  }
+  const result = await page.evaluate(probe('smoke-tap-result.js'));
+  expect(['true', 'the-row-behind-More']).toContain(result);
+});
+
+test('a library with no book open gives the long press no point', async ({ page }) => {
+  await start(page);
+  expect(await page.evaluate(probe('smoke-select-point.js'))).toMatch(/^(no page|no word)$/);
+});
+
+test.describe('at the font scale 2.0', () => {
+  test.use({ isMobile: true });
+
+  test('a word is found though the text is a narrow column, and the point is on it', async ({ page }) => {
+    await page.addInitScript(scaledBy(200));
+    await selectedWord(page);
+    await expect(toolbar(page)).toBeVisible();
+  });
 });
