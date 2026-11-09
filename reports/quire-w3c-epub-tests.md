@@ -20,11 +20,11 @@ Deflate archive that cannot show the case.
 
 | level | pass | fail | n/a | total |
 | --- | ---: | ---: | ---: | ---: |
-| must | 116 | 8 | 16 | 140 |
+| must | 114 | 10 | 16 | 140 |
 | should | 19 | 14 | 5 | 38 |
 | may | 1 | 0 | 0 | 1 |
 | deprecated | 17 | 9 | 1 | 27 |
-| all | 153 | 31 | 22 | 206 |
+| all | 151 | 33 | 22 | 206 |
 
 The suite lists `deprecated` tests (the `fxl-*` and `lay-fxl-*` ones, which the `lay-pp-*` ones replace); they are in
 the table too, and in `reports/quire.json`, as the suite's own template has them.
@@ -210,4 +210,4 @@ Caveats of a pass, where there is one:
 * `sec-untrusted-consent_network`: no remote resource is requested, with or without consent (measured: no request left the page)
 * `sec-untrusted-consent_scripting`: no script is run, with or without consent
 
-Pass with nothing to add: `cnt-xhtml-support`, `fxl-spine-overrides_behave-as-global`, `fxl-spine-overrides_behave-as-global-bis`, `lay-fxl-layout-default`, `lay-fxl-layout-pre-paginated`, `lay-fxl-orientation-default`, `lay-fxl-spread-auto`, `lay-fxl-spread-both`, `lay-fxl-spread-default`, `lay-page-layout-both`, `lay-pp-layout-default`, `lay-pp-layout-pre-paginated`, `lay-pp-spine-overrides_behave-as-global`, `lay-pp-spine-overrides_behave-as-global-bis`, `lay-pp-spine-overrides_image-only-pp`, `lay-pp-spine-overrides_image-only-reflow`, `nav-access`, `nav-activation`, `nav-spine_in-spine`, `nav-spine_in-spine-hidden-toc-css`, `nav-spine_not-in-spine`, `ocf-metainf-inc`, `ocf-metainf-manifest`, `ocf-package_arbitrary`, `ocf-package_multiple`, `ocf-url_link-leaking-relative`, `ocf-url_link-relative`, `ocf-url_manifest`, `pkg-collections-unknown`, `pkg-dir_but_not_content`, `pkg-linked-records`, `pkg-manifest-unknown`, `pkg-meta-unknown`, `pkg-spine-nonlinear-activation`, `pkg-spine-order`, `pkg-spine-progression-default`, `pkg-spine-progression-pre-paginated`, `pkg-spine-progression_ltr`, `pkg-spine-progression_rtl`, `pkg-spine-unknown`, `pkg-version-backward`, `pub-cmt-avif`, `pub-cmt-gif`, `pub-cmt-jpeg`, `pub-cmt-png`, `pub-cmt-svg`, `pub-cmt-webp`, `pub-xml-non-validating_comment`.
+Pass with nothing to add: `cnt-xhtml-support`, `fxl-spine-overrides_behave-as-global`, `fxl-spine-overrides_behave-as-global-bis`, `lay-fxl-layout-default`, `lay-fxl-layout-pre-paginated`, `lay-fxl-orientation-default`, `lay-fxl-spread-auto`, `lay-fxl-spread-both`, `lay-fxl-spread-default`, `lay-page-layout-both`, `lay-pp-layout-default`, `lay-pp-layout-pre-paginated`, `lay-pp-spine-overrides_behave-as-global`, `lay-pp-spine-overrides_behave-as-global-bis`, `lay-pp-spine-overrides_image-only-pp`, `lay-pp-spine-overrides_image-only-reflow`, `nav-access`, `nav-activation`, `nav-spine_in-spine`, `nav-spine_not-in-spine`, `ocf-metainf-inc`, `ocf-metainf-manifest`, `ocf-package_arbitrary`, `ocf-package_multiple`, `ocf-url_link-leaking-relative`, `ocf-url_link-relative`, `ocf-url_manifest`, `pkg-collections-unknown`, `pkg-linked-records`, `pkg-manifest-unknown`, `pkg-meta-unknown`, `pkg-spine-nonlinear-activation`, `pkg-spine-order`, `pkg-spine-progression-default`, `pkg-spine-progression-pre-paginated`, `pkg-spine-progression_ltr`, `pkg-spine-progression_rtl`, `pkg-spine-unknown`, `pkg-version-backward`, `pub-cmt-avif`, `pub-cmt-gif`, `pub-cmt-jpeg`, `pub-cmt-png`, `pub-cmt-svg`, `pub-cmt-webp`, `pub-xml-non-validating_comment`.
