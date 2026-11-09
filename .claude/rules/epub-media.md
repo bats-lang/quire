@@ -152,8 +152,6 @@ that wins is named:
   spacing, Justify, Hyphenation and Font settings are the reader's; a book's colours or
   sizes would break the proofs and the settings. Readium CSS (Thorium) keeps publisher
   styles by default; Quire is the other way round, on purpose.
-* The package's language and direction win over `pkg-lang_but_not_content`
-   (`epub-format.md`).
 * **`pub-cmt-jxl`** is the platform's: Chromium and Android's WebView have no JPEG XL
   decoder. A fallback is followed when the manifest names one (`pub-foreign_image`).
 * **`pkg-manifest-unlisted-resource`**: `epub-format.md`.
