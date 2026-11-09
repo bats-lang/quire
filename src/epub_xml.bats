@@ -1554,6 +1554,19 @@ implement spine_rtl (data, nodes) =
   | SpineDefault() => _language_says_rtl(data, nodes)
   | NoSpine() => _language_says_rtl(data, nodes)
 
+(* Whether the book reads right to left only because its language is written so: the
+   spine says nothing (keyword: content direction, #1062) *)
+#pub fn spine_rtl_inferred
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): bool
+
+implement spine_rtl_inferred (data, nodes) =
+  case+ _spine_rtl_nodes(data, nodes) of
+  | SpineRightToLeft() => false
+  | SpineLeftToRight() => false
+  | SpineDefault() => _language_says_rtl(data, nodes)
+  | NoSpine() => _language_says_rtl(data, nodes)
+
 (* Whether the language tag data[offset, offset + language_len) is
    Chinese, Japanese or Korean, which a book read right to left sets
    vertically *)

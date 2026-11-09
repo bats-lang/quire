@@ -1061,7 +1061,7 @@ test('a capture is reading the ring while a renderer in another page begins an u
     const history = await futexAnalysis(next.file, { address: waiting.address, tid: waiting.pid });
     expect(history.waiter.lastWait, `the ring holds the renderer's wait (${waiting.syscall}): ${JSON.stringify(history.waiter)}`).not.toBeNull();
     expect(history.waiter.lastWait.untimed).toBe(true);
-    expect(history.onAddress.events, 'and the address it waits on').toBeGreaterThan(0);
+    expect(history.onAddress.events, `and the address it waits on (${history.address}; /proc said ${waiting.syscall}; the waiter's last waits in the ring: ${JSON.stringify(history.waiter.waits)}; ${history.ringLines} ring lines from ${history.ringStart} to ${history.ringEnd})`).toBeGreaterThan(0);
     expect(history.waiter.lastWait.at, 'the wait began after the capture took its snapshot').toBeGreaterThan(snapshotAt);
   } finally {
     if (ticking) clearInterval(ticking);

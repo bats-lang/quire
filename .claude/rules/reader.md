@@ -137,10 +137,9 @@ errors its entry lists.
   attributes (`<font>`, `bgcolor`, `width`) are dropped, so a book's sizes,
   colours, margins, alignment, line height and font cannot fight the reader's
   settings, and no theme has a light slab. This is the opposite of Readium CSS
-  (Thorium), on purpose. What only CSS hid (`display:none`) is shown; the
-  `hidden` attribute is kept (`_pass_attrs` gives it the class
-  `hidden-by-book`). `e2e/publisher.spec.js`.
-* **The alignment of a table's elements is the one thing kept** (#868, keyword: publisher alignment).
+  (Thorium), on purpose.
+  `e2e/publisher.spec.js`.
+* **The alignment of a table's elements is kept** (#868, keyword: publisher alignment).
   The `text-align` and `justify-items` of the book's sheets (`<link>` sheets and `<style>`, the same
   joined sheet as the sizes, #431) and of a cell's `style` attribute are read for `table`, `thead`,
   `tbody`, `tfoot`, `tr`, `td`, `th` and MathML's `mtable`, `mtr` and `mtd` only: `left`, `right` and

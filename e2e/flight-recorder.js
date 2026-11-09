@@ -233,6 +233,7 @@ export async function futexAnalysis(ringFile, { address, tid }) {
   const wanted = address.toLowerCase().replace(/^0x/, '').replace(/^0+/, '');
   const last = [];
   const wakers = new Map();
+  const waiterWaits = [];
   let lastWait = null, wokenLast = null, switchedOut = null, ringStart = null, ringEnd = 0, cpuStarts = new Map(), lines = 0, onAddress = 0;
   const reader = createInterface({ input: createReadStream(ringFile).pipe(createGunzip()), crlfDelay: Infinity });
   for await (const line of reader) {
@@ -251,7 +252,12 @@ export async function futexAnalysis(ringFile, { address, tid }) {
       const op = parseInt(call[2], 16) & 0x7f;
       const untimed = FUTEX_WAITS.has(op) && /^(0x)?0+$/.test(call[4]);
       const entry = { at, task: task.trim(), tid: Number(thread), op: `0x${call[2]}`, kind: FUTEX_WAITS.has(op) ? 'wait' : FUTEX_WAKES.has(op) ? 'wake' : 'other', untimed };
-      if (Number(thread) === tid && entry.kind === 'wait') lastWait = { ...entry, address: call[1] };
+      if (Number(thread) === tid && entry.kind === 'wait') {
+        lastWait = { ...entry, address: call[1] };
+        // #1095: the waiter's own waits, newest last, so a miss of the address shows which address the ring has for it (keyword: waiter-waits)
+        waiterWaits.push({ at, address: call[1], op: entry.op, untimed });
+        if (waiterWaits.length > 10) waiterWaits.shift();
+      }
       if (where === wanted) {
         onAddress += 1;
         last.push(entry);
@@ -268,7 +274,7 @@ export async function futexAnalysis(ringFile, { address, tid }) {
   return {
     address: `0x${wanted}`, waiterTid: tid, ringLines: lines, ringStart, ringCompleteFrom: cpuStarts.size ? Math.max(...cpuStarts.values()) : null, ringEnd,
     waiter: {
-      lastWait, switchedOut, wokenLast,
+      lastWait, switchedOut, wokenLast, waits: waiterWaits,
       silentMs: wokenLast ? Math.round((ringEnd - wokenLast.at) * 1000) : null,
       sleepingMs: switchedOut ? Math.round((ringEnd - switchedOut.at) * 1000) : null,
     },

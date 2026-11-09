@@ -7,12 +7,13 @@
 // Decided (issue 411), against Readium CSS (Thorium): it keeps the
 // publisher's styles unless the reader turns on "advanced" settings, and
 // an `!important` in a book can beat a reader's setting. Quire applies the
-// publisher's CSS never, so no setting is beaten and none is needed:
+// publisher's CSS only to hide (below), to size in proportion (#431) and
+// to align a table (#868), so no setting is beaten and none is needed:
 // text-align, line-height and font-family come from the settings
-// (Justify, the spacings, the Font row) alone. What the CSS dropped
-// hid (`display:none` by a rule or a style attribute) is shown, since
-// there is no CSS to say it; the `hidden` attribute is the HTML's own
-// word for it and is kept.
+// (Justify, the spacings, the Font row) alone. What the book hid with
+// `display:none`, by a rule or a style attribute outside @media, stays
+// hidden (#411's last checkbox, #1062), as the `hidden` attribute does;
+// a media rule is not read.
 
 import { test, expect } from './fixtures.js';
 import {
@@ -158,7 +159,7 @@ test('a publisher\'s text-align, line-height and font-family are not applied; th
   expect(errors).toEqual([]);
 });
 
-test('the hidden attribute keeps text hidden; a rule or style that hid text is not applied, nor is a media rule', async ({ page }) => {
+test('the hidden attribute keeps text hidden, and so does a rule or a style that hid it with display:none, but not a media rule', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, publisherBooks.styled.opts);
   await chapterNamed(page, 'Hidden');
@@ -166,8 +167,9 @@ test('the hidden attribute keeps text hidden; a rule or style that hid text is n
   const text = await bookPage(page).evaluate(doc => doc.innerText);
   expect(text).toContain('Shown text.');
   expect(text).not.toContain('Hidden by attribute.');
-  // what only CSS said to hide is shown: the CSS is not applied
-  for (const t of ['Hidden inline.', 'Hidden by class.', 'Media rule.']) expect(text, t).toContain(t);
+  // display:none by a style attribute or a rule stays hidden (#411); a media rule is not read, so its text is shown
+  for (const t of ['Hidden inline.', 'Hidden by class.']) expect(text, t).not.toContain(t);
+  expect(text).toContain('Media rule.');
   expect(errors).toEqual([]);
 });
 
