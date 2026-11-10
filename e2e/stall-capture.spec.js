@@ -227,17 +227,25 @@ test('a page in an endless script loop is captured in that loop, and gdb is not 
 // never reached the page, and the click returned all the same. The pause waits for a press the page has begun, for at most PRESS_MS;
 // here the release cannot come (the page loops), so the wait runs out, says so, and the pause is made all the same.
 test('a capture does not pause a page while a press on it is down, for at most PRESS_MS (quire#1102)', async ({ page, stallWatch }) => {
-  await page.setContent(`${LOOPS}<button id="held" style="position:fixed;left:10px;top:10px;width:100px;height:40px">Held</button>`);
+  // a navigation, not setContent: document.open() removes the window's listeners, the press record's among them
+  const html = `${LOOPS}<button id="held" style="position:fixed;left:10px;top:10px;width:100px;height:40px">Held</button>`;
+  await page.goto(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
   await rawMouse(page, 'move', 50, 30);
   await rawMouse(page, 'down');
-  const session = await stallWatch.session(page);
-  await session.send('Runtime.evaluate', { expression: 'setTimeout(spinForever, 0)' });
-  const capture = await stallWatch.next(page, 30000);
-  expect(capture.pressWait.stillOpen, 'the release did not come while the page looped').toBe(true);
-  expect(capture.pressWait.waitedMs, 'the pause waited for the press as long as it may').toBeGreaterThanOrEqual(PRESS_MS);
-  expect(capture.paused.frames[0].functionName, 'and then paused the loop').toBe('spinForever');
-  await endLoop(page, stallWatch);
-  await rawMouse(page, 'up');
+  try {
+    const session = await stallWatch.session(page);
+    await session.send('Runtime.evaluate', { expression: 'setTimeout(spinForever, 0)' });
+    const capture = await stallWatch.next(page, 30000);
+    console.log(`press wait: ${JSON.stringify(capture.pressWait)}; paused in ${capture.paused && capture.paused.frames[0].functionName}`);
+    expect(capture.pressWait, 'the pause looked for a press the page had begun').toBeDefined();
+    expect(capture.pressWait.stillOpen, 'the release did not come while the page looped').toBe(true);
+    expect(capture.pressWait.waitedMs, 'the pause waited for the press as long as it may').toBeGreaterThanOrEqual(PRESS_MS);
+    expect(capture.paused.frames[0].functionName, 'and then paused the loop').toBe('spinForever');
+  } finally {
+    // the loop ends whatever the outcome, so the page answers for the failure capture's screenshot
+    await endLoop(page, stallWatch);
+    await rawMouse(page, 'up');
+  }
 });
 
 // Forces the pause of another client (quire#1077, keyword: other client pause): gen-pwa test arms every page with a DevTools client

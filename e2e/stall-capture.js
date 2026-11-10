@@ -1106,10 +1106,10 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
     if (answers) await within(Promise.all([...armed.running].map((call) => call.settled)), COMMAND_MS);
     // Keyword: press open (quire#1102). A page paused by the debugger drops the input it is sent (the mouseup of a click whose mousedown it
     // had: the click returned, the page never saw a release), so the pause waits for a press the page has begun to be released, up to PRESS_MS.
-    if (armed.pressOpen) {
+    if (armed.pressOpen && armed.pressOpen()) {
       const began = Date.now();
       while (armed.pressOpen() && Date.now() - began < PRESS_MS) await lasting(PRESS_POLL_MS);
-      if (Date.now() - began > 0) result.pressWait = { waitedMs: Date.now() - began, stillOpen: armed.pressOpen() };
+      result.pressWait = { waitedMs: Date.now() - began, stillOpen: armed.pressOpen() };
     }
     armed.pausing = true;
     const paused = new Promise((resolve) => session.once('Debugger.paused', resolve));
