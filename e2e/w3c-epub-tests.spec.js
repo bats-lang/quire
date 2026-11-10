@@ -9,7 +9,7 @@
 import { test, expect } from './fixtures.js';
 import { w3cBooks, W3C_TEXT } from './w3c-books.js';
 import {
-  start, rawFile, importFiles, importInput, openBook, bookPage, cards, visibleText, expectBannerSaysWhatToDo, clickControl, dialog, openReadingSettings, readingSettings, card, quiet,
+  start, rawFile, importFiles, importInput, openBook, bookPage, cards, visibleText, expectBannerSaysWhatToDo, clickControl, dialog, openReadingSettings, readingSettings, card, quiet, place,
 } from './helpers.js';
 
 /** Imports the book of that name from w3c-books.js (what makes it the
@@ -135,6 +135,35 @@ test('pub-foreign_image (must): an image of a type the reader does not show is r
   expect((await pictures(page))[0].loaded).toBe(true);
 });
 
+/** The images of the page shown, each by its alt text and the width the engine drew it at (0: not drawn) */
+const drawnWidths = page => bookPage(page).locator('img').evaluateAll(images =>
+  Object.fromEntries(images.map(i => [i.alt, i.complete ? i.naturalWidth : -1])));
+
+test('pub-cmt-jxl (must): a JPEG XL image is drawn by the engine, in a chapter, in an svg and in a picture, and a fallback is not used in its place', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'jxl-image', 'JPEG XL images');
+  // 64 pixels wide is the JPEG XL image's own; the PNG fallback of one of them is 32
+  await expect.poll(() => drawnWidths(page)).toEqual({
+    'Plain JPEG XL': 64, 'JPEG XL with a fallback': 64, image: 64, 'JPEG XL in a picture': 64,
+  });
+});
+
+test('pub-cmt-jxl (must): a JPEG XL image the engine fails to draw is replaced by its manifest fallback', async ({ page }) => {
+  const crashed = watchCrash(page);
+  await start(page);
+  await readW3cBook(page, 'jxl-broken', 'Broken JPEG XL images');
+  // the fallback's width is 32; the one with no fallback stays undrawn, as a browser leaves an image it cannot load
+  await expect.poll(() => drawnWidths(page)).toEqual({ 'Broken with a fallback': 32, 'Broken alone': 0 });
+  expect(crashed.value).toBe(false);
+});
+
+test('pub-cmt-jxl (must): a JPEG XL cover is drawn on the book\'s card', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [rawFile('jxl-cover.epub', w3cBooks['jxl-cover'].bytes())], 1);
+  const cover = card(page, 'JPEG XL cover').locator('img');
+  await expect.poll(() => cover.evaluate(i => (i.complete ? i.naturalWidth : -1))).toBe(64);
+});
+
 // ---- Internationalization ----
 
 /** The direction the first card's text holds is drawn in */
@@ -210,6 +239,47 @@ test('nav-spine_in-spine-hidden-toc-html (must): a navigation document in the sp
   await clickControl(page, 'Contents');
   const rows = await dialog(page, 'Contents').getByRole('tabpanel', { name: 'Contents' }).getByRole('button').allInnerTexts();
   expect(rows.map(row => row.trim())).toEqual(['The first link', 'The second link']);
+});
+
+test('nav-spine_in-spine-hidden-toc-css (must): a navigation document in the spine is shown without the entry its display:none hides, and the table of contents lists all (quire#1062)', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'nav-in-spine-hidden-css', 'Navigation document in the spine, an entry hidden by its style');
+  await expect.poll(() => visibleText(page)).toContain('Contents');
+  expect(await bookPage(page).innerText()).toContain('The first link');
+  expect(await bookPage(page).innerText(), 'the entry hidden by its style is not shown in the page').not.toContain('The second link');
+  await clickControl(page, 'Contents');
+  const rows = await dialog(page, 'Contents').getByRole('tabpanel', { name: 'Contents' }).getByRole('button').allInnerTexts();
+  expect(rows.map(row => row.trim())).toEqual(['The first link', 'The second link']);
+});
+
+test('pkg-dir_but_not_content (must): in a Hebrew book whose spine names no direction, a chapter that names none and is in English is set left to right, and the page still turns right to left (quire#1062)', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'dir-but-not-content', 'Direction of a chapter that names none');
+  await expect.poll(() => visibleText(page)).toContain('Short English paragraph.');
+  expect(await bookPage(page).evaluate(e => getComputedStyle(e).direction), 'the page, its columns').toBe('rtl');
+  // how far the first line of the element's text starts from the element's own left edge, and the element's width
+  const startOf = selector => bookPage(page).locator(selector).first().evaluate(element => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const box = element.getBoundingClientRect();
+    return { direction: getComputedStyle(element).direction, inset: range.getClientRects()[0].left - box.left, width: box.width };
+  });
+  const paragraph = await startOf('p');
+  const list = await startOf('ul');
+  const item = await startOf('li');
+  for (const [name, measured] of Object.entries({ paragraph, list, item })) {
+    expect(measured.direction, name).toBe('ltr');
+    expect(measured.width, name + ' has room for the text to be on the right').toBeGreaterThan(300);
+  }
+  // left to right, the first line starts at the element's start (its padding, the list's indent); right to left, a text this short would start at 300px or more
+  expect(paragraph.inset, 'the paragraph starts on the left').toBeLessThan(150);
+  expect(list.inset, 'the list starts on the left').toBeLessThan(150);
+  expect(item.inset, 'the item starts on the left').toBeLessThan(150);
+  // the columns still go to the left: a turn to the left is the next page
+  const before = await place(page);
+  expect(before.t).toBeGreaterThan(1);
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(async () => (await place(page)).p).toBe(before.p + 1);
 });
 
 // ---- Links out of the book, scrolled flow, roll layout, fonts ----

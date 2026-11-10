@@ -167,14 +167,15 @@ implement publisher_sizes_step (offset) = let
   val () = _active_put(SizesActive(rest, aligns))
 in step end
 
-(* The alignment of the table element at offset, AlignNone if none (keyword: publisher alignment) *)
-#pub fn publisher_aligns_next (offset: int): align_value
+(* The alignment of the table element at offset, AlignNone if none, and whether the publisher hid
+   the element (keyword: publisher alignment, publisher hidden) *)
+#pub fn publisher_aligns_next (offset: int): @(align_value, bool)
 
 implement publisher_aligns_next (offset) = let
   val+ ~SizesActive(map, aligns) = _active_take()
-  val @(align, rest) = align_map_take(aligns, offset)
+  val @(align, hidden, rest) = align_map_take(aligns, offset)
   val () = _active_put(SizesActive(map, rest))
-in align end
+in @(align, hidden) end
 
 #pub fn publisher_sizes_end (): void
 

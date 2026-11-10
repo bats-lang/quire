@@ -56,6 +56,7 @@ staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+staload IE = "wasm.bats-packages.dev/bridge/src/image_error.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload SP = "wasm.bats-packages.dev/bridge/src/speech.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
@@ -297,6 +298,11 @@ val _scroll_set = ref<int>(0)
 #pub datatype reading_direction = LeftToRight | RightToLeft
 
 val _direction = ref<reading_direction>(LeftToRight())
+
+(* Whether the book reads right to left only because its language is written so, its spine saying
+   nothing: the chapters that name no direction are then set by their own text (keyword: content
+   direction, #1062) *)
+val _direction_inferred = ref<bool>(false)
 
 fn _is_rtl (): bool = case+ !_direction of RightToLeft() => true | LeftToRight() => false
 
@@ -2804,13 +2810,17 @@ fn _size_mark {doc_location:agz}{node:nat} (doc: !$D.document(doc_location), nod
     val () = $A.drop<byte>(frozen, view)
   in $A.free<byte>($A.thaw<byte>(frozen)) end
 
-(* A table element the publisher aligned: data-align says how (keyword: publisher alignment) *)
-fn _align_mark {doc_location:agz}{node:nat} (doc: !$D.document(doc_location), node: int node, align: align_value): void =
-  case+ align of
+(* A table element the publisher aligned: data-align says how (keyword: publisher alignment); an element the
+   publisher hid by display:none outside @media has the class the stylesheet hides, as hidden has (keyword: publisher hidden) *)
+fn _align_mark {doc_location:agz}{node:nat} (doc: !$D.document(doc_location), node: int node, marks: @(align_value, bool)): void = let
+  val () = (if marks.1 then _node_attr_literal(doc, node, $D.Class, "hidden-by-book") else ())
+in
+  case+ marks.0 of
   | AlignNone() => ()
   | AlignLeft() => _node_attr_literal(doc, node, $D.Data("align"), "left")
   | AlignRight() => _node_attr_literal(doc, node, $D.Data("align"), "right")
   | AlignCenter() => _node_attr_literal(doc, node, $D.Data("align"), "center")
+end
 
 (* The attributes of an XHTML element that are kept on its content node:
    dir, lang (and xml:lang), title, colspan and rowspan, and hidden (as a
@@ -3097,6 +3107,49 @@ fn _page_lang {doc_location,l:agz}{n:pos}{offset,lang_len:nat | offset + lang_le
   val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
   val () = $D.set_attr(doc, page_id_bytes, page_id_len, $D.Lang, data, offset, lang_len)
 in release_bytes(page_id_frozen, page_id_bytes) end
+
+(* The direction the chapter's html or body names, when it names one (keyword: content direction) *)
+datatype root_dir = RootDirNone | RootDirLtr | RootDirRtl
+
+val _root_dir = ref<root_dir>(RootDirNone())
+
+(* Whether the chapter being rendered is set by its own text where it names no direction: the page
+   is a right-to-left one because of the book's language alone (keyword: content direction) *)
+val _auto_direction = ref<bool>(false)
+
+(* The direction an html or body element names, kept for the chapter's blocks (keyword: content direction) *)
+fn _root_direction {l:agz}{n:pos}{attr_count:nat}
+  (data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count)): void = let
+  var _attr_dir = @[char][3]('d', 'i', 'r')
+  var _ltr = @[char][3]('l', 't', 'r')
+  var _rtl = @[char][3]('r', 't', 'l')
+in
+  case+ find_attr(data, attrs, _attr_dir, 3) of
+  | ~xspan_none() => ()
+  | ~xspan_at(start, span_len) =>
+    if xml_name_eq(data, start, span_len, _ltr, 3) then !_root_dir := RootDirLtr()
+    else if xml_name_eq(data, start, span_len, _rtl, 3) then !_root_dir := RootDirRtl()
+    else !_root_dir := RootDirNone()
+end
+
+(* A block of the page, the direction of its own text where it names none: the chapter's, else
+   auto, which HTML resolves from the block's first strong character, not from the package
+   (EPUB RS 3.3, confreq-rs-pkg-lang-no-content; keyword: content direction) *)
+fn _block_direction {doc_location:agz}{l:agz}{n:pos}{attr_count:nat}{node:nat}
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count), parent: int, node: int node): void =
+  if parent >= 0 then ()
+  else if ~(!_auto_direction) then ()
+  else let
+    var _attr_dir = @[char][3]('d', 'i', 'r')
+  in
+    case+ find_attr(data, attrs, _attr_dir, 3) of
+    | ~xspan_at(_, _) => ()
+    | ~xspan_none() =>
+      (case+ !_root_dir of
+       | RootDirLtr() => _node_attr_literal(doc, node, $D.Dir, "ltr")
+       | RootDirRtl() => _node_attr_literal(doc, node, $D.Dir, "rtl")
+       | RootDirNone() => _node_attr_literal(doc, node, $D.Dir, "auto"))
+  end
 
 (* An html or body element's language (xml:lang, else lang), when it has
    one, is the page's: the chapter's content goes into the page with no
@@ -3428,22 +3481,29 @@ and _render_node
        their language is the page's *)
     else if xml_name_eq(data, name_offset, name_len, _tag_html, 4) then let
       val () = _root_lang(doc, data, attrs)
+      val () = _root_direction(data, attrs)
     in _render_nodes(taken | doc, data, bytes, data_len, parent, children, found, fragment) end
     else if xml_name_eq(data, name_offset, name_len, _tag_body, 4) then let
       val () = _root_lang(doc, data, attrs)
+      val () = _root_direction(data, attrs)
     in _render_nodes(taken | doc, data, bytes, data_len, parent, children, found, fragment) end
     (* Void: br, hr, img *)
     else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then let
-      val () = _add_node(doc, parent, _next_content_node(), $D.Br)
+      val content_node = _next_content_node()
+      val () = _add_node(doc, parent, content_node, $D.Br)
+      val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
     in found end
     else if xml_name_eq(data, name_offset, name_len, _tag_hr, 2) then let
-      val () = _add_node(doc, parent, _next_content_node(), $D.Hr)
+      val content_node = _next_content_node()
+      val () = _add_node(doc, parent, content_node, $D.Hr)
+      val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
     in found end
     else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then let
       (* An image: shown once its bytes are read from the book
          (_load_images); until then its src is an empty data URL *)
       val content_node = _next_content_node()
       val () = _add_node(doc, parent, content_node, $D.Img)
+      val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
       val () = _node_src_empty(doc, content_node)
       var _attr_alt = @[char][3]('a', 'l', 't')
       val () = (case+ find_attr(data, attrs, _attr_alt, 3) of
@@ -3502,6 +3562,7 @@ and _render_node
       val () = (if svg_end > 0 then !_svg_inside := !_svg_inside + 1 else ())
       val () = _fragment_check(data, attrs, fragment, content_node)
       val () = _pass_attrs(doc, data, attrs, content_node)
+      val () = _block_direction(doc, data, attrs, parent, content_node)
       (* an audio or video element is played, with the browser's own
          controls and never by itself; its source (or its <source>
          children's) is the book's entry, given once the chapter is shown
@@ -3528,8 +3589,11 @@ and _render_node
            else found)
         else found): [new_count:nat] images(n, new_count)
       val () = _size_mark(doc, content_node, publisher_sizes_step(name_offset))
-      val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
-      val () = (if _note_text(data, attrs) then _node_attr_literal(doc, content_node, $D.Class, "note-text") else ())
+      val marks = publisher_aligns_next(name_offset)
+      val () = _align_mark(doc, content_node, marks)
+      (* a note's class replaces the hidden one: both when the publisher hid the note (keyword: publisher hidden) *)
+      val () = (if _note_text(data, attrs) then (if marks.1 then _node_attr_literal(doc, content_node, $D.Class, "note-text hidden-by-book")
+        else _node_attr_literal(doc, content_node, $D.Class, "note-text")) else ())
       val () = _break_check(data, attrs, content_node)
       var _tag_ruby = @[char][4]('r', 'u', 'b', 'y')
       val () = (if xml_name_eq(data, name_offset, name_len, _tag_ruby, 4) then _ruby_mark() else ())
@@ -3611,20 +3675,22 @@ fn _pictures_push {l:agz}{path_len:pos | path_len < 65536} (node: int, path: $A.
   val+ ~PicturesCell(rest) = _pictures_take()
 in _pictures_put(PicturesCell(pictures_cons(node, path, path_len, rest))) end
 
-(* The images of the book that a reader does not show but whose manifest
-   item has a fallback that it does (EPUB 3.3 §3.3, the suite's
-   pub-foreign_image): each one's entry path and the path of the entry
-   its fallbacks lead to. Found once, with the spine (_fallbacks_collect),
-   and forgotten with the next book's *)
+(* The images of the book whose manifest item has a fallback that the reader
+   shows: each one's entry path, the path of the entry its fallbacks lead to,
+   and whether the engine draws the item's own type. One it does not draw (EPUB
+   3.3 §3.3, the suite's pub-foreign_image) is shown as its fallback; one it
+   draws (JPEG XL, quire#1061) is shown as itself, and as its
+   fallback only if the engine fails to draw it (_retry_show). Found once, with
+   the spine (_fallbacks_collect), and forgotten with the next book's *)
 datavtype image_fallbacks(int) =
   | image_fallbacks_nil(0) of ()
   | {count:nat}{item_l:agz}{item_len:pos | item_len < 65536}{target_l:agz}{target_len:pos | target_len < 65536}
-    image_fallbacks_cons(count + 1) of ($A.arr(byte, item_l, item_len), int item_len, $A.arr(byte, target_l, target_len), int target_len, image_fallbacks(count))
+    image_fallbacks_cons(count + 1) of ($A.arr(byte, item_l, item_len), int item_len, $A.arr(byte, target_l, target_len), int target_len, bool, image_fallbacks(count))
 
 fun image_fallbacks_free {count:nat} .<count>. (entries: image_fallbacks(count)): void =
   case+ entries of
   | ~image_fallbacks_nil() => ()
-  | ~image_fallbacks_cons(item, _, target, _, rest) => let
+  | ~image_fallbacks_cons(item, _, target, _, _, rest) => let
       val () = $A.free<byte>(item)
       val () = $A.free<byte>(target)
     in image_fallbacks_free(rest) end
@@ -3657,20 +3723,26 @@ fun _path_same {l1,l2:agz}{n1,n2:pos}{len:nat | len <= n1; len <= n2}{i:nat | i 
   else if byte2int0($A.get<byte>(kept, i)) <> byte2int0($A.read<byte>(path, i)) then false
   else _path_same(kept, path, len, i + 1)
 
-(* The path of the entry the fallbacks of the image at path[0, path_len)
-   lead to, copied; none when it has no fallback *)
+(* What the fallbacks of an image lead to: the path of the entry, copied, and
+   whether the engine draws the image's own type; or that it has no fallback *)
+datavtype fallback_found =
+  | {l:agz}{path_len:pos | path_len < 65536} FallbackFound of ($A.arr(byte, l, path_len), int path_len, bool)
+  | NoFallbackFound of ()
+
+(* The fallback of the image at path[0, path_len) *)
 fun _image_fallback_find {count:nat}{l:agz}{path_len:pos} .<count>.
-  (entries: !image_fallbacks(count), path: !$A.borrow(byte, l, path_len), path_len: int path_len): kept_path =
+  (entries: !image_fallbacks(count), path: !$A.borrow(byte, l, path_len), path_len: int path_len): fallback_found =
   case+ entries of
-  | image_fallbacks_nil() => NoKeptPath()
-  | @image_fallbacks_cons(item, item_len, target, target_len, rest) =>
+  | image_fallbacks_nil() => NoFallbackFound()
+  | @image_fallbacks_cons(item, item_len, target, target_len, drawn, rest) =>
     if item_len = path_len then
       (if _path_same(item, path, item_len, 0) then let
          val copy = $A.alloc<byte>(target_len)
          val () = _fragment_duplicate(target, copy, target_len, 0)
          val copy_len = target_len
+         val is_drawn = drawn
          prval () = fold@(entries)
-       in KeptPath(copy, copy_len) end
+       in FallbackFound(copy, copy_len, is_drawn) end
        else let
          val found = _image_fallback_find(rest, path, path_len)
          prval () = fold@(entries)
@@ -3734,12 +3806,123 @@ in
     end
 end
 
+(* The images the engine draws whose manifest item has a fallback (JPEG XL,
+   quire#1061), while the engine may still fail to draw them:
+   each one's book (serial, size), content node (0 for the viewer's) and
+   whether it is the viewer's, the chapter load it belongs to, and the path
+   of the fallback's entry. Bridge tells the app which image the engine failed
+   to draw, by its element's id (image_error); the fallback is then shown
+   (_retry_show). An entry is taken out when its image is shown again or
+   fails, so a fallback that fails too is not tried again, and all of them are
+   dropped with the chapter *)
+datavtype image_retries(int) =
+  | image_retries_nil(0) of ()
+  | {count:nat}{file_size:pos}{node:nat}{l:agz}{path_len:pos | path_len < 65536}
+    image_retries_cons(count + 1) of (int, int file_size, int node, bool, int, $A.arr(byte, l, path_len), int path_len, image_retries(count))
+
+fun image_retries_free {count:nat} .<count>. (entries: image_retries(count)): void =
+  case+ entries of
+  | ~image_retries_nil() => ()
+  | ~image_retries_cons(_, _, _, _, _, path, _, rest) => let
+      val () = $A.free<byte>(path)
+    in image_retries_free(rest) end
+
+datavtype image_retries_cell = {count:nat} ImageRetriesCell of image_retries(count)
+
+val _image_retries = ref<image_retries_cell>(ImageRetriesCell(image_retries_nil()))
+
+fn _image_retries_take (): image_retries_cell = let
+  var cell: image_retries_cell = ImageRetriesCell(image_retries_nil())
+  val () = ref_exch_elt<image_retries_cell>(_image_retries, cell)
+in cell end
+
+fn _image_retries_put (new_cell: image_retries_cell): void = let
+  var cell: image_retries_cell = new_cell
+  val () = ref_exch_elt<image_retries_cell>(_image_retries, cell)
+  val+ ~ImageRetriesCell(old) = cell
+in image_retries_free(old) end
+
+(* Whether the first len bytes of two arrays are the same, from byte i *)
+fun _arrays_same {l1,l2:agz}{n1,n2:pos}{len:nat | len <= n1; len <= n2}{i:nat | i <= len} .<len - i>.
+  (first: !$A.arr(byte, l1, n1), second: !$A.arr(byte, l2, n2), len: int len, i: int i): bool =
+  if i >= len then true
+  else if byte2int0($A.get<byte>(first, i)) <> byte2int0($A.get<byte>(second, i)) then false
+  else _arrays_same(first, second, len, i + 1)
+
+(* The fallback kept for an element, taken out of the list *)
+datavtype retry_found =
+  | {file_size:pos}{node:nat}{l:agz}{path_len:pos | path_len < 65536}
+    RetryFound of (int, int file_size, int node, bool, int, $A.arr(byte, l, path_len), int path_len)
+  | NoRetry of ()
+
+(* The entry of the list for the element whose id is id[0, id_len), taken
+   out of it, and the rest of the list *)
+fun _retry_pull {count:nat}{l:agz}{id_len:pos | id_len <= 16} .<count>.
+  (entries: image_retries(count), id: !$A.arr(byte, l, id_len), id_len: int id_len)
+  : [rest:nat] @(retry_found, image_retries(rest)) =
+  case+ entries of
+  | ~image_retries_nil() => @(NoRetry(), image_retries_nil())
+  | ~image_retries_cons(serial, file_size, node, in_viewer, generation, path, path_len, rest) => let
+      val @(own_id, own_len) = _src_id(node, in_viewer)
+      val same = (if own_len = id_len then _arrays_same(own_id, id, own_len, 0) else false)
+      val () = $A.free<byte>(own_id)
+    in
+      if same then @(RetryFound(serial, file_size, node, in_viewer, generation, path, path_len), rest)
+      else let
+        val @(found, others) = _retry_pull(rest, id, id_len)
+      in @(found, image_retries_cons(serial, file_size, node, in_viewer, generation, path, path_len, others)) end
+    end
+
+(* Forgets the fallback kept for a content node's image (or the viewer's) *)
+fn _retry_forget {node:nat} (node: int node, in_viewer: bool): void = let
+  val @(id, id_len) = _src_id(node, in_viewer)
+  val+ ~ImageRetriesCell(entries) = _image_retries_take()
+  val @(older, others) = _retry_pull(entries, id, id_len)
+  val () = _image_retries_put(ImageRetriesCell(others))
+  val () = $A.free<byte>(id)
+in
+  case+ older of
+  | ~NoRetry() => ()
+  | ~RetryFound(_, _, _, _, _, path, _) => $A.free<byte>(path)
+end
+
+(* Keeps the fallback at target[0, target_len) for a content node's image
+   (or the viewer's) that the engine may fail to draw *)
+fn _retry_keep {file_size:pos}{node:nat}{l:agz}{target_len:pos | target_len < 65536}
+  (serial: int, file_size: int file_size, node: int node, in_viewer: bool, generation: int,
+   target: $A.arr(byte, l, target_len), target_len: int target_len): void = let
+  val+ ~ImageRetriesCell(entries) = _image_retries_take()
+in
+  _image_retries_put(ImageRetriesCell(image_retries_cons(serial, file_size, node, in_viewer, generation, target, target_len, entries)))
+end
+
+(* The engine failed to draw the image whose element's id is id[0, id_len):
+   its fallback is shown, when one is kept for it and the chapter it belongs
+   to is still the one shown *)
+fn _retry_show {l:agz}{id_len:pos | id_len <= 16} (id: !$A.arr(byte, l, id_len), id_len: int id_len): void = let
+  val+ ~ImageRetriesCell(entries) = _image_retries_take()
+  val @(found, others) = _retry_pull(entries, id, id_len)
+  val () = _image_retries_put(ImageRetriesCell(others))
+in
+  case+ found of
+  | ~NoRetry() => ()
+  | ~RetryFound(serial, file_size, node, in_viewer, generation, path, path_len) => let
+      val @(path_frozen, path_bytes) = $A.freeze<byte>(path)
+      val () = (if !_load_generation = generation then
+        _show_image_entry(serial, file_size, node, in_viewer, generation, path_bytes, path_len) else ())
+    in release_bytes(path_frozen, path_bytes) end
+end
+
 (* A content node's image, the entry named path[0, path_len): or, when
    the manifest item of that entry is a type the reader does not show
-   and its fallbacks lead to one it does, that fallback's entry *)
+   and its fallbacks lead to one it does, that fallback's entry. When the
+   item is a type the engine draws and may fail to (JPEG XL, quire#1061),
+   the entry itself is shown, and the fallback only if the
+   engine fails to draw it (_retry_show) *)
 fn _show_image {file_size:pos}{node:nat}{l:agz}{path_len:pos}
   (serial: int, file_size: int file_size, node: int node, in_viewer: bool, generation: int,
    path: !$A.borrow(byte, l, path_len), path_len: int path_len): void = let
+  val () = _retry_forget(node, in_viewer)
   val cell = _image_fallbacks_take()
   val+ @ImageFallbacksCell(entries) = cell
   val found = _image_fallback_find(entries, path, path_len)
@@ -3747,12 +3930,37 @@ fn _show_image {file_size:pos}{node:nat}{l:agz}{path_len:pos}
   val () = _image_fallbacks_put(cell)
 in
   case+ found of
-  | ~NoKeptPath() => _show_image_entry(serial, file_size, node, in_viewer, generation, path, path_len)
-  | ~KeptPath(target, target_len) => let
+  | ~NoFallbackFound() => _show_image_entry(serial, file_size, node, in_viewer, generation, path, path_len)
+  | ~FallbackFound(target, target_len, drawn) =>
+    if drawn then let
+      val () = _show_image_entry(serial, file_size, node, in_viewer, generation, path, path_len)
+    in _retry_keep(serial, file_size, node, in_viewer, generation, target, target_len) end
+    else let
       val @(target_frozen, target_bytes) = $A.freeze<byte>(target)
       val () = _show_image_entry(serial, file_size, node, in_viewer, generation, target_bytes, target_len)
     in release_bytes(target_frozen, target_bytes) end
 end
+
+(* The engine failed to draw the image whose element's id the failed event
+   names (bridge's image_error): its fallback is shown, when the manifest gave
+   the image one and the engine draws the image's type (JPEG XL, quire#1061).
+   An id over 16 bytes is none of the app's images' *)
+#pub fun reader_image_failed (failed: $IE.image_error): void
+
+implement reader_image_failed (failed) =
+  case+ failed of
+  | ~$IE.ImageFailed(blob) => let
+      val id_len = $BD.blob_len(blob)
+    in
+      if id_len <= 0 then $BD.blob_free(blob)
+      else if id_len > 16 then $BD.blob_free(blob)
+      else let
+        val id = $A.alloc<byte>(id_len)
+        val () = $BD.blob_read(blob, 0, id, id_len)
+        val () = $BD.blob_free(blob)
+        val () = _retry_show(id, id_len)
+      in $A.free<byte>(id) end
+    end
 
 (* The image of a content node, whose src names the entry joined of the chapter's directory
    (the first dir_len bytes of its name, at name_offset in the file) and data[src_start, src_start + path_end) *)
@@ -3962,7 +4170,8 @@ fn _kept_path {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_off
   end
 
 (* The images the manifest gives a fallback (find_image_fallback_n), from
-   the skip-th on, kept for _show_image: at most 256 of them *)
+   the skip-th on, kept for _show_image: at most 256 of them (and with each,
+   whether the engine draws its type) *)
 fun _fallbacks_collect {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_offset + prefix_len <= file_size; prefix_len < 65536}
   {l:agz}{n:pos}{tree_size:nat}{skip:nat | skip <= 256} .<256 - skip>.
   (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, prefix_len: int prefix_len,
@@ -3970,7 +4179,7 @@ fun _fallbacks_collect {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf
   if skip >= 256 then ()
   else (case+ find_image_fallback_n(opf_bytes, opf_size, nodes, skip) of
     | ~ImageFallbackSkip(_) => ()
-    | ~ImageFallback(item_offset, item_len, fallback_offset, fallback_len) => let
+    | ~ImageFallback(item_offset, item_len, fallback_offset, fallback_len, drawn) => let
         val item = _kept_path(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, item_offset, item_len)
         val target = (case+ find_image_target(opf_bytes, opf_size, nodes, fallback_offset, fallback_len) of
           | ~xspan_none() => NoKeptPath()
@@ -3985,7 +4194,7 @@ fun _fallbacks_collect {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf
             | ~KeptPath(target_path, target_path_len) => let
                 val+ ~ImageFallbacksCell(rest) = _image_fallbacks_take()
               in _image_fallbacks_put(ImageFallbacksCell(
-                   image_fallbacks_cons(item_path, item_path_len, target_path, target_path_len, rest))) end))
+                   image_fallbacks_cons(item_path, item_path_len, target_path, target_path_len, drawn, rest))) end))
       in _fallbacks_collect(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, skip + 1) end)
 
 (* The chapters from spine itemref item down to the first, onto found
@@ -4447,6 +4656,7 @@ fn _spine_build (serial: int): $P.promise(spine_built, $P.Chained) =
                val () = _narration_offered(case+ book_narrated_after(serial, ~1) of ~$R.some(_) => true | ~$R.none() => false)
                val () = toc_locate(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes)
                val () = _direction_set(if spine_rtl(opf_bytes, opf_nodes) then RightToLeft() else LeftToRight())
+               val () = !_direction_inferred := spine_rtl_inferred(opf_bytes, opf_nodes)
                val () = _vertical_set(spine_vertical(opf_bytes, opf_nodes))
                (* a book that asks to be scrolled (rendition:flow, roll layout) is, until the reader chooses Pages *)
                val () = set_book_scrolls_set(opf_scroll_preferred(opf_bytes, opf_nodes))
@@ -4746,6 +4956,13 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                       | PrePaginated() => ()
                       | Reflowable() => if _is_rtl() then ui_attr("page", AClass, "caf rtl") else ui_attr("page", AClass, "caf")))
                   val () = _rows_set()
+                  val () = !_root_dir := RootDirNone()
+                  val () = !_auto_direction := (case+ _writing() of
+                    | Horizontal() => (case+ layout of
+                      | PrePaginated() => false
+                      | Reflowable() => if _is_rtl() then !_direction_inferred else false)
+                    | VerticalRightToLeft() => false
+                    | VerticalLeftToRight() => false)
                   val () = _page_book_lang(doc)
                   val fragment = _fragment_take()
                   (* the sizes the publisher gave its elements, loaded with the chapter *)
@@ -4953,6 +5170,8 @@ fn _load_chapter {chapter_index:nat} (chapter_index: int chapter_index): $P.prom
   val serial = book_serial()
   val () = !_load_generation := !_load_generation + 1
   val generation = !_load_generation
+  (* the images of the chapter left, whose fallbacks were kept for the engine's failure *)
+  val () = _image_retries_put(ImageRetriesCell(image_retries_nil()))
 in
   case+ book_chapter_get(serial, chapter_index) of
   | ~ChaptersUnknown() =>
