@@ -2768,12 +2768,8 @@ fn _toolbar_place (): void = let
      (a probe the stylesheet makes that tall) *)
   val () = ui_measure("selection-toolbar-floor")
   val floor = $DR.get_measure_h()
-  val above_band = selection_top - SELECTION_MENU_BAND - TOOLBAR_GAP - height
-  val below_handles = selection_bottom + HANDLE_CLEARANCE
-  val menu_above = selection_top - SELECTION_MENU_BAND >= floor
-  val top = (if above_band >= floor then above_band
-    else if menu_above then below_handles
-    else below_handles + SELECTION_MENU_BAND + TOOLBAR_GAP): Int
+  val above = selection_top - TOOLBAR_GAP - height
+  val top = (if above >= floor then above else selection_bottom + HANDLE_CLEARANCE): Int
 in ui_toolbar_at(_clamp(top, 0, 10000), _clamp(height, 0, 10000)) end
 
 (* The toolbar shows view's row; its height changes, so it is placed again *)
