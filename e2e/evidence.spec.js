@@ -1032,13 +1032,20 @@ test('a capture is reading the ring while a renderer in another page begins an u
     const snapshotAt = Number(process.hrtime.bigint()) / 1e9;
     const written = (await ringStats(process.env)).written;
     // the renderer begins its wait now, while the capture is in the middle of reading
+    const hangAt = Number(process.hrtime.bigint()) / 1e9;
     hang = await hangPage(page, { session: async () => armed.session });
+    // #1095 (runs 42660119349 and 42688747248: the ring's last wait of the renderer was not the wait /proc showed): the hang is in force only when its request has reached the
+    // server, so the renderer is read after that. Before it, an untimed wait of a renderer's main thread that is not the hang (or one that began before the snapshot) was taken for it
+    let arrived = false;
+    void hang.reached.then(() => { arrived = true; });
+    await expect.poll(() => arrived, { timeout: 30000, message: 'the page\'s synchronous request reached the server' }).toBe(true);
+    const arrivedAt = Number(process.hrtime.bigint()) / 1e9;
     let waiting = null;
     await expect.poll(async () => {
       for (const renderer of (await processes(own)).filter((each) => each.type === 'renderer')) {
         const answer = await readSyscall(renderer.id);
         const call = /^202 (0x[0-9a-f]+) (0x[0-9a-f]+) (0x[0-9a-f]+) (0x[0-9a-f]+)/.exec(answer.syscall || '');
-        if (call && (parseInt(call[2], 16) & 0x7f) === 9 && /^0x0+$/.test(call[4])) { waiting = { pid: renderer.id, address: call[1].slice(2), syscall: answer.syscall }; return true; }
+        if (call && (parseInt(call[2], 16) & 0x7f) === 9 && /^0x0+$/.test(call[4])) { waiting = { pid: renderer.id, address: call[1].slice(2), syscall: answer.syscall, readAt: Number(process.hrtime.bigint()) / 1e9 }; return true; }
       }
       return false;
     }, { timeout: 30000, message: 'a renderer is in an untimed futex wait' }).toBe(true);
@@ -1061,7 +1068,7 @@ test('a capture is reading the ring while a renderer in another page begins an u
     const history = await futexAnalysis(next.file, { address: waiting.address, tid: waiting.pid });
     expect(history.waiter.lastWait, `the ring holds the renderer's wait (${waiting.syscall}): ${JSON.stringify(history.waiter)}`).not.toBeNull();
     expect(history.waiter.lastWait.untimed).toBe(true);
-    expect(history.onAddress.events, `and the address it waits on (${history.address}; /proc said ${waiting.syscall}; the waiter's last waits in the ring: ${JSON.stringify(history.waiter.waits)}; ${history.ringLines} ring lines from ${history.ringStart} to ${history.ringEnd})`).toBeGreaterThan(0);
+    expect(history.onAddress.events, `and the address it waits on (${history.address}; /proc said ${waiting.syscall}; the waiter's last waits in the ring: ${JSON.stringify(history.waiter.waits)}; ${history.ringLines} ring lines from ${history.ringStart} to ${history.ringEnd}, each CPU's first event ${JSON.stringify(history.cpuStarts)}; snapshot ${snapshotAt}, hang asked ${hangAt}, request arrived ${arrivedAt}, wait read ${waiting.readAt})`).toBeGreaterThan(0);
     expect(history.waiter.lastWait.at, 'the wait began after the capture took its snapshot').toBeGreaterThan(snapshotAt);
   } finally {
     if (ticking) clearInterval(ticking);

@@ -273,6 +273,8 @@ export async function futexAnalysis(ringFile, { address, tid }) {
   }
   return {
     address: `0x${wanted}`, waiterTid: tid, ringLines: lines, ringStart, ringCompleteFrom: cpuStarts.size ? Math.max(...cpuStarts.values()) : null, ringEnd,
+    // #1095: each CPU's first event, so a wait missing from the file shows whether its CPU's buffer began after the wait (keyword: waiter-waits)
+    cpuStarts: Object.fromEntries(cpuStarts),
     waiter: {
       lastWait, switchedOut, wokenLast, waits: waiterWaits,
       silentMs: wokenLast ? Math.round((ringEnd - wokenLast.at) * 1000) : null,
