@@ -171,6 +171,11 @@ export function pressRecord() {
       });
       await context.addInitScript(pressInit, { binding: BINDING, types: PRESS_TYPES });
     },
+    /** Whether a press on the page is down and not yet released, as the page has told (keyword: press open, quire#1102). */
+    open(page) {
+      const number = pageNumber(page);
+      return pressesOf(events.filter((event) => event.page === number)).some((press) => !press.released);
+    },
     /** The test ended unexpectedly: the clients that are attached now are the ones attached at the failure. */
     markFailed() { if (failedAt === null) failedAt = Date.now(); },
     /** The record, from what was kept; `inputPath` is the browser's side (flight-recorder.js `inputPathOf`) or the reason there is none. */
