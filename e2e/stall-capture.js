@@ -65,6 +65,8 @@ const PROBE_EVERY_MS = 2000;
 const SCAN_EVERY_MS = 1000; // new contexts and pages are armed this often
 const COMMAND_MS = 2000;    // how long a DevTools command is waited for
 const PAUSE_MS = 3000;
+export const PRESS_MS = 3000;      // how long the pause waits for a press the page has begun to be released (quire#1102)
+const PRESS_POLL_MS = 20;   // how often it looks (a cadence, not a wait for a step)
 const PROFILE_MS = 2000;
 const METRICS_MS = 1000;    // Performance.getMetrics, around an attempt (#600): a busy page is noted, not waited for
 const HARVEST_MS = 1000;
@@ -128,7 +130,7 @@ export const TEARDOWN_MOST_MS = TEARDOWN_MS + HELPER_MS + 1500;
  * time (a session, two reads and 1 s between them) is taken alongside, and is
  * shorter. 10 x 2 s + 3 s + 2 s + 5 s = 30 s.
  */
-export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS + HELPER_MS;
+export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PRESS_MS + PROFILE_MS + HELPER_MS;
 /**
  * The most a crash's record takes after the browser is gone (quire#1055): the kernel ring's snapshot (its sudo call lives ROOT_MOST_MS, the ring lock
  * inside it up to 40 s, then the read of the whole ring) and the browser's trace (TRACE_END_MS for the end and again for its completion). The test waits
@@ -1102,6 +1104,13 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
     // the watch's own calls into the page end first, so none is left to take the pause (#1072, keyword: own script)
     // (a page that answers nothing keeps its calls pending, and is not waited for)
     if (answers) await within(Promise.all([...armed.running].map((call) => call.settled)), COMMAND_MS);
+    // Keyword: press open (quire#1102). A page paused by the debugger drops the input it is sent (the mouseup of a click whose mousedown it
+    // had: the click returned, the page never saw a release), so the pause waits for a press the page has begun to be released, up to PRESS_MS.
+    if (armed.pressOpen) {
+      const began = Date.now();
+      while (armed.pressOpen() && Date.now() - began < PRESS_MS) await lasting(PRESS_POLL_MS);
+      if (Date.now() - began > 0) result.pressWait = { waitedMs: Date.now() - began, stillOpen: armed.pressOpen() };
+    }
     armed.pausing = true;
     const paused = new Promise((resolve) => session.once('Debugger.paused', resolve));
     const pause = await within(session.send('Debugger.pause'), COMMAND_MS);
@@ -1337,6 +1346,7 @@ export function stallWatch(browser, testInfo) {
     const arming = await within(armed.get(page), COMMAND_MS);
     const armedPage = arming.value || { session: null, scripts: new Map(), running: new Set(),
       error: 'the page was still being armed: it stopped answering before its debugger was enabled' };
+    armedPage.pressOpen = () => press.open(page);
     count += 1;
     const path = testInfo.outputPath(`stall-capture-${count}.json`);
     // written when the native stacks are in and again at the end, so what the

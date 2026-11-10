@@ -21,12 +21,13 @@ import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { test, expect } from './fixtures.js';
+import { rawMouse } from './helpers.js';
 import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
 import { gunzipSync } from 'node:zlib';
 import { keepBrowserTrace, keepKernel, ringSeen, serialRun, startBrowserTrace, startKernel, stopKernel, wanted } from './flight-recorder.js';
-import { arm, capture, clientScript, lasting, pausedDuring, taskAnswered, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
+import { arm, capture, clientScript, lasting, pausedDuring, taskAnswered, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, PRESS_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
 
 /** Resolves when the child has been started (its program is running). */
 const started = (child) => once(child, 'spawn');
@@ -216,9 +217,27 @@ test('a page in an endless script loop is captured in that loop, and gdb is not 
   expect(capture.answers.task.answered).toBe(false);
   expect(capture.paused.frames[0].functionName).toBe('spinForever');
   expect(capture.verdict).toContain('spinForever');
+  expect(capture.pressWait, 'no press was down, so the pause did not wait for one').toBeUndefined();
   await endLoop(page, stallWatch);
   // a loop is busy, not frozen: it spends a second of CPU a second
   expectBusyNotFrozen(capture);
+});
+
+// Keyword: press open (quire#1102). A page paused by the debugger drops the input it is sent: a click's mouseup that came in the pause
+// never reached the page, and the click returned all the same. The pause waits for a press the page has begun, for at most PRESS_MS;
+// here the release cannot come (the page loops), so the wait runs out, says so, and the pause is made all the same.
+test('a capture does not pause a page while a press on it is down, for at most PRESS_MS (quire#1102)', async ({ page, stallWatch }) => {
+  await page.setContent(`${LOOPS}<button id="held" style="position:fixed;left:10px;top:10px;width:100px;height:40px">Held</button>`);
+  await rawMouse(page, 'move', 50, 30);
+  await rawMouse(page, 'down');
+  const session = await stallWatch.session(page);
+  await session.send('Runtime.evaluate', { expression: 'setTimeout(spinForever, 0)' });
+  const capture = await stallWatch.next(page, 30000);
+  expect(capture.pressWait.stillOpen, 'the release did not come while the page looped').toBe(true);
+  expect(capture.pressWait.waitedMs, 'the pause waited for the press as long as it may').toBeGreaterThanOrEqual(PRESS_MS);
+  expect(capture.paused.frames[0].functionName, 'and then paused the loop').toBe('spinForever');
+  await endLoop(page, stallWatch);
+  await rawMouse(page, 'up');
 });
 
 // Forces the pause of another client (quire#1077, keyword: other client pause): gen-pwa test arms every page with a DevTools client
