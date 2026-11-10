@@ -567,7 +567,7 @@ test.describe('a single-file book of 5 MB', { tag: '@serial' }, () => {
       within('the jump to the end', big.end, small.end);
       within('the search', big.summary, small.summary);
       within('going to the result', big.found, small.found);
-      // highlight-pages: 3.6 to 6.7 pages measured, so eight (quire#1101)
+      // highlight-pages: up to 6.9 pages measured, so eight (quire#1101)
       within('the highlight', big.highlight, small.highlight, 8);
       // a turn: as soon as an instant one, as page-turn.spec.js holds it
       expect.soft(big.turns.animated[2], log).toBeLessThanOrEqual(big.turns.instant[2] + slack(big.turns.instant[2]));
