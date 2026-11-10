@@ -1,8 +1,4 @@
-// The probes of the android job's emulator run (scripts/android/smoke-*.js, pwa#205, pwa#267,
-// quire#1030), played in Chromium: the long press goes to a word, the taps to the centre of each
-// toolbar button, and the result is true only when every button saw its click. The real WebView
-// is the emulator; here the probes' answers are checked, so a probe that answers a point off a
-// word or a button fails in the e2e group and not only in the emulator. Keyword: android-smoke.
+// The android job's probes (scripts/android/smoke-*.js) played in Chromium (keyword: android lock)
 
 import { readFileSync } from 'node:fs';
 import { test, expect } from './fixtures.js';

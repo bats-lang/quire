@@ -221,10 +221,7 @@ jobs:
         if: steps.app.outcome == 'success'
         run: cp scripts/android/.nvmrc scripts/android/.java-version dist/android/
 
-      # The app's probes for the android job's emulator run, beside the
-      # project's smoke-test.sh: the book is opened, then at each font scale
-      # a word is long-pressed and every toolbar button tapped at its centre
-      # (keyword: android-smoke, pwa#267, #1030)
+      # The app's probes for the android job's emulator run, copied beside smoke-test.sh (keyword: android lock)
       - name: Put the smoke probes beside the Android project
         if: steps.app.outcome == 'success'
         run: cp scripts/android/smoke-open.js scripts/android/smoke-ready.js scripts/android/smoke-select-point.js scripts/android/smoke-tap-points.js scripts/android/smoke-tap-result.js dist/android/
