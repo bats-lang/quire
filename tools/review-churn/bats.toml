@@ -1,0 +1,10 @@
+[package]
+name = "review-churn"
+kind = "bin"
+unsafe = false
+
+[dependencies]
+"array" = ""
+"builder" = ""
+"file" = ""
+"result" = ""
