@@ -197,10 +197,21 @@ export async function walkEveryScreen(page, { look, back }) {
     const r = i.getBoundingClientRect();
     return r.width > 0 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;
   }));
-  for (let turn = 0; turn < 60 && !(await shown()); turn++) {
-    const shown = await visibleText(page);
+  // (a chapter's pictures come in over a moment, quire#1105: a page whose picture is not yet drawn
+  // is the picture's page too, and a key pressed on the chapter's last page turns nothing)
+  const drawn = () => page.evaluate(() => [...document.querySelectorAll('[role=document] img[alt="the map"]')]
+    .every(i => i.complete && i.naturalWidth > 0));
+  for (let turn = 0; turn < 60; turn++) {
+    await expect.poll(drawn).toBe(true);
+    if (await shown()) break;
+    const before = await visibleText(page);
     await page.keyboard.press('ArrowRight');
-    await expect.poll(() => visibleText(page)).not.toBe(shown);
+    // what a failure shows: the key sent and the page's state (quire#1105)
+    try {
+      await expect.poll(async () => (await visibleText(page)) !== before || !(await drawn()) || (await shown())).toBe(true);
+    } catch (error) {
+      throw new Error(`ArrowRight pressed on turn ${turn}, the page still shows ${JSON.stringify(before)}, picture shown: ${await shown()}, drawn: ${await drawn()}\n${error.message}`);
+    }
   }
   await expect(map).toBeInViewport();
   await bookPage(page).getByRole('link', { name: '1', exact: true }).click();
