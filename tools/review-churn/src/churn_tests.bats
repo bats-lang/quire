@@ -1,4 +1,4 @@
-(* churn_tests -- the tests of review-churn's pure parts: the kind of a comment, the anchor of a finding and which findings are new (keyword: review churn tests) *)
+(* churn_tests: the tests of review-churn's pure parts (keyword: review churn tests) *)
 
 #include "share/atspre_staload.hats"
 
@@ -7,7 +7,7 @@
 
 staload "churn.sats"
 
-(* A text of at most 4096 bytes as a frozen array: its borrow, the freezer and the length are used by the tests below *)
+(* The kind of a text of under 4096 bytes (review churn tests) *)
 fn kind_of {s:nat | s < 4096} (text: string s): int = let
   var b = $B.create()
   val () = $B.bput(b, text)

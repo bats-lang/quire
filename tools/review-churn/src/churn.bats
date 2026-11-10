@@ -1,11 +1,11 @@
-(* churn -- the pure parts of review-churn: which comments are reviews, which round they block, and the anchor of a finding (keyword: review churn, quire#884) *)
+(* churn: the pure parts of review-churn, reviews and findings (keyword: review churn) *)
 
 #include "share/atspre_staload.hats"
 
 #use array as A
 
 (* ------------------------------------------------------------------ *)
-(* Bytes (keyword: review churn). Positions are plain ints: peek reads 0 outside the first m bytes. *)
+(* Bytes: peek reads 0 outside the first m bytes (keyword: review churn) *)
 
 #pub fn peek {l:agz}{n:pos}{m:nat | m <= n}{p:int}
   (src: !$A.borrow(byte, l, n), p: int p, m: int m): int
@@ -23,7 +23,7 @@ fn is_alpha (b: int): bool = (b >= 65 && b <= 90) || (b >= 97 && b <= 122)
 
 fn is_blank (b: int): bool = b = 32 || b = 9
 
-(* A byte that is blank in the text of a line or between lines: a space, a tab, a carriage return or a newline *)
+(* A space, a tab, a carriage return or a newline (keyword: review churn) *)
 fn is_space (b: int): bool = b = 32 || b = 9 || b = 13 || b = 10
 
 (* The first newline of bv[p, m), or m *)
@@ -50,7 +50,7 @@ fun skip_blank {l:agz}{n:pos}{e:nat | e <= n}{p:nat | p <= e} .<e - p>.
   else if is_blank(peek(bv, p, e)) then skip_blank(bv, p + 1, e)
   else p
 
-(* The first position at or after p of bv[0, m) that holds no space, tab, carriage return or newline, or m *)
+(* The first position at or after p that holds no space or newline, or m (review churn) *)
 fun skip_space {l:agz}{n:pos}{m:nat | m <= n}{p:nat | p <= m} .<m - p>.
   (bv: !$A.borrow(byte, l, n), p: int p, m: int m): [r:nat | p <= r; r <= m] int r =
   if p >= m then p
@@ -86,7 +86,7 @@ fun trim_end {l:agz}{n:pos}{e:nat | e <= n}{q:nat | q <= e} .<q>.
   else if is_blank(peek(bv, q - 1, e)) || peek(bv, q - 1, e) = 13 then trim_end(bv, a, q - 1, e)
   else q
 
-(* Whether bv[p, e) starts with the first sn bytes of s, a letter of bv read in lower case: s is in lower case *)
+(* Whether bv[p, e) starts with the sn lower case bytes of s, read in lower case (review churn) *)
 fun lit_ci {l:agz}{n:pos}{e:nat | e <= n}{p:int}{sn:nat}{i:nat | i <= sn} .<sn - i>.
   (bv: !$A.borrow(byte, l, n), p: int p, e: int e, s: string sn, sn: int sn, i: int i): bool =
   if i >= sn then true
@@ -98,9 +98,7 @@ fun lit_ci {l:agz}{n:pos}{e:nat | e <= n}{p:int}{sn:nat}{i:nat | i <= sn} .<sn -
 fn text_len {sn:nat} (s: string sn): int sn = g1u2i(string1_length(s))
 
 (* ------------------------------------------------------------------ *)
-(* What a comment is (keyword: review churn): a review is a comment whose first line, without its # marks, opens with
-   "Independent review" or "Adversarial review"; it blocks when its first line ends with "changes needed" or a line of it is
-   "Verdict: changes needed", and approves when the same is true of "approved" (blocking wins) *)
+(* A review opens with Independent review or Adversarial review (review churn) *)
 
 (* Whether the line bv[a, e) without its blanks at the end ends with the sn bytes of s *)
 fn ends_with_ci {l:agz}{n:pos}{e:nat | e <= n}{sn:nat}
@@ -119,7 +117,7 @@ in
   if t - b <> sn then false else lit_ci(bv, b, t, s, sn, 0)
 end
 
-(* 2 when a line of bv[p, m) is "verdict: changes needed", else 1 when one is "verdict: approved", else 0: the first of them wins *)
+(* 2 for a line "verdict: changes needed", else 1 for "verdict: approved", else 0 (review churn) *)
 fun verdict_line {l:agz}{n:pos}{m:nat | m <= n}{p:nat | p <= m} .<m - p>.
   (bv: !$A.borrow(byte, l, n), p: int p, m: int m, found: int): int = let
   val e = line_end(bv, p, m)
@@ -130,7 +128,7 @@ in
   if e >= m then best else verdict_line(bv, e + 1, m, best)
 end
 
-(* 0 for a comment that is no review, 1 for a review that approves, 2 for one that blocks, 3 for a review with no verdict *)
+(* 0 no review, 1 approves, 2 blocks, 3 no verdict (review churn) *)
 #pub fn churn_kind {l:agz}{n:pos}{m:nat | m <= n} (bv: !$A.borrow(byte, l, n), m: int m): int
 
 implement churn_kind (bv, m) = let
@@ -150,13 +148,13 @@ in
 end
 
 (* ------------------------------------------------------------------ *)
-(* What a finding is: a list item line with an inline code span, anchored by the first span of the line (keyword: review churn) *)
+(* A finding is a list item line, anchored by its first inline code span (review churn) *)
 
 (* x held between 0 and e *)
 fn upto {x:int}{e:nat} (x: int x, e: int e): [r:nat | r <= e] int r =
   if x <= 0 then 0 else if x <= e then x else e
 
-(* Where the text of the line bv[p, e) starts after its list marker and the blank that follows it, or ~1 when it has no marker *)
+(* Where the text after the list marker of the line bv[p, e) starts, or ~1 (review churn) *)
 fn item_text {l:agz}{n:pos}{e:nat | e <= n}{p:nat | p <= e}
   (bv: !$A.borrow(byte, l, n), p: int p, e: int e): [r:int | r <= e] int r = let
   val s = skip_blank(bv, p, e)
@@ -173,7 +171,7 @@ in
   else ~1
 end
 
-(* The first span of the item line at p: its start and its end (the text between its backticks), or ~1 and ~1 *)
+(* The text between the backticks of the first span of the item line at p (review churn) *)
 #pub fn churn_anchor {l:agz}{n:pos}{m:nat | m <= n}{p:nat | p < m}
   (bv: !$A.borrow(byte, l, n), m: int m, p: int p): [a,b:int | (a == ~1 && b == ~1) || (0 <= a && a < b && b <= m)] @(int a, int b)
 
@@ -215,7 +213,7 @@ fun find_here {lh:agz}{nh:pos}{hm:nat | hm <= nh}{ln:agz}{nn:pos}{b:nat | b <= n
 
 implement churn_contains_ci (hay, hm, nd, a, b) = find_here(hay, hm, 0, nd, a, b)
 
-(* The number of item lines of round[0, rm) that have an anchor, and the number of those whose anchor is not in earlier[0, em) *)
+(* The item lines with an anchor, and those whose anchor is not in the earlier one (review churn) *)
 fun count_from {lr:agz}{nr:pos}{rm:nat | rm <= nr}{le:agz}{ne:pos}{em:nat | em <= ne}{p:nat | p <= rm} .<rm - p>.
   (round: !$A.borrow(byte, lr, nr), rm: int rm, earlier: !$A.borrow(byte, le, ne), em: int em, p: int p, anchored: int, fresh: int): @(int, int) =
   if p >= rm then @(anchored, fresh)
@@ -228,7 +226,7 @@ fun count_from {lr:agz}{nr:pos}{rm:nat | rm <= nr}{le:agz}{ne:pos}{em:nat | em <
     else count_from(round, rm, earlier, em, nx, anchored + 1, fresh + 1)
   end
 
-(* The findings of the round and how many of them are new against one earlier review: @(anchored, new) *)
+(* @(findings, findings new against one earlier review) of a round (review churn) *)
 #pub fn churn_count {lr:agz}{nr:pos}{rm:nat | rm <= nr}{le:agz}{ne:pos}{em:nat | em <= ne}
   (round: !$A.borrow(byte, lr, nr), rm: int rm, earlier: !$A.borrow(byte, le, ne), em: int em): @(int, int)
 
@@ -248,8 +246,7 @@ implement churn_print (bv, a, b) = let
 in loop(bv, a, b) end
 
 (* ------------------------------------------------------------------ *)
-(* The manifest (keyword: review churn): a line is a pull request number of at most 9 digits, blanks, and the path of one review file;
-   the lines of one pull request are together, in the order the reviews were written *)
+(* A manifest line: a pull request number of 9 digits at most, blanks, a path (review churn) *)
 
 (* The number the digits from p make, at most 9 of them *)
 fun number_of {l:agz}{n:pos}{e:nat | e <= n}{p:nat | p <= e}{k:nat | k <= 9} .<9 - k>.
@@ -259,7 +256,7 @@ fun number_of {l:agz}{n:pos}{e:nat | e <= n}{p:nat | p <= e}{k:nat | k <= 9} .<9
   else if is_digit(peek(bv, p, e)) then number_of(bv, p + 1, e, k + 1, acc * 10 + (peek(bv, p, e) - 48))
   else acc
 
-(* The pull request number of the manifest line at p, or ~1 for a line that does not start with one (a blank line) or whose number has over 9 digits *)
+(* The pull request number of the manifest line at p, or ~1 (review churn) *)
 #pub fn churn_line_key {l:agz}{n:pos}{m:nat | m <= n}{p:nat | p < m}
   (bv: !$A.borrow(byte, l, n), m: int m, p: int p): int
 
@@ -271,7 +268,7 @@ in
   if d <= s then ~1 else if d - s > 9 then ~1 else number_of(bv, s, e, 0, 0)
 end
 
-(* The path of the manifest line at p: its start and its end, or ~1 and ~1 for a line with no number or no path *)
+(* The start and end of the path of the manifest line at p, or ~1 and ~1 (review churn) *)
 #pub fn churn_line_path {l:agz}{n:pos}{m:nat | m <= n}{p:nat | p < m}
   (bv: !$A.borrow(byte, l, n), m: int m, p: int p): [a,b:int | (a == ~1 && b == ~1) || (0 <= a && a < b && b <= m)] @(int a, int b)
 

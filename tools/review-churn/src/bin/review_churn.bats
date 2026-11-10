@@ -9,10 +9,7 @@
 
 staload "churn.sats"
 
-(* review-churn MANIFEST: of the 20 most recent pull requests with two blocking rounds, the share that had a finding new in a later round (keyword: review churn, quire#884).
-   MANIFEST has a line `<pull request number> <path of a review file>` for each review comment, the newest pull request first and the reviews of one in the order written;
-   a file is one comment (gh api repos/bats-lang/quire/issues/comments/<id> --jq .body). Bounds: a number of at most 9 digits, a path of at most 4095 bytes, a file of any size
-   (read whole); the 20 and the rule for a finding are in churn.bats. *)
+(* review-churn MANIFEST: the share of pull requests with a new finding (review churn) *)
 
 val g_failed = ref<bool>(false)
 val g_counted = ref<int>(0)
@@ -26,7 +23,7 @@ datavtype whole_file =
     whole_ok of ($A.arena(byte, la, m, m, 1), $A.arrx(byte, l, m, la), int m, int n)
   | whole_err of $F.io_error
 
-(* The file just opened, read whole in an arena of its own (a file that changes size meanwhile is EIO, one too large for an arena EFBIG) *)
+(* The file just opened, read whole in an arena of its own; a file of any size (review churn) *)
 fn whole_of_open (opened: $R.result($F.fd, $F.io_error)): whole_file =
   case+ opened of
   | ~$R.err(e) => whole_err(e)
@@ -94,7 +91,7 @@ fn say_unreadable {l:agz}{n:pos}{b:nat | b <= n}{a:nat | a < b}
   val () = churn_print(src, a, b)
 in print_newline() end
 
-(* The kind of the review in the file named by mbv[a, b) (0 when it is no review or cannot be read) *)
+(* The kind of the review in the file named by mbv[a, b), 0 when unreadable (review churn) *)
 fn kind_at {l:agz}{n:pos}{b:nat | b <= n}{a:nat | a < b}
   (mbv: !$A.borrow(byte, l, n), a: int a, b: int b): int =
   (case+ read_path(mbv, a, b) of
@@ -125,7 +122,7 @@ fn file_has {l:agz}{n:pos}{pb:nat | pb <= n}{pa:nat | pa < pb}{lr:agz}{rn:pos}{b
       val () = whole_free(ar, $A.thaw<byte>(fz))
     in hit end)
 
-(* Whether the anchor rbv[a, b) is in a review of the lines from e up to the line r of the manifest *)
+(* Whether the anchor rbv[a, b) is in a review of the manifest lines e up to r (review churn) *)
 fun seen_before {l:agz}{n:pos}{m:nat | m <= n}{e:nat | e <= m}{lr:agz}{rn:pos}{b:nat | b <= rn}{a:nat | a <= b} .<m - e>.
   (mbv: !$A.borrow(byte, l, n), m: int m, e: int e, r: int, rbv: !$A.borrow(byte, lr, rn), a: int a, b: int b): bool =
   if e >= r then false
@@ -138,7 +135,7 @@ fun seen_before {l:agz}{n:pos}{m:nat | m <= n}{e:nat | e <= m}{lr:agz}{rn:pos}{b
     if hit then true else seen_before(mbv, m, nx, r, rbv, a, b)
   end
 
-(* The findings of the review rbv[0, rm) of round k that are in no review from the manifest line e up to the line r; each is said, and counted *)
+(* The findings of round k in no review of the lines e up to r, said and counted (review churn) *)
 fun new_lines {l:agz}{n:pos}{m:nat | m <= n}{e:nat | e <= m}{lr:agz}{rn:pos}{rm:nat | rm <= rn}{p:nat | p <= rm} .<rm - p>.
   (mbv: !$A.borrow(byte, l, n), m: int m, e: int e, r: int, rbv: !$A.borrow(byte, lr, rn), rm: int rm, p: int p, k: int, acc: int): int =
   if p >= rm then acc
@@ -155,7 +152,7 @@ fun new_lines {l:agz}{n:pos}{m:nat | m <= n}{e:nat | e <= m}{lr:agz}{rn:pos}{rm:
     in new_lines(mbv, m, e, r, rbv, rm, nx, k, acc + 1) end
   end
 
-(* The number of findings new in the review at manifest line r (round k) against the reviews from line gp up to it *)
+(* The findings new in the review at line r against those from gp up to it (review churn) *)
 fn review_new {l:agz}{n:pos}{m:nat | m <= n}{gp:nat | gp <= m}{r:nat | r < m}
   (mbv: !$A.borrow(byte, l, n), m: int m, gp: int gp, r: int r, k: int): int = let
   val @(a, b) = churn_line_path(mbv, m, r)
@@ -183,7 +180,7 @@ fun count_blocking {l:agz}{n:pos}{m:nat | m <= n}{p:nat | p <= m} .<m - p>.
     count_blocking(mbv, m, nx, ge, (if blocks then acc + 1 else acc))
   end
 
-(* The findings new in the later blocking rounds of the lines from gp: at p, seen blocking rounds so far *)
+(* The findings new in the later blocking rounds of a pull request, from line gp (review churn) *)
 fun later_rounds {l:agz}{n:pos}{m:nat | m <= n}{gp:nat | gp <= m}{p:nat | p <= m} .<m - p>.
   (mbv: !$A.borrow(byte, l, n), m: int m, gp: int gp, p: int p, ge: int, seen: int, fresh: int): int =
   if p >= ge then fresh
@@ -207,7 +204,7 @@ fun group_end {l:agz}{n:pos}{m:nat | m <= n}{p:nat | p <= m} .<m - p>.
     if k >= 0 && k <> key then p else group_end(mbv, m, next_line(mbv, p, m), key)
   end
 
-(* The pull requests of the manifest from the line at p, until LIMIT of them had two blocking rounds *)
+(* The pull requests from the line at p, until LIMIT had two blocking rounds (review churn) *)
 fun groups {l:agz}{n:pos}{m:nat | m <= n}{p:nat | p <= m} .<m - p>.
   (mbv: !$A.borrow(byte, l, n), m: int m, p: int p): void =
   if p >= m then ()
@@ -250,7 +247,7 @@ fn run_manifest {l:agz}{n:pos}{b:nat | b <= n}{a:nat | a < b}
       val () = $A.drop<byte>(fz, bv)
     in whole_free(ar, $A.thaw<byte>(fz)) end)
 
-(* The second argument: its start and its end in the 4096 bytes of the arguments, which hold NUL-terminated strings back to back *)
+(* The first NUL of the 4096 bytes of arguments at or after p, or k (review churn) *)
 fun nul_at {l:agz}{p:nat | p <= 4096} .<4096 - p>.
   (buf: !$A.borrow(byte, l, 4096), p: int p, k: int): [r:nat | p <= r; r <= 4096] int r =
   if p >= 4096 then p
@@ -260,7 +257,15 @@ fun nul_at {l:agz}{p:nat | p <= 4096} .<4096 - p>.
 
 fn usage (): void = let
   val () = (!g_failed := true)
-in println! ("usage: review-churn MANIFEST   (a line `<pull request number> <review file>` for each review, newest pull request first)") end
+  val () = println! ("usage: review-churn MANIFEST")
+  val () = println! ("MANIFEST: a line `<pull request number> <review file>` for each review comment, newest pull request first,")
+  val () = println! ("the reviews of a pull request in the order written; a review file is one comment body, from")
+  val () = println! ("gh api repos/bats-lang/quire/issues/comments/<id> --jq .body; a number has at most 9 digits, a path under 4096 bytes.")
+  val () = println! ("A review opens with Independent review or Adversarial review and blocks on 'changes needed'.")
+  val () = println! ("A finding is a list item line (1. or a. or - or *) with an inline code span; its anchor is the first span.")
+  val () = println! ("A finding of a blocking round after the first is new when its anchor is in no earlier review of the pull request.")
+  val () = println! ("Of the first 20 pull requests with two blocking rounds, the share with a new finding is printed.")
+in () end
 
 implement main0 () = let
   val buf = $A.alloc<byte>(4096)
