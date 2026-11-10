@@ -560,14 +560,23 @@ test.describe('a single-file book of 5 MB', { tag: '@serial' }, () => {
       // in proportion to the text either (below: a second a page at 5 MB,
       // against about 10 ms at 300 KB: its columns times its boxes), and the
       // operations draw a few pages (a jump, a mark), so each is allowed
-      // two of them, as this run measured one
-      const drawn = mode === 'scrolled' ? 0 : 2 * big.turns.instant[2];
-      const within = (what, now, before) => expect.soft(now, `${what}: ${log}`).toBeLessThanOrEqual(Math.max(before, least) * ratio + drawn);
+      // two of them, as this run measured one. The highlight is the
+      // exception (quire#1101): it invalidates every column (the ::highlight
+      // pseudo-class, then PrePaint across all of them, 6.5 s against a
+      // second a page in the trace above), so it costs 3.6 to 6.7 pages of
+      // an instant turn's draw in the 18 paged and two-column runs of this
+      // test from 2026-11-09 to 2026-11-10 (run 42826319979 on android:
+      // 3805 ms over turns of 649 ms, 5.9 pages, over the 2 pages and
+      // 150 x ratio that allowed 3751.9 ms). A bound of two pages fails
+      // whenever the runner draws a page in over about 550 ms, which it
+      // does on one run in a few, so the highlight is allowed eight
+      const drawn = (pages) => mode === 'scrolled' ? 0 : pages * big.turns.instant[2];
+      const within = (what, now, before, pages = 2) => expect.soft(now, `${what}: ${log}`).toBeLessThanOrEqual(Math.max(before, least) * ratio + drawn(pages));
       within('opening', bigOpen, smallOpen);
       within('the jump to the end', big.end, small.end);
       within('the search', big.summary, small.summary);
       within('going to the result', big.found, small.found);
-      within('the highlight', big.highlight, small.highlight);
+      within('the highlight', big.highlight, small.highlight, 8);
       // a turn: as soon as an instant one, as page-turn.spec.js holds it
       expect.soft(big.turns.animated[2], log).toBeLessThanOrEqual(big.turns.instant[2] + slack(big.turns.instant[2]));
       await expectOpenBudget(page, [['opening the 5 MB chapter', bigOpen]]);
