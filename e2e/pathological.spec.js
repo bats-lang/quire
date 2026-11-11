@@ -561,13 +561,14 @@ test.describe('a single-file book of 5 MB', { tag: '@serial' }, () => {
       // against about 10 ms at 300 KB: its columns times its boxes), and the
       // operations draw a few pages (a jump, a mark), so each is allowed
       // two of them, as this run measured one
-      const drawn = mode === 'scrolled' ? 0 : 2 * big.turns.instant[2];
-      const within = (what, now, before) => expect.soft(now, `${what}: ${log}`).toBeLessThanOrEqual(Math.max(before, least) * ratio + drawn);
+      const drawn = (pages) => mode === 'scrolled' ? 0 : pages * big.turns.instant[2];
+      const within = (what, now, before, pages = 2) => expect.soft(now, `${what}: ${log}`).toBeLessThanOrEqual(Math.max(before, least) * ratio + drawn(pages));
       within('opening', bigOpen, smallOpen);
       within('the jump to the end', big.end, small.end);
       within('the search', big.summary, small.summary);
       within('going to the result', big.found, small.found);
-      within('the highlight', big.highlight, small.highlight);
+      // highlight-pages: up to 6.9 pages measured, so eight (quire#1101)
+      within('the highlight', big.highlight, small.highlight, 8);
       // a turn: as soon as an instant one, as page-turn.spec.js holds it
       expect.soft(big.turns.animated[2], log).toBeLessThanOrEqual(big.turns.instant[2] + slack(big.turns.instant[2]));
       await expectOpenBudget(page, [['opening the 5 MB chapter', bigOpen]]);
