@@ -45,6 +45,13 @@ concurrency:
   group: check-${{ github.event_name }}-${{ github.event.pull_request.draft && 'draft-' || '' }}${{ github.event.pull_request.number || (github.event_name == 'merge_group' && github.ref) || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'merge_group' && github.event.action == 'destroyed') }}
 
+# The retry of the uploads the later jobs need (#1109, keyword: upload retry):
+# the attempts of one upload and the wait before each further one, written once
+# here; tests/static/guidelines.py refuses a step that has its own
+env:
+  UPLOAD_ATTEMPTS: 2
+  UPLOAD_RETRY_WAIT_SECONDS: 60
+
 jobs:
   # Whether the merge queue already passed this very commit (pwa#215, #882): a
   # push to main of an entry the queue's group tested, the same commit, skips
@@ -183,14 +190,32 @@ jobs:
         run: tests/static/run.sh "$BATS_REPOSITORY" check
 
       # Hidden files: build/.bats_stamp, which bats judges the build/ by
+      # A GitHub service error fails an upload after its own 5 attempts (#1109):
+      # the first upload goes on as a failure, and a second one follows after the wait
       - name: Upload the checked app
+        id: upload-checked-app
         if: steps.app.outcome == 'success'
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: quire-app-checked
           include-hidden-files: true
           path: ${{ runner.temp }}/quire-static/app/build
           retention-days: 1
+
+      - name: Wait to upload the checked app again
+        if: steps.upload-checked-app.outcome == 'failure'
+        run: sleep "$UPLOAD_RETRY_WAIT_SECONDS"
+
+      - name: Upload the checked app again
+        if: steps.upload-checked-app.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quire-app-checked
+          include-hidden-files: true
+          path: ${{ runner.temp }}/quire-static/app/build
+          retention-days: 1
+          overwrite: true
 
       - name: Build the app and the PWA generator
         if: steps.app.outcome == 'success'
@@ -252,7 +277,9 @@ jobs:
       # groups (which add the home page themselves: the Android project
       # never holds it)
       - name: Upload Android project
+        id: upload-android
         if: steps.app.outcome == 'success'
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: quire-android
@@ -263,14 +290,46 @@ jobs:
             dist/pwa
           retention-days: 1
 
+      - name: Wait to upload the Android project again
+        if: steps.upload-android.outcome == 'failure'
+        run: sleep "$UPLOAD_RETRY_WAIT_SECONDS"
+
+      - name: Upload Android project again
+        if: steps.upload-android.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quire-android
+          # the project's .nvmrc and .java-version are dotfiles, skipped by default (keyword: version-file)
+          include-hidden-files: true
+          path: |
+            dist/android
+            dist/pwa
+          retention-days: 1
+          overwrite: true
+
       # The generator, whose `test` runs the e2e groups' suites (#499)
       - name: Upload the PWA generator
+        id: upload-gen-pwa
         if: steps.app.outcome == 'success'
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: quire-gen-pwa
           path: dist/debug/gen-pwa
           retention-days: 1
+
+      - name: Wait to upload the PWA generator again
+        if: steps.upload-gen-pwa.outcome == 'failure'
+        run: sleep "$UPLOAD_RETRY_WAIT_SECONDS"
+
+      - name: Upload the PWA generator again
+        if: steps.upload-gen-pwa.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quire-gen-pwa
+          path: dist/debug/gen-pwa
+          retention-days: 1
+          overwrite: true
 
       # Node's packages, retried and cached, and the Playwright browsers:
       # pwa's action (quire#637). The WASM smoke tests need no browsers, which
