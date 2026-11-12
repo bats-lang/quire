@@ -631,6 +631,8 @@ class FakeApi:
             return self.comments if page == 1 else []
         if method == 'GET' and '/check-runs' in path:
             return {'check_runs': self.runs if path.endswith('page=1') else []}
+        if method == 'GET' and path.split('?')[0].endswith('/files'):
+            return []
         if method == 'GET' and '/pulls/' in path:
             return PULL
         return None
