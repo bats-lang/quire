@@ -137,7 +137,9 @@
       "reject/crc-step-high-half-not-shifted",
       "reject/cut-two-lengths-of-the-same-cells",
       "reject/fixed-box-zoom-zero",
-      "reject/lay-writes-gap",
+      "reject/lay-writes-gap"
+    ],
+    "app-2": [
       "reject/library-view-unmatched",
       "reject/page-turn-copy-marked",
       "reject/ruler-band-other-pair",
@@ -296,7 +298,9 @@
       "reject/codec-cut-lost-another-cause",
       "reject/codec-drops-unknown-chunk",
       "reject/control-unmatched",
-      "reject/crc-table-entry-of-another-byte",
+      "reject/crc-table-entry-of-another-byte"
+    ],
+    "rejects-2": [
       "reject/cut-view-out-at-thaw",
       "reject/form-field-as-field",
       "reject/lay-writes-max-height",
@@ -479,7 +483,10 @@
     ],
     "mutation-bytesarr-cut": [
       "mutation/bytesarr",
-      "mutation/cut"
+      "mutation/cut-part1of2"
+    ],
+    "mutation-cut-2": [
+      "mutation/cut-part2of2"
     ],
     "mutation-text-relation-1": [
       "mutation/text_relation-part1of4"

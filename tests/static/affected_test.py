@@ -252,7 +252,7 @@ class Workflow(unittest.TestCase):
         return found.group(1)
 
     def test_the_build_the_android_job_and_the_release_do_not_read_the_plan(self):
-        for name in ('build', 'android', 'play-internal'):
+        for name in ('checked', 'build', 'android', 'play-internal'):
             with self.subTest(name):
                 self.assertNotIn('needs.plan', self.job(name))
                 self.assertNotIn('plan.outputs', self.job(name))
@@ -268,11 +268,13 @@ class Workflow(unittest.TestCase):
         the owner's rule and not the plan's skip logic, so a ready pull request reports
         its contexts and the Android job is skipped only with the build, its failed
         check or a draft, never by the plan."""
-        self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('build')),
-                         ["    if: github.event.action != 'destroyed'"])
+        for name in ('checked', 'build'):
+            with self.subTest(name):
+                self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job(name)),
+                                 ["    if: github.event.action != 'destroyed'"])
         self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('android')),
-                         [f"    if: needs.build.outputs.app == 'success' && {self.NOT_DRAFT}"])
-        self.assertIn('needs: build', self.job('android'))
+                         [f"    if: needs.checked.outputs.app == 'success' && {self.NOT_DRAFT}"])
+        self.assertIn('needs: [build, checked]', self.job('android'))
 
     def test_a_draft_pull_request_runs_plan_build_and_check_and_skips_the_rest(self):
         """plan and build carry no draft condition; static, e2e and android carry it
@@ -283,11 +285,11 @@ class Workflow(unittest.TestCase):
                          ["    if: github.event.action != 'destroyed'"])
         self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('check')),
                          ["    if: always() && github.event.action != 'destroyed'"])
-        self.assertIn("jobs: plan build\n", self.job('check'))
+        self.assertIn("jobs: plan checked build\n", self.job('check'))
         for name in ('static', 'e2e', 'android'):
             with self.subTest(name):
                 self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job(name)),
-                                 [f"    if: needs.build.outputs.app == 'success' && {self.NOT_DRAFT}"])
+                                 [f"    if: needs.checked.outputs.app == 'success' && {self.NOT_DRAFT}"])
         for name in ('static', 'e2e'):
             with self.subTest(name):
                 self.assertIn('plan', re.search(r'(?m)^    needs: .*$', self.job(name)).group(0))
@@ -306,15 +308,31 @@ class Workflow(unittest.TestCase):
             with self.subTest(name):
                 self.assertIn('queue', re.search(r'(?m)^    needs: .*$', self.job(name)).group(0))
         self.assertIn('needs.queue.outputs.run_url', self.job('check'))
-        self.assertIn('jobs: plan queue build static e2e', self.job('check'))
+        self.assertIn('jobs: plan queue checked build static e2e', self.job('check'))
         relock = (ROOT / '.github' / 'workflows' / 'relock.yml').read_text()
         self.assertIn('bats-lang/pwa/.github/actions/queue-passed\n', relock)
 
     def test_the_build_the_android_job_and_the_release_do_not_read_the_queue(self):
-        for name in ('build', 'android', 'play-internal'):
+        for name in ('checked', 'build', 'android', 'play-internal'):
             with self.subTest(name):
                 self.assertNotIn('needs.queue', self.job(name))
                 self.assertNotIn('queue.outputs', self.job(name))
+
+    def test_main_gets_the_memo_of_the_queue_run_that_passed_the_commit(self):
+        """#1113 (keyword: memo transfer): a cache of a pull request or a merge group is
+        readable by its ref only, and main's push runs no group when the queue passed
+        the commit, so the queue's group uploads its memo and that push downloads it
+        from the queue run and saves it as main's."""
+        static = self.job('static')
+        self.assertIn("if: github.event_name == 'merge_group' && env.GROUP_BATS == 'yes'", static)
+        self.assertIn("if: github.event_name == 'push' && needs.queue.outputs.skip == 'true'", static)
+        self.assertIn('run-id: ${{ needs.queue.outputs.run_id }}', static)
+        self.assertIn("steps.take.outcome == 'success'", static)
+        self.assertIn('actions: read', static)
+        # the push without a queue run saves what its own cold run made, as before
+        self.assertIn("(github.event_name == 'pull_request' || github.event_name == 'push')", static)
+        self.assertIn('run_id: ${{ steps.number.outputs.id }}', self.job('queue'))
+        self.assertIn("RUN_URL##*/", self.job('queue'))
 
     def test_a_merge_group_plans_the_whole_check(self):
         scope = self.job('plan')[self.job('plan').index('id: scope'):]
