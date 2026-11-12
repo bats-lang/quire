@@ -15,6 +15,6 @@ permissions:
 
 jobs:
   text-lint:
-    uses: bats-lang/repository-prototype/.github/workflows/text-lint-check.yml@9fda271897b8592202b32cd7072c03380e3d6750 # repository-prototype main 9fda271
+    uses: bats-lang/repository-prototype/.github/workflows/text-lint-check.yml@ef9f4f0ad11afb18d4d1d776356058a9a236f733 # repository-prototype main ef9f4f0
     with:
-      tools-ref: 9fda271897b8592202b32cd7072c03380e3d6750
+      tools-ref: ef9f4f0ad11afb18d4d1d776356058a9a236f733
