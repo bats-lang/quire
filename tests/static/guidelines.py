@@ -191,8 +191,86 @@ def lint_version_code(root):
     return findings
 
 
+UPLOAD_NEEDED = ('quire-android', 'quire-gen-pwa', 'quire-app-checked')
+UPLOAD_USES = re.compile(r'^\s+uses: actions/upload-artifact@')
+UPLOAD_WAIT_RUN = 'run: sleep "$UPLOAD_RETRY_WAIT_SECONDS"'
+
+
+def upload_steps(text):
+    """The steps of a workflow file as lists of lines (a step starts at six spaces and a dash)."""
+    steps = []
+    for line in text.split('\n'):
+        if line.startswith('      - '):
+            steps.append([line])
+        elif steps and (line.startswith('        ') or not line.strip()):
+            steps[-1].append(line)
+    return steps
+
+
+def step_field(step, key):
+    for line in step:
+        match = re.match(r'^\s+(?:- )?' + key + r': (.*)$', line)
+        if match and not line.startswith('          '):
+            return match.group(1).strip()
+    return None
+
+
+def step_with(step):
+    """The lines of a step's `with:` block, less `overwrite`, which only the retry has."""
+    lines, inside = [], False
+    for line in step:
+        if line == '        with:':
+            inside = True
+        elif inside and line.startswith('          '):
+            if not line.strip().startswith('overwrite:'):
+                lines.append(line)
+        elif inside and line.strip():
+            break
+    return lines
+
+
+def lint_upload_retry(text, name):
+    """Each upload the later jobs need is retried once after a wait, the attempts and the wait written once (quire#1109, keyword: upload retry)."""
+    findings = []
+    values = {}
+    for key in ('UPLOAD_ATTEMPTS', 'UPLOAD_RETRY_WAIT_SECONDS'):
+        found = re.findall(r'^\s*' + key + r': (.*)$', text, re.MULTILINE)
+        if len(found) != 1 or not re.fullmatch(r'\d+', found[0].strip()) or not re.search(r'^  ' + key + r': \d+$', text, re.MULTILINE):
+            findings.append(f'{name}: {key} must be written once, as a number in the top-level env, and by no step (found {len(found)}); the attempts and the wait are not per step (quire#1109)')
+        else:
+            values[key] = int(found[0])
+    steps = upload_steps(text)
+    uploads = [step for step in steps if any(UPLOAD_USES.match(line) for line in step)]
+    for artifact in UPLOAD_NEEDED:
+        chain = [step for step in uploads if step_with(step) and any(line.strip() == f'name: {artifact}' for line in step_with(step))]
+        if 'UPLOAD_ATTEMPTS' in values and len(chain) != values['UPLOAD_ATTEMPTS']:
+            findings.append(f'{name}: {artifact} is uploaded {len(chain)} times, UPLOAD_ATTEMPTS says {values["UPLOAD_ATTEMPTS"]}: each upload the later jobs need has a second one that runs only when the first failed (quire#1109)')
+        for index, step in enumerate(chain):
+            label = f'{name}: the {artifact} upload {index + 1}'
+            last = index == len(chain) - 1
+            if not last and (step_field(step, 'continue-on-error') != 'true' or not step_field(step, 'id')):
+                findings.append(f'{label} has no id and `continue-on-error: true`, so its failure fails the job (quire#1109)')
+            if index:
+                previous = step_field(chain[index - 1], 'id')
+                condition = f'steps.{previous}.outcome == \'failure\''
+                if not previous or step_field(step, 'if') != condition:
+                    findings.append(f'{label} does not run `if: {condition}` (quire#1109)')
+                if step_with(step) != step_with(chain[0]):
+                    findings.append(f'{label} is not an upload of the same files as the first (quire#1109)')
+                wait = steps[steps.index(step) - 1]
+                if step_field(wait, 'run') != UPLOAD_WAIT_RUN[5:] or step_field(wait, 'if') != condition:
+                    findings.append(f'{label} is not preceded by the step `{UPLOAD_WAIT_RUN}` with the same `if` (the wait is written once, in env, quire#1109)')
+    return findings
+
+
 def lint_guidelines(root, phrases):
     findings = lint_version_code(root)
+    workflow = os.path.join(root, '.github', 'workflows', 'check.yml')
+    if os.path.exists(workflow):
+        with open(workflow, encoding='utf-8') as handle:
+            findings += lint_upload_retry(handle.read(), '.github/workflows/check.yml')
+    else:
+        findings.append('.github/workflows/check.yml: missing (quire#1109)')
     texts = {}
     for relative in guideline_files(root):
         with open(os.path.join(root, relative), encoding='utf-8') as handle:
