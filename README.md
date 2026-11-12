@@ -42,31 +42,6 @@ An EPUB e-reader built on the [bats-lang](https://github.com/bats-lang) ecosyste
 
 Quire is written in [Bats](https://github.com/bats-lang/bats), a language that compiles to ATS2 and then to WebAssembly. The UI is rendered through a virtual DOM diffing protocol via the [bridge](https://github.com/bats-lang/bridge) package.
 
-Key packages used:
-- **widget** — virtual DOM tree and diff generation
-- **dom** — binary DOM protocol emitter
-- **bridge** — WASM-to-JS bridge with event handling
-- **css** — CSS class generation
-- **zip/decompress** — EPUB archive extraction
-- **xml-tree** — XML/OPF metadata parsing
-
-## Development
-
-```bash
-# Build the app (wasm) and the PWA generator (native); the version is
-# the date and short SHA of the commit built from (HEAD, or BATS_COMMIT),
-# which bats writes for src/version.bats. BATS_REPOSITORY may name the
-# repository instead of --repository
-bats build --repository ../repository-prototype
-
-# Generate the PWA (into dist/pwa) and the Android project
-./dist/debug/gen-pwa
-
-# Run the e2e tests (desktop and phone for every area; the layout tests
-# at five screen sizes)
-npx playwright test
-```
-
 ## License
 
 See individual package repositories for license information.
