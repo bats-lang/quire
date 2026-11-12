@@ -363,6 +363,12 @@ jobs:
         if: steps.app.outcome == 'success'
         run: tests/cfi/run.sh $BATS_REPOSITORY
 
+      # The review churn command (tools/review-churn, #884): the kind of a review and its findings
+      - name: Review churn tests
+        if: steps.app.outcome == 'success'
+        working-directory: tools/review-churn
+        run: bats test --repository $BATS_REPOSITORY
+
       # The capped layout waits of the e2e helpers, in node with a fake page
       # (tests/layout-cap/check.mjs, #600): node is set up above by e2e-setup
       - name: Layout cap tests
