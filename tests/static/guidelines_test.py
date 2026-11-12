@@ -1345,5 +1345,57 @@ class NoBackgroundNoSleep(unittest.TestCase):
         self.assertNotIn('about 10 minutes', read_root('CLAUDE.md'))
 
 
+class UploadRetry(unittest.TestCase):
+    """quire#1109: each upload the later jobs need is retried once after a wait, the attempts and the wait written once."""
+    DIR = os.path.join(HERE, 'guidelines')
+    NAMES = {'android': 'quire-android', 'gen-pwa': 'quire-gen-pwa', 'checked-app': 'quire-app-checked'}
+
+    def committed(self):
+        return read_root('.github', 'workflows', 'check.yml')
+
+    def fixture(self, *parts):
+        with open(os.path.join(self.DIR, *parts), encoding='utf-8') as handle:
+            return handle.read()
+
+    def found(self, text):
+        return gl.lint_upload_retry(text, 'check.yml')
+
+    def test_the_committed_workflow_passes(self):
+        self.assertEqual(gl.lint_upload_retry(self.committed(), 'check.yml'), [])
+
+    def test_the_minimal_accept_passes(self):
+        self.assertEqual(self.found(self.fixture('accept', 'upload-retry', 'check.yml')), [])
+
+    def test_each_reject_fixture_is_refused_exactly_as_its_expect_says(self):
+        for key, artifact in self.NAMES.items():
+            with self.subTest(artifact=artifact):
+                directory = 'upload-retry-lacks-' + key
+                found = '\n'.join(self.found(self.fixture('reject', directory, 'check.yml'))) + '\n'
+                self.assertEqual(found, self.fixture('reject', directory, 'expect'))
+                self.assertIn(artifact, found)
+
+    def test_the_committed_workflow_without_a_second_step_is_refused_for_each_artifact(self):
+        text = self.committed()
+        for artifact in self.NAMES.values():
+            steps = [step for step in gl.upload_steps(text) if f'          name: {artifact}' in step and any('overwrite: true' in line for line in step)]
+            self.assertEqual(len(steps), 1, artifact)
+            without = text.replace('\n'.join(steps[0]) + '\n', '')
+            self.assertTrue(any(artifact in finding for finding in self.found(without)), artifact)
+
+    def test_two_steps_with_different_waits_are_refused(self):
+        text = self.committed()
+        self.assertTrue(self.found(text.replace('run: sleep "$UPLOAD_RETRY_WAIT_SECONDS"', 'run: sleep 5', 1)))
+        self.assertTrue(self.found(text.replace('        run: sleep "$UPLOAD_RETRY_WAIT_SECONDS"', '        env:\n          UPLOAD_RETRY_WAIT_SECONDS: 5\n        run: sleep "$UPLOAD_RETRY_WAIT_SECONDS"', 1)))
+
+    def test_a_first_upload_that_fails_the_job_is_refused(self):
+        self.assertTrue(self.found(self.committed().replace('        continue-on-error: true\n        uses: actions/upload-artifact', '        uses: actions/upload-artifact', 1)))
+
+    def test_a_second_upload_that_runs_always_is_refused(self):
+        self.assertTrue(self.found(self.committed().replace("        if: steps.upload-android.outcome == 'failure'\n        uses", '        uses', 1)))
+
+    def test_a_count_that_differs_from_the_steps_is_refused(self):
+        self.assertTrue(self.found(self.committed().replace('UPLOAD_ATTEMPTS: 2', 'UPLOAD_ATTEMPTS: 3')))
+
+
 if __name__ == '__main__':
     unittest.main(argv=[sys.argv[0], '-q'])
