@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up bats
-        uses: bats-lang/bats/.github/actions/setup@a9fa1c99591de2cf88c3fb5832592064f0a5eb25 # bats main a9fa1c9
+        uses: bats-lang/bats/.github/actions/setup@a7573acfad61d63cbe27cb68c18e997e7564fa98 # bats main a7573ac
 
       # The version is the date and short SHA of the commit deployed
       # (#219): HEAD's, which bats writes as the commit's facts
