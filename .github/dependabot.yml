@@ -6,7 +6,7 @@
 #
 # npm: the root package.json and package-lock.json (@playwright/test, the Chromium it runs).
 # github-actions: the workflows' actions pinned by commit with their release comments.
-# bats-lang/* is ignored: the daily relock and the hand moves own those (CLAUDE.md, "CI is pinned").
+# bats-lang/* is ignored: the daily relock and the hand moves own those (.claude/rules/ci.md, "Node's packages").
 version: 2
 multi-ecosystem-groups:
   dependencies:
