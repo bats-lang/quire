@@ -1105,7 +1105,9 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
     // (a page that answers nothing keeps its calls pending, and is not waited for)
     if (answers) await within(Promise.all([...armed.running].map((call) => call.settled)), COMMAND_MS);
     // Keyword: press open (quire#1102). A page paused by the debugger drops the input it is sent (the mouseup of a click whose mousedown it
-    // had: the click returned, the page never saw a release), so the pause waits for a press the page has begun to be released, up to PRESS_MS.
+    // had: the click returned, the page never saw a release), so the pause waits for a press to be released, up to PRESS_MS. A press is open
+    // as the page told (it dispatched pointerdown) or as Playwright's client has begun it (quire#1117: a busy page has not dispatched the
+    // mousedown of a click whose mouseup is queued behind it, and the pause, an interrupt, is taken by the first script it runs, that press's own listener).
     if (armed.pressOpen && armed.pressOpen()) {
       const began = Date.now();
       while (armed.pressOpen() && Date.now() - began < PRESS_MS) await lasting(PRESS_POLL_MS);
@@ -1586,6 +1588,7 @@ export function stallWatch(browser, testInfo) {
         await attachFlight(testInfo, state.flight);
       }
       if (failed) await keepPressRecord();
+      press.release();
       leaveSampler();
       for (const pending of armed.values()) {
         const arming = await within(pending, COMMAND_MS);
