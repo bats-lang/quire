@@ -261,6 +261,98 @@ sys.exit(1 if failed else 0)
         self.assertNotIn('le_trans', out)
 
 
+class Memo(unittest.TestCase):
+    """#1113 (keyword: mutation memo): the compiler's answer is kept under everything it
+    is a function of and served only for the same key. The stand-in counts its calls."""
+
+    COUNTING = FakeCompiler.SCRIPT.replace(
+        'from pathlib import Path\n', 'from pathlib import Path\nPath("calls.txt").open("a").write("x")\n', 1)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.work = Path(self.tmp.name) / 'work'
+        (self.work / 'src').mkdir(parents=True)
+        (self.work / 'build').mkdir()
+        (self.work / 'build' / '.bats_stamp').write_text('stamp one\n')
+        (self.work / 'src' / 'm.bats').write_text(MODULE)
+        (self.work / 'src' / 'other.bats').write_text('one\n')
+        (self.work / 'bats.lock').write_text('lock\n')
+        self.fake = Path(self.tmp.name) / 'fake-check'
+        self.fake.write_text(self.COUNTING)
+        self.fake.chmod(self.fake.stat().st_mode | stat.S_IXUSR)
+        self.memo = Path(self.tmp.name) / 'memo'
+        os.environ['BATS_CHECK'] = str(self.fake)
+        os.environ['QUIRE_MUTATION_MEMO'] = str(self.memo)
+        self.addCleanup(os.environ.pop, 'QUIRE_MUTATION_MEMO', None)
+
+    def run_once(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = mc.main(['--run', str(self.work), '--root', str(self.work), 'src/m.bats'])
+        return code, out.getvalue()
+
+    def calls(self):
+        path = self.work / 'calls.txt'
+        return len(path.read_text()) if path.exists() else 0
+
+    def test_the_same_inputs_are_served_from_the_memo(self):
+        code, first = self.run_once()
+        made = self.calls()
+        self.assertEqual(code, 0, first)
+        self.assertGreater(made, 0)
+        self.assertTrue(list(self.memo.rglob('*.json')))
+        code, second = self.run_once()
+        self.assertEqual(code, 0, second)
+        self.assertEqual(self.calls(), made)
+        self.assertEqual(first, second)
+
+    def test_a_vacuous_lemma_is_still_flagged_from_the_memo(self):
+        (self.work / 'vacuous.txt').write_text('le_trans')
+        self.run_once()
+        made = self.calls()
+        code, out = self.run_once()
+        self.assertEqual(self.calls(), made)
+        self.assertEqual(code, 1, out)
+        self.assertIn('ACCEPTED', out)
+
+    def test_another_stamp_is_not_served(self):
+        self.run_once()
+        made = self.calls()
+        (self.work / 'build' / '.bats_stamp').write_text('stamp two\n')
+        self.run_once()
+        self.assertGreater(self.calls(), made)
+
+    def test_another_file_of_src_is_not_served(self):
+        self.run_once()
+        made = self.calls()
+        (self.work / 'src' / 'other.bats').write_text('two\n')
+        self.run_once()
+        self.assertGreater(self.calls(), made)
+
+    def test_another_lock_is_not_served(self):
+        self.run_once()
+        made = self.calls()
+        (self.work / 'bats.lock').write_text('another lock\n')
+        self.run_once()
+        self.assertGreater(self.calls(), made)
+
+    def test_another_compiler_is_not_served(self):
+        self.run_once()
+        made = self.calls()
+        self.fake.write_text(self.COUNTING + '# another compiler\n')
+        self.run_once()
+        self.assertGreater(self.calls(), made)
+
+    def test_without_a_stamp_nothing_is_kept_or_served(self):
+        (self.work / 'build' / '.bats_stamp').unlink()
+        self.run_once()
+        made = self.calls()
+        self.assertFalse(self.memo.exists())
+        self.run_once()
+        self.assertEqual(self.calls(), 2 * made)
+
+
 class Selection(unittest.TestCase):
     def setUp(self):
         # run.sh points git at the checkout (GIT_DIR); these tests make repositories of their own

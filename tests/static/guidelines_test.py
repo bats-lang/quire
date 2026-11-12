@@ -631,6 +631,8 @@ class FakeApi:
             return self.comments if page == 1 else []
         if method == 'GET' and '/check-runs' in path:
             return {'check_runs': self.runs if path.endswith('page=1') else []}
+        if method == 'GET' and path.split('?')[0].endswith('/files'):
+            return []
         if method == 'GET' and '/pulls/' in path:
             return PULL
         return None
@@ -773,12 +775,12 @@ class GitHub(unittest.TestCase):
             name = block.strip().split(':', 1)[0]
             blocks[name] = '\n'.join(line for line in block.split('\n') if not line.lstrip().startswith('#'))
         draft = 'github.event.pull_request.draft'
-        for name in ('plan', 'build'):
+        for name in ('plan', 'checked', 'build'):
             self.assertNotIn(draft, blocks[name], name)
         for name in ('queue', 'static', 'e2e', 'android'):
             self.assertIn(draft, blocks[name], name)
-        self.assertIn('jobs: plan build\n', blocks['check'])
-        self.assertIn('jobs: plan queue build static e2e\n', blocks['check'])
+        self.assertIn('jobs: plan checked build\n', blocks['check'])
+        self.assertIn('jobs: plan queue checked build static e2e\n', blocks['check'])
         self.assertEqual(blocks['check'].count('github.event.pull_request.draft'), 3)
 
     def test_an_ordinary_comment_is_not_linted(self):

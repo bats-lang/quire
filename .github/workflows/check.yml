@@ -70,12 +70,38 @@ jobs:
       skip: ${{ steps.queue.outputs.skip }}
       run_url: ${{ steps.queue.outputs.run-url }}
       reason: ${{ steps.queue.outputs.reason }}
+      run_id: ${{ steps.number.outputs.id }}
     steps:
+      # Each job of this workflow prints how long it took in its last step
+      # (keyword: job clock, #1113), so a grep of `job took` in a run's logs
+      # shows the cold run of a pin move bounded. Avenue exhausted: bats has no
+      # clock (repository-prototype's pin-audit notes say so), a step has no
+      # duration of its own to print, and a composite action cannot start
+      # before the checkout it needs
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Did the merge queue pass this commit
         id: queue
         # pinned like the other pwa calls; the relock moves it (relock.yml's workflow-pins)
         uses: bats-lang/pwa/.github/actions/queue-passed@a565d7656e225c66c3b46bfacac3d6786e9afc63 # pwa main a565d76
+
+      # The number of that run, for the memo transfer (keyword: memo transfer,
+      # #1113). Avenue exhausted: the action outputs only the run's URL, an
+      # expression has no substring, and a pwa change is barred (pwa's
+      # CLAUDE.md, "Changes to pwa"), so one parameter expansion takes the last
+      # path segment
+      - name: The queue run's number
+        id: number
+        if: steps.queue.outputs.skip == 'true'
+        env:
+          RUN_URL: ${{ steps.queue.outputs.run-url }}
+        run: echo "id=${RUN_URL##*/}" >> "$GITHUB_OUTPUT"
+
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
 
   # The groups the tests run in, side by side (tests/groups.json): every
   # e2e spec and every static test in exactly one, or this fails. And what
@@ -90,6 +116,9 @@ jobs:
       e2e_run: ${{ steps.scope.outputs.e2e_run }}
       static_run: ${{ steps.scope.outputs.static_run }}
     steps:
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       # Two commits deep: a pull request's checkout is the merge, and its
       # first parent is the base the change is compared with
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -118,6 +147,93 @@ jobs:
           esac
           scripts/ci-groups.py plan $base $full
 
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
+
+  # The app checked once, first, in a job of its own beside `build` (#1113: the
+  # check and the build were one job, and each is a cold 20 minutes after a
+  # compiler move, so the job took 47; keyword: cold pin move). A module that
+  # fails `bats check` ends the step, in about a minute, and the job goes on to
+  # the end as a success with the output `app` (the step's outcome): `check` is
+  # then the one failed job of the run (keyword: checked app, #974). The static
+  # groups take this build/ instead of each checking the app again. run.sh's
+  # `check` member is the copy of the checkout the groups work in and its
+  # `bats check`. Never skipped by the plan, like `build`
+  checked:
+    if: github.event.action != 'destroyed'
+    runs-on: ubuntu-24.04
+    outputs:
+      app: ${{ steps.app.outcome }}
+    steps:
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
+      # The whole history: the facts of the commit (the version code counts the
+      # commits, #989) are written from git by bats
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up bats
+        uses: bats-lang/bats/.github/actions/setup@a7573acfad61d63cbe27cb68c18e997e7564fa98 # bats main a7573ac
+
+      - name: Restore the checked app's cache
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        uses: ./.github/actions/build-cache
+        with:
+          mode: restore
+          name: static
+          path: ${{ runner.temp }}/quire-static/app/build
+
+      - name: Check the app
+        id: app
+        continue-on-error: true
+        env:
+          QUIRE_STATIC_WORK: ${{ runner.temp }}/quire-static
+        run: tests/static/run.sh "$BATS_REPOSITORY" check
+
+      # Hidden files: build/.bats_stamp, which bats judges the build/ by
+      # A GitHub service error fails an upload after its own 5 attempts (#1109):
+      # the first upload goes on as a failure, and a second one follows after the wait
+      - name: Upload the checked app
+        id: upload-checked-app
+        if: steps.app.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quire-app-checked
+          include-hidden-files: true
+          path: ${{ runner.temp }}/quire-static/app/build
+          retention-days: 1
+
+      - name: Wait to upload the checked app again
+        if: steps.upload-checked-app.outcome == 'failure'
+        run: sleep "$UPLOAD_RETRY_WAIT_SECONDS"
+
+      - name: Upload the checked app again
+        if: steps.upload-checked-app.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quire-app-checked
+          include-hidden-files: true
+          path: ${{ runner.temp }}/quire-static/app/build
+          retention-days: 1
+          overwrite: true
+
+      # Only after the check passed: a cache holds no failed build
+      - name: Save the checked app's cache
+        if: steps.app.outcome == 'success' && (github.event_name == 'pull_request' || github.event_name == 'push')
+        uses: ./.github/actions/build-cache
+        with:
+          mode: save
+          name: static
+          path: ${{ runner.temp }}/quire-static/app/build
+
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
+
   # The app and the PWA, built once: the Android project and the e2e
   # groups take them from here (the quire-android artifact). It reads
   # nothing of the plan and is never skipped by it: the Android jobs need its
@@ -128,8 +244,10 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       play_signing_sha1: ${{ steps.clients.outputs.play_signing_sha1 }}
-      app: ${{ steps.app.outcome }}
     steps:
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       # The whole history: the version names a pull request's own head (its
       # merge's second parent, #219), and the Android version code is the
       # number of commits reachable from it, which a shallow clone cannot
@@ -164,71 +282,15 @@ jobs:
           name: build
           path: build
 
-      # The app checked once, first: a module that fails `bats check` ends
-      # this step, in about a minute; every later step of this job is skipped
-      # and the static groups, e2e and android (which need this job) do not
-      # start. The groups take this build/ instead of each checking the app
-      # again (keyword: checked app, #974). run.sh's `check` member is the
-      # copy of the checkout the groups work in and its `bats check`
-      - name: Restore the checked app's cache
-        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
-        uses: ./.github/actions/build-cache
-        with:
-          mode: restore
-          name: static
-          path: ${{ runner.temp }}/quire-static/app/build
-
-      - name: Check the app
-        id: app
-        # The job goes on to the end as a success when the check failed (every step
-        # after it is skipped) and says so in its output `app`: `check` is then
-        # the one failed job of the run, where the failed check would make
-        # `build` and `check` two (keyword: checked app, #974)
-        continue-on-error: true
-        env:
-          QUIRE_STATIC_WORK: ${{ runner.temp }}/quire-static
-        run: tests/static/run.sh "$BATS_REPOSITORY" check
-
-      # Hidden files: build/.bats_stamp, which bats judges the build/ by
-      # A GitHub service error fails an upload after its own 5 attempts (#1109):
-      # the first upload goes on as a failure, and a second one follows after the wait
-      - name: Upload the checked app
-        id: upload-checked-app
-        if: steps.app.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: quire-app-checked
-          include-hidden-files: true
-          path: ${{ runner.temp }}/quire-static/app/build
-          retention-days: 1
-
-      - name: Wait to upload the checked app again
-        if: steps.upload-checked-app.outcome == 'failure'
-        run: sleep "$UPLOAD_RETRY_WAIT_SECONDS"
-
-      - name: Upload the checked app again
-        if: steps.upload-checked-app.outcome == 'failure'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: quire-app-checked
-          include-hidden-files: true
-          path: ${{ runner.temp }}/quire-static/app/build
-          retention-days: 1
-          overwrite: true
-
       - name: Build the app and the PWA generator
-        if: steps.app.outcome == 'success'
         run: bats build
 
       - name: Generate PWA
-        if: steps.app.outcome == 'success'
         run: ./dist/debug/gen-pwa
 
       # The OAuth clients it signs in with: public IDs, committed in
       # scripts/sync-clients.env
       - name: Sync clients
-        if: steps.app.outcome == 'success'
         run: scripts/sync-clients.sh dist/pwa
 
       # The Android project's committed lock, beside its build-android.sh: the
@@ -236,24 +298,20 @@ jobs:
       # when it and the generated package.json disagree, and refuses to run
       # without it (keyword: android lock, #735; pwa#131)
       - name: Put the committed lock beside the Android project
-        if: steps.app.outcome == 'success'
         run: cp scripts/android/pnpm-lock.yaml dist/android/pnpm-lock.yaml
 
       # android.yml (pwa#136, pwa#254) reads Node's and Java's versions from
       # the project's own .nvmrc and .java-version; the locked pwa package does
       # not write them yet, so they are committed beside the lock (keyword: version-file)
       - name: Put the version files beside the Android project
-        if: steps.app.outcome == 'success'
         run: cp scripts/android/.nvmrc scripts/android/.java-version dist/android/
 
       # The same commit always gives the same version, whatever the clock
       # or time zone, and the Android project carries it (#219)
       - name: Check the version
-        if: steps.app.outcome == 'success'
         run: tests/version/same.sh
 
       - name: Verify PWA output
-        if: steps.app.outcome == 'success'
         run: |
           test -f dist/pwa/index.html
           test -f dist/pwa/bridge.js
@@ -268,7 +326,6 @@ jobs:
 
       # A book for the Android smoke test to open the app with
       - name: Make the book to share
-        if: steps.app.outcome == 'success'
         run: >-
           node -e "import('./e2e/create-epub.js').then(m => require('fs').writeFileSync('dist/android/smoke-share.epub',
           m.createEpub({ title: 'Shared With Quire', author: 'Smoke Test', chapters: 2, storeChapters: true })))"
@@ -278,7 +335,6 @@ jobs:
       # never holds it)
       - name: Upload Android project
         id: upload-android
-        if: steps.app.outcome == 'success'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -310,7 +366,6 @@ jobs:
       # The generator, whose `test` runs the e2e groups' suites (#499)
       - name: Upload the PWA generator
         id: upload-gen-pwa
-        if: steps.app.outcome == 'success'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -335,56 +390,46 @@ jobs:
       # pwa's action (quire#637). The WASM smoke tests need no browsers, which
       # are restored from the cache here
       - name: Set up Node.js and Playwright
-        if: steps.app.outcome == 'success'
         uses: bats-lang/pwa/.github/actions/e2e-setup@a565d7656e225c66c3b46bfacac3d6786e9afc63 # pwa main a565d76
         with:
           playwright-minimum: "1.58"
 
       - name: Run WASM smoke tests
-        if: steps.app.outcome == 'success'
         run: npm test
 
       # The record codec, natively: the checksum's check value, the edge of
       # 32 bits, damage to every byte, fuzz (#354)
       - name: Codec tests
-        if: steps.app.outcome == 'success'
         run: tests/codec/run.sh $BATS_REPOSITORY
 
       # The CSS font-size reader, natively: values and units, declaration
       # blocks, selectors, whole style sheets and fuzz (#431)
       - name: CSS size tests
-        if: steps.app.outcome == 'success'
         run: tests/css-size/run.sh $BATS_REPOSITORY
 
       # The EPUB CFI module, natively: the specification's examples, epub.js's
       # and KOReader's CFIs, the steps of every position of generated chapters
       # (#901)
       - name: CFI tests
-        if: steps.app.outcome == 'success'
         run: tests/cfi/run.sh $BATS_REPOSITORY
 
       # The capped layout waits of the e2e helpers, in node with a fake page
       # (tests/layout-cap/check.mjs, #600): node is set up above by e2e-setup
       - name: Layout cap tests
-        if: steps.app.outcome == 'success'
         run: node tests/layout-cap/check.mjs
 
       # Only after everything above passed: a cache holds no failed build
       - name: Save the compiler cache
-        if: steps.app.outcome == 'success' && (github.event_name == 'pull_request' || github.event_name == 'push')
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         uses: ./.github/actions/build-cache
         with:
           mode: save
           name: build
           path: build
 
-      - name: Save the checked app's cache
-        if: steps.app.outcome == 'success' && (github.event_name == 'pull_request' || github.event_name == 'push')
-        uses: ./.github/actions/build-cache
-        with:
-          mode: save
-          name: static
-          path: ${{ runner.temp }}/quire-static/app/build
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
 
   # The static tests (tests/static/run.sh): bats check of the app, the
   # checkers, and the fixtures, each put into the app checked whole, so
@@ -392,10 +437,14 @@ jobs:
   # app that `build` checked (quire-app-checked, #974): bats judges that
   # build/ itself, so a groups' `check` member is a check of what it was given
   static:
-    needs: [plan, queue, build]
-    # a draft runs plan and build only (#978, keyword: draft)
-    if: needs.build.outputs.app == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    needs: [plan, queue, checked]
+    # a draft runs plan, checked and build only (#978, keyword: draft)
+    if: needs.checked.outputs.app == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
+    # the queue's memo is downloaded from its run on a push to main (keyword: memo transfer, #1113)
+    permissions:
+      actions: read
+      contents: read
     # a mutation group of a change to crc.bats is the longest (keyword: mutation, #594)
     timeout-minutes: 120
     strategy:
@@ -410,6 +459,9 @@ jobs:
       GROUP_MEMBERS: ${{ needs.queue.outputs.skip != 'true' && fromJSON(needs.plan.outputs.static_run)[matrix.group].members || '' }}
       GROUP_BATS: ${{ needs.queue.outputs.skip != 'true' && fromJSON(needs.plan.outputs.static_run)[matrix.group].bats && 'yes' || 'no' }}
     steps:
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       # A group the plan does not name has no members to run: that fails
       # the job (and so `check`) and is never read as nothing selected (#656)
       - name: The plan names this group
@@ -421,7 +473,7 @@ jobs:
           exit 1
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: env.GROUP_MEMBERS != ''
+        if: env.GROUP_MEMBERS != '' || (github.event_name == 'push' && needs.queue.outputs.skip == 'true')
         with:
           fetch-depth: 2
 
@@ -476,20 +528,50 @@ jobs:
           QUIRE_MUTATION_BASE: ${{ steps.scope.outputs.base != 'none' && steps.scope.outputs.base || '' }}
         run: tests/static/run.sh $FIXTURES_COLD "${BATS_REPOSITORY:-none}" $GROUP_MEMBERS
 
+      # Memo transfer (keyword: memo transfer, #1113). A cache saved by a pull
+      # request or by a merge group is readable only by its own ref, and the
+      # push to main of a commit the queue passed runs no group (queue-passed),
+      # so no memo was ever in main's scope for the next run to restore. The
+      # queue's group uploads its memo, and that push downloads it and saves it
+      # as main's
+      - name: Keep the memo for main
+        if: github.event_name == 'merge_group' && env.GROUP_BATS == 'yes'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: static-memo-${{ matrix.group }}
+          path: ${{ runner.temp }}/quire-static/memo
+          if-no-files-found: ignore
+          retention-days: 2
+
+      - name: Take the queue's memo
+        id: take
+        if: github.event_name == 'push' && needs.queue.outputs.skip == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: static-memo-${{ matrix.group }}
+          path: ${{ runner.temp }}/quire-static/memo
+          run-id: ${{ needs.queue.outputs.run_id }}
+          github-token: ${{ github.token }}
+
       - name: Save the fixtures' memo
-        if: env.GROUP_BATS == 'yes' && (github.event_name == 'pull_request' || github.event_name == 'push')
+        if: (github.event_name == 'pull_request' || github.event_name == 'push') && (env.GROUP_BATS == 'yes' || steps.take.outcome == 'success')
         uses: ./.github/actions/build-cache
         with:
           mode: save
           name: static-memo-${{ matrix.group }}
           path: ${{ runner.temp }}/quire-static/memo
 
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
+
   # The e2e suite, in groups by area side by side, each on the PWA built
   # once (quire-android)
   e2e:
-    needs: [plan, build, queue]
-    # a draft runs plan and build only (#978, keyword: draft)
-    if: needs.build.outputs.app == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    needs: [plan, build, checked, queue]
+    # a draft runs plan, checked and build only (#978, keyword: draft)
+    if: needs.checked.outputs.app == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -506,6 +588,9 @@ jobs:
     env:
       GROUP_RUN: ${{ needs.queue.outputs.skip == 'true' && 'no' || toJSON(fromJSON(needs.plan.outputs.e2e_run)[matrix.group]) == 'false' && 'no' || 'yes' }}
     steps:
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.GROUP_RUN == 'yes'
 
@@ -698,6 +783,10 @@ jobs:
             !test-results/**/stall-core-*
           retention-days: 14
 
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
+
   # The one check main's branch protection requires: every group passed
   # (a group skipped or cancelled is not a pass). A group the plan showed
   # unaffected (#619) is a job that ran and ended after its first step, so it
@@ -705,9 +794,12 @@ jobs:
   # results, with the reason of each path in the plan job's summary
   check:
     if: always() && github.event.action != 'destroyed'
-    needs: [plan, queue, build, static, e2e]
+    needs: [plan, queue, checked, build, static, e2e]
     runs-on: ubuntu-24.04
     steps:
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       # What the plan selected, printed beside the results (as the aggregator
       # printed it before the action of repository-prototype, #328)
       - name: What the plan selected
@@ -722,10 +814,10 @@ jobs:
       # this is the one failed job of the run (keyword: checked app, #974)
       - name: The app passed its check
         env:
-          APP_CHECK: ${{ needs.build.outputs.app }}
+          APP_CHECK: ${{ needs.checked.outputs.app }}
         run: |
           if [ "$APP_CHECK" != success ]; then
-            echo "::error::bats check of the app did not pass (the step 'Check the app' of job build ended: '$APP_CHECK')"
+            echo "::error::bats check of the app did not pass (the step 'Check the app' of job checked ended: '$APP_CHECK')"
             exit 1
           fi
 
@@ -754,7 +846,7 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.draft
         uses: bats-lang/repository-prototype/.github/actions/check-aggregate@ef9f4f0ad11afb18d4d1d776356058a9a236f733 # repository-prototype main ef9f4f0
         with:
-          jobs: plan build
+          jobs: plan checked build
           results: ${{ toJSON(needs) }}
 
       # Every job in needs must have passed: skipped, cancelled and failed are
@@ -764,8 +856,12 @@ jobs:
         if: github.event_name != 'pull_request' || !github.event.pull_request.draft
         uses: bats-lang/repository-prototype/.github/actions/check-aggregate@ef9f4f0ad11afb18d4d1d776356058a9a236f733 # repository-prototype main ef9f4f0
         with:
-          jobs: plan queue build static e2e
+          jobs: plan queue checked build static e2e
           results: ${{ toJSON(needs) }}
+
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
 
   # The Android app (AAB and APK), built by the pwa package's workflow and
   # signed with this repository's secrets; see ANDROID.md. Every run whose
@@ -781,11 +877,11 @@ jobs:
   # skipped"; #656). When the app's check failed, that wait holds nothing back:
   # `check`, the required status, fails in the same run (keyword: checked app, #974)
   android:
-    needs: build
-    # a draft runs plan and build only (#978, keyword: draft); not when the app's check failed:
-    # `build` is a success then (its step went on), and nothing it uploaded is there
+    needs: [build, checked]
+    # a draft runs plan, checked and build only (#978, keyword: draft); not when the app's check failed:
+    # `checked` is a success then (its step went on)
     # (keyword: checked app, #974); the contexts of a ready pull request are all reported (#656)
-    if: needs.build.outputs.app == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    if: needs.checked.outputs.app == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     # Pinned by commit; the relock workflow moves it (#203)
     uses: bats-lang/pwa/.github/workflows/android.yml@a565d7656e225c66c3b46bfacac3d6786e9afc63 # pwa main a565d76
     secrets: inherit
