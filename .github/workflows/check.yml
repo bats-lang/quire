@@ -65,6 +65,15 @@ jobs:
       reason: ${{ steps.queue.outputs.reason }}
       run_id: ${{ steps.number.outputs.id }}
     steps:
+      # Each job of this workflow prints how long it took in its last step
+      # (keyword: job clock, #1113), so a grep of `job took` in a run's logs
+      # shows the cold run of a pin move bounded. Avenue exhausted: bats has no
+      # clock (repository-prototype's pin-audit notes say so), a step has no
+      # duration of its own to print, and a composite action cannot start
+      # before the checkout it needs
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Did the merge queue pass this commit
         id: queue
@@ -83,6 +92,10 @@ jobs:
           RUN_URL: ${{ steps.queue.outputs.run-url }}
         run: echo "id=${RUN_URL##*/}" >> "$GITHUB_OUTPUT"
 
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
+
   # The groups the tests run in, side by side (tests/groups.json): every
   # e2e spec and every static test in exactly one, or this fails. And what
   # each of them has to run for this change (#619): decided here, once, from
@@ -96,6 +109,9 @@ jobs:
       e2e_run: ${{ steps.scope.outputs.e2e_run }}
       static_run: ${{ steps.scope.outputs.static_run }}
     steps:
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       # Two commits deep: a pull request's checkout is the merge, and its
       # first parent is the base the change is compared with
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -124,6 +140,10 @@ jobs:
           esac
           scripts/ci-groups.py plan $base $full
 
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
+
   # The app checked once, first, in a job of its own beside `build` (#1113: the
   # check and the build were one job, and each is a cold 20 minutes after a
   # compiler move, so the job took 47; keyword: cold pin move). A module that
@@ -139,6 +159,9 @@ jobs:
     outputs:
       app: ${{ steps.app.outcome }}
     steps:
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       # The whole history: the facts of the commit (the version code counts the
       # commits, #989) are written from git by bats
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -182,6 +205,10 @@ jobs:
           name: static
           path: ${{ runner.temp }}/quire-static/app/build
 
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
+
   # The app and the PWA, built once: the Android project and the e2e
   # groups take them from here (the quire-android artifact). It reads
   # nothing of the plan and is never skipped by it: the Android jobs need its
@@ -193,6 +220,9 @@ jobs:
     outputs:
       play_signing_sha1: ${{ steps.clients.outputs.play_signing_sha1 }}
     steps:
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       # The whole history: the version names a pull request's own head (its
       # merge's second parent, #219), and the Android version code is the
       # number of commits reachable from it, which a shallow clone cannot
@@ -338,6 +368,10 @@ jobs:
           name: build
           path: build
 
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
+
   # The static tests (tests/static/run.sh): bats check of the app, the
   # checkers, and the fixtures, each put into the app checked whole, so
   # each checks only its module again; in groups side by side, each on the
@@ -366,6 +400,9 @@ jobs:
       GROUP_MEMBERS: ${{ needs.queue.outputs.skip != 'true' && fromJSON(needs.plan.outputs.static_run)[matrix.group].members || '' }}
       GROUP_BATS: ${{ needs.queue.outputs.skip != 'true' && fromJSON(needs.plan.outputs.static_run)[matrix.group].bats && 'yes' || 'no' }}
     steps:
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       # A group the plan does not name has no members to run: that fails
       # the job (and so `check`) and is never read as nothing selected (#656)
       - name: The plan names this group
@@ -466,6 +503,10 @@ jobs:
           name: static-memo-${{ matrix.group }}
           path: ${{ runner.temp }}/quire-static/memo
 
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
+
   # The e2e suite, in groups by area side by side, each on the PWA built
   # once (quire-android)
   e2e:
@@ -488,6 +529,9 @@ jobs:
     env:
       GROUP_RUN: ${{ needs.queue.outputs.skip == 'true' && 'no' || toJSON(fromJSON(needs.plan.outputs.e2e_run)[matrix.group]) == 'false' && 'no' || 'yes' }}
     steps:
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.GROUP_RUN == 'yes'
 
@@ -680,6 +724,10 @@ jobs:
             !test-results/**/stall-core-*
           retention-days: 14
 
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
+
   # The one check main's branch protection requires: every group passed
   # (a group skipped or cancelled is not a pass). A group the plan showed
   # unaffected (#619) is a job that ran and ended after its first step, so it
@@ -690,6 +738,9 @@ jobs:
     needs: [plan, queue, checked, build, static, e2e]
     runs-on: ubuntu-24.04
     steps:
+      - name: Start the job's clock
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       # What the plan selected, printed beside the results (as the aggregator
       # printed it before the action of repository-prototype, #328)
       - name: What the plan selected
@@ -748,6 +799,10 @@ jobs:
         with:
           jobs: plan queue checked build static e2e
           results: ${{ toJSON(needs) }}
+
+      - name: How long the job took
+        if: always()
+        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
 
   # The Android app (AAB and APK), built by the pwa package's workflow and
   # signed with this repository's secrets; see ANDROID.md. Every run whose

@@ -296,6 +296,21 @@ class Workflow(unittest.TestCase):
                 self.assertIn('plan', re.search(r'(?m)^    needs: .*$', self.job(name)).group(0))
         self.assertIn('types: [opened, synchronize, reopened, ready_for_review]', self.TEXT)
 
+    def test_every_job_of_this_workflow_prints_how_long_it_took_in_its_last_step(self):
+        """#1113 (keyword: job clock): a job starts its clock in its first step and its
+        last step, which runs always, prints `job took N s`, so a grep of the log of
+        each job shows the cold run of a pin move under 1800 s. The android and
+        play-internal jobs call pwa's workflows and have no steps of their own."""
+        start = '- name: Start the job\'s clock\n        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"'
+        end = '- name: How long the job took\n        if: always()\n        run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"'
+        for name in ('queue', 'plan', 'checked', 'build', 'static', 'e2e', 'check'):
+            with self.subTest(name):
+                steps = self.job(name).split('    steps:\n', 1)[1]
+                body = '\n'.join(line for line in steps.split('\n') if not line.lstrip().startswith('#'))
+                self.assertTrue(body.lstrip().startswith(start), 'first step')
+                self.assertTrue(body.rstrip().endswith(end), 'last step')
+                self.assertEqual(body.count('JOB_STARTED='), 1)
+
     def test_the_queue_job_calls_queue_passed_by_commit_and_the_groups_read_its_skip(self):
         """#882: pwa's queue-passed is called by commit in its own job, the static and
         e2e groups read its `skip` and end after their first step on `true`, `check`
