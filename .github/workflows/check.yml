@@ -221,6 +221,14 @@ jobs:
         if: steps.app.outcome == 'success'
         run: cp scripts/android/.nvmrc scripts/android/.java-version dist/android/
 
+      # The app's probes for the android job's emulator run, beside the
+      # project's smoke-test.sh: the book is opened, then at each font scale
+      # a word is long-pressed and every toolbar button tapped at its centre
+      # (keyword: android-smoke, pwa#267, #1030)
+      - name: Put the smoke probes beside the Android project
+        if: steps.app.outcome == 'success'
+        run: cp scripts/android/smoke-open.js scripts/android/smoke-ready.js scripts/android/smoke-select-point.js scripts/android/smoke-tap-points.js scripts/android/smoke-tap-result.js dist/android/
+
       # The same commit always gives the same version, whatever the clock
       # or time zone, and the Android project carries it (#219)
       - name: Check the version
@@ -234,6 +242,7 @@ jobs:
           test -f dist/pwa/bridge.js
           test -f dist/pwa/app.wasm
           test -x dist/android/build-android.sh
+          test -s dist/android/smoke-tap-result.js
           grep -q '"appId": "dev.middlefield.quire"' dist/android/capacitor.config.json
           # the icons the manifest names, and the EPUBs the app opens
           test -s dist/pwa/icon-192.png

@@ -14,6 +14,7 @@
       "sync-lost-groups.spec.js"
     ],
     "reader": [
+      "android-smoke-probes.spec.js",
       "backup.spec.js",
       "encodings.spec.js",
       "image-viewer.spec.js",
