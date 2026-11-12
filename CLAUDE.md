@@ -48,28 +48,6 @@ is not a fix. The rule against shell and other non-bats code of our own (quire#6
 
 The rule is in the reference (`rules.md`, "Published APIs") and in repository-prototype's CLAUDE.md, under "Publishing Packages" (https://github.com/bats-lang/repository-prototype/blob/20f15c0/CLAUDE.md, bats-lang/repository-prototype#381 and #384). The brief templates carry the line (`.claude/orchestration.md`, "Briefs and the machine"), and `tests/static/guidelines.py` refuses a brief or a review of a signature change that lacks it.
 
-## CI is pinned
-
-Every input to CI is pinned in the source (#203), so a commit that passes keeps passing:
-the packages by the committed `bats.lock`, the compiler by its commit in
-`.github/bats-version`, pwa's Android workflow by its commit (`android.yml@<sha>` in
-`check.yml`), and the runner image by its label. A quire PR that adopts new package
-versions runs `bats lock --repository <dir>` and commits `bats.lock` with the change that
-needs them. The build cache and its key, the merge queue, the Node packages, the mutation
-check and which groups a change runs are in `.claude/rules/ci.md`, which loads when CI files
-are touched.
-
-Quire still has `.github/dependabot.yml`, which #996 removes once quire's `relock.yml` uses the relock's moves of actions, npm packages and the Gradle wrapper (repository-prototype#392, #414 to #416). Until then, which tool moves which pin (`.github/dependabot.yml`, weekly, a 7-day cooldown, one pull request
-for all the updates of both ecosystems, from one `multi-ecosystem-groups` group with `patterns:
-["*"]`: "Define groups that span multiple package ecosystems to get a single Dependabot pull
-request", https://docs.github.com/en/code-security/concepts/supply-chain-security/multi-ecosystem-updates;
-#760, #795, the detail in `.claude/rules/ci.md`, "Node's packages"): the daily relock moves
-the compiler, the package repository and the workflow pins it names. Dependabot moves quire's
-actions by commit with their release comments, except the `bats-lang/*` ones, and the npm versions
-and `package-lock.json` of the root `package.json`, which carries `@playwright/test` and so the
-Chromium it runs. The bats setup action's commit and the runner label are moved by hand, each in a
-pull request of its own.
-
 ## No cache key is relied on for correctness (#622)
 
 Bats drops a `build/` whose stamp (its own inputs, ATS2, the C compiler, the flags, the target)
@@ -100,9 +78,3 @@ the phrases that made these mistakes come back (quire#751).
 ## The version is the commit's
 
 How quire's version is made and shown: `.claude/rules/release.md`.
-
-## Play release
-
-A push to main that passes the whole check is released to Google Play's internal testing
-track by `check.yml`'s `play-internal` job; production is a promotion in the Play Console
-(details: `.claude/rules/release.md`).
