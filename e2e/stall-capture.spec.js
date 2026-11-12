@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { test, expect } from './fixtures.js';
 import { rawMouse } from './helpers.js';
+import { inputCalls } from './press-record.js';
 import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
@@ -246,6 +247,61 @@ test('a capture does not pause a page while a press on it is down, for at most P
     await endLoop(page, stallWatch);
     await rawMouse(page, 'up');
   }
+});
+
+// Keyword: input calls (quire#1117). The press record's `open` also holds for a pointer call Playwright's client has begun, since a busy
+// page has not dispatched the mousedown of a click whose mouseup is queued behind it. Here the page loops, the click cannot even find its
+// element, and the pause waits for it as long as it may.
+test('a capture does not pause a page while a click Playwright has begun is not over, for at most PRESS_MS (quire#1117)', async ({ page, stallWatch }) => {
+  await page.setContent(`${LOOPS}<button id="held" style="position:fixed;left:10px;top:10px;width:100px;height:40px">Held</button>`);
+  // the client's instrumentation is Playwright's own, not an API: a version without it fails here, by name, not silently
+  const followed = inputCalls(page.context()._instrumentation);
+  followed.release();
+  expect(followed.followed, 'Playwright\'s client instrumentation takes a listener').toBe(true);
+  const session = await stallWatch.session(page);
+  await session.send('Runtime.evaluate', { expression: 'setTimeout(spinForever, 0)' });
+  const click =page.locator('#held').click({ timeout: 0 }).catch(() => {});
+  try {
+    const capture = await stallWatch.next(page, 30000);
+    expect(capture.pressWait, 'the pause looked for the click').toBeDefined();
+    expect(capture.pressWait.stillOpen, 'the click was not over while the page looped').toBe(true);
+    expect(capture.pressWait.waitedMs).toBeGreaterThanOrEqual(PRESS_MS);
+  } finally {
+    await endLoop(page, stallWatch);
+  }
+  await click;
+});
+
+// The record of the client's pointer calls, on a stand-in for the client's instrumentation: a call is a press from its begin to its end,
+// a button down is a press until its up, a move is none, and an instrumentation that cannot take a listener is said as not followed.
+test('the pointer calls of the client: a click in flight, a button held, a move that is none (quire#1117)', () => {
+  const listeners = [];
+  const instrumentation = { addListener: (listener) => listeners.push(listener), removeListener: (listener) => listeners.splice(listeners.indexOf(listener), 1) };
+  const calls = inputCalls(instrumentation);
+  const begin = (zone, type, method) => listeners.forEach((listener) => listener.onApiCallBegin(zone, { type, method }));
+  const end = (zone) => listeners.forEach((listener) => listener.onApiCallEnd(zone));
+  expect(calls.followed).toBe(true);
+  expect(calls.pressing()).toBe(false);
+  const move = {}; begin(move, 'Page', 'mouseMove');
+  const hover = {}; begin(hover, 'Frame', 'hover');
+  expect(calls.pressing(), 'a move or a hover is no press').toBe(false);
+  end(move); end(hover);
+  const click = {}; begin(click, 'Frame', 'click');
+  expect(calls.pressing()).toBe(true);
+  end(click);
+  expect(calls.pressing(), 'the click is over').toBe(false);
+  const down = {}; begin(down, 'Page', 'mouseDown');
+  expect(calls.pressing(), 'the down call has not returned, and holds nothing yet').toBe(false);
+  end(down);
+  expect(calls.pressing(), 'the button is held after the call returned').toBe(true);
+  const up = {}; begin(up, 'Page', 'mouseUp'); end(up);
+  expect(calls.pressing()).toBe(false);
+  const failed = { error: new Error('no') }; begin(failed, 'Page', 'mouseDown'); end(failed);
+  expect(calls.pressing(), 'a down that failed holds no button').toBe(false);
+  calls.release();
+  expect(listeners.length).toBe(0);
+  expect(inputCalls({}).followed).toBe(false);
+  expect(inputCalls(undefined).pressing()).toBe(false);
 });
 
 // Forces the pause of another client (quire#1077, keyword: other client pause): gen-pwa test arms every page with a DevTools client

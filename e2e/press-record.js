@@ -10,7 +10,11 @@
  *     it passed the document's capture listener (one that did not was stopped by a capture listener on window, after the record's own);
  *  3. the browser's side of the same press, from Chrome's trace ring (flight-recorder.js, `inputPathOf`);
  *  4. the DevTools clients of the test's context (every `newCDPSession`: this suite's watch, gen-pwa's page watch, a test's own) with
- *     the commands each sent, so the commands of the 5 s before the press and since are in the record.
+ *     the commands each sent, so the commands of the 5 s before the press and since are in the record;
+ *  5. the pointer calls Playwright's client has begun and not ended, and the buttons it holds down (quire#1117, keyword: input calls):
+ *     the one source of a press that does not need the page. The page reports a press from a script of its own, which a page whose
+ *     main thread is busy has not yet run, so a press that Playwright has sent (a click sends its mousedown and mouseup together)
+ *     and the page has not yet dispatched is in no event of (2), and `open` would say it was not there.
  *
  * STOPGAP (CLAUDE.md, "Pipeline and tooling improvements belong in bats or pwa"): a second app would copy this capture, so it moves with
  * pwa#289 (the two stall watches that arm every page), where the preload is decided; the ticket that moves it is quire#1079's own.
@@ -22,6 +26,18 @@ import { relative } from 'node:path';
 export const PRESS_TYPES = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'pointercancel', 'lostpointercapture'];
 /** The commands of a DevTools client are kept from this long before the press. */
 export const BEFORE_PRESS_MS = 5000;
+/**
+ * The calls of Playwright's channel that press or tap (`<type>.<method>`, as the client's instrumentation names them): a call is a
+ * press from its beginning to its end, whether or not the page has dispatched anything yet. `Page.mouseDown` and `Page.mouseUp` return
+ * at once but leave a button down, so they count the buttons held. A call that only moves, hovers or types is not here.
+ */
+export const PRESSING_CALLS = new Set([
+  'Frame.click', 'Frame.dblclick', 'Frame.tap', 'Frame.check', 'Frame.uncheck', 'Frame.dragAndDrop',
+  'ElementHandle.click', 'ElementHandle.dblclick', 'ElementHandle.tap', 'ElementHandle.check', 'ElementHandle.uncheck',
+  'Page.mouseClick', 'Page.touchscreenTap',
+]);
+const BUTTON_DOWN = 'Page.mouseDown';
+const BUTTON_UP = 'Page.mouseUp';
 const BINDING = 'quirePressEvent';
 const EVENTS_MOST = 2000;
 const EVENTS_KEPT = 600;
@@ -113,9 +129,42 @@ export function pressesOf(events) {
   return presses.map((press) => ({ ...press, released: press.releasedAt !== null }));
 }
 
+/**
+ * The pointer calls Playwright's client has begun and not ended, and the buttons held (keyword: input calls, quire#1117). It listens
+ * to the client's instrumentation, the one @playwright/test itself listens to for its steps (`onApiCallBegin` and `onApiCallEnd`, with
+ * the zone of the call), so it adds no frame to the stack Playwright reads the call's place from. `instrumentation` is
+ * `context._instrumentation`; one that is missing or cannot take a listener is `followed: false`, which the spec of this file fails.
+ */
+export function inputCalls(instrumentation) {
+  const calls = new Map(); // zone -> `<type>.<method>`
+  const state = { held: 0 };
+  const listener = {
+    onApiCallBegin(zone, call) {
+      const name = `${call.type}.${call.method}`;
+      if (PRESSING_CALLS.has(name) || name === BUTTON_DOWN || name === BUTTON_UP) calls.set(zone, name);
+    },
+    onApiCallEnd(zone) {
+      const name = calls.get(zone);
+      calls.delete(zone);
+      if (name === BUTTON_DOWN && !zone.error) state.held += 1;
+      if (name === BUTTON_UP) state.held = Math.max(0, state.held - 1);
+    },
+  };
+  const followed = !!instrumentation && typeof instrumentation.addListener === 'function' && typeof instrumentation.removeListener === 'function';
+  if (followed) instrumentation.addListener(listener);
+  return {
+    followed,
+    /** A press is on its way, or a button is held. */
+    pressing() { return state.held > 0 || [...calls.values()].some((name) => name !== BUTTON_DOWN && name !== BUTTON_UP); },
+    snapshot() { return { followed, inFlight: [...calls.values()], buttonsHeld: state.held }; },
+    release() { if (followed) instrumentation.removeListener(listener); },
+  };
+}
+
 /** The record of one test's presses and DevTools clients; `track` and `listen` are called for each context, `snapshot` once the test is over. */
 export function pressRecord() {
   const events = [];
+  const watched = []; // the pointer calls of each context's client (inputCalls)
   const sessions = [];
   const pageNumbers = new WeakMap();
   let pagesSeen = 0;
@@ -148,6 +197,7 @@ export function pressRecord() {
   return {
     /** Notes every DevTools client the context makes from now on (synchronously, before any page is watched), and who made it. */
     track(context) {
+      watched.push(inputCalls(context._instrumentation));
       const original = context.newCDPSession;
       if (typeof original !== 'function') return;
       context.newCDPSession = async function (...target) {
@@ -171,11 +221,19 @@ export function pressRecord() {
       });
       await context.addInitScript(pressInit, { binding: BINDING, types: PRESS_TYPES });
     },
-    /** Whether a press on the page is down and not yet released, as the page has told (keyword: press open, quire#1102). */
+    /**
+     * Whether a press on the page may be down and not yet released (keyword: press open, quire#1102): as the page has told, or as
+     * Playwright's client has begun it (keyword: input calls, quire#1117), which holds before the page has dispatched anything.
+     */
     open(page) {
       const number = pageNumber(page);
-      return pressesOf(events.filter((event) => event.page === number)).some((press) => !press.released);
+      return watched.some((calls) => calls.pressing())
+        || pressesOf(events.filter((event) => event.page === number)).some((press) => !press.released);
     },
+    /** Whether the client's pointer calls are followed in every context tracked (a Playwright without the instrumentation is not). */
+    callsFollowed() { return watched.length > 0 && watched.every((calls) => calls.followed); },
+    /** The test is over: the listeners on the client's instrumentation, which outlives the test in its worker, are removed. */
+    release() { for (const calls of watched.splice(0)) calls.release(); },
     /** The test ended unexpectedly: the clients that are attached now are the ones attached at the failure. */
     markFailed() { if (failedAt === null) failedAt = Date.now(); },
     /** The record, from what was kept; `inputPath` is the browser's side (flight-recorder.js `inputPathOf`) or the reason there is none. */
@@ -193,6 +251,7 @@ export function pressRecord() {
         pressAt,
         presses,
         lastUnreleasedPress: lost,
+        inputCalls: watched.map((calls) => calls.snapshot()),
         events: events.slice(-EVENTS_KEPT),
         inputPath: inputPath === undefined ? { unavailable: 'no browser trace was kept for this test (the recorder is off, or the trace failed)' } : inputPath,
         devtoolsClients: sessions.map((session) => ({
