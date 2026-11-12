@@ -1,0 +1,64 @@
+name: check
+
+env:
+  UPLOAD_ATTEMPTS: 2
+  UPLOAD_RETRY_WAIT_SECONDS: 60
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Upload quire-android
+        id: upload-android
+        if: steps.app.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quire-android
+          path: dist/android
+          retention-days: 1
+
+      - name: Wait to upload quire-android again
+        if: steps.upload-android.outcome == 'failure'
+        run: sleep "$UPLOAD_RETRY_WAIT_SECONDS"
+
+      - name: Upload quire-android again
+        if: steps.upload-android.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quire-android
+          path: dist/android
+          retention-days: 1
+          overwrite: true
+
+      - name: Upload quire-gen-pwa
+        id: upload-gen-pwa
+        if: steps.app.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quire-gen-pwa
+          path: dist/gen-pwa
+          retention-days: 1
+
+      - name: Wait to upload quire-gen-pwa again
+        if: steps.upload-gen-pwa.outcome == 'failure'
+        run: sleep "$UPLOAD_RETRY_WAIT_SECONDS"
+
+      - name: Upload quire-gen-pwa again
+        if: steps.upload-gen-pwa.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quire-gen-pwa
+          path: dist/gen-pwa
+          retention-days: 1
+          overwrite: true
+
+      - name: Upload quire-app-checked
+        id: upload-checked-app
+        if: steps.app.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quire-app-checked
+          path: dist/checked-app
+          retention-days: 1
