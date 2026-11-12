@@ -262,12 +262,13 @@ class Workflow(unittest.TestCase):
     def test_the_build_and_the_android_job_are_never_skipped_by_the_plan(self):
         """Android's required contexts exist only if the job runs, and it needs the
         build's artifact: neither reads the plan, so the plan cannot skip them. The
-        build's `if` is the `destroyed` one alone (a draft runs it, #978, keyword:
-        draft); the Android job's `if` is that the build's app check succeeded
-        (keyword: checked app, #974) and that the pull request is not a draft, which is
-        the owner's rule and not the plan's skip logic, so a ready pull request reports
-        its contexts and the Android job is skipped only with the build, its failed
-        check or a draft, never by the plan."""
+        `if` of `checked` and of the build is the `destroyed` one alone (a draft runs
+        them, #978, keyword: draft); the Android job's `if` is that the app check,
+        the output of the job `checked`, succeeded (keyword: checked app, #974) and
+        that the pull request is not a draft, which is the owner's rule and not the
+        plan's skip logic, so a ready pull request reports its contexts and the
+        Android job is skipped only with the build, its failed check or a draft,
+        never by the plan."""
         for name in ('checked', 'build'):
             with self.subTest(name):
                 self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job(name)),
@@ -277,8 +278,8 @@ class Workflow(unittest.TestCase):
         self.assertIn('needs: [build, checked]', self.job('android'))
 
     def test_a_draft_pull_request_runs_plan_build_and_check_and_skips_the_rest(self):
-        """plan and build carry no draft condition; static, e2e and android carry it
-        and `check` asks for plan and build only on a draft (#978). Only a
+        """plan, checked and build carry no draft condition; static, e2e and android
+        carry it and `check` asks for plan, checked and build only on a draft (#978). Only a
         `pull_request` event has a draft, so push, schedule, workflow_dispatch and
         merge_group stay as they were."""
         self.assertEqual(re.findall(r'(?m)^    if: .*$', self.job('plan')),
