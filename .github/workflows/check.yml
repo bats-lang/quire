@@ -693,7 +693,7 @@ jobs:
           echo "static, e2e and android are not run for a draft; marking the pull request ready runs the whole check on this head." >> "$GITHUB_STEP_SUMMARY"
       - name: Plan and build passed
         if: github.event_name == 'pull_request' && github.event.pull_request.draft
-        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@35bd7485dbd19f4a65713b2715b69f80eab87f6c # repository-prototype main 35bd748
+        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@ef9f4f0ad11afb18d4d1d776356058a9a236f733 # repository-prototype main ef9f4f0
         with:
           jobs: plan build
           results: ${{ toJSON(needs) }}
@@ -703,7 +703,7 @@ jobs:
       # check-aggregate, #328, called by commit)
       - name: Every group passed
         if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@35bd7485dbd19f4a65713b2715b69f80eab87f6c # repository-prototype main 35bd748
+        uses: bats-lang/repository-prototype/.github/actions/check-aggregate@ef9f4f0ad11afb18d4d1d776356058a9a236f733 # repository-prototype main ef9f4f0
         with:
           jobs: plan queue build static e2e
           results: ${{ toJSON(needs) }}
