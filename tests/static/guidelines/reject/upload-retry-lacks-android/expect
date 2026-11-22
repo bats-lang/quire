@@ -1,0 +1,1 @@
+check.yml: quire-android is uploaded 1 times, UPLOAD_ATTEMPTS says 2: each upload the later jobs need has a second one that runs only when the first failed (quire#1109)

@@ -239,7 +239,7 @@ RULES = [
     # groups serve beside the app
     Rule('the build job\'s tests', [
         'test/*.js', 'vitest.config.js', 'tests/codec/**', 'tests/css-size/**',
-        'tests/layout-cap/**', 'tests/version/**',
+        'tests/layout-cap/**', 'tests/version/**', 'tools/review-churn/**',
     ], NONE, NONE),
     Rule('test books', ['test/fixtures/**'], e2e_by_name, NONE),
     Rule('home page', ['homepage/**'], ALL, NONE),
