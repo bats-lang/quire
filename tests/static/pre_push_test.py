@@ -104,7 +104,8 @@ class Fixtures(unittest.TestCase):
         export_head(self.tree)
         # the locks of the fixture repository (copies of this tree's, at the time the layout was copied)
         shutil.copy2(FIXTURES / 'root.lock', self.tree / 'bats.lock')
-        for name, path in (('cfi', 'tests/cfi'), ('codec', 'tests/codec'), ('css-size', 'tests/css-size')):
+        for name, path in (('cfi', 'tests/cfi'), ('codec', 'tests/codec'), ('css-size', 'tests/css-size'),
+                           ('review-churn', 'tools/review-churn')):
             shutil.copy2(FIXTURES / f'{name}.lock', self.tree / path / 'bats.lock')
 
 
