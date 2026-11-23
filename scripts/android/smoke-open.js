@@ -1,4 +1,4 @@
-/* opens the book when the library is showing: a click on the first card (android-smoke, pwa#267); the book the smoke test hands the app is already open then */
+/* opens the book from the library on a click on the first card (android-smoke, pwa#267) */
 (() => {
   const page = document.getElementById('page');
   if (page && page.getBoundingClientRect().width > 0) return 'open';

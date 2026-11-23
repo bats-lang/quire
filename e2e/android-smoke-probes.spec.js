@@ -9,8 +9,7 @@ import { scaledBy } from './font-scale.js';
 const probe = name => readFileSync(new URL(`../scripts/android/${name}`, import.meta.url), 'utf8');
 const toolbar = page => page.getByRole('toolbar', { name: 'Selection' });
 
-/** The book open, a word selected where smoke-select-point.js says (the point in device pixels,
-    read back as the page's coordinates), and the toolbar up */
+/** The book open, a word selected at smoke-select-point.js's point, and the toolbar up */
 async function selectedWord(page) {
   await start(page);
   await readBook(page, selectionBooks.prose.opts);

@@ -1,4 +1,4 @@
-/* true when the page saw a click on every button smoke-tap-points.js named, else the names it missed (android-smoke, pwa#205) */
+/* true when every button smoke-tap-points.js named got a click, else the names missed (pwa#205) */
 (() => {
   const s = window.__smokeTap;
   if (!s) return 'smoke-tap-points.js did not run';

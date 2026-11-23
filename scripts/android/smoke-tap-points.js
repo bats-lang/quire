@@ -1,4 +1,4 @@
-/* the centre of each selection toolbar button, in device pixels, a line <name> <x> <y> each: the first row, More, then the row behind More (android-smoke, pwa#205). It also starts to record the clicks the buttons get, and keeps the app from acting on them, so the toolbar stays up for the next tap; More is the one it lets act */
+/* a line <name> <x> <y> for each toolbar button, in device pixels (android-smoke, pwa#205) */
 (() => {
   const bar = document.getElementById('selection-toolbar');
   if (!bar || bar.getClientRects().length === 0) return 'the selection toolbar is not shown';
@@ -7,7 +7,7 @@
   window.__smokeTap = state;
   if (!window.__smokeTapListening) {
     window.__smokeTapListening = true;
-    /* a tap on the web view ends the selection (Chromium's own gesture), as the real device showed: the toolbar went with it and the next tap met nothing. The selection is put back before the app is told it ended, so the toolbar stays for the taps that follow */
+    /* a tap ends the selection (Chromium): it is put back so the toolbar stays for the next tap */
     window.addEventListener('selectionchange', e => {
       const s = window.__smokeTap;
       const now = getSelection();

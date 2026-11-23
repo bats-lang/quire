@@ -1,4 +1,4 @@
-/* the centre of a word of the first page, in device pixels: x and y (android-smoke, pwa#205); a word in the page's middle third, clear of the turn zones and the footer, so a long press on it is no tap */
+/* x and y, in device pixels, of a word clear of the turn zones (android-smoke, pwa#205) */
 (() => {
   const page = document.getElementById('page');
   if (!page) return 'no page';
@@ -16,7 +16,7 @@
       if (!b) continue;
       const x = b.left + b.width / 2;
       const y = b.top + b.height / 2;
-      /* the word's centre in the page's middle three fifths (a large font scale makes a word wider than the middle third), clear of the footer and the top */
+      /* the middle three fifths: a large font scale makes a word wider than the middle third */
       if (x < box.left + box.width * 0.2 || x > box.left + box.width * 0.8) continue;
       if (y < box.top + 150 || y > box.bottom - 140) continue;
       if (b.left < box.left || b.right > box.right) continue;

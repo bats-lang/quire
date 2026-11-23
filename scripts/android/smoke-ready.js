@@ -1,4 +1,4 @@
-/* true once the open book's first page is laid out: words of it are on the screen (android-smoke, pwa#267) */
+/* true once the open book's first page is laid out (android-smoke, pwa#267) */
 (() => {
   const page = document.getElementById('page');
   if (!page) return 'no page';
