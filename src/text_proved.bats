@@ -8,6 +8,7 @@
 
 #use array as A
 #use zip as Z
+#use promise as P
 
 staload "bytes.sats"
 staload "bytesarr.sats"
@@ -486,6 +487,17 @@ implement text_either_of_outside {cs} (taken) =
   | ~OutsideTaken(from, text_of, held, length | owner, array, count) =>
     TextEither(TEXT_TAKEN_outside(OUTSIDE_TAKEN_of(from, text_of, held)), length | owner, array, count)
   | other => let val () = outside_taken_free(other) in TextEitherNone() end
+
+(* A text nobody took, given back (the orphan rule: text_either is this package's own type) *)
+#pub fn text_either_free (text: text_either): void
+
+implement text_either_free (text) =
+  case+ text of
+  | ~TextEither(_, _ | owner, array, _) => text_give_back(owner, array)
+  | ~TextEitherNone() => ()
+  | ~TextEitherNoRoom() => ()
+
+implement $P.dispose<text_either>(text) = text_either_free(text)
 
 (* fixture: the-end-of-text-proved *)
 (* The end of text_proved: the static fixtures of tests/static/reject named text-proved are put before this line *)
