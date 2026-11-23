@@ -2204,6 +2204,24 @@ fn _add_node {doc_location:agz}{parent:int | parent >= ~1}{node:nat}
   val () = release_bytes(node_frozen, node_bytes)
 in release_bytes(parent_frozen, parent_bytes) end
 
+(* The id of the element a content node is a child of: the book's container for a top-level node of a chapter that has one *)
+fn _container_parent_id {parent:int | parent >= ~1} (parent: int parent): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len) =
+  if parent < 0 then let
+    val container_id = $A.alloc<byte>(14)
+    val () = $A.write_text(container_id, 0, $A.text_lit("book-container"), 14)
+  in @(container_id, 14) end
+  else _node_id(parent)
+
+(* An app's element of the open container (kind 0 span, 1 br, 2 hr, 3 img), the last child of parent; false when none is open *)
+fn _add_sink_app {parent:int | parent >= ~1}{node:nat} (parent: int parent, node: int node, kind: int): bool = let
+  val @(node_id, node_id_len) = _node_id(node)
+  val @(parent_id, parent_id_len) = _container_parent_id(parent)
+  val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent_id)
+  val made = outside_sink_app_element(node_bytes, node_id_len, parent_bytes, parent_id_len, kind)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in let val () = release_bytes(node_frozen, node_bytes) in made end end
+
 (* Element id's text: data[offset, offset + text_len) decoded *)
 fn _set_decoded {doc_location,id_location,data_location:agz}{id_len:pos | id_len < 256}{data_size:pos}{offset,text_len:nat | offset + text_len <= data_size; text_len < 65536; text_len > 0}
   (doc: !$D.document(doc_location), id_bytes: !$A.borrow(byte, id_location, id_len), id_len: int id_len,
@@ -2341,7 +2359,7 @@ fn _part_add {doc_location,l:agz}{n:pos}{node:nat}{offset,text_len:nat | offset 
   val @(node_id, node_id_len) = _node_id(node)
   val @(part_frozen, part_bytes) = $A.freeze<byte>(part_id)
   val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
-  val () = $D.add_element(doc, node_bytes, node_id_len, part_bytes, part_id_len, $D.Span)
+  val () = (if outside_sink_app_element(part_bytes, part_id_len, node_bytes, node_id_len, 0) then () else $D.add_element(doc, node_bytes, node_id_len, part_bytes, part_id_len, $D.Span))
   val () = release_bytes(node_frozen, node_bytes)
   val marker = $A.alloc<byte>(1)
   val () = $A.set<byte>(marker, 0, $A.int2byte(49))
@@ -2395,7 +2413,7 @@ fun _text_spans {doc_location,l:agz}{n:pos}{cs:$A.cells}{parent:int | parent >= 
   (taken: TEXT_TAKEN(cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), parent: int parent, offset: int offset, text_len: int text_len, split: bool)
   : [count:pos] (PIECES(cs, offset, text_len, count) | int count) = let
   val node = _next_content_node()
-  val () = _add_node(doc, parent, node, $D.Span)
+  val () = (if _add_sink_app(parent, node, 0) then () else _add_node(doc, parent, node, $D.Span))
 in
   if text_len < 65536 then let
     val () = (if split then _node_attr_literal(doc, node, $D.Class, "run") else ())
@@ -3381,7 +3399,13 @@ fn _math_add {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{node:nat}{na
     val @(node_id, node_id_len) = _node_id(node)
     val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent_id)
     val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
-    val made = $D.add_math_element(doc, parent_bytes, parent_id_len, node_bytes, node_id_len, name_bytes, name_len)
+    (* in a container the element is made at once, in a document of its own, so it follows the siblings made before it (keyword: book stream order) *)
+    val made = (if outside_sink_is_open() then let
+        val own = $D.open_document($A.text_lit("bats-root"), 9)
+        val made_here = $D.add_math_element(own, parent_bytes, parent_id_len, node_bytes, node_id_len, name_bytes, name_len)
+        val () = $D.destroy(own)
+      in made_here end
+      else $D.add_math_element(doc, parent_bytes, parent_id_len, node_bytes, node_id_len, name_bytes, name_len))
     val () = release_bytes(node_frozen, node_bytes)
     val () = release_bytes(parent_frozen, parent_bytes)
   in
@@ -3428,19 +3452,12 @@ in
   else xml_name_eq(data, name_offset, name_len, _mtext, 5)
 end
 
-(* The id of the element a content node is a child of: the book's container for a top-level node of a chapter that has one *)
-fn _container_parent_id {parent:int | parent >= ~1} (parent: int parent): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len) =
-  if parent < 0 then let
-    val container_id = $A.alloc<byte>(14)
-    val () = $A.write_text(container_id, 0, $A.text_lit("book-container"), 14)
-  in @(container_id, 14) end
-  else _node_id(parent)
-
 (* The app's element for a content node of this kind: 0 any name, 1 br, 2 hr, 3 and 4 an image (4: an svg drawn as one) *)
 fn _add_app_node {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{node:nat}{name_offset,name_len:nat | name_offset + name_len <= n}
   (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), parent: int parent, node: int node, kind: int,
    name_offset: int name_offset, name_len: int name_len): void =
-  if kind = 1 then _add_node(doc, parent, node, $D.Br)
+  if _add_sink_app(parent, node, kind) then ()
+  else if kind = 1 then _add_node(doc, parent, node, $D.Br)
   else if kind = 2 then _add_node(doc, parent, node, $D.Hr)
   else if kind >= 3 then _add_node(doc, parent, node, $D.Img)
   else _add_node(doc, parent, node, _tag_of(data, name_offset, name_len))

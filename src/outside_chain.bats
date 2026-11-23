@@ -360,6 +360,25 @@ implement outside_sink_element {l}{n}{cs}{li}{ni}{lp}{np}{o,k} (from | src, id, 
       val () = _sink_put(BookSinkOpen(doc, container))
     in true end
 
+(* An app's element (a span, br, hr or img by kind 0, 1, 2, 3) of the open container, the last child of parent, applied at once as a book
+   element is (keyword: book stream order); false when there is no container *)
+#pub fn outside_sink_app_element {li:agz}{ni:pos | ni <= 1024}{lp:agz}{np:pos | np <= 1024}
+  (id: !$A.borrow(byte, li, ni), id_len: int ni, parent: !$A.borrow(byte, lp, np), parent_len: int np, kind: int): bool
+
+implement outside_sink_app_element {li}{ni}{lp}{np} (id, id_len, parent, parent_len, kind) =
+  case+ _sink_take() of
+  | ~BookSinkNone() => false
+  | ~BookSinkOpen(doc, container) => let
+      val tag = (if kind = 1 then $DB.BookTagBr()
+        else if kind = 2 then $DB.BookTagHr()
+        else if kind >= 3 then $DB.BookTagImg()
+        else $DB.BookTagSpan()): $DB.book_tag
+      val () = $DB.add_book_app_element(doc, id, id_len, parent, parent_len, tag)
+      val () = $DB.close_book_document(doc)
+      val doc = $DB.open_book_document(1)
+      val () = _sink_put(BookSinkOpen(doc, container))
+    in true end
+
 (* Whether a container is open *)
 #pub fn outside_sink_is_open (): bool
 
