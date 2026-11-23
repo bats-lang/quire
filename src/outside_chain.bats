@@ -280,61 +280,40 @@ fun _find_root {l:agz}{n:pos}{cs:$A.cells}{i:nat | i <= n} .<n - i>.
     else _find_root(src, n, i + 1)
   end
 
-val _book_count = ref<Nat>(0)
+(* The chapter's container and its document, held while the walk of the chapter makes its elements (keyword: book container) *)
+datavtype book_sink =
+  | BookSinkNone of ()
+  | {g:int | g == 1 || g == 2} BookSinkOpen of ($DB.book_document(g), $DB.book_container(g))
 
-(* A paragraph of the chapter as a book element of the container: its id is a number of its own (keyword: book container) *)
-fn _add_paragraph {l:agz}{n:pos}{cs:$A.cells}{g:int}{o,k:nat | o + k <= n; k <= 255}
-  (from: $BO.OUTSIDE_READ(cs) | doc: !$DB.book_document(g), container: !$DB.book_container(g), bytes: !$A.cborrow(l, n, cs),
-   name_offset: int o, name_len: int k): void = let
-  val number = !_book_count
-  val () = !_book_count := number + 1
-  val @(id, id_len) = nid_make("book-p", number)
-  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
-  val parent = $A.alloc<byte>(14)
-  val () = $A.write_text(parent, 0, $A.text_lit("book-container"), 14)
-  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent)
-  val () = $DB.add_book_element(from | doc, container, id_bytes, id_len, parent_bytes, 14, $DB.BookTagP(), bytes, name_offset, name_len)
-  val () = $A.drop<byte>(parent_frozen, parent_bytes)
-  val () = $A.free<byte>($A.thaw<byte>(parent_frozen))
-  val () = $A.drop<byte>(id_frozen, id_bytes)
-in $A.free<byte>($A.thaw<byte>(id_frozen)) end
+val _sink = ref<book_sink>(BookSinkNone())
 
-fun _walk_nodes {l:agz}{n:pos}{cs:$A.cells}{g:int}{tree_size:nat} .<tree_size, 1>.
-  (from: $BO.OUTSIDE_READ(cs) | doc: !$DB.book_document(g), container: !$DB.book_container(g), bytes: !$A.cborrow(l, n, cs),
-   nodes: !$X.xml_node_list(n, tree_size)): void =
-  case+ nodes of
-  | $X.xml_nodes_cons(node, rest) => let
-      val () = _walk_node(from | doc, container, bytes, node)
-    in _walk_nodes(from | doc, container, bytes, rest) end
-  | $X.xml_nodes_nil() => ()
+fn _sink_take (): book_sink = let
+  var held: book_sink = BookSinkNone()
+  val () = ref_exch_elt<book_sink>(_sink, held)
+in held end
 
-and _walk_node {l:agz}{n:pos}{cs:$A.cells}{g:int}{tree_size:pos} .<tree_size, 0>.
-  (from: $BO.OUTSIDE_READ(cs) | doc: !$DB.book_document(g), container: !$DB.book_container(g), bytes: !$A.cborrow(l, n, cs),
-   node: !$X.xml_node(n, tree_size)): void =
-  case+ node of
-  | $X.xml_text(_, _) => ()
-  | $X.xml_element(name_offset, name_len, _, children) => let
-      val () = (if name_len <= 255 then
-        (case+ book_tag_of(bytes, name_offset, name_len) of
-         | ~TagFound(tag) =>
-           (case+ tag of
-            | $DB.BookTagP() => _add_paragraph(from | doc, container, bytes, name_offset, name_len)
-            | _ => ())
-         | ~TagNone() => ())
-        else ())
-    in _walk_nodes(from | doc, container, bytes, children) end
+(* Puts held in the sink; what was there is closed *)
+fn _sink_put (held: book_sink): void = let
+  var previous: book_sink = held
+  val () = ref_exch_elt<book_sink>(_sink, previous)
+in
+  case+ previous of
+  | ~BookSinkOpen(doc, container) => let
+      val () = $DB.close_book_container(container)
+    in $DB.close_book_document(doc) end
+  | ~BookSinkNone() => ()
+end
 
-(* The container of a book of document layout g, as a child of the page: made on the document's stream from the outside cells
-   of the chapter, whose root tag it finds, with the chapter's paragraphs in it; whether it was made. The stream is flushed by
-   the document's close *)
-#pub fn outside_container_paragraphs {l:agz}{n:pos}{cs:$A.cells}{g:int | g == 1 || g == 2}{tree_size:nat}
-  (from: $BO.OUTSIDE_READ(cs) | doc: !$DB.book_document(g), src: !$A.cborrow(l, n, cs), n: int n,
-   nodes: !$X.xml_node_list(n, tree_size)): bool
+(* The container of the chapter, as a child of the page, made from the outside cells; false when the document has no root tag
+   or the bridge refuses the id (the chapter is then rendered as an app's, with no container) *)
+#pub fn outside_sink_open {l:agz}{n:pos}{cs:$A.cells}
+  (from: $BO.OUTSIDE_READ(cs) | src: !$A.cborrow(l, n, cs), n: int n): bool
 
-implement outside_container_paragraphs {l}{n}{cs}{g}{tree_size} (from | doc, src, n, nodes) =
+implement outside_sink_open {l}{n}{cs} (from | src, n) =
   case+ _find_root(src, n, 0) of
   | ~RootNone() => false
   | ~RootFound(tag | at) => let
+      val doc = $DB.open_book_document(1)
       val parent = $A.alloc<byte>(4)
       val () = $A.write_text(parent, 0, $A.text_lit("page"), 4)
       val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent)
@@ -349,10 +328,43 @@ implement outside_container_paragraphs {l}{n}{cs}{g}{tree_size} (from | doc, src
     in
       case+ made of
       | ~$DB.BookContainerMade(container) => let
-          val () = _walk_nodes(from | doc, container, src, nodes)
-          val () = $DB.close_book_container(container)
+          val () = _sink_put(BookSinkOpen(doc, container))
         in true end
-      | ~$DB.BookContainerRefused() => false
+      | ~$DB.BookContainerRefused() => let
+          val () = $DB.close_book_document(doc)
+        in false end
     end
+
+(* A book element of the open container, named by the book's own name (data-book-element); an image whatever its name when as_image
+   (an inline svg is drawn as one); false when there is no container *)
+#pub fn outside_sink_element {l:agz}{n:pos}{cs:$A.cells}{li:agz}{ni:pos | ni <= 1024}{lp:agz}{np:pos | np <= 1024}{o,k:nat | o + k <= n; k <= 255}
+  (from: $BO.OUTSIDE_READ(cs) | src: !$A.cborrow(l, n, cs),
+   id: !$A.borrow(byte, li, ni), id_len: int ni, parent: !$A.borrow(byte, lp, np), parent_len: int np,
+   as_image: bool, name_offset: int o, name_len: int k): bool
+
+implement outside_sink_element {l}{n}{cs}{li}{ni}{lp}{np}{o,k} (from | src, id, id_len, parent, parent_len, as_image, name_offset, name_len) =
+  case+ _sink_take() of
+  | ~BookSinkNone() => false
+  | ~BookSinkOpen(doc, container) => let
+      val tag = (if as_image then $DB.BookTagImg()
+        else (case+ book_tag_of(src, name_offset, name_len) of
+          | ~TagFound(found) => found
+          | ~TagNone() => $DB.BookTagSpan())): $DB.book_tag
+      val () = $DB.add_book_element(from | doc, container, id, id_len, parent, parent_len, tag, src, name_offset, name_len)
+      val () = _sink_put(BookSinkOpen(doc, container))
+    in true end
+
+(* Whether a container is open *)
+#pub fn outside_sink_is_open (): bool
+
+implement outside_sink_is_open () =
+  case+ _sink_take() of
+  | ~BookSinkNone() => false
+  | ~BookSinkOpen(doc, container) => let val () = _sink_put(BookSinkOpen(doc, container)) in true end
+
+(* The container and its document closed: the book's operations are flushed *)
+#pub fn outside_sink_close (): void
+
+implement outside_sink_close () = _sink_put(BookSinkNone())
 
 end (* #target wasm *)

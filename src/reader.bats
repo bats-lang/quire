@@ -3428,23 +3428,61 @@ in
   else xml_name_eq(data, name_offset, name_len, _mtext, 5)
 end
 
+(* The id of the element a content node is a child of: the book's container for a top-level node of a chapter that has one *)
+fn _container_parent_id {parent:int | parent >= ~1} (parent: int parent): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len) =
+  if parent < 0 then let
+    val container_id = $A.alloc<byte>(14)
+    val () = $A.write_text(container_id, 0, $A.text_lit("book-container"), 14)
+  in @(container_id, 14) end
+  else _node_id(parent)
+
+(* The app's element for a content node of this kind: 0 any name, 1 br, 2 hr, 3 and 4 an image (4: an svg drawn as one) *)
+fn _add_app_node {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{node:nat}{name_offset,name_len:nat | name_offset + name_len <= n}
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), parent: int parent, node: int node, kind: int,
+   name_offset: int name_offset, name_len: int name_len): void =
+  if kind = 1 then _add_node(doc, parent, node, $D.Br)
+  else if kind = 2 then _add_node(doc, parent, node, $D.Hr)
+  else if kind >= 3 then _add_node(doc, parent, node, $D.Img)
+  else _add_node(doc, parent, node, _tag_of(data, name_offset, name_len))
+
+(* A new element for a content node: a book element of the chapter's container when its text is outside bytes and a container
+   is open, else the app's element (keyword: book container) *)
+fn _add_content_node {doc_location,l:agz}{n:pos}{cs:$A.cells}{b:bool}{parent:int | parent >= ~1}{node:nat}{name_offset,name_len:nat | name_offset + name_len <= n}
+  (own: OUTSIDE_OPT(cs, b) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), as_book: bool b,
+   parent: int parent, node: int node, kind: int, name_offset: int name_offset, name_len: int name_len): void =
+  if as_book then let
+    prval OUTSIDE_OPT_yes(readable) = own
+  in
+    if name_len <= 255 then let
+      val @(node_id, node_id_len) = _node_id(node)
+      val @(parent_id, parent_id_len) = _container_parent_id(parent)
+      val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
+      val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent_id)
+      val made = outside_sink_element(readable | bytes, node_bytes, node_id_len, parent_bytes, parent_id_len, kind >= 3, name_offset, name_len)
+      val () = release_bytes(parent_frozen, parent_bytes)
+      val () = release_bytes(node_frozen, node_bytes)
+    in if made then () else _add_app_node(doc, data, parent, node, kind, name_offset, name_len) end
+    else _add_app_node(doc, data, parent, node, kind, name_offset, name_len)
+  end
+  else _add_app_node(doc, data, parent, node, kind, name_offset, name_len)
+
 (* Walk xml_node_list, rendering each node into parent (through doc's
    borrow operations: nothing is allocated for the page); the <img>
    elements met are added to found *)
 fun _render_nodes
-  {doc_location,l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 1>.
-  (taken: TEXT_TAKEN(cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
-   parent: int parent, nodes: !$X.xml_node_list(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
+  {doc_location,l:agz}{n:pos}{cs:$A.cells}{b:bool}{tree_size:nat}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 1>.
+  (taken: TEXT_TAKEN(cs, n), own: OUTSIDE_OPT(cs, b) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
+   as_book: bool b, parent: int parent, nodes: !$X.xml_node_list(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val found = _render_node(taken | doc, data, bytes, data_len, parent, node, found, fragment)
-    in _render_nodes(taken | doc, data, bytes, data_len, parent, rest, found, fragment) end
+      val found = _render_node(taken, own | doc, data, bytes, data_len, as_book, parent, node, found, fragment)
+    in _render_nodes(taken, own | doc, data, bytes, data_len, as_book, parent, rest, found, fragment) end
   | $X.xml_nodes_nil() => found
 
 and _render_node
-  {doc_location,l:agz}{n:pos}{cs:$A.cells}{tree_size:pos}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 0>.
-  (taken: TEXT_TAKEN(cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
-   parent: int parent, node: !$X.xml_node(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
+  {doc_location,l:agz}{n:pos}{cs:$A.cells}{b:bool}{tree_size:pos}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 0>.
+  (taken: TEXT_TAKEN(cs, n), own: OUTSIDE_OPT(cs, b) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
+   as_book: bool b, parent: int parent, node: !$X.xml_node(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
   case+ node of
   | $X.xml_text(offset, text_len) => let
       (* white space between the page's blocks takes its numbers but
@@ -3484,27 +3522,27 @@ and _render_node
     else if xml_name_eq(data, name_offset, name_len, _tag_html, 4) then let
       val () = _root_lang(doc, data, attrs)
       val () = _root_direction(data, attrs)
-    in _render_nodes(taken | doc, data, bytes, data_len, parent, children, found, fragment) end
+    in _render_nodes(taken, own | doc, data, bytes, data_len, as_book, parent, children, found, fragment) end
     else if xml_name_eq(data, name_offset, name_len, _tag_body, 4) then let
       val () = _root_lang(doc, data, attrs)
       val () = _root_direction(data, attrs)
-    in _render_nodes(taken | doc, data, bytes, data_len, parent, children, found, fragment) end
+    in _render_nodes(taken, own | doc, data, bytes, data_len, as_book, parent, children, found, fragment) end
     (* Void: br, hr, img *)
     else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then let
       val content_node = _next_content_node()
-      val () = _add_node(doc, parent, content_node, $D.Br)
+      val () = _add_content_node(own | doc, data, bytes, as_book, parent, content_node, 1, name_offset, name_len)
       val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
     in found end
     else if xml_name_eq(data, name_offset, name_len, _tag_hr, 2) then let
       val content_node = _next_content_node()
-      val () = _add_node(doc, parent, content_node, $D.Hr)
+      val () = _add_content_node(own | doc, data, bytes, as_book, parent, content_node, 2, name_offset, name_len)
       val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
     in found end
     else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then let
       (* An image: shown once its bytes are read from the book
          (_load_images); until then its src is an empty data URL *)
       val content_node = _next_content_node()
-      val () = _add_node(doc, parent, content_node, $D.Img)
+      val () = _add_content_node(own | doc, data, bytes, as_book, parent, content_node, 3, name_offset, name_len)
       val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
       val () = _node_src_empty(doc, content_node)
       var _attr_alt = @[char][3]('a', 'l', 't')
@@ -3525,7 +3563,7 @@ and _render_node
        its source xlink:href, or href *)
     else if xml_name_eq(data, name_offset, name_len, _tag_image, 5) then let
       val content_node = _next_content_node()
-      val () = _add_node(doc, parent, content_node, $D.Img)
+      val () = _add_content_node(own | doc, data, bytes, as_book, parent, content_node, 4, name_offset, name_len)
       val () = _node_src_empty(doc, content_node)
       val () = _node_attr_literal(doc, content_node, $D.Alt, "image")
       var _attr_xlink_href = @[char][10]('x', 'l', 'i', 'n', 'k', ':', 'h', 'r', 'e', 'f')
@@ -3545,7 +3583,7 @@ and _render_node
       val saved = !_math_inside
       val () = !_math_inside := (if made then (if _math_token(data, name_offset, name_len) then 2 else 1) else 1)
       val child_parent = (if made then content_node else parent): [child:int | child >= ~1] int child
-      val found = _render_nodes(taken | doc, data, bytes, data_len, child_parent, children, found, fragment)
+      val found = _render_nodes(taken, own | doc, data, bytes, data_len, as_book, child_parent, children, found, fragment)
       val () = !_math_inside := saved
     in found end
     else let
@@ -3557,7 +3595,7 @@ and _render_node
       var _tag_svg = @[char][3]('s', 'v', 'g')
       val svg_end = (if name_len = 3 then (if xml_name_eq(data, name_offset, name_len, _tag_svg, 3) then _svg_extent(data, data_len, name_offset) else ~1) else ~1): [after:int | after >= ~1; after <= n] int after
       val content_node = _next_content_node()
-      val () = (if svg_end > 0 then _add_node(doc, parent, content_node, $D.Img) else _add_node(doc, parent, content_node, _tag_of(data, name_offset, name_len)))
+      val () = (if svg_end > 0 then _add_content_node(own | doc, data, bytes, as_book, parent, content_node, 4, name_offset, name_len) else _add_content_node(own | doc, data, bytes, as_book, parent, content_node, 0, name_offset, name_len))
       val () = (if svg_end > 0 then let
           val () = _node_src_empty(doc, content_node)
         in _node_attr_literal(doc, content_node, $D.Alt, "image") end else ())
@@ -3601,9 +3639,9 @@ and _render_node
       val () = (if xml_name_eq(data, name_offset, name_len, _tag_ruby, 4) then _ruby_mark() else ())
       var _tag_a = @[char][1]('a')
       val found = (if xml_name_eq(data, name_offset, name_len, _tag_a, 1) then let
-          val found = _render_nodes(taken | doc, data, bytes, data_len, content_node, children, found, fragment)
+          val found = _render_nodes(taken, own | doc, data, bytes, data_len, as_book, content_node, children, found, fragment)
         in _link(doc, data, attrs, content_node, !_content_count, found) end
-        else _render_nodes(taken | doc, data, bytes, data_len, content_node, children, found, fragment)): [new_count:nat] images(n, new_count)
+        else _render_nodes(taken, own | doc, data, bytes, data_len, as_book, content_node, children, found, fragment)): [new_count:nat] images(n, new_count)
       (* the clip of the chapter's overlay that reads this element, by its
          id: its content nodes, this one's and its children's *)
       val () = _clip_match(data, attrs, content_node, !_content_count)
@@ -4852,7 +4890,7 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
                val doc = $D.open_document($A.text_lit("bats-root"), 9)
                val () = !_render_into := IntoFacingBox()
                val no_fragment = FragmentNone()
-               val found = _render_nodes(taken | doc, xhtml_bytes, xhtml_cells, xhtml_size, ~1, nodes, images_nil(), no_fragment)
+               val found = _render_nodes(taken, OUTSIDE_OPT_no() | doc, xhtml_bytes, xhtml_cells, xhtml_size, false, ~1, nodes, images_nil(), no_fragment)
                val () = _fragment_free(no_fragment)
                val () = !_render_into := IntoPage()
                val () = $D.destroy(doc)
@@ -4868,20 +4906,6 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
 
 (* Shows chapter chapter_index of book serial, from its chapters, its
    overlay's clips matched to its content nodes as they are made *)
-(* the book's container for a reflowable chapter whose text is outside bytes (keyword: book container) *)
-fn _book_container {l:agz}{n:pos}{cs:$A.cells}{b:bool}{tree_size:nat}
-  (own: OUTSIDE_OPT(cs, b) | layout: rendition_layout, as_outside: bool b, src: !$A.cborrow(l, n, cs), n: int n,
-   nodes: !$X.xml_node_list(n, tree_size)): void =
-  case+ layout of
-  | PrePaginated() => ()
-  | Reflowable() =>
-    if as_outside then let
-      prval OUTSIDE_OPT_yes(outside_read) = own
-      val book_doc = $DB.open_book_document(1)
-      val _ = outside_container_paragraphs(outside_read | book_doc, src, n, nodes)
-    in $DB.close_book_document(book_doc) end
-    else ()
-
 fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_index, generation: int): $P.promise(load_outcome, $P.Chained) =
   case+ book_chapter_get(serial, chapter_index) of
   | ~ChaptersUnknown() => let
@@ -4925,6 +4949,16 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
                   val () = $D.remove_children(doc, page_id_bytes, page_id_len)
                   val () = release_bytes(page_id_frozen, page_id_bytes)
+                  (* the page is empty before the book's container is made in it (keyword: book container) *)
+                  val () = $D.destroy(doc)
+                  val doc = $D.open_document($A.text_lit("bats-root"), 9)
+                  val _ = (case+ layout of
+                    | PrePaginated() => false
+                    | Reflowable() =>
+                      if as_outside then let
+                        prval OUTSIDE_OPT_yes(readable) = outside_own
+                      in outside_sink_open(readable | xhtml_cells, xhtml_size) end
+                      else false)
                   val () = !_content_count := 0
                   val () = !_part_count := 0
                   val () = _links_put(LinksCell(links_nil()))
@@ -4967,13 +5001,12 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val fragment = _fragment_take()
                   (* the sizes the publisher gave its elements, loaded with the chapter *)
                   val () = publisher_sizes_begin(chapter_index, generation)
-                  val found = _render_nodes(taken | doc, xhtml_bytes, xhtml_cells, xhtml_size, ~1, nodes, images_nil(), fragment)
+                  val found = _render_nodes(taken, outside_own | doc, xhtml_bytes, xhtml_cells, xhtml_size, as_outside, ~1, nodes, images_nil(), fragment)
                   val () = publisher_sizes_end()
                   val () = !_render_into := IntoPage()
                   val () = _fragment_put(fragment)
+                  val () = outside_sink_close()
                   val () = $D.destroy(doc)
-                  (* the book's container beside the page's content, when the text is outside bytes (keyword: book container) *)
-                  val () = _book_container(outside_own | layout, as_outside, xhtml_cells, xhtml_size, nodes)
                   val () = $X.free_nodes(nodes)
                   (* only the clip table is kept, for the narration *)
                   val () = _overlay_finish(chapter_index, generation)
