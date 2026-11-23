@@ -19,6 +19,7 @@ staload "language.sats"
 staload "cut.sats"
 staload "text_proved.sats"
 staload "book.sats"
+staload "outside_chain.sats"
 staload "pages.sats"
 staload "paths.sats"
 staload "overlay.sats"
@@ -4796,6 +4797,28 @@ implement load_shown (outcome) =
   | ChapterNotRead() => false
   | ChapterSuperseded() => false
 
+(* The text of the chapter entry [data_offset, data_offset + data_size): read as outside cells of the book's outside copy when it
+   has one (the browser decompresses them), else taken in the app (zip's inflate) as before; the sum the archive states is
+   checked on the inflated cells either way (quire#529, #849; keyword: outside-chain) *)
+fn _chapter_text {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}
+  (serial: int, file_size: int file_size, data_offset: int data_offset, data_size: int data_size, method: $Z.compression, name_offset: int name_offset)
+  : $P.promise(text_either, $P.Chained) =
+  case+ book_entry_sum(serial, name_offset) of
+  | ~SumUnknown() => $P.ret<text_either>(TextEitherNone())
+  | ~SumKnown(want_high, want_low) =>
+    $P.and_then<outside_text><text_either>(outside_chapter_text(file_size, data_offset, data_size, method, want_high, want_low), llam(got) =>
+      case+ got of
+      | ~OutsideText(taken) => $P.ret<text_either>(text_either_of_outside(taken))
+      | ~OutsideTextNone() =>
+        (case+ piece_new(data_size) of
+         | ~NoPiece() => $P.ret<text_either>(TextEitherNoRoom())
+         | ~Piece(compressed_owner, compressed) => let
+             val _ = book_read(serial, file_size, data_offset, compressed, data_size)
+             val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
+             val @(compressed_back, text) = take_text_proved_sum(compressed_length | entry_method_of(method), compressed_barr, data_size, want_high, want_low)
+             val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
+           in $P.ret<text_either>(text_either_of_taken(text)) end))
+
 (* Shows chapter facing_index of book serial in the facing box of a
    spread, its content nodes going on from the page's, its size its
    viewport's (else the page's), its links and images its own. Shown
@@ -4806,27 +4829,9 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
   | ~ChaptersUnknown() => $P.ret<load_outcome>(SpineNotRead())
   | ~ChapterNone(_) => $P.ret<load_outcome>(NoSuchChapter())
   | ~ChapterGot(file_size, chapter_start, compressed_size, method, chapter_name_offset, _, dir_len, _, _) =>
-    (case+ piece_new(compressed_size) of
-     | ~NoPiece() => $P.ret<load_outcome>(NoRoomForChapter())
-     | ~Piece(compressed_owner, compressed) => let
-         val facing_sum = book_entry_sum(serial, chapter_name_offset)
-         val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
-         (* the entry's bytes are lent as a barr and taken with the proofs the walks take (#849), the sum
-            compared on the inflated cells; an unknown sum is no text, and an entry of over 1048576 bytes, stored
-            or deflated, is taken whole (arena-text) *)
-         val taken_text = (case+ facing_sum of
-           | ~SumUnknown() => let
-               val () = piece_free(compressed_owner, compressed)
-             in TextMalformed{$Z.inflate_stored()}{$A.cnil()}() end
-           | ~SumKnown(want_high, want_low) =>
-             let
-               val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
-               val @(compressed_back, text) = take_text_proved_sum(compressed_length | entry_method_of(method), compressed_barr, compressed_size, want_high, want_low)
-               val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
-             in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
-       in
-         (case+ taken_text of
-           | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) =>
+    $P.and_then<text_either><load_outcome>(_chapter_text(serial, file_size, chapter_start, compressed_size, method, chapter_name_offset), llam(either) =>
+      case+ either of
+      | ~TextEither(taken, _ | text_array_owner, xhtml, xhtml_size) =>
              if generation <> !_load_generation then let
                val () = text_give_back(text_array_owner, xhtml)
              in $P.ret<load_outcome>(ChapterSuperseded()) end
@@ -4835,7 +4840,6 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
                   the cells of the text are in the type for the cut (#568), and the
                   plain borrow the parser and the page read through is a view of the
                   same bytes *)
-               prval taken = TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held))
                val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
@@ -4854,10 +4858,8 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
                val () = text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen))
                val () = _fixed_fit()
              in $P.ret<load_outcome>(ChapterShown()) end
-           | other => let
-               val () = text_taken_free(other)
-             in $P.ret<load_outcome>(ChapterNotRead()) end)
-       end)
+      | ~TextEitherNoRoom() => $P.ret<load_outcome>(NoRoomForChapter())
+      | ~TextEitherNone() => $P.ret<load_outcome>(ChapterNotRead()))
 
 (* Shows chapter chapter_index of book serial, from its chapters, its
    overlay's clips matched to its content nodes as they are made *)
@@ -4875,31 +4877,10 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
       val () = (case+ reading_get() of
         | @(page, page_count, chapter, _) => reading_set(@(page, page_count, chapter, chapter_count)))
     in
-      case+ piece_new(compressed_size) of
-      | ~NoPiece() => let
-          val () = _overlay_pending_put(NoOverlayPending())
-        in $P.ret<load_outcome>(NoRoomForChapter()) end
-      | ~Piece(compressed_owner, compressed) => let
-              (* the CRC-32 the archive states for the chapter (quire#529) *)
-              val chapter_sum = book_entry_sum(serial, chapter_name_offset)
-              val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
-              (* taken as the facing page's is (#849) *)
-              val taken_text = (case+ chapter_sum of
-                | ~SumUnknown() => let
-                    val () = piece_free(compressed_owner, compressed)
-                  in TextMalformed{$Z.inflate_stored()}{$A.cnil()}() end
-                | ~SumKnown(want_high, want_low) =>
-                  let
-                    val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
-                    val @(compressed_back, text) = take_text_proved_sum(compressed_length | entry_method_of(method), compressed_barr, compressed_size, want_high, want_low)
-                    val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
-                  in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
-            in
-              (* Stage 3: parse HTML and render *)
-              (case+ taken_text of
-                | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
+      $P.and_then<text_either><load_outcome>(_chapter_text(serial, file_size, chapter_start, compressed_size, method, chapter_name_offset), llam(either) =>
+      case+ either of
+      | ~TextEither(taken, _ | text_array_owner, xhtml, xhtml_size) => let
                   (* the text is the barr of the take, as the facing page's is (#568, #849) *)
-                  prval taken = TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held))
                   val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                   val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                 in
@@ -5004,11 +4985,12 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   | AloneRight() => $P.ret<load_outcome>(ChapterShown())
                 end
                 end
-                | other => let
-                    val () = text_taken_free(other)
-                    val () = _overlay_pending_put(NoOverlayPending())
-                  in $P.ret<load_outcome>(ChapterNotRead()) end)
-            end
+      | ~TextEitherNoRoom() => let
+          val () = _overlay_pending_put(NoOverlayPending())
+        in $P.ret<load_outcome>(NoRoomForChapter()) end
+      | ~TextEitherNone() => let
+          val () = _overlay_pending_put(NoOverlayPending())
+        in $P.ret<load_outcome>(ChapterNotRead()) end)
     end
 
 (* The type of the audio entry whose name is [name_offset, name_offset +

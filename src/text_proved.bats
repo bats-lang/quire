@@ -464,6 +464,29 @@ end
   | {output,text:$A.cells}{count:int}
     TEXT_TAKEN_outside(text, count) of OUTSIDE_TAKEN(output, text, count)
 
+(* A text for the walks, from whichever route made it (keyword: outside-text): zip's inflate in the app, or the browser's
+   decompression of outside cells; none when it could not be had, no room when no array could be had for the entry *)
+#pub datavtype text_either =
+  | {l:agz}{n:pos}{text:$A.cells} TextEither of (TEXT_TAKEN(text, n), $A.CLEN(text, n) | text_owner(l, n), $A.barr(l, n, text), int n)
+  | TextEitherNone of ()
+  | TextEitherNoRoom of ()
+
+#pub fn text_either_of_taken {kind:$Z.inflate_kind}{cs:$A.cells} (taken: text_taken(kind, cs)): text_either
+
+implement text_either_of_taken {kind}{cs} (taken) =
+  case+ taken of
+  | ~TextTaken(inflates, text_of, held, length | owner, array, count) =>
+    TextEither(TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held)), length | owner, array, count)
+  | other => let val () = text_taken_free(other) in TextEitherNone() end
+
+#pub fn text_either_of_outside {cs:$A.cells} (taken: outside_taken(cs)): text_either
+
+implement text_either_of_outside {cs} (taken) =
+  case+ taken of
+  | ~OutsideTaken(from, text_of, held, length | owner, array, count) =>
+    TextEither(TEXT_TAKEN_outside(OUTSIDE_TAKEN_of(from, text_of, held)), length | owner, array, count)
+  | other => let val () = outside_taken_free(other) in TextEitherNone() end
+
 (* fixture: the-end-of-text-proved *)
 (* The end of text_proved: the static fixtures of tests/static/reject named text-proved are put before this line *)
 
