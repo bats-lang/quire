@@ -382,16 +382,12 @@ fn _store_file (id_high: Int, id_low: Int): $P.promise($IDB.stored, $P.Chained) 
   val key = lib_key(98, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
   val storing = book_idb_put(key_bytes, 15)
-  (* the outside copy beside it, for the renderer (keyword: outside-chain) *)
+  (* the outside copy beside it, for the renderer (keyword: outside-chain): a copy that is not stored leaves the book without
+     book styles, as a book of the old library has none, so it is not the book's failure *)
   val outside_storing = outside_book_idb_put(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
-in
-  $P.and_then<$IDB.stored><$IDB.stored>(storing, llam(first) =>
-    $P.and_then<$IDB.stored><$IDB.stored>(outside_storing, llam(second) =>
-      case+ first of
-      | $IDB.Stored() => $P.ret<$IDB.stored>(second)
-      | $IDB.NotStored() => $P.ret<$IDB.stored>($IDB.NotStored())))
-end
+  val () = $P.finish<outside_put>(outside_storing, llam(_) => ())
+in storing end
 
 (* A new book added to the library from the OPF opf_bytes[0, n), whose
    file is in the book cell (file_size bytes): its file stored under 'b' *)

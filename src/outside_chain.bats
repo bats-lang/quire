@@ -65,6 +65,9 @@ implement outside_text_free (text) =
   | ~OutsideText(taken) => outside_taken_free(taken)
   | ~OutsideTextNone() => ()
 
+(* A promise of an outside text nobody took frees it (the orphan rule: outside_text is this package's own type) *)
+implement $P.dispose<outside_text>(text) = outside_text_free(text)
+
 (* A fetched body (a catalogue's book) held by JS as a file of outside bytes: the blob read as cells, which file_store_outside
    takes with their proof; none when it is empty or over 1 MiB *)
 #pub datavtype outside_file =
@@ -159,9 +162,17 @@ implement outside_book_pick (kind, file_index) =
     val () = $A.free<byte>($A.thaw<byte>(id_frozen))
   in $P.and_then<$BO.opened_outside><bool>(opening, llam(opened) => $P.ret<bool>(_after_open(opened))) end
 
+(* Whether the slot's file was stored in the second IndexedDB database (a type of this package's own, so a promise of it is
+   disposed here, not by an implement for bridge's stored) *)
+#pub datatype outside_put =
+  | OutsidePutStored of ()
+  | OutsidePutNot of ()
+
+implement $P.dispose<outside_put>(_) = ()
+
 (* The slot's file stored in the second IndexedDB database under key *)
 #pub fn outside_book_idb_put {key_loc:agz}{key_size:pos}
-  (key: !$A.borrow(byte, key_loc, key_size), key_size: int key_size): $P.promise($IDB.stored, $P.Chained)
+  (key: !$A.borrow(byte, key_loc, key_size), key_size: int key_size): $P.promise(outside_put, $P.Chained)
 
 implement outside_book_idb_put (key, key_size) = let
   val held = _slot_take()
@@ -171,8 +182,13 @@ in
       val stored = $BO.file_idb_put_outside(key, key_size, file)
       prval () = fold@(held)
       val () = _slot_replace(held)
-    in stored end
-  | ~OutsideEmpty() => $P.ret<$IDB.stored>($IDB.NotStored())
+    in
+      $P.and_then<$IDB.stored><outside_put>(stored, llam(status) =>
+        case+ status of
+        | $IDB.Stored() => $P.ret<outside_put>(OutsidePutStored())
+        | $IDB.NotStored() => $P.ret<outside_put>(OutsidePutNot()))
+    end
+  | ~OutsideEmpty() => $P.ret<outside_put>(OutsidePutNot())
 end
 
 (* The file stored under key in the second IndexedDB database, into the slot: whether it was found *)
