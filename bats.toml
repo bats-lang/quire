@@ -22,3 +22,6 @@ unsafe = false
 "zip" = ""
 "wasm.bats-packages.dev/bridge" = ""
 "wasm.bats-packages.dev/dom" = ""
+
+[prcheck]
+checks = "1 2 3 4 5 6 7 8 9 10"
