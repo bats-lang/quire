@@ -283,7 +283,7 @@ fun _find_root {l:agz}{n:pos}{cs:$A.cells}{i:nat | i <= n} .<n - i>.
 (* The chapter's container and its document, held while the walk of the chapter makes its elements (keyword: book container) *)
 datavtype book_sink =
   | BookSinkNone of ()
-  | {g:int | g == 1 || g == 2} BookSinkOpen of ($DB.book_document(g), $DB.book_container(g))
+  | BookSinkOpen of ($DB.book_document(1), $DB.book_container(1))
 
 val _sink = ref<book_sink>(BookSinkNone())
 
@@ -328,6 +328,8 @@ implement outside_sink_open {l}{n}{cs} (from | src, n) =
     in
       case+ made of
       | ~$DB.BookContainerMade(container) => let
+          val () = $DB.close_book_document(doc)
+          val doc = $DB.open_book_document(1)
           val () = _sink_put(BookSinkOpen(doc, container))
         in true end
       | ~$DB.BookContainerRefused() => let
@@ -351,6 +353,10 @@ implement outside_sink_element {l}{n}{cs}{li}{ni}{lp}{np}{o,k} (from | src, id, 
           | ~TagFound(found) => found
           | ~TagNone() => $DB.BookTagSpan())): $DB.book_tag
       val () = $DB.add_book_element(from | doc, container, id, id_len, parent, parent_len, tag, src, name_offset, name_len)
+      (* the stream is applied now, so the ordinary operations that follow (text, attributes, urls, spans) find the element:
+         the two streams are flushed on their own and the ordinary one would otherwise run first (keyword: book stream order) *)
+      val () = $DB.close_book_document(doc)
+      val doc = $DB.open_book_document(1)
       val () = _sink_put(BookSinkOpen(doc, container))
     in true end
 
