@@ -441,6 +441,21 @@ implement outside_taken_free {cs} (taken) =
   | ~OutsideMalformed() => ()
   | ~OutsideTooLarge() => ()
 
+(* The outside cells taken as text when the CRC-32 of the cells is the sum the archive states, else malformed (keyword: outside-text) *)
+#pub fn take_text_outside_sum {l:agz}{n:pos | n <= 1048576}{cs:$A.cells}
+  (from: $BO.OUTSIDE_READ(cs), length: $A.CLEN(cs, n) | outside: $A.barr(l, n, cs), n: int n, want_high: int, want_low: int)
+  : @($A.barr(l, n, cs), outside_taken(cs))
+
+implement take_text_outside_sum {l}{n}{cs} (from, length | outside, n, want_high, want_low) = let
+  val @(frozen, view) = $A.barr_freeze(outside)
+  val (_, _ | @(sum_high, sum_low)) = crc_of_cborrow(length | view, n)
+  val () = $A.cborrow_drop(frozen, view)
+  val back = $A.barr_thaw(frozen)
+in
+  if sum_high = want_high && sum_low = want_low then take_text_outside(from, length | back, n)
+  else @(back, OutsideMalformed())
+end
+
 (* fixture: the-end-of-text-proved *)
 (* The end of text_proved: the static fixtures of tests/static/reject named text-proved are put before this line *)
 
