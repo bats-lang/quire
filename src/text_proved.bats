@@ -13,6 +13,7 @@ staload "bytes.sats"
 staload "bytesarr.sats"
 staload "crc.sats"
 staload "text_relation.sats"
+staload BO = "wasm.bats-packages.dev/bridge/src/outside.sats"
 
 (* How an entry's data is stored, as a value of its static index (zip's inflate_kind) *)
 #pub datatype entry_method($Z.inflate_kind) =
@@ -363,6 +364,82 @@ implement text_taken_free {kind}{cs} (taken) =
   | ~TextEmpty(_ | ) => ()
   | ~TextMalformed() => ()
   | ~TextTooLarge() => ()
+
+(* ===== a text of outside cells: OUTSIDE_READ and TEXTOF (keyword: outside-text) ===== *)
+
+(* What taking outside cells as text gave (keyword: outside-text) *)
+#pub datavtype outside_taken($A.cells) =
+  | {output,text:$A.cells}{plan:plan}{octets:bytes}{count:pos}{l:agz}
+    OutsideTaken(output) of ($BO.OUTSIDE_READ(output), TEXTOF(output, plan, TOUT_bytes(octets)),
+      HOLDS(text, 0, octets, count), $A.CLEN(text, count) | text_owner(l, count), $A.barr(l, count, text), int count)
+  | {output:$A.cells}{out:textout}
+    OutsideRefused(output) of ($BO.OUTSIDE_READ(output), TEXTOF(output, PlanRefused(), out) | )
+  | {output:$A.cells} OutsideMalformed(output) of ()
+  | {output:$A.cells} OutsideTooLarge(output) of ()
+
+(* OUTSIDE_TAKEN: the text holds the document of the outside cells (keyword: outside-text) *)
+#pub dataprop OUTSIDE_TAKEN($A.cells, $A.cells, int) =
+  | {output,text:$A.cells}{plan:plan}{octets:bytes}{count:int}
+    OUTSIDE_TAKEN_of(output, text, count)
+      of ($BO.OUTSIDE_READ(output), TEXTOF(output, plan, TOUT_bytes(octets)), HOLDS(text, 0, octets, count))
+
+(* A copy of the outside cells read as text (keyword: outside-text) *)
+fn _read_outside {output:$A.cells}{n:pos | n <= 1048576}{l:agz}
+  (from: $BO.OUTSIDE_READ(output), length: $A.CLEN(output, n) | outside: $A.barr(l, n, output), n: int n)
+  : @($A.barr(l, n, output), outside_taken(output)) = let
+  val copy = $A.barr_copy(outside, n)
+  val @(frozen, view) = $A.barr_freeze(copy)
+  val (plan | which) = text_plan_proved(length | view, n)
+in
+  case+ which of
+  | ProvedAsIs() => let
+      prval (as_is, held) = _as_is_holds(plan, length)
+      val () = $A.cborrow_drop(frozen, view)
+      val back = $A.barr_thaw(frozen)
+    in @(outside, OutsideTaken(from, as_is, held, length | text_owner_heap(), back, n)) end
+  | ProvedRefused() => let
+      val () = $A.cborrow_drop(frozen, view)
+      val back = $A.barr_thaw(frozen)
+      val () = $A.barr_free(back)
+    in @(outside, OutsideRefused(from, plan | )) end
+  | ProvedConvert() =>
+    (case+ text_convert_size(length | view, n) of
+     | ~TextNoConversion() => let
+         val () = $A.cborrow_drop(frozen, view)
+         val back = $A.barr_thaw(frozen)
+         val () = $A.barr_free(back)
+       in @(outside, OutsideMalformed()) end
+     | ~TextSized(converting, total_length | count) =>
+       if count <= 1048576 then let
+         val (text_length | text) = $A.barr_alloc(count)
+         val (held, written_length | written) = text_convert_fill(length, converting, total_length, text_length | view, n, text, count)
+         val () = $A.cborrow_drop(frozen, view)
+         val back = $A.barr_thaw(frozen)
+         val () = $A.barr_free(back)
+       in @(outside, OutsideTaken(from, converting, held, written_length | text_owner_heap(), written, count)) end
+       else let
+         val () = $A.cborrow_drop(frozen, view)
+         val back = $A.barr_thaw(frozen)
+         val () = $A.barr_free(back)
+       in @(outside, OutsideTooLarge()) end)
+end
+
+(* The outside cells taken as text, the array given back (keyword: outside-text) *)
+#pub fn take_text_outside {l:agz}{n:pos | n <= 1048576}{cs:$A.cells}
+  (from: $BO.OUTSIDE_READ(cs), length: $A.CLEN(cs, n) | outside: $A.barr(l, n, cs), n: int n)
+  : @($A.barr(l, n, cs), outside_taken(cs))
+
+implement take_text_outside {l}{n}{cs} (from, length | outside, n) = _read_outside(from, length | outside, n)
+
+(* The array and proofs of an outside text are not wanted (keyword: outside-text) *)
+#pub fn outside_taken_free {cs:$A.cells} (taken: outside_taken(cs)): void
+
+implement outside_taken_free {cs} (taken) =
+  case+ taken of
+  | ~OutsideTaken(_, _, _, _ | owner, array, _) => text_give_back(owner, array)
+  | ~OutsideRefused(_, _ | ) => ()
+  | ~OutsideMalformed() => ()
+  | ~OutsideTooLarge() => ()
 
 (* fixture: the-end-of-text-proved *)
 (* The end of text_proved: the static fixtures of tests/static/reject named text-proved are put before this line *)

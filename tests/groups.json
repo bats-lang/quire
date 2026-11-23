@@ -185,6 +185,7 @@
       "accept/page-height-whole",
       "accept/pieces-of-three-takes-equal",
       "accept/sheet-scrolls-most",
+      "accept/book-render-proved",
       "accept/text-proved-two-takes-one-text",
       "reject/aloud-placement-unmatched",
       "reject/back-forged-proof",
