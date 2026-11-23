@@ -926,6 +926,13 @@ fn _put_ruby {l:agz}{position:nat | position + 30 <= 1280}
 (* What the reader's settings give a book's elements, in style element style-book-vars (keyword: book css): the
    justify and hyphenation that the rules of book_rules.bats read, and a hidden ruby's annotations, which the
    book's own style must not show *)
+fn _put_book_ruby {l:agz}{position:nat | position + 110 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, ruby: set_ruby)
+  : [stop:nat | stop <= position + 110] int stop =
+  case+ ruby of
+  | RubyHidden() => _put_text(buf, position, "[data-book-layout=\"1\"] :is([data-book-element=\"rt\"],[data-book-element=\"rtc\"]){display:none!important}")
+  | RubyShown() => position
+
 fn _apply_book_vars (current: settings, ruby: set_ruby): void = let
   val buf = $A.alloc<byte>(1280)
   val next = _put_text(buf, 0, "[data-book-layout=\"1\"]{--reader-align:")
@@ -933,9 +940,7 @@ fn _apply_book_vars (current: settings, ruby: set_ruby): void = let
   val next = _put_text(buf, next, ";--reader-hyphens:")
   val next = _put_hyphens(buf, next, current.hyphens)
   val next = _put_text(buf, next, "}")
-  val next = (case+ ruby of
-    | RubyHidden() => _put_text(buf, next, "[data-book-layout=\"1\"] :is([data-book-element=\"rt\"],[data-book-element=\"rtc\"]){display:none!important}")
-    | RubyShown() => next): [stop:nat | stop <= 1280] int stop
+  val next = _put_book_ruby(buf, next, ruby)
 in ui_text_buf("style-book-vars", buf, next) end
 
 (* The reader's typography as CSS, in style element style-type *)
