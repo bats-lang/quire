@@ -1031,6 +1031,8 @@ test('a capture is reading the ring while a renderer in another page begins an u
   let reading = null;
   let draining = null;
   let ticking = null;
+  // #1129: what the test read, kept in its artifact so that a failure says which thread it took (the failing run's evidence did not)
+  const record = { early: [], taken: null, waiter: null };
   try {
     const page = await (await own.newContext()).newPage();
     const armed = await arm(page);
@@ -1056,6 +1058,7 @@ test('a capture is reading the ring while a renderer in another page begins an u
     const arrivedAt = Number(process.hrtime.bigint()) / 1e9;
     let early = [];
     await expect.poll(async () => { early = await untimedWaits(own); return early.length > 0; }, { timeout: 30000, message: 'a renderer is in an untimed futex wait' }).toBe(true);
+    record.early = early;
     const waiting = early[0];
     expect(capturing, 'the capture is still reading when the wait has begun (else this test shows nothing)').toBe(true);
     // the ring recorded all the while: events came in during the capture
@@ -1076,12 +1079,15 @@ test('a capture is reading the ring while a renderer in another page begins an u
     // #1129: the first read can be a wait that ended (a renderer's main thread waits untimed for a moment while it starts); the hang is the wait still held after both captures
     let held = null;
     await expect.poll(async () => { held = stillBlocked(early, await untimedWaits(own)); return held !== null; }, { timeout: 30000, message: `a renderer is still in the untimed wait it was in before the captures: ${JSON.stringify(early)}` }).toBe(true);
+    record.taken = held;
     const history = await futexAnalysis(next.file, { address: held.address, tid: held.pid });
+    record.waiter = history.waiter;
     expect(history.waiter.lastWait, `the ring holds the renderer's wait (${held.syscall}): ${JSON.stringify(history.waiter)}`).not.toBeNull();
     expect(history.waiter.lastWait.untimed, `the waiter's last waits in the ring: ${JSON.stringify(history.waiter.waits)}; first read ${JSON.stringify(early)}`).toBe(true);
     expect(history.onAddress.events, `and the address it waits on (${history.address}; /proc said ${held.syscall}; the waiter's last waits in the ring: ${JSON.stringify(history.waiter.waits)}; ${history.ringLines} ring lines from ${history.ringStart} to ${history.ringEnd}, each CPU's first event ${JSON.stringify(history.cpuStarts)}; snapshot ${snapshotAt}, hang asked ${hangAt}, request arrived ${arrivedAt}, wait read ${waiting.readAt})`).toBeGreaterThan(0);
     expect(history.waiter.lastWait.at, 'the wait began after the capture took its snapshot').toBeGreaterThan(snapshotAt);
   } finally {
+    await testInfo.attach('untimed-waiters.json', { body: JSON.stringify(record, null, 2), contentType: 'application/json' }).catch(() => {});
     if (ticking) clearInterval(ticking);
     if (hang) hang.release();
     if (!draining) { draining = (async () => { for await (const chunk of createReadStream(pipe)) { void chunk; } })(); }
