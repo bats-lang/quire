@@ -4870,7 +4870,7 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
    overlay's clips matched to its content nodes as they are made *)
 (* the book's container for a reflowable chapter whose text is outside bytes (keyword: book container) *)
 fn _book_container {l:agz}{n:pos}{cs:$A.cells}{b:bool}{tree_size:nat}
-  (layout: rendition_layout, as_outside: bool b, own: OUTSIDE_OPT(cs, b) | src: !$A.cborrow(l, n, cs), n: int n,
+  (own: OUTSIDE_OPT(cs, b) | layout: rendition_layout, as_outside: bool b, src: !$A.cborrow(l, n, cs), n: int n,
    nodes: !$X.xml_node_list(n, tree_size)): void =
   case+ layout of
   | PrePaginated() => ()
@@ -4973,7 +4973,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val () = _fragment_put(fragment)
                   val () = $D.destroy(doc)
                   (* the book's container beside the page's content, when the text is outside bytes (keyword: book container) *)
-                  val () = _book_container(layout, as_outside, outside_own | xhtml_cells, xhtml_size, nodes)
+                  val () = _book_container(outside_own | layout, as_outside, xhtml_cells, xhtml_size, nodes)
                   val () = $X.free_nodes(nodes)
                   (* only the clip table is kept, for the narration *)
                   val () = _overlay_finish(chapter_index, generation)
