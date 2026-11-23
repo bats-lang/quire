@@ -4961,7 +4961,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                       if as_outside then let
                         prval OUTSIDE_OPT_yes(outside_read) = outside_own
                         val book_doc = $DB.open_book_document(1)
-                        val _ = outside_container_make(outside_read | book_doc, xhtml_cells, xhtml_size)
+                        val _ = outside_container_paragraphs(outside_read | book_doc, xhtml_cells, xhtml_size, nodes)
                       in $DB.close_book_document(book_doc) end
                       else ())
                   val () = $X.free_nodes(nodes)

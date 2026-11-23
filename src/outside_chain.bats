@@ -9,8 +9,11 @@
 #use array as A
 #use promise as P
 #use zip as Z
+#use xml-tree as X
 
 staload "book.sats"
+staload "ui.sats"
+staload "book_tags.sats"
 staload "text_proved.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -272,12 +275,58 @@ fun _find_root {l:agz}{n:pos}{cs:$A.cells}{i:nat | i <= n} .<n - i>.
     else _find_root(src, n, i + 1)
   end
 
-(* The container of a book of document layout g, as a child of the page: made on the document's stream from the outside cells
-   of the chapter, whose root tag it finds; whether it was made. The stream is flushed by the document's close *)
-#pub fn outside_container_make {l:agz}{n:pos}{cs:$A.cells}{g:int | g == 1 || g == 2}
-  (from: $BO.OUTSIDE_READ(cs) | doc: !$DB.book_document(g), src: !$A.cborrow(l, n, cs), n: int n): bool
+val _book_count = ref<Nat>(0)
 
-implement outside_container_make {l}{n}{cs}{g} (from | doc, src, n) =
+(* A paragraph of the chapter as a book element of the container: its id is a number of its own (keyword: book container) *)
+fn _add_paragraph {l:agz}{n:pos}{cs:$A.cells}{g:int}{o,k:nat | o + k <= n; k <= 255}
+  (from: $BO.OUTSIDE_READ(cs) | doc: !$DB.book_document(g), container: !$DB.book_container(g), bytes: !$A.cborrow(l, n, cs),
+   name_offset: int o, name_len: int k): void = let
+  val number = !_book_count
+  val () = !_book_count := number + 1
+  val @(id, id_len) = nid_make("book-p", number)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val parent = $A.alloc<byte>(14)
+  val () = $A.write_text(parent, 0, $A.text_lit("book-container"), 14)
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent)
+  val () = $DB.add_book_element(from | doc, container, id_bytes, id_len, parent_bytes, 14, $DB.BookTagP(), bytes, name_offset, name_len)
+  val () = $A.drop<byte>(parent_frozen, parent_bytes)
+  val () = $A.free<byte>($A.thaw<byte>(parent_frozen))
+  val () = $A.drop<byte>(id_frozen, id_bytes)
+in $A.free<byte>($A.thaw<byte>(id_frozen)) end
+
+fun _walk_nodes {l:agz}{n:pos}{cs:$A.cells}{g:int}{tree_size:nat} .<tree_size, 1>.
+  (from: $BO.OUTSIDE_READ(cs) | doc: !$DB.book_document(g), container: !$DB.book_container(g), bytes: !$A.cborrow(l, n, cs),
+   nodes: !$X.xml_node_list(n, tree_size)): void =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val () = _walk_node(from | doc, container, bytes, node)
+    in _walk_nodes(from | doc, container, bytes, rest) end
+  | $X.xml_nodes_nil() => ()
+
+and _walk_node {l:agz}{n:pos}{cs:$A.cells}{g:int}{tree_size:pos} .<tree_size, 0>.
+  (from: $BO.OUTSIDE_READ(cs) | doc: !$DB.book_document(g), container: !$DB.book_container(g), bytes: !$A.cborrow(l, n, cs),
+   node: !$X.xml_node(n, tree_size)): void =
+  case+ node of
+  | $X.xml_text(_, _) => ()
+  | $X.xml_element(name_offset, name_len, _, children) => let
+      val () = (if name_len <= 255 then
+        (case+ book_tag_of(bytes, name_offset, name_len) of
+         | ~TagFound(tag) =>
+           (case+ tag of
+            | $DB.BookTagP() => _add_paragraph(from | doc, container, bytes, name_offset, name_len)
+            | _ => ())
+         | ~TagNone() => ())
+        else ())
+    in _walk_nodes(from | doc, container, bytes, children) end
+
+(* The container of a book of document layout g, as a child of the page: made on the document's stream from the outside cells
+   of the chapter, whose root tag it finds, with the chapter's paragraphs in it; whether it was made. The stream is flushed by
+   the document's close *)
+#pub fn outside_container_paragraphs {l:agz}{n:pos}{cs:$A.cells}{g:int | g == 1 || g == 2}{tree_size:nat}
+  (from: $BO.OUTSIDE_READ(cs) | doc: !$DB.book_document(g), src: !$A.cborrow(l, n, cs), n: int n,
+   nodes: !$X.xml_node_list(n, tree_size)): bool
+
+implement outside_container_paragraphs {l}{n}{cs}{g}{tree_size} (from | doc, src, n, nodes) =
   case+ _find_root(src, n, 0) of
   | ~RootNone() => false
   | ~RootFound(tag | at) => let
@@ -294,7 +343,10 @@ implement outside_container_make {l}{n}{cs}{g} (from | doc, src, n) =
       val () = $A.free<byte>($A.thaw<byte>(name_frozen))
     in
       case+ made of
-      | ~$DB.BookContainerMade(container) => let val () = $DB.close_book_container(container) in true end
+      | ~$DB.BookContainerMade(container) => let
+          val () = _walk_nodes(from | doc, container, src, nodes)
+          val () = $DB.close_book_container(container)
+        in true end
       | ~$DB.BookContainerRefused() => false
     end
 
