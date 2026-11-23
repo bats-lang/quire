@@ -113,7 +113,7 @@ each blocked an unrelated PR while their p0 tickets were open. Three rules:
     asked, with a listener installed first (`expectEvent`, `arrived`), when the press and the
     release reached it.
   * **A window or a cadence is the instrument's own duration** (keyword: window): the renderers'
-    CPU read over `CPU_WINDOW_MS`, the profile sampled over `PROFILE_MS`, the probe that asks
+    CPU read over `CPU_WINDOW_MS`, the probe that asks
     every `PROBE_EVERY_MS` (`lasting`, defined once in `e2e/preflight.js`). The time is what is measured, so no event
     can stand for it. The lint sees the helper's braced timer (`() => { resolve(); }`), allows its one
     definition and prints every call as `span: file:line: lasting(...)`: a new call shows in the
@@ -214,15 +214,13 @@ paused and holds only a blob URL the app revoked.
 ## A page that stops answering in e2e explains itself (#244, #575, #591)
 
 Every spec takes `test` from `e2e/fixtures.js` (`e2e/global-setup.js` refuses one that does
-not). Its auto fixture `stallWatch` (`e2e/stall-capture.js`) arms each page with a DevTools
-session of its own (debugger enabled, breakpoints inactive: a page already stuck in a loop
-can no longer be attached to), asks it to evaluate `1` every 2 s, and captures a page that
-does not answer within 5 s, and every page of a test 15 s before its timeout: the frames
-`Debugger.pause` stops in, a CPU profile, the renderers' CPU time, threads and `/proc` state,
+not). Its auto fixture `stallWatch` (`e2e/stall-capture.js`)
+ captures a page that
+does not answer within 5 s, and every page of a test 15 s before its timeout:
+the renderers' CPU time, threads and `/proc` state,
 the machine's load and pressure, native stacks and a core, each renderer's cgroup and the kernel's log, and the page's recent events. The capture is
 `stall-capture-<n>.json` in the test's output (CI's `e2e-stall-captures-<group>` artifact).
 `e2e/stall-capture.spec.js` checks it; its long tests run in the desktop project only.
-`QUIRE_NO_STALL_ARM=1` skips arming (to compare stall rates); nothing sets it.
 
 * **A capture reads only what a value can hold** (quire#751, row 8). A log, ring or trace
   read into one string is read in pieces, or its size is bounded below the largest string
@@ -236,7 +234,6 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
   process id, so any renderer's CPU means the page is presumed busy, `presumedBusy`). Every
   idle renderer is then attached to (at most 6): gdb's backtrace of every thread, the kernel's
   stack and wait channel, and what resolves offsets later (binary path, build id, `exeBase`).
-  It is taken before the pause and the profile, which change what the renderer does.
 * **gdb is ended with KILL, never TERM or INT** (`stop()` after `TEARDOWN_MS`): a gdb ended by
   TERM or INT stays attached and the renderer stays stopped. Every external command runs in
   its own process group under `timeout -s KILL` inside sudo.
@@ -276,8 +273,8 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
 * **Page history** (`history`, `e2e/page-history.js`): per watched page, the last 100 console messages,
   uncaught errors, requests, finished requests and failed requests, each with its time and URL (and
   its status, or its failure text), texts cut to 300 characters, no body read and nothing awaited;
-  and the requests in flight with their age. It is kept from `arm()`, except under `QUIRE_NO_STALL_ARM=1`
-  (no listener on the page then, so a comparison of stall rates differs only by the debugger). A kept text is a
+  and the requests in flight with their age. 
+  A kept text is a
   copy, not a slice (V8 keeps a slice's whole parent alive: 100 slices of 10 MB messages held 1000 MB on node
   22.22, 100 copies held 0).
 * **The browser's own stderr is not captured.** Playwright 1.61's `logger` launch option receives
@@ -319,11 +316,8 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
   * `e2e/attempt-log.js`: the helpers that try again (`toLibrary`, `showChrome` per tap, `clickControl`,
     `releaseClick`) run each try through `attempted(page, step, attempt, work, detail)`, which notes
     its start, duration, outcome, the first line of why it failed (and, from the helper, why it tried
-    again: `noted`), and what the main thread did meanwhile from `Performance.getMetrics` before and
-    after (`devtools`: task, script, layout and style milliseconds, and the CPU the thread and process got,
-    so a main thread that ran tasks but got little CPU is a runner that did not give it, and one that got
-    what it used is a slow page). A page with no log bound (not armed by the watch) runs the work as before.
-    `getMetrics` is answered by a busy page (measured with a script loop); when it is not, the entry says so.
+    again: `noted`)
+    A page with no log bound runs the work as before.
   * Long tasks: `arm` installs a `PerformanceObserver` for `longtask` and `long-animation-frame` in the
     page (`__quireStall`, not enumerable; entries with epoch `at`, duration, blocking time, where style
     and layout began, and the scripts), which the 2 s probe and a failed attempt take. They are kept in
@@ -331,7 +325,7 @@ the machine's load and pressure, native stacks and a core, each renderer's cgrou
     (`Runtime.evaluate`) is not a task of the frame and is not seen; the page's own timers are.
   A failed test attaches `page-timing.json` (each page's `attempts` and `longTasks`), and a capture has
   `pageTiming`. The JSON of a capture only gained fields. `e2e/stall-capture.spec.js` checks the fields,
-  the attempt log, and that a stuck page or an unarmed one gives a note and no failure.
+  the attempt log, and that a stuck page gives a note and no failure.
 
 ## The flight recorder and the evidence of a red (#575)
 
@@ -403,7 +397,7 @@ only for a red. The design, with the research and what each means cannot find, i
   That failure is the bug to fix, ahead of the test's own.
 * **What identifies each class, and the test that induces it** (`e2e/evidence.spec.js`, and `sanitizer.spec.js`): an untimed futex wait in a renderer's main thread (sync XHR to a
   server that never answers): the word's address and 64 bytes around it, the waker candidates (the process's other threads), the ring's waits and wakes on the word and who woke the waiter
-  last, the browser trace with the renderer's events, the symbols' state; a script spin: the paused frame's function; a renderer crash and a killed browser: the signal and the exit in the ring,
+  last, the browser trace with the renderer's events, the symbols' state; a renderer crash and a killed browser: the signal and the exit in the ring,
   the trace or why there is none; a frozen compositor (GPU process stopped): the page answers but `frames.answered` is false and the process is `T`; a service worker that never answers a
   fetch: its state in the capture and the request in the trace (`pendingRequests`, since it reaches no network layer and no page request event shows it); a full disk: `disk` and the
   block requests in the ring; a missing symbol file: `symbols.state` and the module and offset of each frame; a recorder that does not start and a red with no record:

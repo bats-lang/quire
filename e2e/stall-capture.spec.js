@@ -21,44 +21,23 @@ import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { test, expect } from './fixtures.js';
-import { rawMouse } from './helpers.js';
 import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
 import { gunzipSync } from 'node:zlib';
 import { keepBrowserTrace, keepKernel, ringSeen, serialRun, startBrowserTrace, startKernel, stopKernel, wanted } from './flight-recorder.js';
-import { arm, capture, clientScript, lasting, pausedDuring, taskAnswered, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, PRESS_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
+import { arm, capture, lasting, cgroupEvidence, summary, CANNOT_ATTACH, CAPTURE_MOST_MS, CORE_GZ_MAX_BYTES, CORE_MAX_BYTES, FROZEN_CPU_SECONDS, KERNEL_LOG_LINES, kernelLog, nativeScope, nativeStacks, NATIVE_MOST_MS, READ_MOST, TEARDOWN_MOST_MS, whichExecutable } from './stall-capture.js';
 
 /** Resolves when the child has been started (its program is running). */
 const started = (child) => once(child, 'spawn');
 
-/** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
-const SPIN_MODULE = (() => {
-  const name = [...'spinInWasm'].map((character) => character.charCodeAt(0));
-  const nameSubsection = [0x01, 1 + 1 + 1 + name.length, 0x01, 0x00, name.length, ...name];
-  const nameSection = [0x04, ...[...'name'].map((character) => character.charCodeAt(0)), ...nameSubsection];
-  const body = [0x00, 0x03, 0x40, 0x0c, 0x00, 0x0b, 0x0b]; // no locals; loop: br 0; end; end
-  return [
-    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
-    0x01, 0x04, 0x01, 0x60, 0x00, 0x00,                         // type: () -> ()
-    0x03, 0x02, 0x01, 0x00,                                     // one function of that type
-    0x07, 0x08, 0x01, 0x04, 0x73, 0x70, 0x69, 0x6e, 0x00, 0x00, // export "spin"
-    0x0a, body.length + 2, 0x01, body.length, ...body,          // its code
-    0x00, nameSection.length, ...nameSection,                   // its name
-  ];
-})();
-
 const LOOPS = `<!doctype html><title>Endless loops</title><script>
 function spinForever() { let turns = 0; for (;;) { turns += 1; } }
 function spinForeverAnnounced() { console.log('spinning'); spinForever(); }
-function enterWasm(bytes) {
-  const instance = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array(bytes)));
-  instance.exports.spin();
-}
 </script>`;
 
 /**
- * Starts an endless loop on the page, through the watch's session: a
+ * Starts an endless loop on the page, through a session the watch gives the test: a
  * Playwright action would wait for its trace snapshot after it, which a
  * page that loops never answers.
  */
@@ -209,83 +188,13 @@ function expectLibraryFramesNamed(frames) {
   expect(library.some((frame) => namedFrame(frame.text)), `a named frame among ${library.map((frame) => frame.text.slice(0, 60)).join(' | ')}`).toBe(true);
 }
 
-test('a page in an endless script loop is captured in that loop, and gdb is not attached to it', async ({ page, stallWatch }) => {
+test('a page in an endless script loop is captured, and gdb is not attached to it', async ({ page, stallWatch }) => {
   await startLoop(page, stallWatch, 'setTimeout(spinForever, 0)');
   const capture = await stallWatch.next(page, 20000);
   expect(capture.reason).toContain('did not answer');
-  expect(capture.answers.interrupt.answered).toBe(true);
-  expect(capture.answers.task.answered).toBe(false);
-  expect(capture.paused.frames[0].functionName).toBe('spinForever');
-  expect(capture.verdict).toContain('spinForever');
-  expect(capture.pressWait, 'no press was down, so the pause did not wait for one').toBeUndefined();
+  expect(capture.evaluate.answered).toBe(false);
   await endLoop(page, stallWatch);
   // a loop is busy, not frozen: it spends a second of CPU a second
-  expectBusyNotFrozen(capture);
-});
-
-// Keyword: press open (quire#1102). A page paused by the debugger drops the input it is sent: a click's mouseup that came in the pause
-// never reached the page, and the click returned all the same. The pause waits for a press the page has begun, for at most PRESS_MS;
-// here the release cannot come (the page loops), so the wait runs out, says so, and the pause is made all the same.
-test('a capture does not pause a page while a press on it is down, for at most PRESS_MS (quire#1102)', async ({ page, stallWatch }) => {
-  // a navigation, not setContent: document.open() removes the window's listeners, the press record's among them
-  const html = `${LOOPS}<button id="held" style="position:fixed;left:10px;top:10px;width:100px;height:40px">Held</button>`;
-  await page.goto(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-  await rawMouse(page, 'move', 50, 30);
-  await rawMouse(page, 'down');
-  try {
-    const session = await stallWatch.session(page);
-    await session.send('Runtime.evaluate', { expression: 'setTimeout(spinForever, 0)' });
-    const capture = await stallWatch.next(page, 30000);
-    console.log(`press wait: ${JSON.stringify(capture.pressWait)}; paused in ${capture.paused && capture.paused.frames[0].functionName}`);
-    expect(capture.pressWait, 'the pause looked for a press the page had begun').toBeDefined();
-    expect(capture.pressWait.stillOpen, 'the release did not come while the page looped').toBe(true);
-    expect(capture.pressWait.waitedMs, 'the pause waited for the press as long as it may').toBeGreaterThanOrEqual(PRESS_MS);
-    expect(capture.paused.frames[0].functionName, 'and then paused the loop').toBe('spinForever');
-  } finally {
-    // the loop ends whatever the outcome, so the page answers for the failure capture's screenshot
-    await endLoop(page, stallWatch);
-    await rawMouse(page, 'up');
-  }
-});
-
-// Forces the pause of another client (quire#1077, keyword: other client pause): gen-pwa test arms every page with a DevTools client
-// of its own, which pauses a page that does not answer; the pause lets the queued task run in its nested loop. A second session of
-// the page pauses it all the while the capture asks, and the task, answered all the same, is not counted as the task queue's.
-// Its log line is `the task was answered in a pause of another DevTools client`.
-test('a task answered in the pause of another DevTools client is not the page\'s task queue answering', async ({ page, stallWatch }) => {
-  await page.setContent(LOOPS);
-  const other = await page.context().newCDPSession(page);
-  await other.send('Debugger.enable');
-  await startLoop(page, stallWatch, 'setTimeout(spinForever, 0)');
-  // the probe is not answered first (a pause earlier would answer it), then the other client pauses for as long as the capture asks
-  await stallWatch.started(page, 20000);
-  let pausing = true;
-  const interfering = (async () => {
-    while (pausing) await other.send('Debugger.pause').catch(() => {});
-  })();
-  const capture = await stallWatch.next(page, 30000);
-  pausing = false;
-  await interfering;
-  console.log(summary(capture).split('\n').filter((line) => line.includes('the task was answered in a pause of another DevTools client')).join('\n'));
-  expect(capture.reason).toContain('did not answer');
-  expect(capture.answers.interrupt.answered).toBe(true);
-  expect(capture.answers.task.answered).toBe(false);
-  expect(capture.answers.task.answeredInPauseOfAnotherClient[0].functionName).toBe('spinForever');
-  expect(summary(capture)).toContain('the task was answered in a pause of another DevTools client (in spinForever');
-  expectBusyNotFrozen(capture);
-  // the loop ends first: the other session cannot detach from a page that still spins
-  await endLoop(page, stallWatch);
-  await other.detach();
-});
-
-test('a page in an endless wasm loop is captured in that loop, and gdb is not attached to it', async ({ page, stallWatch }) => {
-  await startLoop(page, stallWatch, `setTimeout(() => enterWasm(${JSON.stringify(SPIN_MODULE)}), 0)`);
-  const capture = await stallWatch.next(page, 20000);
-  const [inWasm, caller] = capture.paused.frames;
-  expect(inWasm.functionName).toContain('spinInWasm');
-  expect(inWasm.url).toMatch(/^wasm:\/\//);
-  expect(caller.functionName).toBe('enterWasm');
-  await endLoop(page, stallWatch);
   expectBusyNotFrozen(capture);
 });
 
@@ -360,7 +269,7 @@ test('a page busy for 12 s that then recovers is captured, not attached to, and 
   // heavy layout, a loaded runner: a synchronous task that ends by itself
   await session.send('Runtime.evaluate', { expression: 'setTimeout(() => { const end = Date.now() + 12000; while (Date.now() < end); }, 0)' });
   const capture = await stallWatch.next(page, 30000);
-  expect(capture.answers.task.answered, 'the task came after the busy time or not at all').toBe(false);
+  expect(capture.evaluate.answered, 'the evaluate came after the busy time or not at all').toBe(false);
   expectBusyNotFrozen(capture);
   await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
 });
@@ -373,7 +282,7 @@ test('a renderer that is frozen (no CPU, no answer) has its native stacks captur
   expect(pids.length).toBeGreaterThan(0);
   const capture = await frozen(pids, () => stallWatch.next(page, 20000 + NATIVE_MOST_MS));
   expect(capture.reason).toContain('did not answer');
-  expect(capture.answers.task.answered).toBe(false);
+  expect(capture.evaluate.answered).toBe(false);
   expect(Math.max(...capture.rendererCpu.map((process) => process.cpuSeconds))).toBeLessThan(FROZEN_CPU_SECONDS);
   expectNativeStacks(capture, pids);
   expect(capture.kernel.error).toBeUndefined();
@@ -476,27 +385,6 @@ test('the run of the @serial tests is told from the other by its command line, a
   expect(serialRun(['test', '--grep'])).toBe(false);
 });
 
-/**
- * A page of a context made with QUIRE_NO_STALL_ARM=1, so it is not armed, in a
- * renderer of its own: { context, page, pids, restore }.
- */
-async function unarmedPage(browser) {
-  const kept = process.env.QUIRE_NO_STALL_ARM;
-  const restore = () => { if (kept === undefined) delete process.env.QUIRE_NO_STALL_ARM; else process.env.QUIRE_NO_STALL_ARM = kept; };
-  process.env.QUIRE_NO_STALL_ARM = '1';
-  try {
-    const before = await rendererPids(browser);
-    const context = await browser.newContext();   // watched at once, armed (or not) as its page is made
-    const page = await context.newPage();
-    await page.setContent('<!doctype html><title>Unarmed</title><p>Unarmed</p>');
-    const pids = (await rendererPids(browser)).filter((pid) => !before.includes(pid));
-    expect(pids.length).toBe(1);
-    return { context, page, pids, restore };
-  } finally {
-    restore();
-  }
-}
-
 test('without gdb the capture of a frozen renderer says so and carries on', async ({ page, browser, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
@@ -508,7 +396,7 @@ test('without gdb the capture of a frozen renderer says so and carries on', asyn
     const capture = await frozen(pids, () => stallWatch.next(page, 20000 + NATIVE_MOST_MS));
     expect(capture.native.unavailable).toMatch(/^native capture unavailable: gdb is not installed/);
     // the rest of the capture is what it is without the native side
-    expect(capture.answers.task.answered).toBe(false);
+    expect(capture.evaluate.answered).toBe(false);
     expect(capture.rendererCpu.length).toBeGreaterThan(0);
     expect(capture.verdict).toContain('blocked');
     expect(capture.native.renderers.every((renderer) => renderer.exe && renderer.kernel.tasks.length > 0 && !renderer.gdbStacks.ok)).toBe(true);
@@ -768,7 +656,7 @@ test('the core of a really hung renderer is bounded, kept compressed and opens i
   } finally {
     hung.release();
   }
-  expect(capture.answers.task.answered).toBe(false);
+  expect(capture.evaluate.answered).toBe(false);
   expect(capture.presumedBusy).toBeUndefined();
   if (capture.native.unavailable) unavailable(capture.native.unavailable);
   const renderer = capture.native.renderers.find((each) => each.gdbStacks && each.core);
@@ -795,38 +683,6 @@ test('the core of a really hung renderer is bounded, kept compressed and opens i
   const live = renderer.gdbStacks.mainThread.frames[0].pc;
   expect(opened.stdout, 'the core\'s main thread is where the live one was').toContain(live.replace(/^0x0*/, ''));
   await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
-});
-
-test('an unarmed page that is busy is judged as an armed one: no native stacks', async ({ browser, stallWatch }, testInfo) => {
-  desktopOnly(testInfo);
-  const { context, page } = await unarmedPage(browser);
-  try {
-    // a loop through a session of the test's own, since the watch has none for it
-    const busy = await context.newCDPSession(page);
-    await busy.send('Runtime.evaluate', { expression: 'setTimeout(() => { const end = Date.now() + 12000; while (Date.now() < end); }, 0)' });
-    const capture = await stallWatch.next(page, 30000);
-    expect(capture.armed).toBe(false);
-    expect(capture.evaluate.answered, 'asked with an evaluate of its own').toBe(false);
-    expectBusyNotFrozen(capture);
-    await expect.poll(() => page.evaluate(() => 1 + 1), { timeout: 30000 }).toBe(2);
-  } finally {
-    await context.close();
-  }
-});
-
-test('an unarmed page that is frozen is judged as an armed one: native stacks', async ({ browser, stallWatch }, testInfo) => {
-  desktopOnly(testInfo);
-  test.setTimeout(testInfo.timeout + NATIVE_MOST_MS);
-  const { context, page, pids } = await unarmedPage(browser);
-  try {
-    const capture = await frozen(pids, () => stallWatch.next(page, 20000 + NATIVE_MOST_MS));
-    expect(capture.armed).toBe(false);
-    expect(capture.evaluate.answered).toBe(false);
-    expectNativeStacks(capture, pids);
-  } finally {
-    for (const pid of pids) { try { process.kill(pid, 'SIGCONT'); } catch (gone) { /* it ended */ } }
-    await context.close();
-  }
 });
 
 /** A second page of the browser in a context of its own, so a renderer of its own: { context, page, pids }. */
@@ -1005,7 +861,6 @@ test('the kernel evidence is saved before the native step, which a teardown can 
   const pids = await rendererPids(browser);
   const saved = [];
   const result = await frozen(pids, () => capture(page, armed, 'a capture asked for', browser, (partial) => saved.push({ kernel: partial.kernel, native: partial.native })));
-  await armed.session.detach().catch(() => {});
   expect(result.native, 'the renderer was frozen, so the native step ran').toBeDefined();
   expect(saved[0].native, 'the first save is before the native step').toBeUndefined();
   expect(saved[0].kernel.cgroups.length).toBeGreaterThan(0);
@@ -1019,29 +874,23 @@ test('a page that answers is not captured', async ({ page, stallWatch }) => {
   expect(stallWatch.captures).toEqual([]);
 });
 
-test('QUIRE_NO_STALL_ARM skips arming and nothing else sets it', async ({ page }) => {
-  const kept = process.env.QUIRE_NO_STALL_ARM;
+// pwa#289, quire#1133: gen-pwa test's preload is the one DevTools client of a page. The watch asks the context for none, whether it arms the
+// page through the fixture or `arm` is called on it; its log line is `the watch made 0 DevTools clients`.
+test('the watch makes no DevTools client of its own', async ({ browser, stallWatch }) => {
+  const context = await browser.newContext();
+  const made = [];
+  const newCDPSession = context.newCDPSession;
+  context.newCDPSession = function (...target) { made.push(target); return newCDPSession.apply(this, target); };
   try {
-    delete process.env.QUIRE_NO_STALL_ARM;
-    const armed = await arm(page);
-    expect(armed.error, 'armed by default').toBeNull();
-    expect(armed.session).not.toBeNull();
-    await armed.session.detach();
-    for (const off of ['', '0']) {
-      process.env.QUIRE_NO_STALL_ARM = off;
-      const stillArmed = await arm(page);
-      expect(stillArmed.error, `armed when set to "${off}"`).toBeNull();
-      await stillArmed.session.detach();
-    }
-    process.env.QUIRE_NO_STALL_ARM = '1';
-    const listening = ['console', 'pageerror', 'request', 'requestfinished', 'requestfailed'].map((event) => page.listenerCount(event));
-    const notArmed = await arm(page);
-    expect(['console', 'pageerror', 'request', 'requestfinished', 'requestfailed'].map((event) => page.listenerCount(event)), 'no listener when arming is off').toEqual(listening);
-    expect(notArmed.history).toBeNull();
-    expect(notArmed.session, 'no DevTools session, so no debugger').toBeNull();
-    expect(notArmed.error).toContain('QUIRE_NO_STALL_ARM=1');
+    const page = await context.newPage();
+    await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
+    await arm(page);
+    await stallWatch.answered(page, 1, 30000);
+    console.log(`the watch made ${made.length} DevTools clients`);
+    expect(made).toEqual([]);
   } finally {
-    if (kept === undefined) delete process.env.QUIRE_NO_STALL_ARM; else process.env.QUIRE_NO_STALL_ARM = kept;
+    context.newCDPSession = newCDPSession;
+    await context.close();
   }
 });
 
@@ -1056,65 +905,12 @@ test('every page of a test about to time out is captured', async ({ page, stallW
   test.setTimeout(testInfo.timeout + headroom);
   const capture = await stallWatch.next(page, headroom);
   expect(capture.reason).toBe('test about to time out');
-  // nothing runs, so nothing pauses; the profile is taken instead
-  expect(capture.paused).toBeUndefined();
-  expect(capture.profile.samples).toBeGreaterThan(0);
-  expect(capture.answers.task.answered).toBe(true);
+  expect(capture.evaluate.answered).toBe(true);
   expect(capture.verdict).toContain('free');
   // a page that answers is not stalled: gdb never stops its renderer
   expect(capture.native).toBeUndefined();
-  // and the pause it asked for is dropped: the page still runs script
+  // and the page still runs script
   expect(await page.evaluate(() => 1 + 1)).toBe(2);
-});
-
-// A pause nobody here asked for, in effect while the task is asked (quire#1077, keyword: other client pause), makes the answer no
-// task queue's; no such pause leaves an answer as it was (a task asked of a page with no pause stays answered).
-test('a task answered in a pause nobody here asked for is not the task queue answering, and with no such pause it is', () => {
-  const none = { paused: false, count: 0 };
-  expect(pausedDuring(none, { paused: false, count: 0 })).toBe(false);
-  expect(pausedDuring({ paused: true, count: 1 }, { paused: false, count: 1 })).toBe(true);
-  expect(pausedDuring(none, { paused: true, count: 1 })).toBe(true);
-  expect(pausedDuring(none, { paused: false, count: 1 })).toBe(true);
-  expect(taskAnswered(true, false)).toBe(true);
-  expect(taskAnswered(true, true)).toBe(false);
-  expect(taskAnswered(false, true)).toBe(false);
-  expect(taskAnswered(false, false)).toBe(false);
-});
-
-// A pause that stops in a script a debugger client made (the watch's own probe, quire#1072) is not where the page is.
-test('a pause in a script of the watch or the first statement of a client\'s script is not the page\'s, and one in the page\'s function is', () => {
-  const at = (functionName, url, line, column) => ({ functionName, url, line, column });
-  expect(clientScript([at('(anonymous)', 'quire-stall-watch/task.js', 1, 1)])).toContain('quire-stall-watch/task.js');
-  expect(clientScript([at('(anonymous)', '', 1, 1)])).toContain('no URL');
-  expect(clientScript([at('spinForever', '', 2, 41)])).toBeNull();
-  expect(clientScript([at('(anonymous)', '', 1, 1), at('caller', '', 3, 1)])).toBeNull();
-  expect(clientScript([at('(anonymous)', 'http://127.0.0.1/app.js', 1, 1)])).toBeNull();
-  expect(clientScript([])).toBeNull();
-});
-
-// Forces the pause (quire#1072, Done-when 1): a client of the page's DevTools session keeps starting scripts of its own while the
-// capture asks for a pause, so the pause stops in one, and the summary names it. Its log line is `pause stopped in `.
-test('a pause that stops in a client\'s script is named in the capture\'s summary and is not reported as paused', async ({ page, browser }) => {
-  await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
-  const armed = await arm(page);
-  const client = await page.context().newCDPSession(page);
-  let starting = true;
-  const keepStarting = (async () => {
-    while (starting) {
-      await client.send('Runtime.evaluate', { expression: '1' }).catch(() => {});
-    }
-  })();
-  const result = await capture(page, armed, 'a capture asked for', browser);
-  starting = false;
-  await keepStarting;
-  await armed.session.detach();
-  const text = summary(result);
-  console.log(text.split('\n').filter((line) => line.includes('pause stopped in ')).join('\n'));
-  expect(result.paused).toBeUndefined();
-  expect(result.clientPause.frames[0].url).toBe('');
-  expect(result.clientPause.frames[0].line).toBe(1);
-  expect(result.clientPause.frames[0].column).toBe(1);
-  expect(text).toContain('pause stopped in a script with no URL, made by a debugger client (line 1 column 1, no caller)');
 });
 
 // ---- the evidence for a page that was slow, not frozen (#600) ----
@@ -1132,7 +928,6 @@ test('a capture holds the runner\'s load over the last minute and the page\'s at
   // two samples at least, 2 s apart: the sampler has taken them
   await expect.poll(() => runnerLoad(60000).samples.length, { timeout: 30000 }).toBeGreaterThanOrEqual(2);
   const result = await capture(page, armed, 'a capture asked for', browser);
-  await armed.session.detach();
   const load = result.runnerLoad;
   expect(typeof load, `runnerLoad is ${JSON.stringify(load).slice(0, 200)}`).toBe('object');
   expect(load.everyMs).toBe(SAMPLE_EVERY_MS);
@@ -1154,16 +949,15 @@ test('a capture holds the runner\'s load over the last minute and the page\'s at
   const later = load.samples.find((each) => each.intervalMs !== null && each.intervalMs !== undefined && typeof each.cpuShare === 'object');
   if (later) for (const name of ['user', 'system', 'idle', 'iowait', 'steal']) expect(typeof later.cpuShare[name], `cpuShare.${name}`).toBe('number');
   // the old fields are as they were
-  for (const field of ['reason', 'at', 'url', 'armed', 'rendererCpu', 'machine', 'verdict']) expect(result, field).toHaveProperty(field);
+  for (const field of ['reason', 'at', 'url', 'rendererCpu', 'machine', 'verdict']) expect(result, field).toHaveProperty(field);
   // the page's timing is in the capture too
   expect(Array.isArray(result.pageTiming.attempts)).toBe(true);
   expect(Array.isArray(result.pageTiming.longTasks)).toBe(true);
   expect(summary(result)).toContain('runner: over the last');
 });
 
-test('an attempt is noted with its duration, DevTools metrics and the long tasks the page saw', async ({ page, stallWatch }) => {
+test('an attempt is noted with its duration, why its metrics are not available and the long tasks the page saw', async ({ page, stallWatch }) => {
   await page.setContent('<!doctype html><title>Busy</title><p>Busy</p>');
-  await stallWatch.session(page);
   const log = attemptsOf(page);
   expect(log, 'the watch bound a log to the page').toBeTruthy();
   await attempted(page, 'busy', 1, () => page.evaluate(() => new Promise((done) => setTimeout(() => { const began = performance.now(); while (performance.now() - began < 400); done(); }, 10))), { detail: 'kept' });
@@ -1173,11 +967,7 @@ test('an attempt is noted with its duration, DevTools metrics and the long tasks
   expect(busy).toMatchObject({ step: 'busy', attempt: 1, outcome: 'ok', detail: 'kept' });
   expect(busy.ms).toBeGreaterThanOrEqual(390);
   expect(busy.startedAt).toMatch(/^\d{4}-\d\d-\d\dT/);
-  expect(busy.devtools.unavailable, 'the metrics were read').toBeUndefined();
-  expect(busy.devtools.taskMs, 'the busy task shows in the main thread\'s task time').toBeGreaterThanOrEqual(300);
-  expect(busy.devtools.threadCpuMs).toBeGreaterThan(0);
-  expect(busy.devtools.reading).toContain('ran tasks for');
-  for (const field of ['scriptMs', 'layoutMs', 'recalcStyleMs', 'processCpuMs', 'layoutCount']) expect(busy.devtools, field).toHaveProperty(field);
+  expect(busy.devtools.unavailable, 'the watch makes no DevTools client, so no metrics').toMatch(/^not available: .*pwa#289/);
   expect(broken).toMatchObject({ step: 'broken', outcome: 'failed', why: 'it did not work' });
   expect(note).toMatchObject({ outcome: 'note', why: 'a note' });
   // the long task of the loop is seen by the page's observer and taken
@@ -1207,38 +997,10 @@ test('taking the evidence never fails or hangs a test, and says why when it cann
     expect(Date.now() - began, 'bounded by the metrics\' and the harvest\'s limits').toBeLessThan(6000);
     const stuck = log.entries.find((each) => each.step === 'stuck');
     expect(stuck.outcome).toBe('ok');
-    // Performance.getMetrics may be answered by a busy page (an interrupting command, as
-    // Debugger.setBreakpointsActive is) or not; either way the entry says which
-    if (stuck.devtools.unavailable) expect(stuck.devtools.unavailable).toMatch(/^not available: /);
-    else expect(stuck.devtools.wallMs).toBeGreaterThanOrEqual(0);
+    expect(stuck.devtools.unavailable).toMatch(/^not available: /);
     // and the evidence is still given
     const kept = await stallWatch.evidence();
     expect(kept.pageTiming[0].attempts.some((each) => each.step === 'stuck')).toBe(true);
-  } finally {
-    await endLoop(page, stallWatch);
-  }
-});
-
-test('a page that answers nothing costs the attempts one wait, not one before and one after each (#715)', async ({ page, stallWatch }) => {
-  await startLoopHeard(page, stallWatch);
-  try {
-    const log = attemptsOf(page);
-    const took = [];
-    for (let attempt = 1; attempt <= 4; attempt++) {
-      const began = Date.now();
-      await expect(attempted(page, 'frozen', attempt, () => { throw new Error('the click did not land'); })).rejects.toThrow('did not land');
-      took.push(Date.now() - began);
-    }
-    const entries = log.entries.filter((each) => each.step === 'frozen');
-    expect(entries).toHaveLength(4);
-    // an attempt that waited for nothing is quick: if the first read timed out, the others were not made
-    const timedOut = entries.some((each) => String(each.devtools.unavailable).includes('was not answered'));
-    if (timedOut) {
-      expect(took.slice(1).every((ms) => ms < 500), `later attempts took ${took}`).toBe(true);
-      expect(entries[1].devtools.unavailable).toContain('not asked');
-    }
-    // the four tries of a page that answers nothing take about one wait in all
-    expect(took.reduce((a, b) => a + b, 0), `took ${took}`).toBeLessThan(2500);
   } finally {
     await endLoop(page, stallWatch);
   }
@@ -1256,44 +1018,13 @@ test('the runner\'s samples taken under the name of an earlier test remain after
   expect(samples[samples.length - 1].test, 'and the later ones say no test').toBe('');
 });
 
-test('a page that stops answering until a read of it times out, and recovers, gets its metrics again within the probe period, not after DEAF_MS (#715)', async ({ page, browser, stallWatch }, testInfo) => {
-  desktopOnly(testInfo);
-  await page.setContent('<!doctype html><title>Recovers</title>');
-  await stallWatch.session(page);
+test('an attempt says the metrics are not available, as the watch makes no DevTools client', async ({ page }) => {
+  const watched = await arm(page);
   const log = attemptsOf(page);
-  await attempted(page, 'before', 1, async () => 1);
-  expect(log.entries.find((each) => each.step === 'before').devtools.unavailable, 'answered while idle').toBeUndefined();
-  const pids = await rendererPids(browser);
-  // frozen (no answer to anything): the read waits its second and the page is deaf from then on; it is let go as that read ends, long before the 5 s that make the probe capture it
-  let released = 0;
-  await frozen(pids, async () => {
-    // the freeze lasts until the read has timed out (the attempt returns after its METRICS_MS): that is what the page is let go for
-    await attempted(page, 'frozen', 1, async () => 1);
-    expect(String(log.entries.find((each) => each.step === 'frozen').devtools.unavailable)).toContain('was not answered');
-    released = Date.now();
-  });
-  await expect.poll(async () => {
-    await attempted(page, 'after', 1, async () => 1);
-    return log.entries.filter((each) => each.step === 'after').pop().devtools.unavailable === undefined;
-  }, { timeout: 8000, intervals: [250] }).toBe(true);
-  const waited = Date.now() - released;
-  // the probe asks every PROBE_EVERY_MS (2 s) and hears the page at once; DEAF_MS alone would have kept it deaf for about 4.5 s after the release
-  expect(waited, `metrics came back ${waited} ms after the page did`).toBeLessThan(3500);
-});
-
-test('an unarmed page notes its attempts and says the metrics are not available', async ({ page }) => {
-  const kept = process.env.QUIRE_NO_STALL_ARM;
-  try {
-    process.env.QUIRE_NO_STALL_ARM = '1';
-    const unarmed = await arm(page);
-    const log = attemptsOf(page);
-    await attempted(page, 'unarmed', 1, async () => 1);
-    const entry = log.entries.find((each) => each.step === 'unarmed');
-    expect(entry.devtools.unavailable).toMatch(/^not available: /);
-    expect(unarmed.timing.snapshot().notAvailable).toMatch(/^not available: /);
-  } finally {
-    if (kept === undefined) delete process.env.QUIRE_NO_STALL_ARM; else process.env.QUIRE_NO_STALL_ARM = kept;
-  }
+  await attempted(page, 'plain', 1, async () => 1);
+  const entry = log.entries.find((each) => each.step === 'plain');
+  expect(entry.devtools.unavailable).toMatch(/^not available: /);
+  expect(watched.timing.snapshot().notAvailable).toMatch(/^not available: /);
 });
 
 test('crashRecorded: a record that is not made says why', async ({ stallWatch }) => {
