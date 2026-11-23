@@ -186,6 +186,7 @@
       "accept/pieces-of-three-takes-equal",
       "accept/sheet-scrolls-most",
       "accept/book-render-proved",
+      "reject/book-style-from-app-bytes",
       "accept/text-proved-two-takes-one-text",
       "reject/aloud-placement-unmatched",
       "reject/back-forged-proof",
