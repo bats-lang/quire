@@ -14,6 +14,7 @@ staload "book.sats"
 staload "text_proved.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload DB = "wasm.bats-packages.dev/dom/src/book.sats"
 staload BO = "wasm.bats-packages.dev/bridge/src/outside.sats"
 
 (* An entry's text from the browser's decompression: its cells are outside bytes, with their proofs (keyword: outside-chain) *)
@@ -250,5 +251,51 @@ in
     else let prval () = fold@(held); val () = _slot_replace(held) in $P.ret<outside_text>(OutsideTextNone()) end
   | ~OutsideEmpty() => $P.ret<outside_text>(OutsideTextNone())
 end
+
+
+(* ===== the book's container (keyword: book container) ===== *)
+
+(* Where the root tag of the document in the cells is, scanning from i *)
+datavtype root_found(cs: $A.cells) =
+  | {o:nat} RootFound(cs) of ($DB.ROOT_TAG(cs, o) | int o)
+  | RootNone(cs) of ()
+
+fun _find_root {l:agz}{n:pos}{cs:$A.cells}{i:nat | i <= n} .<n - i>.
+  (src: !$A.cborrow(l, n, cs), n: int n, i: int i): root_found(cs) =
+  if i >= n then RootNone()
+  else let
+    val (found_tag | found) = $DB.book_root_scan(src, n, i)
+  in
+    if found then let
+      prval $DB.ROOT_TAG_yes(tag) = found_tag
+    in RootFound(tag | i) end
+    else _find_root(src, n, i + 1)
+  end
+
+(* The container of a book of document layout g, as a child of the page: made on the document's stream from the outside cells
+   of the chapter, whose root tag it finds; whether it was made. The stream is flushed by the document's close *)
+#pub fn outside_container_make {l:agz}{n:pos}{cs:$A.cells}{g:int | g == 1 || g == 2}
+  (from: $BO.OUTSIDE_READ(cs) | doc: !$DB.book_document(g), src: !$A.cborrow(l, n, cs), n: int n): bool
+
+implement outside_container_make {l}{n}{cs}{g} (from | doc, src, n) =
+  case+ _find_root(src, n, 0) of
+  | ~RootNone() => false
+  | ~RootFound(tag | at) => let
+      val parent = $A.alloc<byte>(4)
+      val () = $A.write_text(parent, 0, $A.text_lit("page"), 4)
+      val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent)
+      val name = $A.alloc<byte>(14)
+      val () = $A.write_text(name, 0, $A.text_lit("book-container"), 14)
+      val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
+      val made = $DB.add_book_container(from, tag | doc, src, at, parent_bytes, 4, name_bytes, 14)
+      val () = $A.drop<byte>(parent_frozen, parent_bytes)
+      val () = $A.free<byte>($A.thaw<byte>(parent_frozen))
+      val () = $A.drop<byte>(name_frozen, name_bytes)
+      val () = $A.free<byte>($A.thaw<byte>(name_frozen))
+    in
+      case+ made of
+      | ~$DB.BookContainerMade(container) => let val () = $DB.close_book_container(container) in true end
+      | ~$DB.BookContainerRefused() => false
+    end
 
 end (* #target wasm *)
