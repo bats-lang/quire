@@ -4868,6 +4868,20 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
 
 (* Shows chapter chapter_index of book serial, from its chapters, its
    overlay's clips matched to its content nodes as they are made *)
+(* the book's container for a reflowable chapter whose text is outside bytes (keyword: book container) *)
+fn _book_container {l:agz}{n:pos}{cs:$A.cells}{b:bool}{tree_size:nat}
+  (layout: rendition_layout, as_outside: bool b, own: OUTSIDE_OPT(cs, b) | src: !$A.cborrow(l, n, cs), n: int n,
+   nodes: !$X.xml_node_list(n, tree_size)): void =
+  case+ layout of
+  | PrePaginated() => ()
+  | Reflowable() =>
+    if as_outside then let
+      prval OUTSIDE_OPT_yes(outside_read) = own
+      val book_doc = $DB.open_book_document(1)
+      val _ = outside_container_paragraphs(outside_read | book_doc, src, n, nodes)
+    in $DB.close_book_document(book_doc) end
+    else ()
+
 fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_index, generation: int): $P.promise(load_outcome, $P.Chained) =
   case+ book_chapter_get(serial, chapter_index) of
   | ~ChaptersUnknown() => let
@@ -4959,15 +4973,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val () = _fragment_put(fragment)
                   val () = $D.destroy(doc)
                   (* the book's container beside the page's content, when the text is outside bytes (keyword: book container) *)
-                  val () = (case+ layout of
-                    | PrePaginated() => ()
-                    | Reflowable() =>
-                      if as_outside then let
-                        prval OUTSIDE_OPT_yes(outside_read) = outside_own
-                        val book_doc = $DB.open_book_document(1)
-                        val _ = outside_container_paragraphs(outside_read | book_doc, xhtml_cells, xhtml_size, nodes)
-                      in $DB.close_book_document(book_doc) end
-                      else ())
+                  val () = _book_container(layout, as_outside, outside_own | xhtml_cells, xhtml_size, nodes)
                   val () = $X.free_nodes(nodes)
                   (* only the clip table is kept, for the narration *)
                   val () = _overlay_finish(chapter_index, generation)
