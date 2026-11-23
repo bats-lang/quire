@@ -82,6 +82,42 @@ in Sheet(builder) end
 
 
 (* ============================================================
+   Layers (keyword: content-rule-unlayered, design section 4)
+   ============================================================ *)
+
+(* The view of an open @layer block: a rule for the book's content (an app
+   selector that can match inside a container) is written only while it is held,
+   so one written without a layer does not type-check, since an unlayered
+   normal rule beats every layered one *)
+#pub dataview LAYER_OPEN = LAYER_OPEN_mk of ()
+
+(* @layer name { *)
+#pub fn layer_begin {left:nat}{length:nat | length + 8 <= left}
+  (sheet: sheet(left, false, false), name: string length): (LAYER_OPEN | sheet(left - length - 8, false, false))
+
+implement layer_begin (sheet, name) = let
+  val () = raw(sheet, "@layer ")
+  val () = plain(sheet, name)
+  val () = raw(sheet, "{")
+  val+ ~Sheet(builder) = sheet
+in (LAYER_OPEN_mk() | Sheet(builder)) end
+
+(* } of the layer *)
+#pub fn layer_end {left:pos} (pf: LAYER_OPEN | sheet: sheet(left, false, false)): sheet(left - 1, false, false)
+
+implement layer_end (pf | sheet) = let
+  prval LAYER_OPEN_mk() = pf
+  val () = raw(sheet, "}")
+  val+ ~Sheet(builder) = sheet
+in Sheet(builder) end
+
+(* selector { of a rule for the book's content, inside the layer *)
+#pub fn content_rule {left:nat}{length:nat | length + 1 <= left}
+  (pf: !LAYER_OPEN | sheet: sheet(left, false, false), selector: string length): sheet(left - length - 1, false, true)
+
+implement content_rule (pf | sheet, selector) = rule(sheet, selector)
+
+(* ============================================================
    Rules
    ============================================================ *)
 
@@ -504,5 +540,7 @@ in sheet end
 implement read_out_only (sheet) = let
   val () = raw(sheet, "margin:-1px;overflow:hidden;")
 in sheet end
+
+(* fixture: the-end-of-sheet *)
 
 end

@@ -187,6 +187,7 @@
       "accept/sheet-scrolls-most",
       "accept/book-render-proved",
       "reject/book-style-from-app-bytes",
+      "reject/content-rule-unlayered",
       "accept/text-proved-two-takes-one-text",
       "reject/aloud-placement-unmatched",
       "reject/back-forged-proof",
