@@ -874,20 +874,22 @@ test('a page that answers is not captured', async ({ page, stallWatch }) => {
   expect(stallWatch.captures).toEqual([]);
 });
 
-// pwa#289, quire#1133: gen-pwa test's preload is the one DevTools client of a page. The watch asks the context for none, whether it arms the
-// page through the fixture or `arm` is called on it; its log line is `the watch made 0 DevTools clients`.
+// pwa#289, quire#1133: gen-pwa test's preload is the one DevTools client of a page (it makes its own `newCDPSession` call, which CI's run of
+// this test sees too). The watch asks the context for none beyond it: a call is the watch's when its stack runs through `stall-capture.js`,
+// whether it arms the page through the fixture or `arm` is called on it; its log line is `the watch made 0 DevTools clients`.
 test('the watch makes no DevTools client of its own', async ({ browser, stallWatch }) => {
   const context = await browser.newContext();
   const made = [];
   const newCDPSession = context.newCDPSession;
-  context.newCDPSession = function (...target) { made.push(target); return newCDPSession.apply(this, target); };
+  context.newCDPSession = function (...target) { made.push(new Error('newCDPSession').stack); return newCDPSession.apply(this, target); };
   try {
     const page = await context.newPage();
     await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
     await arm(page);
     await stallWatch.answered(page, 1, 30000);
-    console.log(`the watch made ${made.length} DevTools clients`);
-    expect(made).toEqual([]);
+    const watchs = made.filter((stack) => /stall-capture\.js/.test(stack));
+    console.log(`the watch made ${watchs.length} DevTools clients (${made.length} calls in all, the preload's included)`);
+    expect(watchs).toEqual([]);
   } finally {
     context.newCDPSession = newCDPSession;
     await context.close();
