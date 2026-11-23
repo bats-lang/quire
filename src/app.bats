@@ -1269,7 +1269,7 @@ implement app_build () = let
   val () = ui_add("bats-root", "style-book", TStyle)
   val @(book_css, book_css_len) = book_style()
   val () = ui_text_buf("style-book", book_css, book_css_len)
-  (* the reader's justify and hyphenation for a book's elements, written by settings.bats (keyword: book css) *)
+  (* the reader's justify and hyphenation for a book, set by settings.bats (keyword: book css) *)
   val () = ui_add("bats-root", "style-book-vars", TStyle)
   val () = ui_add("bats-root", "style-type", TStyle)
   (* where the reading ruler lies, written by reading_ruler.bats *)

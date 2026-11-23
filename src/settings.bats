@@ -923,9 +923,7 @@ fn _put_ruby {l:agz}{position:nat | position + 30 <= 1280}
   | RubyHidden() => _put_text(buf, position, ".caf rt,.caf rtc{display:none}")
   | RubyShown() => position
 
-(* What the reader's settings give a book's elements, in style element style-book-vars (keyword: book css): the
-   justify and hyphenation that the rules of book_rules.bats read, and a hidden ruby's annotations, which the
-   book's own style must not show *)
+(* the reader's justify, hyphenation and hidden ruby, in style-book-vars (keyword: book css) *)
 fn _put_book_ruby {l:agz}{position:nat | position + 110 <= 1280}
   (buf: !$A.arr(byte, l, 1280), position: int position, ruby: set_ruby)
   : [stop:nat | stop <= position + 110] int stop =
