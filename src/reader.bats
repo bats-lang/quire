@@ -2389,8 +2389,8 @@ fn _text_into {doc_location,l:agz}{n:pos}{node:nat}{offset,text_len:nat | offset
    time that grows with the square of the columns (a megabyte of one word
    at 390 px: 17 s a frame; the same text as blocks of 64 KiB: 1 s), so no
    run is longer than one piece (#423) *)
-fun _text_spans {doc_location,l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n} .<text_len>.
-  (taken: TAKEN(kind, compressed, cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), parent: int parent, offset: int offset, text_len: int text_len, split: bool)
+fun _text_spans {doc_location,l:agz}{n:pos}{cs:$A.cells}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n} .<text_len>.
+  (taken: TEXT_TAKEN(cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), parent: int parent, offset: int offset, text_len: int text_len, split: bool)
   : [count:pos] (PIECES(cs, offset, text_len, count) | int count) = let
   val node = _next_content_node()
   val () = _add_node(doc, parent, node, $D.Span)
@@ -2408,8 +2408,8 @@ in
 end
 
 (* A text shown as its pieces *)
-fn _text_shown {doc_location,l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n}
-  (taken: TAKEN(kind, compressed, cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), parent: int parent, offset: int offset, text_len: int text_len): void = let
+fn _text_shown {doc_location,l:agz}{n:pos}{cs:$A.cells}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n}
+  (taken: TEXT_TAKEN(cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), parent: int parent, offset: int offset, text_len: int text_len): void = let
   val (_ | _) = _text_spans(taken | doc, data, bytes, parent, offset, text_len, false)
 in () end
 
@@ -2427,8 +2427,8 @@ fun _take_nodes {count:nat} .<count>. (count: int count): void =
 (* The numbers _text_spans would give text of text_len bytes, taken: as
    many as pieces_find counts (it stepped by 65533 here and by cut_find
    there, so a text of 131069 or 131070 spaces was numbered two ways, #568) *)
-fn _skip_spans {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{offset,text_len:nat | offset + text_len <= n}
-  (taken: TAKEN(kind, compressed, cs, n) | bytes: !$A.cborrow(l, n, cs), offset: int offset, text_len: int text_len): void = let
+fn _skip_spans {l:agz}{n:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_len <= n}
+  (taken: TEXT_TAKEN(cs, n) | bytes: !$A.cborrow(l, n, cs), offset: int offset, text_len: int text_len): void = let
   val (_ | count) = pieces_find(bytes, offset, text_len)
 in _take_nodes(count) end
 
@@ -3430,8 +3430,8 @@ end
    borrow operations: nothing is allocated for the page); the <img>
    elements met are added to found *)
 fun _render_nodes
-  {doc_location,l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 1>.
-  (taken: TAKEN(kind, compressed, cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
+  {doc_location,l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 1>.
+  (taken: TEXT_TAKEN(cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
    parent: int parent, nodes: !$X.xml_node_list(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
@@ -3440,8 +3440,8 @@ fun _render_nodes
   | $X.xml_nodes_nil() => found
 
 and _render_node
-  {doc_location,l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:pos}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 0>.
-  (taken: TAKEN(kind, compressed, cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
+  {doc_location,l:agz}{n:pos}{cs:$A.cells}{tree_size:pos}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 0>.
+  (taken: TEXT_TAKEN(cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
    parent: int parent, node: !$X.xml_node(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
   case+ node of
   | $X.xml_text(offset, text_len) => let
@@ -4835,7 +4835,7 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
                   the cells of the text are in the type for the cut (#568), and the
                   plain borrow the parser and the page read through is a view of the
                   same bytes *)
-               prval taken = TAKEN_of(inflates, text_of, held)
+               prval taken = TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held))
                val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
@@ -4899,7 +4899,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
               (case+ taken_text of
                 | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
                   (* the text is the barr of the take, as the facing page's is (#568, #849) *)
-                  prval taken = TAKEN_of(inflates, text_of, held)
+                  prval taken = TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held))
                   val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                   val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                 in
@@ -5959,8 +5959,8 @@ fn _scan_piece {data_location,query_location:agz}{data_size:pos}{offset,piece_le
 
 (* The pieces of text data[offset, offset + text_len), as _text_spans makes them,
    from a content node: their hits, and the next node's number *)
-fun _scan_text {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{offset,text_len:nat | offset + text_len <= data_size}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<text_len>.
-  (taken: TAKEN(kind, compressed, cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), offset: int offset, text_len: int text_len, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
+fun _scan_text {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_len <= data_size}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<text_len>.
+  (taken: TEXT_TAKEN(cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), offset: int offset, text_len: int text_len, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
    chapter: Int, node: Nat, found: hits(hit_count), hit_count: int hit_count)
   : [count:pos][new_count:nat | new_count <= HIT_MAX] (PIECES(cs, offset, text_len, count) | @(Nat, hits(new_count), int new_count)) =
   if text_len < 65536 then let
@@ -5974,8 +5974,8 @@ fun _scan_text {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{ki
 
 (* The numbers _scan_text takes for text data[offset, offset + text_len),
    as _text_spans makes its pieces, with nothing searched *)
-fn _text_count {data_location:agz}{data_size:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{offset,text_len:nat | offset + text_len <= data_size}
-  (taken: TAKEN(kind, compressed, cs, data_size) | bytes: !$A.cborrow(data_location, data_size, cs), offset: int offset, text_len: int text_len, node: Nat): Nat = let
+fn _text_count {data_location:agz}{data_size:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_len <= data_size}
+  (taken: TEXT_TAKEN(cs, data_size) | bytes: !$A.cborrow(data_location, data_size, cs), offset: int offset, text_len: int text_len, node: Nat): Nat = let
   val (_ | count) = pieces_find(bytes, offset, text_len)
 in node + count end
 
@@ -6031,8 +6031,8 @@ in
   else is(data, ruby_parenthesis, 2)
 end
 
-fun _scan_nodes {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 1>.
-  (taken: TAKEN(kind, compressed, cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), nodes: !$X.xml_node_list(data_size, tree_size), top: bool, searched: bool,
+fun _scan_nodes {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{tree_size:nat}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 1>.
+  (taken: TEXT_TAKEN(cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), nodes: !$X.xml_node_list(data_size, tree_size), top: bool, searched: bool,
    query: !$A.arr(byte, query_location, query_size), query_len: int query_len, chapter: Int, content_node: Nat, found: hits(hit_count), hit_count: int hit_count)
   : [new_count:nat | new_count <= HIT_MAX] @(Nat, hits(new_count), int new_count) =
   case+ nodes of
@@ -6041,8 +6041,8 @@ fun _scan_nodes {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{k
     in _scan_nodes(taken | data, bytes, rest, top, searched, query, query_len, chapter, next_node, found_after, new_count) end
   | $X.xml_nodes_nil() => @(content_node, found, hit_count)
 
-and _scan_node {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:pos}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 0>.
-  (taken: TAKEN(kind, compressed, cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), node: !$X.xml_node(data_size, tree_size), top: bool, searched: bool,
+and _scan_node {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{tree_size:pos}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 0>.
+  (taken: TEXT_TAKEN(cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), node: !$X.xml_node(data_size, tree_size), top: bool, searched: bool,
    query: !$A.arr(byte, query_location, query_size), query_len: int query_len, chapter: Int, content_node: Nat, found: hits(hit_count), hit_count: int hit_count)
   : [new_count:nat | new_count <= HIT_MAX] @(Nat, hits(new_count), int new_count) =
   case+ node of
@@ -6251,8 +6251,8 @@ fun _hits_locate {count:nat} .<count>. (found: !hits(count), fresh: Int, chapter
       in end)
 
 (* The hits of the chapter data[0, n) (the chapter given), added *)
-fn _search_add {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}
-  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
+fn _search_add {l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}
+  (taken: TEXT_TAKEN(cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
   case+ _search_take() of
   | ~SearchNone() => ()
   | ~SearchCell(found, hit_count, query, query_len) => let
@@ -6262,8 +6262,8 @@ fn _search_add {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.c
       val () = _hits_locate(found_after, count_after - hit_count, chapter, total_nodes, layout)
     in _search_put(SearchCell(found_after, count_after, query, query_len)) end
 
-fn _search_add_if {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}
-  (taken: TAKEN(kind, compressed, cs, n) | generation: int, data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
+fn _search_add_if {l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}
+  (taken: TEXT_TAKEN(cs, n) | generation: int, data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
   if generation = !_search_generation then _search_add(taken | data, bytes, nodes, chapter, layout) else ()
 
 fn _search_full (): bool =
@@ -6301,7 +6301,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
              in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
            val () = (case+ taken_text of
              | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
-                 prval taken = TAKEN_of(inflates, text_of, held)
+                 prval taken = TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held))
                  val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                  val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                  val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
@@ -6320,8 +6320,8 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
 val _places_generation = ref<int>(0)
 
 (* Counts the content nodes of the chapter data[0, n), as render and a search number them *)
-fn _count_nodes {data_location:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}
-  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, data_location, n), bytes: !$A.cborrow(data_location, n, cs), nodes: !$X.xml_node_list(n, tree_size)): Nat = let
+fn _count_nodes {data_location:agz}{n:pos}{cs:$A.cells}{tree_size:nat}
+  (taken: TEXT_TAKEN(cs, n) | data: !$A.borrow(byte, data_location, n), bytes: !$A.cborrow(data_location, n, cs), nodes: !$X.xml_node_list(n, tree_size)): Nat = let
   val query = $A.alloc<byte>(1)
   val () = _tail_begin()
   val @(total, found, _) = _scan_nodes(taken | data, bytes, nodes, true, false, query, 1, 0, 0, hits_nil(), 0)
@@ -6360,7 +6360,7 @@ fun _places_chapters {after:int | after >= ~1}{bound:nat} .<max(bound - after, 0
                in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
              val () = (case+ taken_text of
                | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
-                   prval taken = TAKEN_of(inflates, text_of, held)
+                   prval taken = TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held))
                    val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                    val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                    val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
@@ -7563,8 +7563,8 @@ fun _text_runs_reverse {n:int}{count,reversed_count:nat} .<count>.
 (* The pieces of text data[offset, offset + text_len), as _text_spans
    makes them, from a content node on: as runs of block, and the next
    node's number *)
-fun _runs_text {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{offset,text_len:nat | offset + text_len <= n}{count:nat} .<text_len>.
-  (taken: TAKEN(kind, compressed, cs, n) | bytes: !$A.cborrow(l, n, cs), offset: int offset, text_len: int text_len, block: Nat, node: Nat, found: text_runs(n, count))
+fun _runs_text {l:agz}{n:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_len <= n}{count:nat} .<text_len>.
+  (taken: TEXT_TAKEN(cs, n) | bytes: !$A.cborrow(l, n, cs), offset: int offset, text_len: int text_len, block: Nat, node: Nat, found: text_runs(n, count))
   : [pieces:pos][new_count:nat] (PIECES(cs, offset, text_len, pieces) | @(Nat, text_runs(n, new_count))) =
   if text_len < 65536 then (PIECES_last() | @(node + 1, TextRun(block, node, offset, text_len, found)))
   else let
@@ -7579,8 +7579,8 @@ fun _runs_text {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.c
    not read, nor a ruby's readings and parentheses (rt, rtc, rp), whose
    nodes are counted all the same. The next content node's number, the
    blocks' count, and the runs found (the latest first) *)
-fun _runs_nodes {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}{count:nat} .<tree_size, 1>.
-  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), top: bool, readable: bool,
+fun _runs_nodes {l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}{count:nat} .<tree_size, 1>.
+  (taken: TEXT_TAKEN(cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), top: bool, readable: bool,
    block: Int, blocks: Nat, content_node: Nat, found: text_runs(n, count))
   : [new_count:nat] @(Nat, Nat, text_runs(n, new_count)) =
   case+ nodes of
@@ -7589,8 +7589,8 @@ fun _runs_nodes {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.
     in _runs_nodes(taken | data, bytes, rest, top, readable, block, next_blocks, next_node, found_after) end
   | $X.xml_nodes_nil() => @(content_node, blocks, found)
 
-and _runs_node {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:pos}{count:nat} .<tree_size, 0>.
-  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), node: !$X.xml_node(n, tree_size), top: bool, readable: bool,
+and _runs_node {l:agz}{n:pos}{cs:$A.cells}{tree_size:pos}{count:nat} .<tree_size, 0>.
+  (taken: TEXT_TAKEN(cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), node: !$X.xml_node(n, tree_size), top: bool, readable: bool,
    block: Int, blocks: Nat, content_node: Nat, found: text_runs(n, count))
   : [new_count:nat] @(Nat, Nat, text_runs(n, new_count)) =
   case+ node of
@@ -7924,8 +7924,8 @@ implement $P.dispose<script>(script) = script_free(script)
 
 (* The script of the chapter data[0, n), whose nodes are nodes, of
    index chapter *)
-fn _script_make {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}
-  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Nat): script = let
+fn _script_make {l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}
+  (taken: TEXT_TAKEN(cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Nat): script = let
   val () = _lang_drop(_run_lang_swap(NoBookLang()))
   val () = _block_langs_free(_block_langs_swap(_block_langs_empty()))
   val @(_, _, found) = _runs_nodes(taken | data, bytes, nodes, true, true, ~1, 0, 0, TextRunsEnd())
@@ -7982,7 +7982,7 @@ in
        in
          (case+ taken_text of
            | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
-               prval taken = TAKEN_of(inflates, text_of, held)
+               prval taken = TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held))
                val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                val nodes = xhtml_parse(xhtml_bytes, xhtml_size)

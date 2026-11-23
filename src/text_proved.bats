@@ -456,6 +456,14 @@ in
   else @(back, OutsideMalformed())
 end
 
+(* TEXT_TAKEN(text, count): the walks take the text of a document whose cells came by zip's inflate (TAKEN) or from outside
+   (OUTSIDE_TAKEN), whichever made them (keyword: outside-text); the walks keep no more of either than the cells *)
+#pub dataprop TEXT_TAKEN($A.cells, int) =
+  | {kind:$Z.inflate_kind}{compressed,text:$A.cells}{count:int}
+    TEXT_TAKEN_inflated(text, count) of TAKEN(kind, compressed, text, count)
+  | {output,text:$A.cells}{count:int}
+    TEXT_TAKEN_outside(text, count) of OUTSIDE_TAKEN(output, text, count)
+
 (* fixture: the-end-of-text-proved *)
 (* The end of text_proved: the static fixtures of tests/static/reject named text-proved are put before this line *)
 
