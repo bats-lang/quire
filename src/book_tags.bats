@@ -16,7 +16,7 @@ fun _is_at {l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}{i:nat | i <= k} .<k
     val (_ | value) = $A.cborrow_get(bytes, offset + i)
     val letter = char2int1(string_get_at(text, i))
   in
-    if byte2int0(value) = letter then _is_at(bytes, offset, text, length, i + 1) else false
+    if value = letter then _is_at(bytes, offset, text, length, i + 1) else false
   end
 
 fn _is {l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}{m:nat}
@@ -27,7 +27,7 @@ in
 end
 
 (* The tag a name is, or none when the book's tags do not include it (an element of another name is not a book element) *)
-#pub datatype book_tag_found =
+#pub datavtype book_tag_found =
   | TagFound of ($DB.book_tag)
   | TagNone of ()
 

@@ -4798,6 +4798,10 @@ implement load_shown (outcome) =
   | ChapterNotRead() => false
   | ChapterSuperseded() => false
 
+(* The promises of this module that hold a text or an outside text give them back (keyword: outside-chain) *)
+implement $P.dispose<text_either>(text) = text_either_free(text)
+implement $P.dispose<outside_text>(text) = outside_text_free(text)
+
 (* The text of the chapter entry [data_offset, data_offset + data_size): read as outside cells of the book's outside copy when it
    has one (the browser decompresses them), else taken in the app (zip's inflate) as before; the sum the archive states is
    checked on the inflated cells either way (quire#529, #849; keyword: outside-chain) *)

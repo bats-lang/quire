@@ -499,7 +499,7 @@ implement text_either_of_outside {cs} (taken) =
     TextEither(TEXT_TAKEN_outside(OUTSIDE_TAKEN_of(from, text_of, held)), length, OUTSIDE_OPT_yes(from) | owner, array, count, true)
   | other => let val () = outside_taken_free(other) in TextEitherNone() end
 
-(* A text nobody took, given back (the orphan rule: text_either is this package's own type) *)
+(* A text nobody took, given back (a module that makes a promise of text_either implements its dispose with this, as import's hrefs do) *)
 #pub fn text_either_free (text: text_either): void
 
 implement text_either_free (text) =
@@ -507,8 +507,6 @@ implement text_either_free (text) =
   | ~TextEither(_, _, _ | owner, array, _, _) => text_give_back(owner, array)
   | ~TextEitherNone() => ()
   | ~TextEitherNoRoom() => ()
-
-implement $P.dispose<text_either>(text) = text_either_free(text)
 
 (* fixture: the-end-of-text-proved *)
 (* The end of text_proved: the static fixtures of tests/static/reject named text-proved are put before this line *)

@@ -224,6 +224,7 @@ implement $P.dispose<archive_outcome>(outcome) =
   | ~ArchiveFailed(_cause) => ()
 
 implement $P.dispose<hrefs>(found) = hrefs_free(found)
+implement $P.dispose<outside_put>(_) = ()
 
 (* Why an archive could not be imported, matched case by case *)
 fn _archive_named (cause: archive_failure): named_failure =
