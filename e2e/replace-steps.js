@@ -149,7 +149,7 @@ export async function coverBytes(page) {
 /** How many paragraphs begin on the page shown */
 const beginning = page => bookPage(page).evaluate(doc => {
   const c = doc.getBoundingClientRect();
-  return [...doc.querySelectorAll('p')].filter(e => {
+  return [...doc.querySelectorAll('p:not([data-book-element])')].filter(e => {
     const r = e.getBoundingClientRect();
     return r.width > 0 && r.left >= c.left - 1 && r.left < c.right;
   }).length;
@@ -166,7 +166,7 @@ export async function selectLastText(page, from, to) {
   }
   await bookPage(page).evaluate((doc, [from, to]) => {
     const c = doc.getBoundingClientRect();
-    const starting = [...doc.querySelectorAll('p')].filter(e => {
+    const starting = [...doc.querySelectorAll('p:not([data-book-element])')].filter(e => {
       const r = e.getBoundingClientRect();
       return r.width > 0 && r.left >= c.left - 1 && r.left < c.right;
     });

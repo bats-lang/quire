@@ -1141,6 +1141,7 @@ implement import_external (handed) =
   | ~$BE.External(book_file, name) => let
       val file_size = $BF.file_size(book_file)
       val () = _keep_name(name)
+      val () = outside_slot_clear()
     in _import_file(book_file, file_size, OpenHeld()) end
 
 (* ============================================================

@@ -136,11 +136,16 @@ fn _slot_set {n:nat} (file: $BO.infile_outside(n)): void = let
   val size = $BO.file_size_outside(file)
 in _slot_replace(OutsideHeld(file, size)) end
 
+(* No book's file in the slot: a book that has no outside copy must not be read from another's (keyword: outside-chain) *)
+#pub fn outside_slot_clear (): void
+
+implement outside_slot_clear () = _slot_replace(OutsideEmpty())
+
 fn _after_open (opened: $BO.opened_outside): bool =
   case+ opened of
   | ~$BO.OpenedOutside(file) => let val () = _slot_set(file) in true end
-  | ~$BO.NotOpenedOutside() => false
-  | ~$BO.OpenFailedOutside() => false
+  | ~$BO.NotOpenedOutside() => let val () = _slot_replace(OutsideEmpty()) in false end
+  | ~$BO.OpenFailedOutside() => let val () = _slot_replace(OutsideEmpty()) in false end
 
 (* The file the reader picked (kind 0: the import input, 1: the empty library's input) or dropped (kind 2 and over), file_index of
    them, opened as outside bytes into the slot: whether it was *)
@@ -203,8 +208,8 @@ implement outside_book_idb_get (key, key_size) =
   $P.and_then<$BO.file_lookup_outside><bool>($BO.file_idb_get_outside(key, key_size), llam(found) =>
     case+ found of
     | ~$BO.FoundOutside(file) => let val () = _slot_set(file) in $P.ret<bool>(true) end
-    | ~$BO.NotFoundOutside() => $P.ret<bool>(false)
-    | ~$BO.LookupFailedOutside() => $P.ret<bool>(false))
+    | ~$BO.NotFoundOutside() => let val () = outside_slot_clear() in $P.ret<bool>(false) end
+    | ~$BO.LookupFailedOutside() => let val () = outside_slot_clear() in $P.ret<bool>(false) end)
 
 (* An entry of the file in the slot, [offset, offset + size) of it, read as outside cells, decompressed by the browser when method says
    and taken as text against the sum (want_high, want_low); none when there is no slot file of file_size bytes, or the entry is over 1 MiB *)
