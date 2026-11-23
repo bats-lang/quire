@@ -8,9 +8,12 @@
 
 #use array as A
 #use promise as P
+#use zip as Z
 
 staload "book.sats"
 staload "text_proved.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BO = "wasm.bats-packages.dev/bridge/src/outside.sats"
 
 (* An entry's text from the browser's decompression: its cells are outside bytes, with their proofs (keyword: outside-chain) *)
@@ -96,5 +99,140 @@ implement outside_file_free (file) =
   case+ file of
   | ~OutsideFile(held) => $BO.file_close_outside(held)
   | ~OutsideFileNone() => ()
+
+
+(* ===== the open book's outside copy (keyword: outside-chain) ===== *)
+
+(* The picked, dropped or stored file of the book in hand, as outside bytes: held by JS in its own table (not the book cell's file) *)
+datavtype outside_slot =
+  | {n:nat} OutsideHeld of ($BO.infile_outside(n), int n)
+  | OutsideEmpty of ()
+
+val _slot = ref<outside_slot>(OutsideEmpty())
+
+fn _slot_take (): outside_slot = let
+  var held: outside_slot = OutsideEmpty()
+  val () = ref_exch_elt<outside_slot>(_slot, held)
+in held end
+
+(* Puts held in the slot; what was there is closed *)
+fn _slot_replace (held: outside_slot): void = let
+  var previous: outside_slot = held
+  val () = ref_exch_elt<outside_slot>(_slot, previous)
+in
+  case+ previous of
+  | ~OutsideHeld(old, _) => $BO.file_close_outside(old)
+  | ~OutsideEmpty() => ()
+end
+
+fn _slot_set {n:nat} (file: $BO.infile_outside(n)): void = let
+  val size = $BO.file_size_outside(file)
+in _slot_replace(OutsideHeld(file, size)) end
+
+fn _after_open (opened: $BO.opened_outside): bool =
+  case+ opened of
+  | ~$BO.OpenedOutside(file) => let val () = _slot_set(file) in true end
+  | ~$BO.NotOpenedOutside() => false
+  | ~$BO.OpenFailedOutside() => false
+
+(* The file the reader picked (kind 0: the import input, 1: the empty library's input) or dropped (kind 2 and over), file_index of
+   them, opened as outside bytes into the slot: whether it was *)
+#pub fn outside_book_pick (kind: int, file_index: int): $P.promise(bool, $P.Chained)
+
+implement outside_book_pick (kind, file_index) =
+  if kind >= 2 then
+    $P.and_then<$BO.opened_outside><bool>($BO.dropped_open_at_outside(file_index), llam(opened) => $P.ret<bool>(_after_open(opened)))
+  else if kind = 1 then let
+    val input_id = $A.alloc<byte>(17)
+    val () = $A.write_text(input_id, 0, $A.text_lit("empty-import-file"), 17)
+    val @(id_frozen, id_bytes) = $A.freeze<byte>(input_id)
+    val opening = $BO.file_open_at_outside(id_bytes, 17, file_index)
+    val () = $A.drop<byte>(id_frozen, id_bytes)
+    val () = $A.free<byte>($A.thaw<byte>(id_frozen))
+  in $P.and_then<$BO.opened_outside><bool>(opening, llam(opened) => $P.ret<bool>(_after_open(opened))) end
+  else let
+    val input_id = $A.alloc<byte>(11)
+    val () = $A.write_text(input_id, 0, $A.text_lit("import-file"), 11)
+    val @(id_frozen, id_bytes) = $A.freeze<byte>(input_id)
+    val opening = $BO.file_open_at_outside(id_bytes, 11, file_index)
+    val () = $A.drop<byte>(id_frozen, id_bytes)
+    val () = $A.free<byte>($A.thaw<byte>(id_frozen))
+  in $P.and_then<$BO.opened_outside><bool>(opening, llam(opened) => $P.ret<bool>(_after_open(opened))) end
+
+(* The slot's file stored in the second IndexedDB database under key *)
+#pub fn outside_book_idb_put {key_loc:agz}{key_size:pos}
+  (key: !$A.borrow(byte, key_loc, key_size), key_size: int key_size): $P.promise($IDB.stored, $P.Chained)
+
+implement outside_book_idb_put (key, key_size) = let
+  val held = _slot_take()
+in
+  case+ held of
+  | @OutsideHeld(file, _) => let
+      val stored = $BO.file_idb_put_outside(key, key_size, file)
+      prval () = fold@(held)
+      val () = _slot_replace(held)
+    in stored end
+  | ~OutsideEmpty() => $P.ret<$IDB.stored>($IDB.NotStored())
+end
+
+(* The file stored under key in the second IndexedDB database, into the slot: whether it was found *)
+#pub fn outside_book_idb_get {key_loc:agz}{key_size:pos}
+  (key: !$A.borrow(byte, key_loc, key_size), key_size: int key_size): $P.promise(bool, $P.Chained)
+
+implement outside_book_idb_get (key, key_size) =
+  $P.and_then<$BO.file_lookup_outside><bool>($BO.file_idb_get_outside(key, key_size), llam(found) =>
+    case+ found of
+    | ~$BO.FoundOutside(file) => let val () = _slot_set(file) in $P.ret<bool>(true) end
+    | ~$BO.NotFoundOutside() => $P.ret<bool>(false)
+    | ~$BO.LookupFailedOutside() => $P.ret<bool>(false))
+
+(* An entry of the file in the slot, [offset, offset + size) of it, read as outside cells, decompressed by the browser when method says
+   and taken as text against the sum (want_high, want_low); none when there is no slot file of file_size bytes, or the entry is over 1 MiB *)
+fn _chapter_read {n:nat}{f:nat}{k:pos | f + k <= n; k <= 1048576}
+  (file: !$BO.infile_outside(n), offset: int f, size: int k, stored: bool, want_high: int, want_low: int)
+  : $P.promise(outside_text, $P.Chained) = let
+  val out = $A.alloc<byte>(size)
+  val (read, length, lent | cells) = $BO.file_read_outside(file, offset, out, size)
+in
+  if stored then let
+    val @(back, taken) = take_text_outside_sum(read, length | cells, size, want_high, want_low)
+    val () = $A.free<byte>($A.barr_to_arrx(lent | back))
+  in $P.ret<outside_text>(OutsideText(taken)) end
+  else let
+    val @(frozen, view) = $A.barr_freeze(cells)
+    val deciding = $BO.decompress_outside(read | view, size, $BD.DeflateRaw())
+    val () = $A.cborrow_drop(frozen, view)
+    val () = $A.free<byte>($A.barr_to_arrx(lent | $A.barr_thaw(frozen)))
+  in
+    $P.and_then<$BO.decompressed_outside><outside_text>(deciding, llam(inflated) =>
+      $P.ret<outside_text>(take_outside_text_sum(inflated, SumKnown(want_high, want_low))))
+  end
+end
+
+#pub fn outside_chapter_text {f,k:int}
+  (file_size: int, offset: int f, size: int k, method: $Z.compression, want_high: int, want_low: int): $P.promise(outside_text, $P.Chained)
+
+implement outside_chapter_text {f,k} (file_size, offset, size, method, want_high, want_low) = let
+  val held = _slot_take()
+in
+  case+ held of
+  | @OutsideHeld(file, held_size) =>
+    if held_size = file_size then
+      (if offset >= 0 then
+        (if size > 0 then
+          (if size <= 1048576 then
+            (if offset + size <= held_size then let
+               val stored = (case+ method of $Z.Stored() => true | $Z.Deflated() => false)
+               val got = _chapter_read(file, offset, size, stored, want_high, want_low)
+               prval () = fold@(held)
+               val () = _slot_replace(held)
+             in got end
+             else let prval () = fold@(held); val () = _slot_replace(held) in $P.ret<outside_text>(OutsideTextNone()) end)
+           else let prval () = fold@(held); val () = _slot_replace(held) in $P.ret<outside_text>(OutsideTextNone()) end)
+         else let prval () = fold@(held); val () = _slot_replace(held) in $P.ret<outside_text>(OutsideTextNone()) end)
+       else let prval () = fold@(held); val () = _slot_replace(held) in $P.ret<outside_text>(OutsideTextNone()) end)
+    else let prval () = fold@(held); val () = _slot_replace(held) in $P.ret<outside_text>(OutsideTextNone()) end
+  | ~OutsideEmpty() => $P.ret<outside_text>(OutsideTextNone())
+end
 
 end (* #target wasm *)
