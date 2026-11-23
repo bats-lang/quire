@@ -10,6 +10,9 @@ fn _static_taken {cs:$A.cells} (taken: outside_taken(cs)): bool =
   | ~OutsideTaken(_, _, _, _ | owner, array, _) => let
       val () = text_give_back(owner, array)
     in true end
+  | ~OutsideTakenAsIs(_, _, _, _ | owner, array, _) => let
+      val () = text_give_back(owner, array)
+    in true end
   | ~OutsideRefused(_, _ | ) => false
   | ~OutsideMalformed() => false
   | ~OutsideTooLarge() => false

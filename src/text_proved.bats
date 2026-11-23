@@ -375,6 +375,9 @@ implement text_taken_free {kind}{cs} (taken) =
       HOLDS(text, 0, octets, count), $A.CLEN(text, count) | text_owner(l, count), $A.barr(l, count, text), int count)
   | {output:$A.cells}{out:textout}
     OutsideRefused(output) of ($BO.OUTSIDE_READ(output), TEXTOF(output, PlanRefused(), out) | )
+  | {output:$A.cells}{plan:plan}{octets:bytes}{count:pos}{l:agz}
+    OutsideTakenAsIs(output) of ($BO.OUTSIDE_READ(output), TEXTOF(output, plan, TOUT_bytes(octets)),
+      HOLDS(output, 0, octets, count), $A.CLEN(output, count) | text_owner(l, count), $A.barr(l, count, output), int count)
   | {output:$A.cells} OutsideMalformed(output) of ()
   | {output:$A.cells} OutsideTooLarge(output) of ()
 
@@ -397,7 +400,7 @@ in
       prval (as_is, held) = _as_is_holds(plan, length)
       val () = $A.cborrow_drop(frozen, view)
       val back = $A.barr_thaw(frozen)
-    in @(outside, OutsideTaken(from, as_is, held, length | text_owner_heap(), back, n)) end
+    in @(outside, OutsideTakenAsIs(from, as_is, held, length | text_owner_heap(), back, n)) end
   | ProvedRefused() => let
       val () = $A.cborrow_drop(frozen, view)
       val back = $A.barr_thaw(frozen)
@@ -438,6 +441,7 @@ implement take_text_outside {l}{n}{cs} (from, length | outside, n) = _read_outsi
 implement outside_taken_free {cs} (taken) =
   case+ taken of
   | ~OutsideTaken(_, _, _, _ | owner, array, _) => text_give_back(owner, array)
+  | ~OutsideTakenAsIs(_, _, _, _ | owner, array, _) => text_give_back(owner, array)
   | ~OutsideRefused(_, _ | ) => ()
   | ~OutsideMalformed() => ()
   | ~OutsideTooLarge() => ()
@@ -467,8 +471,13 @@ end
 
 (* A text for the walks, from whichever route made it (keyword: outside-text): zip's inflate in the app, or the browser's
    decompression of outside cells; none when it could not be had, no room when no array could be had for the entry *)
+#pub dataprop OUTSIDE_OPT($A.cells, bool) =
+  | {cs:$A.cells} OUTSIDE_OPT_yes(cs, true) of $BO.OUTSIDE_READ(cs)
+  | {cs:$A.cells} OUTSIDE_OPT_no(cs, false)
+
 #pub datavtype text_either =
-  | {l:agz}{n:pos}{text:$A.cells} TextEither of (TEXT_TAKEN(text, n), $A.CLEN(text, n) | text_owner(l, n), $A.barr(l, n, text), int n)
+  | {l:agz}{n:pos}{text:$A.cells}{b:bool}
+    TextEither of (TEXT_TAKEN(text, n), $A.CLEN(text, n), OUTSIDE_OPT(text, b) | text_owner(l, n), $A.barr(l, n, text), int n, bool b)
   | TextEitherNone of ()
   | TextEitherNoRoom of ()
 
@@ -477,7 +486,7 @@ end
 implement text_either_of_taken {kind}{cs} (taken) =
   case+ taken of
   | ~TextTaken(inflates, text_of, held, length | owner, array, count) =>
-    TextEither(TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held)), length | owner, array, count)
+    TextEither(TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held)), length, OUTSIDE_OPT_no() | owner, array, count, false)
   | other => let val () = text_taken_free(other) in TextEitherNone() end
 
 #pub fn text_either_of_outside {cs:$A.cells} (taken: outside_taken(cs)): text_either
@@ -485,7 +494,9 @@ implement text_either_of_taken {kind}{cs} (taken) =
 implement text_either_of_outside {cs} (taken) =
   case+ taken of
   | ~OutsideTaken(from, text_of, held, length | owner, array, count) =>
-    TextEither(TEXT_TAKEN_outside(OUTSIDE_TAKEN_of(from, text_of, held)), length | owner, array, count)
+    TextEither(TEXT_TAKEN_outside(OUTSIDE_TAKEN_of(from, text_of, held)), length, OUTSIDE_OPT_no() | owner, array, count, false)
+  | ~OutsideTakenAsIs(from, text_of, held, length | owner, array, count) =>
+    TextEither(TEXT_TAKEN_outside(OUTSIDE_TAKEN_of(from, text_of, held)), length, OUTSIDE_OPT_yes(from) | owner, array, count, true)
   | other => let val () = outside_taken_free(other) in TextEitherNone() end
 
 (* A text nobody took, given back (the orphan rule: text_either is this package's own type) *)
@@ -493,7 +504,7 @@ implement text_either_of_outside {cs} (taken) =
 
 implement text_either_free (text) =
   case+ text of
-  | ~TextEither(_, _ | owner, array, _) => text_give_back(owner, array)
+  | ~TextEither(_, _, _ | owner, array, _, _) => text_give_back(owner, array)
   | ~TextEitherNone() => ()
   | ~TextEitherNoRoom() => ()
 

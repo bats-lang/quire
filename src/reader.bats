@@ -20,6 +20,7 @@ staload "cut.sats"
 staload "text_proved.sats"
 staload "book.sats"
 staload "outside_chain.sats"
+staload DB = "wasm.bats-packages.dev/dom/src/book.sats"
 staload "pages.sats"
 staload "paths.sats"
 staload "overlay.sats"
@@ -4831,7 +4832,7 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
   | ~ChapterGot(file_size, chapter_start, compressed_size, method, chapter_name_offset, _, dir_len, _, _) =>
     $P.and_then<text_either><load_outcome>(_chapter_text(serial, file_size, chapter_start, compressed_size, method, chapter_name_offset), llam(either) =>
       case+ either of
-      | ~TextEither(taken, _ | text_array_owner, xhtml, xhtml_size) =>
+      | ~TextEither(taken, _, outside_own | text_array_owner, xhtml, xhtml_size, as_outside) =>
              if generation <> !_load_generation then let
                val () = text_give_back(text_array_owner, xhtml)
              in $P.ret<load_outcome>(ChapterSuperseded()) end
@@ -4879,7 +4880,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
     in
       $P.and_then<text_either><load_outcome>(_chapter_text(serial, file_size, chapter_start, compressed_size, method, chapter_name_offset), llam(either) =>
       case+ either of
-      | ~TextEither(taken, _ | text_array_owner, xhtml, xhtml_size) => let
+      | ~TextEither(taken, _, outside_own | text_array_owner, xhtml, xhtml_size, as_outside) => let
                   (* the text is the barr of the take, as the facing page's is (#568, #849) *)
                   val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                   val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
@@ -4953,6 +4954,16 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val () = !_render_into := IntoPage()
                   val () = _fragment_put(fragment)
                   val () = $D.destroy(doc)
+                  (* the book's container beside the page's content, when the text is outside bytes (keyword: book container) *)
+                  val () = (case+ layout of
+                    | PrePaginated() => ()
+                    | Reflowable() =>
+                      if as_outside then let
+                        prval OUTSIDE_OPT_yes(outside_read) = outside_own
+                        val book_doc = $DB.open_book_document(1)
+                        val _ = outside_container_make(outside_read | book_doc, xhtml_cells, xhtml_size)
+                      in $DB.close_book_document(book_doc) end
+                      else ())
                   val () = $X.free_nodes(nodes)
                   (* only the clip table is kept, for the narration *)
                   val () = _overlay_finish(chapter_index, generation)
