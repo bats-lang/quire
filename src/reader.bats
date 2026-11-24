@@ -2212,6 +2212,10 @@ fn _container_parent_id {parent:int | parent >= ~1} (parent: int parent): [l:agz
   in @(container_id, 14) end
   else _node_id(parent)
 
+(* The id of the element a content node is a child of: the container's when one is open *)
+fn _content_parent_id {parent:int | parent >= ~1} (parent: int parent): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len) =
+  if outside_sink_is_open() then _container_parent_id(parent) else _node_id(parent)
+
 (* An app's element of the open container (kind 0 span, 1 br, 2 hr, 3 img), the last child of parent; false when none is open *)
 fn _add_sink_app {parent:int | parent >= ~1}{node:nat} (parent: int parent, node: int node, kind: int): bool = let
   val @(node_id, node_id_len) = _node_id(node)
@@ -3395,7 +3399,7 @@ fn _math_add {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{node:nat}{na
     val name = $A.alloc<byte>(name_len)
     val () = $S.copy_from_borrow(data, name_offset, data_len, name, 0, name_len, name_len)
     val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
-    val @(parent_id, parent_id_len) = _node_id(parent)
+    val @(parent_id, parent_id_len) = _content_parent_id(parent)
     val @(node_id, node_id_len) = _node_id(node)
     val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent_id)
     val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)

@@ -10,7 +10,7 @@ staload "sheet.sats"
 staload "declarations.sats"
 staload "page_size.sats"
 
-#pub fn reader_rules {left:nat | left >= 14564} (sheet: sheet(left, false, false)): [after:nat | after >= left - 14564] sheet(after, false, false)
+#pub fn reader_rules {left:nat | left >= 14676} (sheet: sheet(left, false, false)): [after:nat | after >= left - 14676] sheet(after, false, false)
 
 (* The bars and title, from .rv on *)
 fn reader_rules_bars_and_title {left:nat | left >= 1730} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1730] sheet(after, false, false) = let
@@ -248,7 +248,7 @@ fn reader_rules_page_indicator_and_footer {left:nat | left >= 2400} (sheet: shee
 in sheet end
 
 (* The book text, from .sprobe on *)
-fn reader_rules_book_text {left:nat | left >= 1318} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1318] sheet(after, false, false) = let
+fn reader_rules_book_text {left:nat | left >= 1430} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1430] sheet(after, false, false) = let
   (* shown only by the typography's style, for a spread; a point the
      reader measures, never seen *)
   val sheet = rule(sheet, ".sprobe")
@@ -329,6 +329,11 @@ fn reader_rules_book_text {left:nat | left >= 1318} (sheet: sheet(left, false, f
   val sheet = close(sheet)
   val sheet = content_rule(layer | sheet, ".caf pre")
   val sheet = lay(sheet, WhiteSpace(), "pre-wrap")
+  val sheet = close(sheet)
+  (* a list of the chapter's top level is indented by the page's margins only, as the page's children were (.caf>* in style-type) *)
+  val sheet = content_rule(layer | sheet, ".caf>[data-book-container]>ul,.caf>[data-book-container]>ol")
+  val sheet = spaced(sheet, PaddingLeft(), SpaceNone())
+  val sheet = spaced(sheet, PaddingRight(), SpaceNone())
   val sheet = close(sheet)
   val sheet = content_rule(layer | sheet, ".caf blockquote")
   val sheet = prose_margin(sheet, Margin(), ProseOne(), ProseAuto())

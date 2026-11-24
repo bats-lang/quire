@@ -57,7 +57,7 @@ test('small, sub, sup, a caption and a footnote are smaller than the text and sc
       sub: await px(page, 'sub'),
       sup: await px(page, 'sup'),
       caption: await px(page, 'figcaption'),
-      note: await px(page, 'aside, div', "A footnote's text."),
+      note: await px(page, 'aside, div:not([data-book-container])', "A footnote's text."),
     };
     for (const [name, value] of Object.entries(sizes)) expect(value, `${name} at ${size}`).toBeLessThan(text);
   }

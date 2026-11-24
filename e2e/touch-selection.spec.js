@@ -125,6 +125,8 @@ async function fingerOn(page) {
   // the commands are carried out in the order they are sent
   const finger = {
     async down(x, y) {
+      // the page is drawn and its hit-test data is current before the finger lands on it (two frames, an event, not a time)
+      await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
       await expectEvent(page, 'pointerdown');
       send('mouseMoved', x, y); down = true; send('mousePressed', x, y);
       await arrived(page);
