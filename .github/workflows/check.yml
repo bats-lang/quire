@@ -72,12 +72,7 @@ jobs:
       reason: ${{ steps.queue.outputs.reason }}
       run_id: ${{ steps.number.outputs.id }}
     steps:
-      # Each job of this workflow prints how long it took in its last step
-      # (keyword: job clock, #1113), so a grep of `job took` in a run's logs
-      # shows the cold run of a pin move bounded. Avenue exhausted: bats has no
-      # clock (repository-prototype's pin-audit notes say so), a step has no
-      # duration of its own to print, and a composite action cannot start
-      # before the checkout it needs
+      # Job clock (keyword: job clock, #1113): the last step of each job prints `job took N s`
       - name: Start the job's clock
         run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
 
@@ -87,11 +82,7 @@ jobs:
         # pinned like the other pwa calls; the relock moves it (relock.yml's workflow-pins)
         uses: bats-lang/pwa/.github/actions/queue-passed@a565d7656e225c66c3b46bfacac3d6786e9afc63 # pwa main a565d76
 
-      # The number of that run, for the memo transfer (keyword: memo transfer,
-      # #1113). Avenue exhausted: the action outputs only the run's URL, an
-      # expression has no substring, and a pwa change is barred (pwa's
-      # CLAUDE.md, "Changes to pwa"), so one parameter expansion takes the last
-      # path segment
+      # The queue run's number, the last path segment of its URL (keyword: memo transfer, #1113)
       - name: The queue run's number
         id: number
         if: steps.queue.outputs.skip == 'true'
@@ -151,15 +142,7 @@ jobs:
         if: always()
         run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
 
-  # The app checked once, first, in a job of its own beside `build` (#1113: the
-  # check and the build were one job, and each is a cold 20 minutes after a
-  # compiler move, so the job took 47; keyword: cold pin move). A module that
-  # fails `bats check` ends the step, in about a minute, and the job goes on to
-  # the end as a success with the output `app` (the step's outcome): `check` is
-  # then the one failed job of the run (keyword: checked app, #974). The static
-  # groups take this build/ instead of each checking the app again. run.sh's
-  # `check` member is the copy of the checkout the groups work in and its
-  # `bats check`. Never skipped by the plan, like `build`
+  # The app checked once, beside `build`, never skipped by the plan (keyword: checked app, #1113)
   checked:
     if: github.event.action != 'destroyed'
     runs-on: ubuntu-24.04
@@ -169,8 +152,7 @@ jobs:
       - name: Start the job's clock
         run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
 
-      # The whole history: the facts of the commit (the version code counts the
-      # commits, #989) are written from git by bats
+      # The whole history: the version code counts the commits (#989)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -234,11 +216,7 @@ jobs:
         if: always()
         run: echo "job took $(( $(date +%s) - JOB_STARTED )) s"
 
-  # The app and the PWA, built once: the Android project and the e2e
-  # groups take them from here (the quire-android artifact). It reads
-  # nothing of the plan and is never skipped by it: the Android jobs need its
-  # artifact, and the Android job is never skipped by the plan (below), so a missing or
-  # malformed plan entry cannot make it skip (#656)
+  # The app and the PWA, built once, never skipped (keyword: quire-android artifact, #656)
   build:
     if: github.event.action != 'destroyed'
     runs-on: ubuntu-24.04
@@ -248,16 +226,12 @@ jobs:
       - name: Start the job's clock
         run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
 
-      # The whole history: the version names a pull request's own head (its
-      # merge's second parent, #219), and the Android version code is the
-      # number of commits reachable from it, which a shallow clone cannot
-      # count (#989; gen-pwa refuses one)
+      # The whole history: the version names the head and counts its commits (#219, #989)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      # The committed Play app signing SHA-1, which the android job has
-      # pwa's script compare with the upload key's
+      # The committed Play app signing SHA-1, which the android job compares with the upload key's
       - name: Play signing SHA-1
         id: clients
         run: |
@@ -271,9 +245,7 @@ jobs:
       - name: Set up bats
         uses: bats-lang/bats/.github/actions/setup@a7573acfad61d63cbe27cb68c18e997e7564fa98 # bats main a7573ac
 
-      # A pull request and the merge queue's group start from the newest
-      # build of the same toolchain (main's, or the pull request's own earlier
-      # push); a push to main and the nightly run build cold (#460, #586)
+      # A pull request and a merge group restore the newest build; main builds cold (#460)
       - name: Restore the compiler cache
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         uses: ./.github/actions/build-cache
@@ -534,12 +506,7 @@ jobs:
           QUIRE_MUTATION_BASE: ${{ steps.scope.outputs.base != 'none' && steps.scope.outputs.base || '' }}
         run: tests/static/run.sh $FIXTURES_COLD "${BATS_REPOSITORY:-none}" $GROUP_MEMBERS
 
-      # Memo transfer (keyword: memo transfer, #1113). A cache saved by a pull
-      # request or by a merge group is readable only by its own ref, and the
-      # push to main of a commit the queue passed runs no group (queue-passed),
-      # so no memo was ever in main's scope for the next run to restore. The
-      # queue's group uploads its memo, and that push downloads it and saves it
-      # as main's
+      # Memo transfer (keyword: memo transfer, #1113): the group's memo reaches main by artifact
       - name: Keep the memo for main
         if: github.event_name == 'merge_group' && env.GROUP_BATS == 'yes'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -884,9 +851,7 @@ jobs:
   # `check`, the required status, fails in the same run (keyword: checked app, #974)
   android:
     needs: [build, checked]
-    # a draft runs plan, checked and build only (#978, keyword: draft); not when the app's check failed:
-    # `checked` is a success then (its step went on)
-    # (keyword: checked app, #974); the contexts of a ready pull request are all reported (#656)
+    # a draft runs plan, checked and build only (#978, keyword: draft); not if the app failed (#974)
     if: needs.checked.outputs.app == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     # Pinned by commit; the relock workflow moves it (#203)
     uses: bats-lang/pwa/.github/workflows/android.yml@a565d7656e225c66c3b46bfacac3d6786e9afc63 # pwa main a565d76

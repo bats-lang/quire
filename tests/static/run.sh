@@ -347,7 +347,7 @@ fi
 # whose context is contradictory. Runs in the checked copy after the
 # fixtures (it leaves its build changed) and puts each module back.
 for member in $mutation_run; do
-  # the compiler's answers are kept in the group's memo, which the cache saves (#1113, keyword: mutation memo)
+  # the compiler's answers are kept in the group's memo (#1113, keyword: mutation memo)
   if (cd "$app" && QUIRE_MUTATION_MEMO="$TMP/memo" BATS_CHECK="bats check --repository $repository" python3 "$ROOT/tests/static/mutation_check.py" \
         --run "$app" --root "$ROOT" $mutation_diff --known "$ROOT/tests/static/mutation_known.txt" \
         --member "$member") > "$TMP/mutation.log" 2>&1; then echo "ok   $member: $(tail -1 "$TMP/mutation.log")"
