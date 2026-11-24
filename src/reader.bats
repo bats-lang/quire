@@ -5137,28 +5137,24 @@ fun _refs_style {l:agz}{n:pos}{cs:$A.cells}{r:nat} .<r>.
   | $CB.BRefFaceStyle(face, o, k, rest) =>
       if face = num then _style_value(bytes, o, k) else _refs_style(bytes, rest, num)
 
-(* A font file of a face: its entry is kept to be read (the face number is css's, below 32 by its own rule) *)
-fn _font_job_push {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}{r:nat}
+(* A font file of a face: its entry is kept to be read. The face number is css's own int; it is found among 0 to 31 so that its type says it is one *)
+fun _font_job_push {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}{r:nat}{i:nat | i <= 32} .<32 - i>.
   (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len,
    bytes: !$A.borrow(byte, l, n), n: int n, cells: !$A.cborrow(l, n, cs), all: !$CB.book_refs(n, r),
-   number: int, o: int o, k: int k): void = let
-  val face = g1ofg0(number)
-in
-  if face >= 0 then
-    (if face < 32 then
-      (case+ book_find_relative(serial, file_size, name_offset, dir_len, bytes, n, o, k) of
-       | ~EntryHit(data_offset, data_size, method, found_offset, _) => let
-           val weight = _refs_weight(cells, all, number)
-           val style = _refs_style(cells, all, number)
-           val () = !_font_total := !_font_total + 1
-         in
-           case+ _font_jobs_take() of
-           | ~FontJobsCell(xs) => _font_jobs_put(FontJobsCell(FontJobsCons(file_size, data_offset, data_size, method, found_offset, face, weight, style, xs)))
-         end
-       | ~EntryMiss() => ())
-     else ())
-  else ()
-end
+   number: int, o: int o, k: int k, i: int i): void =
+  if i >= 32 then ()
+  else if number = i then
+    (case+ book_find_relative(serial, file_size, name_offset, dir_len, bytes, n, o, k) of
+     | ~EntryHit(data_offset, data_size, method, found_offset, _) => let
+         val weight = _refs_weight(cells, all, number)
+         val style = _refs_style(cells, all, number)
+         val () = !_font_total := !_font_total + 1
+       in
+         case+ _font_jobs_take() of
+         | ~FontJobsCell(xs) => _font_jobs_put(FontJobsCell(FontJobsCons(file_size, data_offset, data_size, method, found_offset, i, weight, style, xs)))
+       end
+     | ~EntryMiss() => ())
+  else _font_job_push(serial, file_size, name_offset, dir_len, bytes, n, cells, all, number, o, k, i + 1)
 
 fun _font_jobs_collect {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{cs:$A.cells}{a,r:nat} .<r>.
   (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len,
@@ -5169,7 +5165,7 @@ fun _font_jobs_collect {file_size:pos}{name_offset,dir_len:nat | name_offset + d
   | $CB.BRefFaceWeight(_, _, _, rest) => _font_jobs_collect(serial, file_size, name_offset, dir_len, bytes, n, cells, all, rest)
   | $CB.BRefFaceStyle(_, _, _, rest) => _font_jobs_collect(serial, file_size, name_offset, dir_len, bytes, n, cells, all, rest)
   | $CB.BRefFaceSrc(number, o, k, rest) => let
-      val () = (if !_font_total < 64 then _font_job_push(serial, file_size, name_offset, dir_len, bytes, n, cells, all, number, o, k) else ())
+      val () = (if !_font_total < 64 then _font_job_push(serial, file_size, name_offset, dir_len, bytes, n, cells, all, number, o, k, 0) else ())
     in _font_jobs_collect(serial, file_size, name_offset, dir_len, bytes, n, cells, all, rest) end
 
 (* The font text either added as a face of the container of the chapter, when the chapter is still the one in hand *)
