@@ -19,6 +19,8 @@ staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload DB = "wasm.bats-packages.dev/dom/src/book.sats"
 staload BO = "wasm.bats-packages.dev/bridge/src/outside.sats"
+staload CB = "css/src/book.sats"
+#use css as C
 
 (* An entry's text from the browser's decompression: its cells are outside bytes, with their proofs (keyword: outside-chain) *)
 #pub datavtype outside_text =
@@ -387,9 +389,72 @@ implement outside_sink_is_open () =
   | ~BookSinkNone() => false
   | ~BookSinkOpen(doc, container) => let val () = _sink_put(BookSinkOpen(doc, container)) in true end
 
-(* The container and its document closed: the book's operations are flushed *)
+(* The container of the chapter last shown, kept after its walk for the sheets and faces that are read later (keyword: book sheets) *)
+datavtype held_container =
+  | HeldNone of ()
+  | HeldOpen of $DB.book_container(1)
+
+val _held = ref<held_container>(HeldNone())
+
+fn _held_take (): held_container = let
+  var held: held_container = HeldNone()
+  val () = ref_exch_elt<held_container>(_held, held)
+in held end
+
+(* Puts held away; what was there is closed *)
+fn _held_put (held: held_container): void = let
+  var previous: held_container = held
+  val () = ref_exch_elt<held_container>(_held, previous)
+in
+  case+ previous of
+  | ~HeldOpen(container) => $DB.close_book_container(container)
+  | ~HeldNone() => ()
+end
+
+(* The document closed: the book's operations are flushed. Its container is kept for the sheets, or none is when the chapter had none *)
 #pub fn outside_sink_close (): void
 
-implement outside_sink_close () = _sink_put(BookSinkNone())
+implement outside_sink_close () =
+  case+ _sink_take() of
+  | ~BookSinkNone() => _held_put(HeldNone())
+  | ~BookSinkOpen(doc, container) => let
+      val () = $DB.close_book_document(doc)
+    in _held_put(HeldOpen(container)) end
+
+(* The chapter last shown has its container still *)
+#pub fn outside_sheet_ready (): bool
+
+implement outside_sheet_ready () =
+  case+ _held_take() of
+  | ~HeldNone() => false
+  | ~HeldOpen(container) => let val () = _held_put(HeldOpen(container)) in true end
+
+(* A sheet of the book, read by css from outside cells, added to the container of the chapter last shown; false when it has none *)
+#pub fn outside_sheet_add {l:agz}{n:pos}{cs:$A.cells}
+  (from: $BO.OUTSIDE_READ(cs) | src: !$A.cborrow(l, n, cs), read: !$CB.book_read(cs, n, 1)): bool
+
+implement outside_sheet_add {l}{n}{cs} (from | src, read) =
+  case+ _held_take() of
+  | ~HeldNone() => false
+  | ~HeldOpen(container) => let
+      val doc = $DB.open_book_document(1)
+      val () = $DB.add_book_sheet(from | doc, container, src, read)
+      val () = $DB.close_book_document(doc)
+      val () = _held_put(HeldOpen(container))
+    in true end
+
+(* A face of the book, its bytes outside cells, added to the container of the chapter last shown *)
+#pub fn outside_face_add {l:agz}{n:nat}{cs:$A.cells}{o:nat}{k:pos | o + k <= n}{face:nat | face < 32}{weight:int | 1 <= weight; weight <= 1000}{style:int | 0 <= style; style <= 2}
+  (from: $BO.OUTSIDE_READ(cs) | src: !$A.cborrow(l, n, cs), off: int o, len: int k, face: int face, weight: int weight, style: int style): bool
+
+implement outside_face_add {l}{n}{cs}{o}{k}{face}{weight}{style} (from | src, off, len, face, weight, style) =
+  case+ _held_take() of
+  | ~HeldNone() => false
+  | ~HeldOpen(container) => let
+      val doc = $DB.open_book_document(1)
+      val () = $DB.add_book_font(from | doc, container, src, off, len, face, weight, style)
+      val () = $DB.close_book_document(doc)
+      val () = _held_put(HeldOpen(container))
+    in true end
 
 end (* #target wasm *)

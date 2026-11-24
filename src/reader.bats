@@ -4,6 +4,7 @@
 
 #include "share/atspre_staload.hats"
 #use array as A
+#use css as C
 #use arith as AR
 #use promise as P
 #use result as R
@@ -20,6 +21,7 @@ staload "cut.sats"
 staload "text_proved.sats"
 staload "book.sats"
 staload "outside_chain.sats"
+staload CB = "css/src/book.sats"
 staload DB = "wasm.bats-packages.dev/dom/src/book.sats"
 staload "pages.sats"
 staload "paths.sats"
@@ -3490,6 +3492,97 @@ fn _add_content_node {doc_location,l:agz}{n:pos}{cs:$A.cells}{b:bool}{parent:int
 (* Walk xml_node_list, rendering each node into parent (through doc's
    borrow operations: nothing is allocated for the page); the <img>
    elements met are added to found *)
+
+(* ===== the book's sheets (keyword: book sheets) ===== *)
+
+(* The paths of the sheets a chapter's head links (at most 16, each at most 1024 bytes), copied while its walk goes by *)
+datavtype sheet_paths(int) =
+  | SheetPathsNil(0) of ()
+  | {l:agz}{k:pos | k <= 1024}{m:nat} SheetPathsCons(m+1) of ($A.arr(byte, l, k), int k, sheet_paths(m))
+
+datavtype sheet_paths_cell = {count:nat} SheetPathsCell of sheet_paths(count)
+
+(* The entries the sheets are, by the name's place in the book's file *)
+datavtype sheet_names(int) =
+  | SheetNamesNil(0) of ()
+  | {name_offset,name_len:int}{m:nat} SheetNamesCons(m+1) of (int name_offset, int name_len, sheet_names(m))
+
+datavtype sheet_names_cell = {count:nat} SheetNamesCell of sheet_names(count)
+
+val _sheet_paths = ref<sheet_paths_cell>(SheetPathsCell(SheetPathsNil()))
+
+(* The sheets read for the chapter in hand, imports included: at most 32 *)
+val _sheet_total = ref<int>(0)
+
+fun _sheet_paths_free {count:nat} .<count>. (xs: sheet_paths(count)): void =
+  case+ xs of
+  | ~SheetPathsNil() => ()
+  | ~SheetPathsCons(buf, _, rest) => let
+      val () = $A.free<byte>(buf)
+    in _sheet_paths_free(rest) end
+
+fun _sheet_names_free {count:nat} .<count>. (xs: sheet_names(count)): void =
+  case+ xs of
+  | ~SheetNamesNil() => ()
+  | ~SheetNamesCons(_, _, rest) => _sheet_names_free(rest)
+
+fn _sheet_paths_take (): sheet_paths_cell = let
+  var held: sheet_paths_cell = SheetPathsCell(SheetPathsNil())
+  val () = ref_exch_elt<sheet_paths_cell>(_sheet_paths, held)
+in held end
+
+(* Keeps held; what was kept is freed *)
+fn _sheet_paths_put (held: sheet_paths_cell): void = let
+  var previous: sheet_paths_cell = held
+  val () = ref_exch_elt<sheet_paths_cell>(_sheet_paths, previous)
+in (case+ previous of ~SheetPathsCell(xs) => _sheet_paths_free(xs)) end
+
+(* A chapter begins: no sheet is linked yet *)
+fn _sheets_reset (): void = let
+  val () = _sheet_paths_put(SheetPathsCell(SheetPathsNil()))
+in !_sheet_total := 0 end
+
+fn _sheet_push {l:agz}{n:pos}{o:nat}{k:pos | o + k <= n; k <= 1024}
+  (data: !$A.borrow(byte, l, n), data_len: int n, o: int o, k: int k): void = let
+  val buf = $A.alloc<byte>(k)
+  val () = $S.copy_from_borrow(data, o, data_len, buf, 0, k, k)
+  val held = _sheet_paths_take()
+in (case+ held of ~SheetPathsCell(xs) => _sheet_paths_put(SheetPathsCell(SheetPathsCons(buf, k, xs)))) end
+
+(* A <link rel="stylesheet" href> of the head: its path is kept *)
+fn _sheet_link {l:agz}{n:pos}{attr_count:nat}{name_offset,name_len:nat | name_offset + name_len <= n}
+  (data: !$A.borrow(byte, l, n), data_len: int n, name_offset: int name_offset, name_len: int name_len,
+   attrs: !$X.xml_attr_list(n, attr_count)): void = let
+  var _tag_link = @[char][4]('l', 'i', 'n', 'k')
+in
+  if xml_name_eq(data, name_offset, name_len, _tag_link, 4) then let
+    var _attr_rel = @[char][3]('r', 'e', 'l')
+    var _attr_href = @[char][4]('h', 'r', 'e', 'f')
+    var _word = @[char][10]('s', 't', 'y', 'l', 'e', 's', 'h', 'e', 'e', 't')
+    val is_sheet = (case+ find_attr(data, attrs, _attr_rel, 3) of
+      | ~xspan_at(o, k) => xml_name_eq(data, o, k, _word, 10)
+      | ~xspan_none() => false): bool
+  in
+    if is_sheet then
+      (case+ find_attr(data, attrs, _attr_href, 4) of
+       | ~xspan_at(o, k) =>
+         if k > 0 then (if k <= 1024 then _sheet_push(data, data_len, o, k) else ()) else ()
+       | ~xspan_none() => ())
+    else ()
+  end
+  else ()
+end
+
+fun _sheets_collect {l:agz}{n:pos}{sz:nat} .<sz>.
+  (data: !$A.borrow(byte, l, n), data_len: int n, nodes: !$X.xml_node_list(n, sz)): void =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val () = (case+ node of
+        | $X.xml_element(name_offset, name_len, attrs, _) => _sheet_link(data, data_len, name_offset, name_len, attrs)
+        | $X.xml_text(_, _) => ())
+    in _sheets_collect(data, data_len, rest) end
+  | $X.xml_nodes_nil() => ()
+
 fun _render_nodes
   {doc_location,l:agz}{n:pos}{cs:$A.cells}{b:bool}{tree_size:nat}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 1>.
   (taken: TEXT_TAKEN(cs, n), own: OUTSIDE_OPT(cs, b) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
@@ -3532,7 +3625,10 @@ and _render_node
     var _tag_math = @[char][4]('m', 'a', 't', 'h')
   in
     (* Skipped: head, title, meta, link, style, script *)
-    if xml_name_eq(data, name_offset, name_len, _tag_head, 4) then found
+    if xml_name_eq(data, name_offset, name_len, _tag_head, 4) then let
+      (* its links to sheets are kept for the sheets' load (keyword: book sheets) *)
+      val () = _sheets_collect(data, data_len, children)
+    in found end
     else if xml_name_eq(data, name_offset, name_len, _tag_title, 5) then found
     else if xml_name_eq(data, name_offset, name_len, _tag_meta, 4) then found
     else if xml_name_eq(data, name_offset, name_len, _tag_link, 4) then found
@@ -4883,6 +4979,127 @@ fn _chapter_text {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + 
              val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
            in $P.ret<text_either>(text_either_of_taken(text)) end))
 
+
+(* The entries the @import rules of a sheet name, in order: the paths are relative to the sheet's own directory *)
+fun _imports_names {file_size:pos}{dir_name_offset,dir_len:nat | dir_name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{sz:nat} .<sz>.
+  (serial: int, file_size: int file_size, dir_name_offset: int dir_name_offset, dir_len: int dir_len,
+   data: !$A.borrow(byte, l, n), n: int n, imps: !$CB.book_imports(n, sz)): [m:nat] sheet_names(m) =
+  case+ imps of
+  | $CB.BImportsNil() => SheetNamesNil()
+  | $CB.BImportsCons(o, k, rest) => let
+      val tail = _imports_names(serial, file_size, dir_name_offset, dir_len, data, n, rest)
+    in
+      case+ book_find_relative(serial, file_size, dir_name_offset, dir_len, data, n, o, k) of
+      | ~EntryHit(_, _, _, found_offset, found_len) => SheetNamesCons(found_offset, found_len, tail)
+      | ~EntryMiss() => tail
+    end
+
+(* The @import entries of the sheet text either, an outside text of the entry name[name_offset, name_offset + name_len) *)
+fn _sheet_imports_of {file_size:pos}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+  (serial: int, file_size: int file_size, name_offset: int name_offset, name_len: int name_len, either: text_either): sheet_names_cell =
+  case+ either of
+  | ~TextEither(taken, length, own | owner, array, size, as_outside) => let
+      val @(frozen, cells) = $A.barr_freeze(array)
+      val bytes = $A.cborrow_view(frozen, cells)
+      val names = (if as_outside then let
+          prval OUTSIDE_OPT_yes(readable) = own
+          val read = $CB.book_sheet_read(cells, size, 1, @(250, 248, 245), @(240, 230, 210))
+          val dir_len = _opf_prefix_len(serial, file_size, name_offset, name_len)
+          val names = (case+ read of
+            | @$CB.BookRead(rules, imps, faces) => let
+                val names = _imports_names(serial, file_size, name_offset, dir_len, bytes, size, imps)
+                prval () = fold@(read)
+              in SheetNamesCell(names) end): sheet_names_cell
+          val () = $CB.book_read_free(read)
+        in names end
+        else SheetNamesCell(SheetNamesNil())): sheet_names_cell
+      val () = $A.cborrow_view_drop(frozen, bytes)
+      val () = $A.cborrow_drop(frozen, cells)
+      val () = text_give_back(owner, $A.barr_thaw(frozen))
+    in names end
+  | ~TextEitherNone() => SheetNamesCell(SheetNamesNil())
+  | ~TextEitherNoRoom() => SheetNamesCell(SheetNamesNil())
+
+(* The sheet text either added to the container of the chapter, when the chapter is still the one in hand: 1 when it was *)
+fn _sheet_added (generation: int, either: text_either): int =
+  case+ either of
+  | ~TextEither(taken, length, own | owner, array, size, as_outside) => let
+      val @(frozen, cells) = $A.barr_freeze(array)
+      val added = (if as_outside then (if generation = !_load_generation then let
+          prval OUTSIDE_OPT_yes(readable) = own
+          val read = $CB.book_sheet_read(cells, size, 1, @(250, 248, 245), @(240, 230, 210))
+          val added = outside_sheet_add(readable | cells, read)
+          val () = $CB.book_read_free(read)
+        in (if added then 1 else 0) end
+        else 0) else 0): int
+      val () = $A.cborrow_drop(frozen, cells)
+      val () = text_give_back(owner, $A.barr_thaw(frozen))
+    in added end
+  | ~TextEitherNone() => 0
+  | ~TextEitherNoRoom() => 0
+
+(* The sheet of the book that is the entry name[name_offset, name_offset + name_len): its imports first (four deep at most), then it *)
+fun _sheet_named {file_size,name_offset,name_len:int}{depth:nat | depth <= 5} .<5-depth, 0>.
+  (serial: int, file_size: int file_size, name_offset: int name_offset, name_len: int name_len, depth: int depth, generation: int): $P.promise(int, $P.Chained) =
+  if generation <> !_load_generation then $P.ret<int>(0)
+  else if depth >= 5 then $P.ret<int>(0)
+  else if !_sheet_total >= 32 then $P.ret<int>(0)
+  else if file_size <= 0 then $P.ret<int>(0)
+  else if name_offset < 0 then $P.ret<int>(0)
+  else if name_len <= 0 then $P.ret<int>(0)
+  else if name_len >= 65536 then $P.ret<int>(0)
+  else if name_offset + name_len > file_size then $P.ret<int>(0)
+  else let
+    val () = !_sheet_total := !_sheet_total + 1
+    val name = $A.alloc<byte>(name_len)
+    val _ = book_read(serial, file_size, name_offset, name, name_len)
+    val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
+    val hit = book_find_entry(serial, file_size, name_bytes, name_len)
+    val () = release_bytes(name_frozen, name_bytes)
+  in
+    case+ hit of
+    | ~EntryMiss() => $P.ret<int>(0)
+    | ~EntryHit(data_offset, data_size, method, found_offset, found_len) =>
+      $P.and_then<text_either><int>(_chapter_text(serial, file_size, data_offset, data_size, method, found_offset), llam(first) => let
+        val ~SheetNamesCell(names) = _sheet_imports_of(serial, file_size, found_offset, found_len, first)
+      in
+        $P.and_then<int><int>(_sheets_chain(serial, file_size, names, depth + 1, generation), llam(_) =>
+          $P.and_then<text_either><int>(_chapter_text(serial, file_size, data_offset, data_size, method, found_offset), llam(second) =>
+            $P.ret<int>(_sheet_added(generation, second))))
+      end)
+  end
+
+and _sheets_chain {file_size:int}{depth:nat | depth <= 5}{count:nat} .<5-depth, count>.
+  (serial: int, file_size: int file_size, names: sheet_names(count), depth: int depth, generation: int): $P.promise(int, $P.Chained) =
+  case+ names of
+  | ~SheetNamesNil() => $P.ret<int>(0)
+  | ~SheetNamesCons(name_offset, name_len, rest) =>
+    $P.and_then<int><int>(_sheet_named(serial, file_size, name_offset, name_len, depth, generation), llam(first) =>
+      $P.and_then<int><int>(_sheets_chain(serial, file_size, rest, depth, generation), llam(more) => $P.ret<int>(first + more)))
+
+(* The entries the paths of a chapter's links name, relative to the chapter's directory, in the order they were linked *)
+fun _sheet_paths_names {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{count,a:nat} .<count>.
+  (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len, xs: sheet_paths(count), acc: sheet_names(a)): [m:nat] sheet_names(m) =
+  case+ xs of
+  | ~SheetPathsNil() => acc
+  | ~SheetPathsCons(buf, k, rest) => let
+      val @(frozen, bytes) = $A.freeze<byte>(buf)
+      val acc = (case+ book_find_relative(serial, file_size, name_offset, dir_len, bytes, k, 0, k) of
+        | ~EntryHit(_, _, _, found_offset, found_len) => SheetNamesCons(found_offset, found_len, acc)
+        | ~EntryMiss() => acc): [m:nat] sheet_names(m)
+      val () = release_bytes(frozen, bytes)
+    in _sheet_paths_names(serial, file_size, name_offset, dir_len, rest, acc) end
+
+(* The sheets the chapter's head links, read from the book and added to its container (keyword: book sheets): how many were *)
+fn _sheets_load {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}
+  (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len, generation: int): $P.promise(int, $P.Chained) = let
+  val ~SheetPathsCell(paths) = _sheet_paths_take()
+in
+  if outside_sheet_ready() then
+    _sheets_chain(serial, file_size, _sheet_paths_names(serial, file_size, name_offset, dir_len, paths, SheetNamesNil()), 0, generation)
+  else let val () = _sheet_paths_free(paths) in $P.ret<int>(0) end
+end
+
 (* Shows chapter facing_index of book serial in the facing box of a
    spread, its content nodes going on from the page's, its size its
    viewport's (else the page's), its links and images its own. Shown
@@ -4982,6 +5199,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                       else false)
                   val () = !_content_count := 0
                   val () = !_part_count := 0
+                  val () = _sheets_reset()
                   val () = _links_put(LinksCell(links_nil()))
                   val () = _pictures_put(PicturesCell(pictures_nil()))
                   val () = _breaks_put(BreaksCell(breaks_nil()))
@@ -5042,12 +5260,15 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   (* The chapter's title in the top bar *)
                   val () = toc_title(chapter_index)
                   val () = (case+ reading_get() of @(_, _, _, chapter_count) => _ticks_show(chapter_count))
-                  val () = _tcy_refit()
-                  val () = _measure_pagination()
                   (* an annotation that names a node this chapter has not is not found in it *)
                   val () = annot_chapter_shown(!_content_count)
                   val () = annot_marks()
                 in
+                  (* the book's sheets are read before the pages are counted (keyword: book sheets) *)
+                  $P.and_then<int><load_outcome>(_sheets_load(serial, file_size, chapter_name_offset, dir_len, generation), llam(_) => let
+                  val () = _tcy_refit()
+                  val () = _measure_pagination()
+                  in
                   (* the facing page, on the other side; the page is
                      shown whatever becomes of it *)
                   case+ shape of
@@ -5058,6 +5279,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   | Single() => $P.ret<load_outcome>(ChapterShown())
                   | AloneLeft() => $P.ret<load_outcome>(ChapterShown())
                   | AloneRight() => $P.ret<load_outcome>(ChapterShown())
+                  end)
                 end
                 end
       | ~TextEitherNoRoom() => let
