@@ -362,6 +362,22 @@ implement outside_sink_element {l}{n}{cs}{li}{ni}{lp}{np}{o,k} (from | src, id, 
       val () = _sink_put(BookSinkOpen(doc, container))
     in true end
 
+(* The class names (kind 1), id (2) or epub:type (3) of a book element of the open container, from the text of the chapter (keyword: book names);
+   false when there is no container *)
+#pub fn outside_sink_names {l:agz}{n:pos}{cs:$A.cells}{li:agz}{ni:pos | ni <= 1024}{kind:int | 1 <= kind; kind <= 3}{o,k:nat | o + k <= n; k <= 65535}
+  (from: $BO.OUTSIDE_READ(cs) | src: !$A.cborrow(l, n, cs), id: !$A.borrow(byte, li, ni), id_len: int ni,
+   kind: int kind, off: int o, len: int k): bool
+
+implement outside_sink_names {l}{n}{cs}{li}{ni}{kind}{o,k} (from | src, id, id_len, kind, off, len) =
+  case+ _sink_take() of
+  | ~BookSinkNone() => false
+  | ~BookSinkOpen(doc, container) => let
+      val () = $DB.set_book_names(from | doc, container, id, id_len, kind, src, off, len)
+      val () = $DB.close_book_document(doc)
+      val doc = $DB.open_book_document(1)
+      val () = _sink_put(BookSinkOpen(doc, container))
+    in true end
+
 (* An app's element (a span, br, hr or img by kind 0, 1, 2, 3) of the open container, the last child of parent, applied at once as a book
    element is (keyword: book stream order); false when there is no container *)
 #pub fn outside_sink_app_element {li:agz}{ni:pos | ni <= 1024}{lp:agz}{np:pos | np <= 1024}

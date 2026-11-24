@@ -3489,6 +3489,29 @@ fn _add_content_node {doc_location,l:agz}{n:pos}{cs:$A.cells}{b:bool}{parent:int
   end
   else _add_app_node(doc, data, parent, node, kind, name_offset, name_len)
 
+(* The class, id and epub:type of an element of the book's container, which its sheets' selectors read (keyword: book names) *)
+fn _book_names {l:agz}{n:pos}{cs:$A.cells}{b:bool}{attr_count:nat}{node:nat}
+  (own: OUTSIDE_OPT(cs, b) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), as_book: bool b,
+   attrs: !$X.xml_attr_list(n, attr_count), node: int node): void =
+  if as_book then let
+    prval OUTSIDE_OPT_yes(readable) = own
+    var _attr_class = @[char][5]('c', 'l', 'a', 's', 's')
+    var _attr_id = @[char][2]('i', 'd')
+    var _attr_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
+    val @(node_id, node_id_len) = _node_id(node)
+    val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
+    val () = (case+ find_attr(data, attrs, _attr_class, 5) of
+      | ~xspan_at(o, k) => if k <= 65535 then (if outside_sink_names(readable | bytes, node_bytes, node_id_len, 1, o, k) then () else ()) else ()
+      | ~xspan_none() => ())
+    val () = (case+ find_attr(data, attrs, _attr_id, 2) of
+      | ~xspan_at(o, k) => if k <= 65535 then (if outside_sink_names(readable | bytes, node_bytes, node_id_len, 2, o, k) then () else ()) else ()
+      | ~xspan_none() => ())
+    val () = (case+ find_attr(data, attrs, _attr_type, 9) of
+      | ~xspan_at(o, k) => if k <= 65535 then (if outside_sink_names(readable | bytes, node_bytes, node_id_len, 3, o, k) then () else ()) else ()
+      | ~xspan_none() => ())
+  in release_bytes(node_frozen, node_bytes) end
+  else ()
+
 (* Walk xml_node_list, rendering each node into parent (through doc's
    borrow operations: nothing is allocated for the page); the <img>
    elements met are added to found *)
@@ -3513,6 +3536,32 @@ val _sheet_paths = ref<sheet_paths_cell>(SheetPathsCell(SheetPathsNil()))
 
 (* The sheets read for the chapter in hand, imports included: at most 32 *)
 val _sheet_total = ref<int>(0)
+
+(* The fonts the sheets' @font-face rules name, resolved to entries of the book (keyword: book fonts): at most 64 for a chapter *)
+datavtype font_jobs(int) =
+  | FontJobsNil(0) of ()
+  | {fs:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= fs; data_size <= 268435456}{name_offset:nat}{face:nat | face < 32}{weight:int | 1 <= weight; weight <= 1000}{style:int | 0 <= style; style <= 2}{m:nat}
+    FontJobsCons(m+1) of (int fs, int data_offset, int data_size, $Z.compression, int name_offset, int face, int weight, int style, font_jobs(m))
+
+datavtype font_jobs_cell = {count:nat} FontJobsCell of font_jobs(count)
+
+val _font_jobs = ref<font_jobs_cell>(FontJobsCell(FontJobsNil()))
+val _font_total = ref<int>(0)
+
+fun _font_jobs_free {count:nat} .<count>. (xs: font_jobs(count)): void =
+  case+ xs of
+  | ~FontJobsNil() => ()
+  | ~FontJobsCons(_, _, _, _, _, _, _, _, rest) => _font_jobs_free(rest)
+
+fn _font_jobs_take (): font_jobs_cell = let
+  var held: font_jobs_cell = FontJobsCell(FontJobsNil())
+  val () = ref_exch_elt<font_jobs_cell>(_font_jobs, held)
+in held end
+
+fn _font_jobs_put (held: font_jobs_cell): void = let
+  var previous: font_jobs_cell = held
+  val () = ref_exch_elt<font_jobs_cell>(_font_jobs, previous)
+in (case+ previous of ~FontJobsCell(xs) => _font_jobs_free(xs)) end
 
 fun _sheet_paths_free {count:nat} .<count>. (xs: sheet_paths(count)): void =
   case+ xs of
@@ -3540,6 +3589,8 @@ in (case+ previous of ~SheetPathsCell(xs) => _sheet_paths_free(xs)) end
 (* A chapter begins: no sheet is linked yet *)
 fn _sheets_reset (): void = let
   val () = _sheet_paths_put(SheetPathsCell(SheetPathsNil()))
+  val () = _font_jobs_put(FontJobsCell(FontJobsNil()))
+  val () = !_font_total := 0
 in !_sheet_total := 0 end
 
 fn _sheet_push {l:agz}{n:pos}{o:nat}{k:pos | o + k <= n; k <= 1024}
@@ -3719,6 +3770,7 @@ and _render_node
       val () = (if svg_end > 0 then !_svg_inside := !_svg_inside + 1 else ())
       val () = _fragment_check(data, attrs, fragment, content_node)
       val () = _pass_attrs(doc, data, attrs, content_node)
+      val () = _book_names(own | data, bytes, as_book, attrs, content_node)
       val () = _block_direction(doc, data, attrs, parent, content_node)
       (* an audio or video element is played, with the browser's own
          controls and never by itself; its source (or its <source>
@@ -5020,8 +5072,137 @@ fn _sheet_imports_of {file_size:pos}{name_offset:nat}{name_len:pos | name_offset
   | ~TextEitherNone() => SheetNamesCell(SheetNamesNil())
   | ~TextEitherNoRoom() => SheetNamesCell(SheetNamesNil())
 
-(* The sheet text either added to the container of the chapter, when the chapter is still the one in hand: 1 when it was *)
-fn _sheet_added (generation: int, either: text_either): int =
+(* The span's bytes are the text, from i on *)
+fun _span_is_at {l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}{i:nat | i <= k} .<k - i>.
+  (bytes: !$A.cborrow(l, n, cs), offset: int o, text: string k, length: int k, i: int i): bool =
+  if i >= length then true
+  else let
+    val (_ | value) = $A.cborrow_get(bytes, offset + i)
+    val letter = char2int1(string_get_at(text, i))
+  in
+    if value = letter then _span_is_at(bytes, offset, text, length, i + 1) else false
+  end
+
+fn _span_is {l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}{m:nat}
+  (bytes: !$A.cborrow(l, n, cs), offset: int o, length: int k, text: string m): bool = let
+  val text_length = g1u2i(string1_length(text))
+in
+  if length = text_length then _span_is_at(bytes, offset, text, text_length, 0) else false
+end
+
+(* The digits of the span as a number, or ~1 when it is anything else *)
+fun _span_number {l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}{i:nat | i <= k} .<k - i>.
+  (bytes: !$A.cborrow(l, n, cs), offset: int o, length: int k, i: int i, acc: int): int =
+  if i >= length then acc
+  else let
+    val (_ | value) = $A.cborrow_get(bytes, offset + i)
+  in
+    if value >= 48 then
+      (if value <= 57 then (if acc > 100000 then ~1 else _span_number(bytes, offset, length, i + 1, acc * 10 + (value - 48))) else ~1)
+    else ~1
+  end
+
+(* A face's weight descriptor: a number of 1 to 1000, bold, or else normal *)
+fn _weight_value {l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}
+  (bytes: !$A.cborrow(l, n, cs), offset: int o, length: int k): [w:int | 1 <= w; w <= 1000] int w =
+  if length <= 0 then 400
+  else if _span_is(bytes, offset, length, "bold") then 700
+  else let
+    val value = g1ofg0(_span_number(bytes, offset, length, 0, 0))
+  in if value >= 1 then (if value <= 1000 then value else 400) else 400 end
+
+fn _style_value {l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}
+  (bytes: !$A.cborrow(l, n, cs), offset: int o, length: int k): [s:int | 0 <= s; s <= 2] int s =
+  if _span_is(bytes, offset, length, "italic") then 1
+  else if _span_is(bytes, offset, length, "oblique") then 2
+  else 0
+
+fun _refs_weight {l:agz}{n:pos}{cs:$A.cells}{r:nat} .<r>.
+  (bytes: !$A.cborrow(l, n, cs), refs: !$CB.book_refs(n, r), num: int): [w:int | 1 <= w; w <= 1000] int w =
+  case+ refs of
+  | $CB.BRefsNil() => 400
+  | $CB.BRefImport(_, _, rest) => _refs_weight(bytes, rest, num)
+  | $CB.BRefFaceSrc(_, _, _, rest) => _refs_weight(bytes, rest, num)
+  | $CB.BRefFaceStyle(_, _, _, rest) => _refs_weight(bytes, rest, num)
+  | $CB.BRefFaceWeight(face, o, k, rest) =>
+      if face = num then _weight_value(bytes, o, k) else _refs_weight(bytes, rest, num)
+
+fun _refs_style {l:agz}{n:pos}{cs:$A.cells}{r:nat} .<r>.
+  (bytes: !$A.cborrow(l, n, cs), refs: !$CB.book_refs(n, r), num: int): [s:int | 0 <= s; s <= 2] int s =
+  case+ refs of
+  | $CB.BRefsNil() => 0
+  | $CB.BRefImport(_, _, rest) => _refs_style(bytes, rest, num)
+  | $CB.BRefFaceSrc(_, _, _, rest) => _refs_style(bytes, rest, num)
+  | $CB.BRefFaceWeight(_, _, _, rest) => _refs_style(bytes, rest, num)
+  | $CB.BRefFaceStyle(face, o, k, rest) =>
+      if face = num then _style_value(bytes, o, k) else _refs_style(bytes, rest, num)
+
+(* A font file of a face: its entry is kept to be read (the face number is css's, below 32 by its own rule) *)
+fn _font_job_push {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}{r:nat}
+  (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len,
+   bytes: !$A.borrow(byte, l, n), n: int n, cells: !$A.cborrow(l, n, cs), all: !$CB.book_refs(n, r),
+   number: int, o: int o, k: int k): void = let
+  val face = g1ofg0(number)
+in
+  if face >= 0 then
+    (if face < 32 then
+      (case+ book_find_relative(serial, file_size, name_offset, dir_len, bytes, n, o, k) of
+       | ~EntryHit(data_offset, data_size, method, found_offset, _) => let
+           val weight = _refs_weight(cells, all, number)
+           val style = _refs_style(cells, all, number)
+           val () = !_font_total := !_font_total + 1
+         in
+           case+ _font_jobs_take() of
+           | ~FontJobsCell(xs) => _font_jobs_put(FontJobsCell(FontJobsCons(file_size, data_offset, data_size, method, found_offset, face, weight, style, xs)))
+         end
+       | ~EntryMiss() => ())
+     else ())
+  else ()
+end
+
+fun _font_jobs_collect {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{cs:$A.cells}{a,r:nat} .<r>.
+  (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len,
+   bytes: !$A.borrow(byte, l, n), n: int n, cells: !$A.cborrow(l, n, cs), all: !$CB.book_refs(n, a), cur: !$CB.book_refs(n, r)): void =
+  case+ cur of
+  | $CB.BRefsNil() => ()
+  | $CB.BRefImport(_, _, rest) => _font_jobs_collect(serial, file_size, name_offset, dir_len, bytes, n, cells, all, rest)
+  | $CB.BRefFaceWeight(_, _, _, rest) => _font_jobs_collect(serial, file_size, name_offset, dir_len, bytes, n, cells, all, rest)
+  | $CB.BRefFaceStyle(_, _, _, rest) => _font_jobs_collect(serial, file_size, name_offset, dir_len, bytes, n, cells, all, rest)
+  | $CB.BRefFaceSrc(number, o, k, rest) => let
+      val () = (if !_font_total < 64 then _font_job_push(serial, file_size, name_offset, dir_len, bytes, n, cells, all, number, o, k) else ())
+    in _font_jobs_collect(serial, file_size, name_offset, dir_len, bytes, n, cells, all, rest) end
+
+(* The font text either added as a face of the container of the chapter, when the chapter is still the one in hand *)
+fn _font_added {face:nat | face < 32}{weight:int | 1 <= weight; weight <= 1000}{style:int | 0 <= style; style <= 2}
+  (generation: int, face: int face, weight: int weight, style: int style, either: text_either): int =
+  case+ either of
+  | ~TextEither(taken, length, own | owner, array, size, as_outside) => let
+      val @(frozen, cells) = $A.barr_freeze(array)
+      val added = (if as_outside then (if generation = !_load_generation then let
+          prval OUTSIDE_OPT_yes(readable) = own
+          val added = outside_face_add(readable | cells, 0, size, face, weight, style)
+        in (if added then 1 else 0) end
+        else 0) else 0): int
+      val () = $A.cborrow_drop(frozen, cells)
+      val () = text_give_back(owner, $A.barr_thaw(frozen))
+    in added end
+  | ~TextEitherNone() => 0
+  | ~TextEitherNoRoom() => 0
+
+fun _font_jobs_chain {count:nat} .<count>.
+  (serial: int, generation: int, jobs: font_jobs(count)): $P.promise(int, $P.Chained) =
+  case+ jobs of
+  | ~FontJobsNil() => $P.ret<int>(0)
+  | ~FontJobsCons(fs, data_offset, data_size, method, name_offset, face, weight, style, rest) =>
+    if generation <> !_load_generation then let val () = _font_jobs_free(rest) in $P.ret<int>(0) end
+    else
+      $P.and_then<text_either><int>(_chapter_text(serial, fs, data_offset, data_size, method, name_offset), llam(either) =>
+        $P.and_then<int><int>(_font_jobs_chain(serial, generation, rest), llam(more) =>
+          $P.ret<int>(_font_added(generation, face, weight, style, either) + more)))
+
+(* The sheet text either added to the container of the chapter, when the chapter is still the one in hand: 1 when it was; its fonts are kept to be read *)
+fn _sheet_added {file_size:pos}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+  (serial: int, file_size: int file_size, name_offset: int name_offset, name_len: int name_len, generation: int, either: text_either): int =
   case+ either of
   | ~TextEither(taken, length, own | owner, array, size, as_outside) => let
       val @(frozen, cells) = $A.barr_freeze(array)
@@ -5029,6 +5210,14 @@ fn _sheet_added (generation: int, either: text_either): int =
           prval OUTSIDE_OPT_yes(readable) = own
           val read = $CB.book_sheet_read(cells, size, 1, @(250, 248, 245), @(240, 230, 210))
           val added = outside_sheet_add(readable | cells, read)
+          val bytes = $A.cborrow_view(frozen, cells)
+          val refs = $CB.book_refs_of(cells, read)
+          val all = $CB.book_refs_of(cells, read)
+          val dir_len = _opf_prefix_len(serial, file_size, name_offset, name_len)
+          val () = _font_jobs_collect(serial, file_size, name_offset, dir_len, bytes, size, cells, all, refs)
+          val () = $CB.book_refs_free(refs)
+          val () = $CB.book_refs_free(all)
+          val () = $A.cborrow_view_drop(frozen, bytes)
           val () = $CB.book_read_free(read)
         in (if added then 1 else 0) end
         else 0) else 0): int
@@ -5065,7 +5254,7 @@ fun _sheet_named {file_size,name_offset,name_len:int}{depth:nat | depth <= 5} .<
       in
         $P.and_then<int><int>(_sheets_chain(serial, file_size, names, depth + 1, generation), llam(_) =>
           $P.and_then<text_either><int>(_chapter_text(serial, file_size, data_offset, data_size, method, found_offset), llam(second) =>
-            $P.ret<int>(_sheet_added(generation, second))))
+            $P.ret<int>(_sheet_added(serial, file_size, found_offset, found_len, generation, second))))
       end)
   end
 
@@ -5096,7 +5285,10 @@ fn _sheets_load {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len 
   val ~SheetPathsCell(paths) = _sheet_paths_take()
 in
   if outside_sheet_ready() then
-    _sheets_chain(serial, file_size, _sheet_paths_names(serial, file_size, name_offset, dir_len, paths, SheetNamesNil()), 0, generation)
+    $P.and_then<int><int>(_sheets_chain(serial, file_size, _sheet_paths_names(serial, file_size, name_offset, dir_len, paths, SheetNamesNil()), 0, generation), llam(sheets) =>
+      (case+ _font_jobs_take() of
+       | ~FontJobsCell(jobs) =>
+         $P.and_then<int><int>(_font_jobs_chain(serial, generation, jobs), llam(fonts) => $P.ret<int>(sheets + fonts))))
   else let val () = _sheet_paths_free(paths) in $P.ret<int>(0) end
 end
 
