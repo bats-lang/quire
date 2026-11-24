@@ -5385,10 +5385,10 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val _ = (case+ layout of
                     | PrePaginated() => false
                     | Reflowable() =>
-                      if as_outside then let
+                      if as_outside then (if (case+ set_book_styles_get() of BookStylesOn() => true | BookStylesOff() => false) then let
                         prval OUTSIDE_OPT_yes(readable) = outside_own
                       in outside_sink_open(readable | xhtml_cells, xhtml_size) end
-                      else false)
+                      else false) else false)
                   val () = !_content_count := 0
                   val () = !_part_count := 0
                   val () = _sheets_reset()

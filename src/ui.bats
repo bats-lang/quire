@@ -2517,6 +2517,7 @@ implement ui_sync_offer_control (bytes, n, at) = _sync_offer_control_from(bytes,
   | RubyHide
   | DimImagesSwitch
   | PublisherSizesSwitch
+  | BookStylesSwitch
   | RulerChoiceOff
   | RulerChoiceUnderline
   | RulerChoiceGreyBar
@@ -2561,6 +2562,7 @@ implement typography_control_id (control) =
   | RubyHide() => "ruby-hide"
   | DimImagesSwitch() => "dim-images-switch"
   | PublisherSizesSwitch() => "publisher-sizes-switch"
+  | BookStylesSwitch() => "book-styles-switch"
   | RulerChoiceOff() => "ruler-off"
   | RulerChoiceUnderline() => "ruler-underline"
   | RulerChoiceGreyBar() => "ruler-grey-bar"
@@ -2604,7 +2606,8 @@ fn _typography_control_after (control: typography_control): $R.option(typography
   | RubyShow() => $R.some(RubyHide())
   | RubyHide() => $R.some(DimImagesSwitch())
   | DimImagesSwitch() => $R.some(PublisherSizesSwitch())
-  | PublisherSizesSwitch() => $R.some(RulerChoiceOff())
+  | PublisherSizesSwitch() => $R.some(BookStylesSwitch())
+  | BookStylesSwitch() => $R.some(RulerChoiceOff())
   | RulerChoiceOff() => $R.some(RulerChoiceUnderline())
   | RulerChoiceUnderline() => $R.some(RulerChoiceGreyBar())
   | RulerChoiceGreyBar() => $R.some(RulerChoiceShade())

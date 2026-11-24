@@ -1032,6 +1032,10 @@ fn _settings (): void = let
   val () = _switch_row("typography-look", "publisher-sizes-row", "publisher-sizes-switch", "publisher-sizes-track",
     "publisher-sizes-knob", "publisher-sizes-about", "Respect the publisher's sizes",
     "Off, your text size is the book's text size and its other sizes follow in proportion. On, the book keeps the sizes its publisher chose", NoteHidden())
+  (* a book's own styles shown, under the reader's settings, or not (keyword: book styles) *)
+  val () = _switch_row("typography-look", "book-styles-row", "book-styles-switch", "book-styles-track",
+    "book-styles-knob", "book-styles-about", "Book's styles",
+    "On, the book's own colours, fonts and layout show, with your text size, font, spacing and theme still winning. Off, the book is shown plainly", NoteHidden())
   (* the reading ruler's style, and its height where the style has one (keyword: reading ruler, #566) *)
   val () = ui_el("typography-look", "ruler-row", TDiv, "srow")
   val () = ui_el("ruler-row", "ruler-label", TSpan, "slabel")

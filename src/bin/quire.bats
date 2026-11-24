@@ -2115,6 +2115,13 @@ fn _typography_chosen (control: typography_control): bool =
         | SizesAsPublished() => set_sizes_set(SizesInProportion()))
       val () = (if _in_reader() then reader_sizes_reload() else ())
     in true end
+  (* the book's styles are given to the page as a chapter is loaded, so it is shown again (keyword: book styles) *)
+  | BookStylesSwitch() => let
+      val () = (case+ set_book_styles_get() of
+        | BookStylesOn() => set_book_styles_set(BookStylesOff())
+        | BookStylesOff() => set_book_styles_set(BookStylesOn()))
+      val () = (if _in_reader() then reader_sizes_reload() else ())
+    in true end
   | TapsSides() => let val () = set_taps_set(SideZones()) in true end
   | TapsForward() => let val () = set_taps_set(ForwardZones()) in true end
   | TapsOneHand() => let val () = set_taps_set(OneHandZones()) in true end

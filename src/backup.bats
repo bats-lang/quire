@@ -154,6 +154,8 @@ fn _settings_chunk (): jchunk =
       val next = jw_int(out, next, ruby_code(set_ruby_get()))
       val next = jw_lit(out, next, ",\"publisherSizes\":")
       val next = jw_int(out, next, sizes_code(set_sizes_get()))
+      val next = jw_lit(out, next, ",\"bookStyles\":")
+      val next = jw_int(out, next, book_styles_code(set_book_styles_get()))
       val next = jw_lit(out, next, ",\"readingRuler\":")
       val next = jw_int(out, next, ruler_code(set_ruler_get()))
       val next = jw_lit(out, next, ",\"readingRulerLines\":")
@@ -1440,6 +1442,9 @@ in
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "publisherSizes") then let
         val () = (if value >= 0 then (if value <= 1 then set_sizes_set(sizes_of_code(value)) else ()) else ())
+      in _settings_members(buf, n, stop, key, sort) end
+      else if jr_key_is(key, key_len, "bookStyles") then let
+        val () = (if value >= 0 then (if value <= 1 then set_book_styles_set(book_styles_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "readingRuler") then let
         val () = (if value >= 0 then (if value <= 4 then set_ruler_set(ruler_of_code(value)) else ()) else ())
