@@ -221,14 +221,10 @@ export function pressRecord() {
       });
       await context.addInitScript(pressInit, { binding: BINDING, types: PRESS_TYPES });
     },
-    /**
-     * Whether a press on the page may be down and not yet released (keyword: press open, quire#1102): as the page has told, or as
-     * Playwright's client has begun it (keyword: input calls, quire#1117), which holds before the page has dispatched anything.
-     */
+    /** Whether a press on the page is down and not yet released, as the page has told (keyword: press open, quire#1102). */
     open(page) {
       const number = pageNumber(page);
-      return watched.some((calls) => calls.pressing())
-        || pressesOf(events.filter((event) => event.page === number)).some((press) => !press.released);
+      return pressesOf(events.filter((event) => event.page === number)).some((press) => !press.released);
     },
     /** Whether the client's pointer calls are followed in every context tracked (a Playwright without the instrumentation is not). */
     callsFollowed() { return watched.length > 0 && watched.every((calls) => calls.followed); },
