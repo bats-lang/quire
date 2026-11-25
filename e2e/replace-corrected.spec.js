@@ -94,7 +94,8 @@ test('a corrected file of a book in the library replaces it: the place, the note
   const changed = Object.keys({ ...before, ...after }).filter(key => before[key] !== after[key])
     .map(key => key.replace(/"([a-z])[0-9a-f]{14}"/, '"$1<id>"').replace(/[0-9a-f]{14}/, '<id>')).sort();
   expect(changed, 'the stored records that changed').toEqual(
-    ['bats/kv "b<id>"', 'bats/kv "c<id>"', 'bats/kv "v<id>"', 'bats/kv "library/book/<id>"', 'bats/kv "library/stamp/<id>"'].sort());
+    ['bats/kv "b<id>"', 'bats/kv "c<id>"', 'bats/kv "v<id>"', 'bats/kv "library/book/<id>"', 'bats/kv "library/stamp/<id>"',
+     'bats-outside/files "b<id>"'].sort());
   // one file, the corrected one's size, and its cover is the corrected file's
   expect(Object.values(await fileSizes(page))).toEqual([statSync(corrected).size]);
   const covers = Object.values(await coverBytes(page));

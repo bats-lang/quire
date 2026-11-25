@@ -21,6 +21,7 @@ staload "entity.sats"
 staload "mem.sats"
 staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload BO = "wasm.bats-packages.dev/bridge/src/outside.sats"
 staload "storage.sats"
 staload "bookrec.sats"
 staload "indexrec.sats"
@@ -790,6 +791,15 @@ fn _idb_delete {letter:nat | letter < 256} (letter: int letter, id_high: int, id
   val () = $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
 in release_bytes(key_frozen, key_bytes) end
 
+(* Deletes the outside copy (the second IndexedDB database, bats-outside) under the key with this letter of book
+   (id_high, id_low), as _idb_delete does the first (keyword: outside-copy) *)
+fn _idb_delete_outside {letter:nat | letter < 256} (letter: int letter, id_high: int, id_low: int): void = let
+  val key = lib_key(letter, id_high, id_low)
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
+  (* ignored: a delete that fails leaves bytes nothing reads *)
+  val () = $P.finish<$IDB.stored>($BO.file_idb_delete_outside(key_bytes, 15), llam(_) => ())
+in release_bytes(key_frozen, key_bytes) end
+
 (* Sets the shelf of the book at index, and keeps and shows the
    library *)
 #pub fn lib_set_shelf {index:int} (index: int index, shelf: shelf): void
@@ -839,6 +849,8 @@ fn _delete_book {index:int} (index: int index): void =
       val () = _idb_delete(121, nums.id_high, nums.id_low)
       val () = _idb_delete(104, nums.id_high, nums.id_low)
       val () = _idb_delete(118, nums.id_high, nums.id_low)
+      (* the book's file is in both stores (keyword: outside-copy) *)
+      val () = _idb_delete_outside(98, nums.id_high, nums.id_low)
     in _remove(index) end
 
 (* The index of the first book in the Trash from i on, or -1 *)

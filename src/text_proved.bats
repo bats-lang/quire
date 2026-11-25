@@ -8,11 +8,13 @@
 
 #use array as A
 #use zip as Z
+#use promise as P
 
 staload "bytes.sats"
 staload "bytesarr.sats"
 staload "crc.sats"
 staload "text_relation.sats"
+staload BO = "wasm.bats-packages.dev/bridge/src/outside.sats"
 
 (* How an entry's data is stored, as a value of its static index (zip's inflate_kind) *)
 #pub datatype entry_method($Z.inflate_kind) =
@@ -363,6 +365,148 @@ implement text_taken_free {kind}{cs} (taken) =
   | ~TextEmpty(_ | ) => ()
   | ~TextMalformed() => ()
   | ~TextTooLarge() => ()
+
+(* ===== a text of outside cells: OUTSIDE_READ and TEXTOF (keyword: outside-text) ===== *)
+
+(* What taking outside cells as text gave (keyword: outside-text) *)
+#pub datavtype outside_taken($A.cells) =
+  | {output,text:$A.cells}{plan:plan}{octets:bytes}{count:pos}{l:agz}
+    OutsideTaken(output) of ($BO.OUTSIDE_READ(output), TEXTOF(output, plan, TOUT_bytes(octets)),
+      HOLDS(text, 0, octets, count), $A.CLEN(text, count) | text_owner(l, count), $A.barr(l, count, text), int count)
+  | {output:$A.cells}{out:textout}
+    OutsideRefused(output) of ($BO.OUTSIDE_READ(output), TEXTOF(output, PlanRefused(), out) | )
+  | {output:$A.cells}{plan:plan}{octets:bytes}{count:pos}{l:agz}
+    OutsideTakenAsIs(output) of ($BO.OUTSIDE_READ(output), TEXTOF(output, plan, TOUT_bytes(octets)),
+      HOLDS(output, 0, octets, count), $A.CLEN(output, count) | text_owner(l, count), $A.barr(l, count, output), int count)
+  | {output:$A.cells} OutsideMalformed(output) of ()
+  | {output:$A.cells} OutsideTooLarge(output) of ()
+
+(* OUTSIDE_TAKEN: the text holds the document of the outside cells (keyword: outside-text) *)
+#pub dataprop OUTSIDE_TAKEN($A.cells, $A.cells, int) =
+  | {output,text:$A.cells}{plan:plan}{octets:bytes}{count:int}
+    OUTSIDE_TAKEN_of(output, text, count)
+      of ($BO.OUTSIDE_READ(output), TEXTOF(output, plan, TOUT_bytes(octets)), HOLDS(text, 0, octets, count))
+
+(* A copy of the outside cells read as text (keyword: outside-text) *)
+fn _read_outside {output:$A.cells}{n:pos | n <= 1048576}{l:agz}
+  (from: $BO.OUTSIDE_READ(output), length: $A.CLEN(output, n) | outside: $A.barr(l, n, output), n: int n)
+  : @($A.barr(l, n, output), outside_taken(output)) = let
+  val copy = $A.barr_copy(outside, n)
+  val @(frozen, view) = $A.barr_freeze(copy)
+  val (plan | which) = text_plan_proved(length | view, n)
+in
+  case+ which of
+  | ProvedAsIs() => let
+      prval (as_is, held) = _as_is_holds(plan, length)
+      val () = $A.cborrow_drop(frozen, view)
+      val back = $A.barr_thaw(frozen)
+    in @(outside, OutsideTakenAsIs(from, as_is, held, length | text_owner_heap(), back, n)) end
+  | ProvedRefused() => let
+      val () = $A.cborrow_drop(frozen, view)
+      val back = $A.barr_thaw(frozen)
+      val () = $A.barr_free(back)
+    in @(outside, OutsideRefused(from, plan | )) end
+  | ProvedConvert() =>
+    (case+ text_convert_size(length | view, n) of
+     | ~TextNoConversion() => let
+         val () = $A.cborrow_drop(frozen, view)
+         val back = $A.barr_thaw(frozen)
+         val () = $A.barr_free(back)
+       in @(outside, OutsideMalformed()) end
+     | ~TextSized(converting, total_length | count) =>
+       if count <= 1048576 then let
+         val (text_length | text) = $A.barr_alloc(count)
+         val (held, written_length | written) = text_convert_fill(length, converting, total_length, text_length | view, n, text, count)
+         val () = $A.cborrow_drop(frozen, view)
+         val back = $A.barr_thaw(frozen)
+         val () = $A.barr_free(back)
+       in @(outside, OutsideTaken(from, converting, held, written_length | text_owner_heap(), written, count)) end
+       else let
+         val () = $A.cborrow_drop(frozen, view)
+         val back = $A.barr_thaw(frozen)
+         val () = $A.barr_free(back)
+       in @(outside, OutsideTooLarge()) end)
+end
+
+(* The outside cells taken as text, the array given back (keyword: outside-text) *)
+#pub fn take_text_outside {l:agz}{n:pos | n <= 1048576}{cs:$A.cells}
+  (from: $BO.OUTSIDE_READ(cs), length: $A.CLEN(cs, n) | outside: $A.barr(l, n, cs), n: int n)
+  : @($A.barr(l, n, cs), outside_taken(cs))
+
+implement take_text_outside {l}{n}{cs} (from, length | outside, n) = _read_outside(from, length | outside, n)
+
+(* The array and proofs of an outside text are not wanted (keyword: outside-text) *)
+#pub fn outside_taken_free {cs:$A.cells} (taken: outside_taken(cs)): void
+
+implement outside_taken_free {cs} (taken) =
+  case+ taken of
+  | ~OutsideTaken(_, _, _, _ | owner, array, _) => text_give_back(owner, array)
+  | ~OutsideTakenAsIs(_, _, _, _ | owner, array, _) => text_give_back(owner, array)
+  | ~OutsideRefused(_, _ | ) => ()
+  | ~OutsideMalformed() => ()
+  | ~OutsideTooLarge() => ()
+
+(* The outside cells taken as text when the CRC-32 of the cells is the sum the archive states, else malformed (keyword: outside-text) *)
+#pub fn take_text_outside_sum {l:agz}{n:pos | n <= 1048576}{cs:$A.cells}
+  (from: $BO.OUTSIDE_READ(cs), length: $A.CLEN(cs, n) | outside: $A.barr(l, n, cs), n: int n, want_high: int, want_low: int)
+  : @($A.barr(l, n, cs), outside_taken(cs))
+
+implement take_text_outside_sum {l}{n}{cs} (from, length | outside, n, want_high, want_low) = let
+  val @(frozen, view) = $A.barr_freeze(outside)
+  val (_, _ | @(sum_high, sum_low)) = crc_of_cborrow(length | view, n)
+  val () = $A.cborrow_drop(frozen, view)
+  val back = $A.barr_thaw(frozen)
+in
+  if sum_high = want_high && sum_low = want_low then take_text_outside(from, length | back, n)
+  else @(back, OutsideMalformed())
+end
+
+(* TEXT_TAKEN(text, count): the walks take the text of a document whose cells came by zip's inflate (TAKEN) or from outside
+   (OUTSIDE_TAKEN), whichever made them (keyword: outside-text); the walks keep no more of either than the cells *)
+#pub dataprop TEXT_TAKEN($A.cells, int) =
+  | {kind:$Z.inflate_kind}{compressed,text:$A.cells}{count:int}
+    TEXT_TAKEN_inflated(text, count) of TAKEN(kind, compressed, text, count)
+  | {output,text:$A.cells}{count:int}
+    TEXT_TAKEN_outside(text, count) of OUTSIDE_TAKEN(output, text, count)
+
+(* A text for the walks, from whichever route made it (keyword: outside-text): zip's inflate in the app, or the browser's
+   decompression of outside cells; none when it could not be had, no room when no array could be had for the entry *)
+#pub dataprop OUTSIDE_OPT($A.cells, bool) =
+  | {cs:$A.cells} OUTSIDE_OPT_yes(cs, true) of $BO.OUTSIDE_READ(cs)
+  | {cs:$A.cells} OUTSIDE_OPT_no(cs, false)
+
+#pub datavtype text_either =
+  | {l:agz}{n:pos}{text:$A.cells}{b:bool}
+    TextEither of (TEXT_TAKEN(text, n), $A.CLEN(text, n), OUTSIDE_OPT(text, b) | text_owner(l, n), $A.barr(l, n, text), int n, bool b)
+  | TextEitherNone of ()
+  | TextEitherNoRoom of ()
+
+#pub fn text_either_of_taken {kind:$Z.inflate_kind}{cs:$A.cells} (taken: text_taken(kind, cs)): text_either
+
+implement text_either_of_taken {kind}{cs} (taken) =
+  case+ taken of
+  | ~TextTaken(inflates, text_of, held, length | owner, array, count) =>
+    TextEither(TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held)), length, OUTSIDE_OPT_no() | owner, array, count, false)
+  | other => let val () = text_taken_free(other) in TextEitherNone() end
+
+#pub fn text_either_of_outside {cs:$A.cells} (taken: outside_taken(cs)): text_either
+
+implement text_either_of_outside {cs} (taken) =
+  case+ taken of
+  | ~OutsideTaken(from, text_of, held, length | owner, array, count) =>
+    TextEither(TEXT_TAKEN_outside(OUTSIDE_TAKEN_of(from, text_of, held)), length, OUTSIDE_OPT_no() | owner, array, count, false)
+  | ~OutsideTakenAsIs(from, text_of, held, length | owner, array, count) =>
+    TextEither(TEXT_TAKEN_outside(OUTSIDE_TAKEN_of(from, text_of, held)), length, OUTSIDE_OPT_yes(from) | owner, array, count, true)
+  | other => let val () = outside_taken_free(other) in TextEitherNone() end
+
+(* A text nobody took, given back (a module that makes a promise of text_either implements its dispose with this, as import's hrefs do) *)
+#pub fn text_either_free (text: text_either): void
+
+implement text_either_free (text) =
+  case+ text of
+  | ~TextEither(_, _, _ | owner, array, _, _) => text_give_back(owner, array)
+  | ~TextEitherNone() => ()
+  | ~TextEitherNoRoom() => ()
 
 (* fixture: the-end-of-text-proved *)
 (* The end of text_proved: the static fixtures of tests/static/reject named text-proved are put before this line *)

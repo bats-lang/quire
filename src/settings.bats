@@ -357,6 +357,27 @@ implement sizes_code (choice) = _sizes_code(choice)
 #pub fn sizes_of_code (code: int): publisher_sizes
 implement sizes_of_code (code) = _sizes_of_code(code)
 
+(* Whether a book's own styles are shown (keyword: book styles): on, the book's sheets are in their own layer under the reader's settings; off, the
+   book is shown as the app always showed it *)
+#pub datatype book_styles = BookStylesOn | BookStylesOff
+
+fn _book_styles_code (choice: book_styles): [code:nat | code <= 1] int code =
+  case+ choice of BookStylesOn() => 0 | BookStylesOff() => 1
+
+fn _book_styles_of_code (code: int): book_styles =
+  if code = 1 then BookStylesOff() else BookStylesOn()
+
+val _book_styles = ref<book_styles>(BookStylesOn())
+
+#pub fn set_book_styles_get (): book_styles
+implement set_book_styles_get () = !_book_styles
+#pub fn set_book_styles_set (choice: book_styles): void
+implement set_book_styles_set (choice) = !_book_styles := choice
+#pub fn book_styles_code (choice: book_styles): [code:nat | code <= 1] int code
+implement book_styles_code (choice) = _book_styles_code(choice)
+#pub fn book_styles_of_code (code: int): book_styles
+implement book_styles_of_code (code) = _book_styles_of_code(code)
+
 (* The reading ruler's style, a band that holds the eye to one line: off to begin with, the device's own (keyword: reading ruler, #566) *)
 #pub datatype reading_ruler = RulerOff | RulerUnderline | RulerGreyBar | RulerShade | RulerLightbox
 
@@ -781,6 +802,19 @@ fn _sizes_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at
   else if byte2int0($A.get<byte>(record, at)) <> 80 then !_sizes := SizesInProportion()
   else !_sizes := _sizes_of_code(byte2int0($A.get<byte>(record, at + 1)))
 
+(* "B" and the book's styles' byte at record[at, at + 2) (keyword: book styles) *)
+fn _book_styles_write {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 2 > n then ()
+  else let
+    val () = $A.write_byte(record, at, 66)
+  in $A.write_byte(record, at + 1, _book_styles_code(!_book_styles)) end
+
+(* The book's styles' byte after "B" at record[at]: on when there is none (a record written before it) *)
+fn _book_styles_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 2 > n then !_book_styles := BookStylesOn()
+  else if byte2int0($A.get<byte>(record, at)) <> 66 then !_book_styles := BookStylesOn()
+  else !_book_styles := _book_styles_of_code(byte2int0($A.get<byte>(record, at + 1)))
+
 (* "R" and the ruler's style and lines, a byte each, at record[at, at + 3) *)
 fn _ruler_write {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
   if at + 3 > n then ()
@@ -923,6 +957,24 @@ fn _put_ruby {l:agz}{position:nat | position + 30 <= 1280}
   | RubyHidden() => _put_text(buf, position, ".caf rt,.caf rtc{display:none}")
   | RubyShown() => position
 
+(* the reader's justify, hyphenation and hidden ruby, in style-book-vars (keyword: book css) *)
+fn _put_book_ruby {l:agz}{position:nat | position + 110 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, ruby: set_ruby)
+  : [stop:nat | stop <= position + 110] int stop =
+  case+ ruby of
+  | RubyHidden() => _put_text(buf, position, "[data-book-layout=\"1\"] :is([data-book-element=\"rt\"],[data-book-element=\"rtc\"]){display:none!important}")
+  | RubyShown() => position
+
+fn _apply_book_vars (current: settings, ruby: set_ruby): void = let
+  val buf = $A.alloc<byte>(1280)
+  val next = _put_text(buf, 0, "[data-book-layout=\"1\"]{--reader-align:")
+  val next = _put_align(buf, next, current.align)
+  val next = _put_text(buf, next, ";--reader-hyphens:")
+  val next = _put_hyphens(buf, next, current.hyphens)
+  val next = _put_text(buf, next, "}")
+  val next = _put_book_ruby(buf, next, ruby)
+in ui_text_buf("style-book-vars", buf, next) end
+
 (* The reader's typography as CSS, in style element style-type *)
 fn _apply_type (): void = let
   val current = !_set
@@ -966,6 +1018,7 @@ fn _apply_type (): void = let
   val next = _put_scrolled(buf, next, current.scrolled)
   (* a ruby's annotations, shown or hidden *)
   val next = _put_ruby(buf, next, ruby)
+  val () = _apply_book_vars(current, ruby)
 in ui_text_buf("style-type", buf, next) end
 
 (* Whether it is night by the local clock (22:00 to 07:00, iOS Night
@@ -1065,6 +1118,7 @@ fn _show_controls (): void = let
   val () = _pressed("hyphenation-switch", hyph_code(current.hyphens) = hyph_code(Hyphenated()))
   val () = _pressed("dim-images-switch", dim_code(current.dim_images) = dim_code(ImagesDimmed()))
   val () = _pressed("publisher-sizes-switch", _sizes_code(!_sizes) = _sizes_code(SizesAsPublished()))
+  val () = _pressed("book-styles-switch", _book_styles_code(!_book_styles) = _book_styles_code(BookStylesOn()))
   val taps = taps_code(current.tap_zones)
   val () = _pressed("taps-sides", taps = taps_code(SideZones()))
   val () = _pressed("taps-forward", taps = taps_code(ForwardZones()))
@@ -1115,7 +1169,8 @@ in ui_text_buf("word-value", buf, next) end
    then "N" (78) and a book narration's speed and skipping, a byte each,
    then "F" (70) and full screen's byte, then "P" (80) and the byte of
    whether a book's sizes are the publisher's (quire#431), then "R" (82)
-   and the reading ruler's style and lines, a byte each (quire#566).
+   and the reading ruler's style and lines, a byte each (quire#566), "K" and the
+   words' byte, then "B" (66) and the byte of whether a book's styles are shown (keyword: book styles).
    ("S1" was the first 8; a record of "S2" without the last bytes has
    their defaults.) *)
 fn _save (sort: int): void = let
@@ -1123,7 +1178,7 @@ fn _save (sort: int): void = let
   val voices = _voices_take()
   val+ @VoicesCell(choices, voice_count) = voices
   val voices_size = _voices_size(choices)
-  val record_size = 24 + voices_size + 3 + 2 + 2 + 3 + 2
+  val record_size = 24 + voices_size + 3 + 2 + 2 + 3 + 2 + 2
   val record = $A.alloc<byte>(record_size)
   val () = _voices_write(choices, record, record_size, 24)
   val () = $A.write_byte(record, 23, voice_count)
@@ -1132,6 +1187,7 @@ fn _save (sort: int): void = let
   val () = _sizes_write(record, record_size, 24 + voices_size + 5)
   val () = _ruler_write(record, record_size, 24 + voices_size + 7)
   val () = _words_write(record, record_size, 24 + voices_size + 10)
+  val () = _book_styles_write(record, record_size, 24 + voices_size + 12)
   prval () = fold@(voices)
   val () = _voices_put(voices)
   val () = $A.write_byte(record, 20, _rate_code(!_speech_rate))
@@ -1389,6 +1445,7 @@ fn _reset (): void = let
   val () = !_fullscreen := FullscreenOff()
   val () = !_words := WordsKept()
   val () = !_sizes := SizesInProportion()
+  val () = !_book_styles := BookStylesOn()
   val () = !_ruler := RulerOff()
   val () = !_ruler_lines := RulerOneLine()
   val () = !_narration_speed := 4
@@ -1414,6 +1471,7 @@ implement set_reset_undoable (how) = let
   val fullscreen_before = !_fullscreen
   val words_before = !_words
   val sizes_before = !_sizes
+  val book_styles_before = !_book_styles
   val ruler_before = !_ruler
   val ruler_lines_before = !_ruler_lines
   val speed_before = !_narration_speed
@@ -1433,6 +1491,7 @@ in
         val () = !_fullscreen := fullscreen_before
         val () = !_words := words_before
         val () = !_sizes := sizes_before
+        val () = !_book_styles := book_styles_before
         val () = !_ruler := ruler_before
         val () = !_ruler_lines := ruler_lines_before
         val () = !_narration_speed := speed_before
@@ -1558,6 +1617,7 @@ in
         val () = _sizes_read(record, n, voices_end + 5)
         val () = _ruler_read(record, n, voices_end + 7)
         val () = _words_read(record, n, voices_end + 10)
+        val () = _book_styles_read(record, n, voices_end + 12)
         val () = _voices_put(VoicesCell(voices_read, voices_read_count))
         val () = $A.free<byte>(record)
         val () = !_set := @{ size = size, line_height = line_height, margin = margin, font = font,

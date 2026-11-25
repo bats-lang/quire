@@ -10,7 +10,7 @@ staload "sheet.sats"
 staload "declarations.sats"
 staload "page_size.sats"
 
-#pub fn reader_rules {left:nat | left >= 14800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 14800] sheet(after, false, false)
+#pub fn reader_rules {left:nat | left >= 14676} (sheet: sheet(left, false, false)): [after:nat | after >= left - 14676] sheet(after, false, false)
 
 (* The bars and title, from .rv on *)
 fn reader_rules_bars_and_title {left:nat | left >= 1730} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1730] sheet(after, false, false) = let
@@ -248,7 +248,7 @@ fn reader_rules_page_indicator_and_footer {left:nat | left >= 2400} (sheet: shee
 in sheet end
 
 (* The book text, from .sprobe on *)
-fn reader_rules_book_text {left:nat | left >= 1298} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1298] sheet(after, false, false) = let
+fn reader_rules_book_text {left:nat | left >= 1430} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1430] sheet(after, false, false) = let
   (* shown only by the typography's style, for a spread; a point the
      reader measures, never seen *)
   val sheet = rule(sheet, ".sprobe")
@@ -257,7 +257,9 @@ fn reader_rules_book_text {left:nat | left >= 1298} (sheet: sheet(left, false, f
   val sheet = lay(sheet, Width(), "1px")
   val sheet = lay(sheet, Height(), "1px")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".caf>*")
+  (* the content defaults in reader-base: the book's own layer, declared after it in style-book, comes after (keyword: content-rule-unlayered) *)
+  val (layer | sheet) = layer_begin(sheet, "reader-base")
+  val sheet = content_rule(layer | sheet, ".caf>*")
   val sheet = lay(sheet, MaxWidth(), "38rem")
   val sheet = auto_margin(sheet, MarginLeft())
   val sheet = auto_margin(sheet, MarginRight())
@@ -268,11 +270,11 @@ fn reader_rules_book_text {left:nat | left >= 1298} (sheet: sheet(left, false, f
      are logical: the space after it is below it in horizontal text,
      and beside it (between its columns of lines) in vertical text,
      where a margin below would shorten its lines *)
-  val sheet = rule(sheet, ".caf p")
+  val sheet = content_rule(layer | sheet, ".caf p")
   val sheet = prose_margin(sheet, MarginBlock(), ProseNone(), ProseParagraph())
   val sheet = auto_margin(sheet, MarginInline())
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".caf h1,.caf h2,.caf h3")
+  val sheet = content_rule(layer | sheet, ".caf h1,.caf h2,.caf h3")
   val sheet = lay(sheet, TextAlign(), "center")
   val sheet = prose_margin(sheet, MarginBlock(), ProseOneAndHalf(), ProseHalf())
   val sheet = lay(sheet, BreakAfter(), "avoid")
@@ -281,14 +283,14 @@ fn reader_rules_book_text {left:nat | left >= 1298} (sheet: sheet(left, false, f
      blocks: the inline run of a paragraph drawn across its columns costs
      time in proportion to the square of them in Chrome, so none is longer
      than a piece (#423) *)
-  val sheet = rule(sheet, ".caf .run")
+  val sheet = content_rule(layer | sheet, ".caf .run")
   val sheet = lay(sheet, Display(), "block")
   val sheet = close(sheet)
   (* an element the book marks hidden stays hidden (#411) *)
-  val sheet = rule(sheet, ".caf .hidden-by-book")
+  val sheet = content_rule(layer | sheet, ".caf .hidden-by-book")
   val sheet = lay(sheet, Display(), "none")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".caf hr")
+  val sheet = content_rule(layer | sheet, ".caf hr")
   val sheet = no_line(sheet)
   val sheet = line(sheet, TopSide(), 1, RoleLine())
   val sheet = prose_margin(sheet, Margin(), ProseTwo(), ProseAuto())
@@ -296,7 +298,7 @@ fn reader_rules_book_text {left:nat | left >= 1298} (sheet: sheet(left, false, f
   val sheet = close(sheet)
   (* a picture is at most a column's height: the window's less the
      page's paddings *)
-  val sheet = rule(sheet, ".caf img")
+  val sheet = content_rule(layer | sheet, ".caf img")
   val sheet = lay(sheet, MaxWidth(), "100%")
   val sheet = capped(sheet, CapPageArea())
   val sheet = lay(sheet, ObjectFit(), "contain")
@@ -309,29 +311,35 @@ fn reader_rules_book_text {left:nat | left >= 1298} (sheet: sheet(left, false, f
      height at most (#413): a block that scrolls cannot be split between
      columns, so one taller than the page would lose the rows past the
      page's foot *)
-  val sheet = rule(sheet, ".caf table")
+  val sheet = content_rule(layer | sheet, ".caf table")
   val sheet = lay(sheet, Display(), "block")
   val sheet = scrolling(sheet)
   val sheet = lay(sheet, MaxWidth(), "100%")
   val sheet = capped(sheet, CapPageArea())
   val sheet = lay(sheet, BorderCollapse(), "collapse")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".caf td,.caf th")
+  val sheet = content_rule(layer | sheet, ".caf td,.caf th")
   val sheet = line(sheet, AllSides(), 1, RoleLine())
   val sheet = spaced_pair(sheet, Padding(), SpaceTight(), SpaceSmall())
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".caf a,.caf [role=link]")
+  val sheet = content_rule(layer | sheet, ".caf a,.caf [role=link]")
   val sheet = surf(S_accent_bg | sheet, RoleAccent(), RoleGround())
   val sheet = lay(sheet, TextDecoration(), "underline")
   val sheet = lay(sheet, Cursor(), "pointer")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".caf pre")
+  val sheet = content_rule(layer | sheet, ".caf pre")
   val sheet = lay(sheet, WhiteSpace(), "pre-wrap")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".caf blockquote")
+  (* a list of the chapter's top level is indented by the page's margins only, as the page's children were (.caf>* in style-type) *)
+  val sheet = content_rule(layer | sheet, ".caf>[data-book-container]>ul,.caf>[data-book-container]>ol")
+  val sheet = spaced(sheet, PaddingLeft(), SpaceNone())
+  val sheet = spaced(sheet, PaddingRight(), SpaceNone())
+  val sheet = close(sheet)
+  val sheet = content_rule(layer | sheet, ".caf blockquote")
   val sheet = prose_margin(sheet, Margin(), ProseOne(), ProseAuto())
   val sheet = lay(sheet, FontStyle(), "italic")
   val sheet = close(sheet)
+  val sheet = layer_end(layer | sheet)
 in sheet end
 
 (* The vertical fixed and notes, from .caf.rtl on *)

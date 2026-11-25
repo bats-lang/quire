@@ -120,14 +120,14 @@ fn _intent_filters (): bool =
     val () = _write_file("dist/android/intent-filters.xml", b, $F.CreateOrTruncate())
   in true end
 
-(* The page's bridge.js with the image error atom (bridge's
-   produce_bridge_app_image_error, bridge#277): pwa's create_pwa writes the
+(* The page's bridge.js with the book sections (bridge's produce_bridge_app_book: the outside reads, keyword: outside-chain,
+   and the image error atom of bridge#277): pwa's create_pwa writes the
    bridge without it, and the reader needs to be told which image the engine
    failed to draw, to show its manifest fallback (quire#1061).
    Written over the file pwa wrote, with the same wasm name and root *)
 fn _bridge_with_image_error (): void = let
   var b = $B.create()
-  val () = $BR.produce_bridge_app_image_error(b, "app.wasm", "bats-root")
+  val () = $BR.produce_bridge_app_book(b, "app.wasm", "bats-root")
 in _write_file("dist/pwa/bridge.js", b, $F.CreateOrTruncate()) end
 
 (* The PWA and the Android project, generated from the app's build *)

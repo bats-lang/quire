@@ -10,6 +10,8 @@ import { TINY_PNG } from './create-epub.js';
 
 const para = page => bookPage(page).locator('p').first();
 const style = (page, prop) => para(page).evaluate((e, p) => getComputedStyle(e)[p], prop);
+// the margins setting is the book container's paddings (the container is the page's child, quire#1131)
+const containerPadding = page => bookPage(page).locator('[data-book-container]').first().evaluate(e => getComputedStyle(e).paddingLeft);
 const sheet = page => dialog(page, 'Reading settings');
 const slider = (page, name) => sheet(page).getByRole('slider', { name });
 const choose = (page, name) => sheet(page).getByRole('button', { name, exact: true }).click();
@@ -90,11 +92,11 @@ test('size, line spacing and margins change the page, and are kept', async ({ pa
   await expect.poll(() => style(page, 'fontSize')).toBe('28px');
   await slider(page, 'Line spacing').fill('20');
   await expect.poll(() => style(page, 'lineHeight')).toBe(`${28 * 2}px`);
-  const narrow = await style(page, 'paddingLeft');
+  const narrow = await containerPadding(page);
   await openReadingSettings(page, 'Page');
   await moreSlider(page, 'Margins').fill('4');
-  await expect.poll(() => style(page, 'paddingLeft')).not.toBe(narrow);
-  const wide = await style(page, 'paddingLeft');
+  await expect.poll(() => containerPadding(page)).not.toBe(narrow);
+  const wide = await containerPadding(page);
   await choose(page, 'Close');
   await expect(sheet(page)).toBeHidden();
   await toLibrary(page);
@@ -102,7 +104,7 @@ test('size, line spacing and margins change the page, and are kept', async ({ pa
   await openBook(page, 'Typeset');
   await expect.poll(() => style(page, 'fontSize')).toBe('28px');
   expect(await style(page, 'lineHeight')).toBe(`${28 * 2}px`);
-  expect(await style(page, 'paddingLeft')).toBe(wide);
+  expect(await containerPadding(page)).toBe(wide);
   await openSettings(page);
   await expect(slider(page, 'Size')).toHaveValue('28');
   expect(errors).toEqual([]);

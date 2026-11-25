@@ -124,7 +124,7 @@ test('a fixed-layout book is offered only the theme, its spreads and how the rea
   await expect(more.getByRole('slider', { name: 'Margins' })).toBeVisible();
   await page.keyboard.press('Escape');
   expect(await bookPage(page).evaluate(e => getComputedStyle(e).columnWidth)).not.toBe('auto');
-  expect(await bookPage(page).evaluate(e => [...e.querySelectorAll('[style]')].length)).toBe(0);
+  expect(await bookPage(page).evaluate(e => [...e.querySelectorAll('[style]:not([data-book-container])')].length)).toBe(0);
 });
 
 test('an itemref\'s own layout outranks the book\'s: one fixed page in a reflowed book', async ({ page }) => {
@@ -154,5 +154,5 @@ test('an itemref\'s own layout outranks the book\'s: one fixed page in a reflowe
   await page.keyboard.press('ArrowRight');
   await expect(indicator(page)).toContainText('in chapter');
   expect(await bookPage(page).evaluate(e => getComputedStyle(e).columnWidth)).not.toBe('auto');
-  expect(await bookPage(page).evaluate(e => [...e.querySelectorAll('[style]')].length)).toBe(0);
+  expect(await bookPage(page).evaluate(e => [...e.querySelectorAll('[style]:not([data-book-container])')].length)).toBe(0);
 });

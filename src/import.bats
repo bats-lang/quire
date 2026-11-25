@@ -16,6 +16,7 @@ staload "ui.sats"
 staload "notice.sats"
 staload "modal.sats"
 staload "book.sats"
+staload "outside_chain.sats"
 staload "zipcheck.sats"
 staload "paths.sats"
 staload "epub_xml.sats"
@@ -223,6 +224,7 @@ implement $P.dispose<archive_outcome>(outcome) =
   | ~ArchiveFailed(_cause) => ()
 
 implement $P.dispose<hrefs>(found) = hrefs_free(found)
+implement $P.dispose<outside_put>(_) = ()
 
 (* Why an archive could not be imported, matched case by case *)
 fn _archive_named (cause: archive_failure): named_failure =
@@ -381,7 +383,11 @@ fn _store_file (id_high: Int, id_low: Int): $P.promise($IDB.stored, $P.Chained) 
   val key = lib_key(98, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
   val storing = book_idb_put(key_bytes, 15)
+  (* the outside copy beside it, for the renderer (keyword: outside-chain): a copy that is not stored leaves the book without
+     book styles, as a book of the old library has none, so it is not the book's failure *)
+  val outside_storing = outside_book_idb_put(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
+  val () = $P.finish<outside_put>(outside_storing, llam(_) => ())
 in storing end
 
 (* A new book added to the library from the OPF opf_bytes[0, n), whose
@@ -1063,6 +1069,7 @@ fun _import_seq {file_index,file_count:nat | file_index <= file_count} .<file_co
     (* the input's files are all read: its choice is cleared *)
     (case+ source of FileInput() => app_import_input() | EmptyFileInput() => app_import_input() | Dropped() => ())
   else let
+    val picking = outside_book_pick((case+ source of FileInput() => 0 | EmptyFileInput() => 1 | Dropped() => 2), file_index)
     val opened = (case+ source of
       | FileInput() => let
         val input_id = $A.alloc<byte>(11)
@@ -1083,7 +1090,8 @@ fun _import_seq {file_index,file_count:nat | file_index <= file_count} .<file_co
     (* each import's result is already reported (_import_opened shows
        the error banner on a failure, and a duplicate is answered in its
        own dialog): the next file is imported whatever it was *)
-    $P.finish<import_outcome>($P.and_then<$BF.opened><import_outcome>(opened, llam(opened) => _import_opened(opened)), llam(outcome) => let
+    $P.finish<import_outcome>($P.and_then<bool><import_outcome>(picking, llam(_) =>
+      $P.and_then<$BF.opened><import_outcome>(opened, llam(opened) => _import_opened(opened))), llam(outcome) => let
       val () = import_outcome_free(outcome)
     in
       _import_seq(source, file_index + 1, file_count) end)
@@ -1133,6 +1141,7 @@ implement import_external (handed) =
   | ~$BE.External(book_file, name) => let
       val file_size = $BF.file_size(book_file)
       val () = _keep_name(name)
+      val () = outside_slot_clear()
     in _import_file(book_file, file_size, OpenHeld()) end
 
 (* ============================================================
@@ -1179,20 +1188,28 @@ in
     | ~$BF.FileAbsent() => $P.ret<book_opening>(BookFileMissing())
     | ~$BF.FileUnreadable() => $P.ret<book_opening>(BookFileUnreadable())
     | ~$BF.FileFound(book_file) => let
-        val file_size = $BF.file_size(book_file)
+        (* its outside copy into the slot first (keyword: outside-chain) *)
+        val outside_key = lib_key(98, id_high, id_low)
+        val @(outside_frozen, outside_bytes) = $A.freeze<byte>(outside_key)
+        val outside_getting = outside_book_idb_get(outside_bytes, 15)
+        val () = release_bytes(outside_frozen, outside_bytes)
       in
-        if file_size <= 0 then let val () = $BF.file_close(book_file) in $P.ret<book_opening>(BookFileMissing()) end
-        else let
-          val serial = book_begin(book_file, file_size)
+        $P.and_then<bool><book_opening>(outside_getting, llam(_) => let
+          val file_size = $BF.file_size(book_file)
         in
-          $P.and_then<archive_outcome><book_opening>(_open_archive(serial, file_size, Reopen(), ~1, id_high, id_low), llam(outcome) =>
-            case+ outcome of
-            | ~BookReopened() => let val () = open_key_set(key) in $P.ret<book_opening>(BookOpened()) end
-            | ~BookAdded(_) => $P.ret<book_opening>(BookFileMissing())
-            | ~BookReplaced(_, found) => let val () = hrefs_free(found) in $P.ret<book_opening>(BookFileMissing()) end
-            | ~BookLooksLike(_) => $P.ret<book_opening>(BookFileMissing())
-            | ~ArchiveFailed(cause) => $P.ret<book_opening>(_reopen_failed(cause)))
-        end
+          if file_size <= 0 then let val () = $BF.file_close(book_file) in $P.ret<book_opening>(BookFileMissing()) end
+          else let
+            val serial = book_begin(book_file, file_size)
+          in
+            $P.and_then<archive_outcome><book_opening>(_open_archive(serial, file_size, Reopen(), ~1, id_high, id_low), llam(outcome) =>
+              case+ outcome of
+              | ~BookReopened() => let val () = open_key_set(key) in $P.ret<book_opening>(BookOpened()) end
+              | ~BookAdded(_) => $P.ret<book_opening>(BookFileMissing())
+              | ~BookReplaced(_, found) => let val () = hrefs_free(found) in $P.ret<book_opening>(BookFileMissing()) end
+              | ~BookLooksLike(_) => $P.ret<book_opening>(BookFileMissing())
+              | ~ArchiveFailed(cause) => $P.ret<book_opening>(_reopen_failed(cause)))
+          end
+        end)
       end)
 end
 

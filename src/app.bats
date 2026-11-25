@@ -8,6 +8,7 @@
 staload "ui.sats"
 staload "style.sats"
 staload "size_rules.sats"
+staload "book_rules.sats"
 staload "ruler_rules.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload "version.sats"
@@ -1031,6 +1032,10 @@ fn _settings (): void = let
   val () = _switch_row("typography-look", "publisher-sizes-row", "publisher-sizes-switch", "publisher-sizes-track",
     "publisher-sizes-knob", "publisher-sizes-about", "Respect the publisher's sizes",
     "Off, your text size is the book's text size and its other sizes follow in proportion. On, the book keeps the sizes its publisher chose", NoteHidden())
+  (* a book's own styles shown, under the reader's settings, or not (keyword: book styles) *)
+  val () = _switch_row("typography-look", "book-styles-row", "book-styles-switch", "book-styles-track",
+    "book-styles-knob", "book-styles-about", "Book's styles",
+    "On, the book's own colours, fonts and layout show, with your text size, font, spacing and theme still winning. Off, the book is shown plainly", NoteHidden())
   (* the reading ruler's style, and its height where the style has one (keyword: reading ruler, #566) *)
   val () = ui_el("typography-look", "ruler-row", TDiv, "srow")
   val () = ui_el("ruler-row", "ruler-label", TSpan, "slabel")
@@ -1265,6 +1270,11 @@ implement app_build () = let
   val () = ui_add("bats-root", "style-ruler-rules", TStyle)
   val @(ruler_css, ruler_css_len) = ruler_style()
   val () = ui_text_buf("style-ruler-rules", ruler_css, ruler_css_len)
+  val () = ui_add("bats-root", "style-book", TStyle)
+  val @(book_css, book_css_len) = book_style()
+  val () = ui_text_buf("style-book", book_css, book_css_len)
+  (* the reader's justify and hyphenation for a book, set by settings.bats (keyword: book css) *)
+  val () = ui_add("bats-root", "style-book-vars", TStyle)
   val () = ui_add("bats-root", "style-type", TStyle)
   (* where the reading ruler lies, written by reading_ruler.bats *)
   val () = ui_add("bats-root", "style-ruler", TStyle)

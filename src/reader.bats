@@ -4,6 +4,7 @@
 
 #include "share/atspre_staload.hats"
 #use array as A
+#use css as C
 #use arith as AR
 #use promise as P
 #use result as R
@@ -19,6 +20,9 @@ staload "language.sats"
 staload "cut.sats"
 staload "text_proved.sats"
 staload "book.sats"
+staload "outside_chain.sats"
+staload CB = "css/src/book.sats"
+staload DB = "wasm.bats-packages.dev/dom/src/book.sats"
 staload "pages.sats"
 staload "paths.sats"
 staload "overlay.sats"
@@ -2202,6 +2206,28 @@ fn _add_node {doc_location:agz}{parent:int | parent >= ~1}{node:nat}
   val () = release_bytes(node_frozen, node_bytes)
 in release_bytes(parent_frozen, parent_bytes) end
 
+(* The id of the element a content node is a child of: the book's container for a top-level node of a chapter that has one *)
+fn _container_parent_id {parent:int | parent >= ~1} (parent: int parent): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len) =
+  if parent < 0 then let
+    val container_id = $A.alloc<byte>(14)
+    val () = $A.write_text(container_id, 0, $A.text_lit("book-container"), 14)
+  in @(container_id, 14) end
+  else _node_id(parent)
+
+(* The id of the element a content node is a child of: the container's when one is open *)
+fn _content_parent_id {parent:int | parent >= ~1} (parent: int parent): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len) =
+  if outside_sink_is_open() then _container_parent_id(parent) else _node_id(parent)
+
+(* An app's element of the open container (kind 0 span, 1 br, 2 hr, 3 img), the last child of parent; false when none is open *)
+fn _add_sink_app {parent:int | parent >= ~1}{node:nat} (parent: int parent, node: int node, kind: int): bool = let
+  val @(node_id, node_id_len) = _node_id(node)
+  val @(parent_id, parent_id_len) = _container_parent_id(parent)
+  val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent_id)
+  val made = outside_sink_app_element(node_bytes, node_id_len, parent_bytes, parent_id_len, kind)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in let val () = release_bytes(node_frozen, node_bytes) in made end end
+
 (* Element id's text: data[offset, offset + text_len) decoded *)
 fn _set_decoded {doc_location,id_location,data_location:agz}{id_len:pos | id_len < 256}{data_size:pos}{offset,text_len:nat | offset + text_len <= data_size; text_len < 65536; text_len > 0}
   (doc: !$D.document(doc_location), id_bytes: !$A.borrow(byte, id_location, id_len), id_len: int id_len,
@@ -2339,7 +2365,7 @@ fn _part_add {doc_location,l:agz}{n:pos}{node:nat}{offset,text_len:nat | offset 
   val @(node_id, node_id_len) = _node_id(node)
   val @(part_frozen, part_bytes) = $A.freeze<byte>(part_id)
   val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
-  val () = $D.add_element(doc, node_bytes, node_id_len, part_bytes, part_id_len, $D.Span)
+  val () = (if outside_sink_app_element(part_bytes, part_id_len, node_bytes, node_id_len, 0) then () else $D.add_element(doc, node_bytes, node_id_len, part_bytes, part_id_len, $D.Span))
   val () = release_bytes(node_frozen, node_bytes)
   val marker = $A.alloc<byte>(1)
   val () = $A.set<byte>(marker, 0, $A.int2byte(49))
@@ -2389,11 +2415,11 @@ fn _text_into {doc_location,l:agz}{n:pos}{node:nat}{offset,text_len:nat | offset
    time that grows with the square of the columns (a megabyte of one word
    at 390 px: 17 s a frame; the same text as blocks of 64 KiB: 1 s), so no
    run is longer than one piece (#423) *)
-fun _text_spans {doc_location,l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n} .<text_len>.
-  (taken: TAKEN(kind, compressed, cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), parent: int parent, offset: int offset, text_len: int text_len, split: bool)
+fun _text_spans {doc_location,l:agz}{n:pos}{cs:$A.cells}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n} .<text_len>.
+  (taken: TEXT_TAKEN(cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), parent: int parent, offset: int offset, text_len: int text_len, split: bool)
   : [count:pos] (PIECES(cs, offset, text_len, count) | int count) = let
   val node = _next_content_node()
-  val () = _add_node(doc, parent, node, $D.Span)
+  val () = (if _add_sink_app(parent, node, 0) then () else _add_node(doc, parent, node, $D.Span))
 in
   if text_len < 65536 then let
     val () = (if split then _node_attr_literal(doc, node, $D.Class, "run") else ())
@@ -2408,8 +2434,8 @@ in
 end
 
 (* A text shown as its pieces *)
-fn _text_shown {doc_location,l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n}
-  (taken: TAKEN(kind, compressed, cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), parent: int parent, offset: int offset, text_len: int text_len): void = let
+fn _text_shown {doc_location,l:agz}{n:pos}{cs:$A.cells}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n}
+  (taken: TEXT_TAKEN(cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), parent: int parent, offset: int offset, text_len: int text_len): void = let
   val (_ | _) = _text_spans(taken | doc, data, bytes, parent, offset, text_len, false)
 in () end
 
@@ -2427,8 +2453,8 @@ fun _take_nodes {count:nat} .<count>. (count: int count): void =
 (* The numbers _text_spans would give text of text_len bytes, taken: as
    many as pieces_find counts (it stepped by 65533 here and by cut_find
    there, so a text of 131069 or 131070 spaces was numbered two ways, #568) *)
-fn _skip_spans {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{offset,text_len:nat | offset + text_len <= n}
-  (taken: TAKEN(kind, compressed, cs, n) | bytes: !$A.cborrow(l, n, cs), offset: int offset, text_len: int text_len): void = let
+fn _skip_spans {l:agz}{n:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_len <= n}
+  (taken: TEXT_TAKEN(cs, n) | bytes: !$A.cborrow(l, n, cs), offset: int offset, text_len: int text_len): void = let
   val (_ | count) = pieces_find(bytes, offset, text_len)
 in _take_nodes(count) end
 
@@ -3375,11 +3401,17 @@ fn _math_add {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{node:nat}{na
     val name = $A.alloc<byte>(name_len)
     val () = $S.copy_from_borrow(data, name_offset, data_len, name, 0, name_len, name_len)
     val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
-    val @(parent_id, parent_id_len) = _node_id(parent)
+    val @(parent_id, parent_id_len) = _content_parent_id(parent)
     val @(node_id, node_id_len) = _node_id(node)
     val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent_id)
     val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
-    val made = $D.add_math_element(doc, parent_bytes, parent_id_len, node_bytes, node_id_len, name_bytes, name_len)
+    (* in a container the element is made at once, in a document of its own, so it follows the siblings made before it (keyword: book stream order) *)
+    val made = (if outside_sink_is_open() then let
+        val own = $D.open_document($A.text_lit("bats-root"), 9)
+        val made_here = $D.add_math_element(own, parent_bytes, parent_id_len, node_bytes, node_id_len, name_bytes, name_len)
+        val () = $D.destroy(own)
+      in made_here end
+      else $D.add_math_element(doc, parent_bytes, parent_id_len, node_bytes, node_id_len, name_bytes, name_len))
     val () = release_bytes(node_frozen, node_bytes)
     val () = release_bytes(parent_frozen, parent_bytes)
   in
@@ -3426,23 +3458,196 @@ in
   else xml_name_eq(data, name_offset, name_len, _mtext, 5)
 end
 
+(* The app's element for a content node of this kind: 0 any name, 1 br, 2 hr, 3 and 4 an image (4: an svg drawn as one) *)
+fn _add_app_node {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{node:nat}{name_offset,name_len:nat | name_offset + name_len <= n}
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), parent: int parent, node: int node, kind: int,
+   name_offset: int name_offset, name_len: int name_len): void =
+  if _add_sink_app(parent, node, kind) then ()
+  else if kind = 1 then _add_node(doc, parent, node, $D.Br)
+  else if kind = 2 then _add_node(doc, parent, node, $D.Hr)
+  else if kind >= 3 then _add_node(doc, parent, node, $D.Img)
+  else _add_node(doc, parent, node, _tag_of(data, name_offset, name_len))
+
+(* A new element for a content node: a book element of the chapter's container when its text is outside bytes and a container
+   is open, else the app's element (keyword: book container) *)
+fn _add_content_node {doc_location,l:agz}{n:pos}{cs:$A.cells}{b:bool}{parent:int | parent >= ~1}{node:nat}{name_offset,name_len:nat | name_offset + name_len <= n}
+  (own: OUTSIDE_OPT(cs, b) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), as_book: bool b,
+   parent: int parent, node: int node, kind: int, name_offset: int name_offset, name_len: int name_len): void =
+  if as_book then let
+    prval OUTSIDE_OPT_yes(readable) = own
+  in
+    if name_len <= 255 then let
+      val @(node_id, node_id_len) = _node_id(node)
+      val @(parent_id, parent_id_len) = _container_parent_id(parent)
+      val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
+      val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent_id)
+      val made = outside_sink_element(readable | bytes, node_bytes, node_id_len, parent_bytes, parent_id_len, kind >= 3, name_offset, name_len)
+      val () = release_bytes(parent_frozen, parent_bytes)
+      val () = release_bytes(node_frozen, node_bytes)
+    in if made then () else _add_app_node(doc, data, parent, node, kind, name_offset, name_len) end
+    else _add_app_node(doc, data, parent, node, kind, name_offset, name_len)
+  end
+  else _add_app_node(doc, data, parent, node, kind, name_offset, name_len)
+
+(* The class, id and epub:type of an element of the book's container, which its sheets' selectors read (keyword: book names) *)
+fn _book_names {l:agz}{n:pos}{cs:$A.cells}{b:bool}{attr_count:nat}{node:nat}
+  (own: OUTSIDE_OPT(cs, b) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), as_book: bool b,
+   attrs: !$X.xml_attr_list(n, attr_count), node: int node): void =
+  if as_book then let
+    prval OUTSIDE_OPT_yes(readable) = own
+    var _attr_class = @[char][5]('c', 'l', 'a', 's', 's')
+    var _attr_id = @[char][2]('i', 'd')
+    var _attr_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
+    val @(node_id, node_id_len) = _node_id(node)
+    val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
+    val () = (case+ find_attr(data, attrs, _attr_class, 5) of
+      | ~xspan_at(o, k) => if k <= 65535 then (if outside_sink_names(readable | bytes, node_bytes, node_id_len, 1, o, k) then () else ()) else ()
+      | ~xspan_none() => ())
+    val () = (case+ find_attr(data, attrs, _attr_id, 2) of
+      | ~xspan_at(o, k) => if k <= 65535 then (if outside_sink_names(readable | bytes, node_bytes, node_id_len, 2, o, k) then () else ()) else ()
+      | ~xspan_none() => ())
+    val () = (case+ find_attr(data, attrs, _attr_type, 9) of
+      | ~xspan_at(o, k) => if k <= 65535 then (if outside_sink_names(readable | bytes, node_bytes, node_id_len, 3, o, k) then () else ()) else ()
+      | ~xspan_none() => ())
+  in release_bytes(node_frozen, node_bytes) end
+  else ()
+
 (* Walk xml_node_list, rendering each node into parent (through doc's
    borrow operations: nothing is allocated for the page); the <img>
    elements met are added to found *)
-fun _render_nodes
-  {doc_location,l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 1>.
-  (taken: TAKEN(kind, compressed, cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
-   parent: int parent, nodes: !$X.xml_node_list(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
+
+(* ===== the book's sheets (keyword: book sheets) ===== *)
+
+(* The paths of the sheets a chapter's head links (at most 16, each at most 1024 bytes), copied while its walk goes by *)
+datavtype sheet_paths(int) =
+  | SheetPathsNil(0) of ()
+  | {l:agz}{k:pos | k <= 1024}{m:nat} SheetPathsCons(m+1) of ($A.arr(byte, l, k), int k, sheet_paths(m))
+
+datavtype sheet_paths_cell = {count:nat} SheetPathsCell of sheet_paths(count)
+
+(* The entries the sheets are, by the name's place in the book's file *)
+datavtype sheet_names(int) =
+  | SheetNamesNil(0) of ()
+  | {name_offset,name_len:int}{m:nat} SheetNamesCons(m+1) of (int name_offset, int name_len, sheet_names(m))
+
+datavtype sheet_names_cell = {count:nat} SheetNamesCell of sheet_names(count)
+
+val _sheet_paths = ref<sheet_paths_cell>(SheetPathsCell(SheetPathsNil()))
+
+(* The sheets read for the chapter in hand, imports included: at most 32 *)
+val _sheet_total = ref<int>(0)
+
+(* The fonts the sheets' @font-face rules name, resolved to entries of the book (keyword: book fonts): at most 64 for a chapter *)
+datavtype font_jobs(int) =
+  | FontJobsNil(0) of ()
+  | {fs:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= fs; data_size <= 268435456}{name_offset:nat}{face:nat | face < 32}{weight:int | 1 <= weight; weight <= 1000}{style:int | 0 <= style; style <= 2}{m:nat}
+    FontJobsCons(m+1) of (int fs, int data_offset, int data_size, $Z.compression, int name_offset, int face, int weight, int style, font_jobs(m))
+
+datavtype font_jobs_cell = {count:nat} FontJobsCell of font_jobs(count)
+
+val _font_jobs = ref<font_jobs_cell>(FontJobsCell(FontJobsNil()))
+val _font_total = ref<int>(0)
+
+fun _font_jobs_free {count:nat} .<count>. (xs: font_jobs(count)): void =
+  case+ xs of
+  | ~FontJobsNil() => ()
+  | ~FontJobsCons(_, _, _, _, _, _, _, _, rest) => _font_jobs_free(rest)
+
+fn _font_jobs_take (): font_jobs_cell = let
+  var held: font_jobs_cell = FontJobsCell(FontJobsNil())
+  val () = ref_exch_elt<font_jobs_cell>(_font_jobs, held)
+in held end
+
+fn _font_jobs_put (held: font_jobs_cell): void = let
+  var previous: font_jobs_cell = held
+  val () = ref_exch_elt<font_jobs_cell>(_font_jobs, previous)
+in (case+ previous of ~FontJobsCell(xs) => _font_jobs_free(xs)) end
+
+fun _sheet_paths_free {count:nat} .<count>. (xs: sheet_paths(count)): void =
+  case+ xs of
+  | ~SheetPathsNil() => ()
+  | ~SheetPathsCons(buf, _, rest) => let
+      val () = $A.free<byte>(buf)
+    in _sheet_paths_free(rest) end
+
+fun _sheet_names_free {count:nat} .<count>. (xs: sheet_names(count)): void =
+  case+ xs of
+  | ~SheetNamesNil() => ()
+  | ~SheetNamesCons(_, _, rest) => _sheet_names_free(rest)
+
+fn _sheet_paths_take (): sheet_paths_cell = let
+  var held: sheet_paths_cell = SheetPathsCell(SheetPathsNil())
+  val () = ref_exch_elt<sheet_paths_cell>(_sheet_paths, held)
+in held end
+
+(* Keeps held; what was kept is freed *)
+fn _sheet_paths_put (held: sheet_paths_cell): void = let
+  var previous: sheet_paths_cell = held
+  val () = ref_exch_elt<sheet_paths_cell>(_sheet_paths, previous)
+in (case+ previous of ~SheetPathsCell(xs) => _sheet_paths_free(xs)) end
+
+(* A chapter begins: no sheet is linked yet *)
+fn _sheets_reset (): void = let
+  val () = _sheet_paths_put(SheetPathsCell(SheetPathsNil()))
+  val () = _font_jobs_put(FontJobsCell(FontJobsNil()))
+  val () = !_font_total := 0
+in !_sheet_total := 0 end
+
+fn _sheet_push {l:agz}{n:pos}{o:nat}{k:pos | o + k <= n; k <= 1024}
+  (data: !$A.borrow(byte, l, n), data_len: int n, o: int o, k: int k): void = let
+  val buf = $A.alloc<byte>(k)
+  val () = $S.copy_from_borrow(data, o, data_len, buf, 0, k, k)
+  val held = _sheet_paths_take()
+in (case+ held of ~SheetPathsCell(xs) => _sheet_paths_put(SheetPathsCell(SheetPathsCons(buf, k, xs)))) end
+
+(* A <link rel="stylesheet" href> of the head: its path is kept *)
+fn _sheet_link {l:agz}{n:pos}{attr_count:nat}{name_offset,name_len:nat | name_offset + name_len <= n}
+  (data: !$A.borrow(byte, l, n), data_len: int n, name_offset: int name_offset, name_len: int name_len,
+   attrs: !$X.xml_attr_list(n, attr_count)): void = let
+  var _tag_link = @[char][4]('l', 'i', 'n', 'k')
+in
+  if xml_name_eq(data, name_offset, name_len, _tag_link, 4) then let
+    var _attr_rel = @[char][3]('r', 'e', 'l')
+    var _attr_href = @[char][4]('h', 'r', 'e', 'f')
+    var _word = @[char][10]('s', 't', 'y', 'l', 'e', 's', 'h', 'e', 'e', 't')
+    val is_sheet = (case+ find_attr(data, attrs, _attr_rel, 3) of
+      | ~xspan_at(o, k) => xml_name_eq(data, o, k, _word, 10)
+      | ~xspan_none() => false): bool
+  in
+    if is_sheet then
+      (case+ find_attr(data, attrs, _attr_href, 4) of
+       | ~xspan_at(o, k) =>
+         if k > 0 then (if k <= 1024 then _sheet_push(data, data_len, o, k) else ()) else ()
+       | ~xspan_none() => ())
+    else ()
+  end
+  else ()
+end
+
+fun _sheets_collect {l:agz}{n:pos}{sz:nat} .<sz>.
+  (data: !$A.borrow(byte, l, n), data_len: int n, nodes: !$X.xml_node_list(n, sz)): void =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val found = _render_node(taken | doc, data, bytes, data_len, parent, node, found, fragment)
-    in _render_nodes(taken | doc, data, bytes, data_len, parent, rest, found, fragment) end
+      val () = (case+ node of
+        | $X.xml_element(name_offset, name_len, attrs, _) => _sheet_link(data, data_len, name_offset, name_len, attrs)
+        | $X.xml_text(_, _) => ())
+    in _sheets_collect(data, data_len, rest) end
+  | $X.xml_nodes_nil() => ()
+
+fun _render_nodes
+  {doc_location,l:agz}{n:pos}{cs:$A.cells}{b:bool}{tree_size:nat}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 1>.
+  (taken: TEXT_TAKEN(cs, n), own: OUTSIDE_OPT(cs, b) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
+   as_book: bool b, parent: int parent, nodes: !$X.xml_node_list(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val found = _render_node(taken, own | doc, data, bytes, data_len, as_book, parent, node, found, fragment)
+    in _render_nodes(taken, own | doc, data, bytes, data_len, as_book, parent, rest, found, fragment) end
   | $X.xml_nodes_nil() => found
 
 and _render_node
-  {doc_location,l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:pos}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 0>.
-  (taken: TAKEN(kind, compressed, cs, n) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
-   parent: int parent, node: !$X.xml_node(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
+  {doc_location,l:agz}{n:pos}{cs:$A.cells}{b:bool}{tree_size:pos}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 0>.
+  (taken: TEXT_TAKEN(cs, n), own: OUTSIDE_OPT(cs, b) | doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), data_len: int n,
+   as_book: bool b, parent: int parent, node: !$X.xml_node(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
   case+ node of
   | $X.xml_text(offset, text_len) => let
       (* white space between the page's blocks takes its numbers but
@@ -3471,7 +3676,10 @@ and _render_node
     var _tag_math = @[char][4]('m', 'a', 't', 'h')
   in
     (* Skipped: head, title, meta, link, style, script *)
-    if xml_name_eq(data, name_offset, name_len, _tag_head, 4) then found
+    if xml_name_eq(data, name_offset, name_len, _tag_head, 4) then let
+      (* its links to sheets are kept for the sheets' load (keyword: book sheets) *)
+      val () = _sheets_collect(data, data_len, children)
+    in found end
     else if xml_name_eq(data, name_offset, name_len, _tag_title, 5) then found
     else if xml_name_eq(data, name_offset, name_len, _tag_meta, 4) then found
     else if xml_name_eq(data, name_offset, name_len, _tag_link, 4) then found
@@ -3482,27 +3690,27 @@ and _render_node
     else if xml_name_eq(data, name_offset, name_len, _tag_html, 4) then let
       val () = _root_lang(doc, data, attrs)
       val () = _root_direction(data, attrs)
-    in _render_nodes(taken | doc, data, bytes, data_len, parent, children, found, fragment) end
+    in _render_nodes(taken, own | doc, data, bytes, data_len, as_book, parent, children, found, fragment) end
     else if xml_name_eq(data, name_offset, name_len, _tag_body, 4) then let
       val () = _root_lang(doc, data, attrs)
       val () = _root_direction(data, attrs)
-    in _render_nodes(taken | doc, data, bytes, data_len, parent, children, found, fragment) end
+    in _render_nodes(taken, own | doc, data, bytes, data_len, as_book, parent, children, found, fragment) end
     (* Void: br, hr, img *)
     else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then let
       val content_node = _next_content_node()
-      val () = _add_node(doc, parent, content_node, $D.Br)
+      val () = _add_content_node(own | doc, data, bytes, as_book, parent, content_node, 1, name_offset, name_len)
       val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
     in found end
     else if xml_name_eq(data, name_offset, name_len, _tag_hr, 2) then let
       val content_node = _next_content_node()
-      val () = _add_node(doc, parent, content_node, $D.Hr)
+      val () = _add_content_node(own | doc, data, bytes, as_book, parent, content_node, 2, name_offset, name_len)
       val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
     in found end
     else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then let
       (* An image: shown once its bytes are read from the book
          (_load_images); until then its src is an empty data URL *)
       val content_node = _next_content_node()
-      val () = _add_node(doc, parent, content_node, $D.Img)
+      val () = _add_content_node(own | doc, data, bytes, as_book, parent, content_node, 3, name_offset, name_len)
       val () = _align_mark(doc, content_node, publisher_aligns_next(name_offset))
       val () = _node_src_empty(doc, content_node)
       var _attr_alt = @[char][3]('a', 'l', 't')
@@ -3523,7 +3731,7 @@ and _render_node
        its source xlink:href, or href *)
     else if xml_name_eq(data, name_offset, name_len, _tag_image, 5) then let
       val content_node = _next_content_node()
-      val () = _add_node(doc, parent, content_node, $D.Img)
+      val () = _add_content_node(own | doc, data, bytes, as_book, parent, content_node, 4, name_offset, name_len)
       val () = _node_src_empty(doc, content_node)
       val () = _node_attr_literal(doc, content_node, $D.Alt, "image")
       var _attr_xlink_href = @[char][10]('x', 'l', 'i', 'n', 'k', ':', 'h', 'r', 'e', 'f')
@@ -3543,7 +3751,7 @@ and _render_node
       val saved = !_math_inside
       val () = !_math_inside := (if made then (if _math_token(data, name_offset, name_len) then 2 else 1) else 1)
       val child_parent = (if made then content_node else parent): [child:int | child >= ~1] int child
-      val found = _render_nodes(taken | doc, data, bytes, data_len, child_parent, children, found, fragment)
+      val found = _render_nodes(taken, own | doc, data, bytes, data_len, as_book, child_parent, children, found, fragment)
       val () = !_math_inside := saved
     in found end
     else let
@@ -3555,13 +3763,14 @@ and _render_node
       var _tag_svg = @[char][3]('s', 'v', 'g')
       val svg_end = (if name_len = 3 then (if xml_name_eq(data, name_offset, name_len, _tag_svg, 3) then _svg_extent(data, data_len, name_offset) else ~1) else ~1): [after:int | after >= ~1; after <= n] int after
       val content_node = _next_content_node()
-      val () = (if svg_end > 0 then _add_node(doc, parent, content_node, $D.Img) else _add_node(doc, parent, content_node, _tag_of(data, name_offset, name_len)))
+      val () = (if svg_end > 0 then _add_content_node(own | doc, data, bytes, as_book, parent, content_node, 4, name_offset, name_len) else _add_content_node(own | doc, data, bytes, as_book, parent, content_node, 0, name_offset, name_len))
       val () = (if svg_end > 0 then let
           val () = _node_src_empty(doc, content_node)
         in _node_attr_literal(doc, content_node, $D.Alt, "image") end else ())
       val () = (if svg_end > 0 then !_svg_inside := !_svg_inside + 1 else ())
       val () = _fragment_check(data, attrs, fragment, content_node)
       val () = _pass_attrs(doc, data, attrs, content_node)
+      val () = _book_names(own | data, bytes, as_book, attrs, content_node)
       val () = _block_direction(doc, data, attrs, parent, content_node)
       (* an audio or video element is played, with the browser's own
          controls and never by itself; its source (or its <source>
@@ -3599,9 +3808,9 @@ and _render_node
       val () = (if xml_name_eq(data, name_offset, name_len, _tag_ruby, 4) then _ruby_mark() else ())
       var _tag_a = @[char][1]('a')
       val found = (if xml_name_eq(data, name_offset, name_len, _tag_a, 1) then let
-          val found = _render_nodes(taken | doc, data, bytes, data_len, content_node, children, found, fragment)
+          val found = _render_nodes(taken, own | doc, data, bytes, data_len, as_book, content_node, children, found, fragment)
         in _link(doc, data, attrs, content_node, !_content_count, found) end
-        else _render_nodes(taken | doc, data, bytes, data_len, content_node, children, found, fragment)): [new_count:nat] images(n, new_count)
+        else _render_nodes(taken, own | doc, data, bytes, data_len, as_book, content_node, children, found, fragment)): [new_count:nat] images(n, new_count)
       (* the clip of the chapter's overlay that reads this element, by its
          id: its content nodes, this one's and its children's *)
       val () = _clip_match(data, attrs, content_node, !_content_count)
@@ -4796,6 +5005,289 @@ implement load_shown (outcome) =
   | ChapterNotRead() => false
   | ChapterSuperseded() => false
 
+(* The promises of this module that hold a text or an outside text give them back (keyword: outside-chain) *)
+implement $P.dispose<text_either>(text) = text_either_free(text)
+implement $P.dispose<outside_text>(text) = outside_text_free(text)
+
+(* The text of the chapter entry [data_offset, data_offset + data_size): read as outside cells of the book's outside copy when it
+   has one (the browser decompresses them), else taken in the app (zip's inflate) as before; the sum the archive states is
+   checked on the inflated cells either way (quire#529, #849; keyword: outside-chain) *)
+fn _chapter_text {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}
+  (serial: int, file_size: int file_size, data_offset: int data_offset, data_size: int data_size, method: $Z.compression, name_offset: int name_offset)
+  : $P.promise(text_either, $P.Chained) =
+  case+ book_entry_sum(serial, name_offset) of
+  | ~SumUnknown() => $P.ret<text_either>(TextEitherNone())
+  | ~SumKnown(want_high, want_low) =>
+    $P.and_then<outside_text><text_either>(outside_chapter_text(file_size, data_offset, data_size, method, want_high, want_low), llam(got) =>
+      case+ got of
+      | ~OutsideText(taken) => $P.ret<text_either>(text_either_of_outside(taken))
+      | ~OutsideTextNone() =>
+        (case+ piece_new(data_size) of
+         | ~NoPiece() => $P.ret<text_either>(TextEitherNoRoom())
+         | ~Piece(compressed_owner, compressed) => let
+             val _ = book_read(serial, file_size, data_offset, compressed, data_size)
+             val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
+             val @(compressed_back, text) = take_text_proved_sum(compressed_length | entry_method_of(method), compressed_barr, data_size, want_high, want_low)
+             val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
+           in $P.ret<text_either>(text_either_of_taken(text)) end))
+
+
+(* The entries the @import rules of a sheet name, in order: the paths are relative to the sheet's own directory *)
+fun _imports_names {file_size:pos}{dir_name_offset,dir_len:nat | dir_name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{sz:nat} .<sz>.
+  (serial: int, file_size: int file_size, dir_name_offset: int dir_name_offset, dir_len: int dir_len,
+   data: !$A.borrow(byte, l, n), n: int n, imps: !$CB.book_imports(n, sz)): [m:nat] sheet_names(m) =
+  case+ imps of
+  | $CB.BImportsNil() => SheetNamesNil()
+  | $CB.BImportsCons(o, k, rest) => let
+      val tail = _imports_names(serial, file_size, dir_name_offset, dir_len, data, n, rest)
+    in
+      case+ book_find_relative(serial, file_size, dir_name_offset, dir_len, data, n, o, k) of
+      | ~EntryHit(_, _, _, found_offset, found_len) => SheetNamesCons(found_offset, found_len, tail)
+      | ~EntryMiss() => tail
+    end
+
+(* The @import entries of the sheet text either, an outside text of the entry name[name_offset, name_offset + name_len) *)
+fn _sheet_imports_of {file_size:pos}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+  (serial: int, file_size: int file_size, name_offset: int name_offset, name_len: int name_len, either: text_either): sheet_names_cell =
+  case+ either of
+  | ~TextEither(taken, length, own | owner, array, size, as_outside) => let
+      val @(frozen, cells) = $A.barr_freeze(array)
+      val bytes = $A.cborrow_view(frozen, cells)
+      val names = (if as_outside then let
+          prval OUTSIDE_OPT_yes(readable) = own
+          val read = $CB.book_sheet_read(cells, size, 1, @(250, 248, 245), @(240, 230, 210))
+          val dir_len = _opf_prefix_len(serial, file_size, name_offset, name_len)
+          val names = (case+ read of
+            | @$CB.BookRead(rules, imps, faces) => let
+                val names = _imports_names(serial, file_size, name_offset, dir_len, bytes, size, imps)
+                prval () = fold@(read)
+              in SheetNamesCell(names) end): sheet_names_cell
+          val () = $CB.book_read_free(read)
+        in names end
+        else SheetNamesCell(SheetNamesNil())): sheet_names_cell
+      val () = $A.cborrow_view_drop(frozen, bytes)
+      val () = $A.cborrow_drop(frozen, cells)
+      val () = text_give_back(owner, $A.barr_thaw(frozen))
+    in names end
+  | ~TextEitherNone() => SheetNamesCell(SheetNamesNil())
+  | ~TextEitherNoRoom() => SheetNamesCell(SheetNamesNil())
+
+(* The span's bytes are the text, from i on *)
+fun _span_is_at {l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}{i:nat | i <= k} .<k - i>.
+  (bytes: !$A.cborrow(l, n, cs), offset: int o, text: string k, length: int k, i: int i): bool =
+  if i >= length then true
+  else let
+    val (_ | value) = $A.cborrow_get(bytes, offset + i)
+    val letter = char2int1(string_get_at(text, i))
+  in
+    if value = letter then _span_is_at(bytes, offset, text, length, i + 1) else false
+  end
+
+fn _span_is {l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}{m:nat}
+  (bytes: !$A.cborrow(l, n, cs), offset: int o, length: int k, text: string m): bool = let
+  val text_length = g1u2i(string1_length(text))
+in
+  if length = text_length then _span_is_at(bytes, offset, text, text_length, 0) else false
+end
+
+(* The digits of the span as a number, or ~1 when it is anything else *)
+fun _span_number {l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}{i:nat | i <= k} .<k - i>.
+  (bytes: !$A.cborrow(l, n, cs), offset: int o, length: int k, i: int i, acc: int): int =
+  if i >= length then acc
+  else let
+    val (_ | value) = $A.cborrow_get(bytes, offset + i)
+  in
+    if value >= 48 then
+      (if value <= 57 then (if acc > 100000 then ~1 else _span_number(bytes, offset, length, i + 1, acc * 10 + (value - 48))) else ~1)
+    else ~1
+  end
+
+(* A face's weight descriptor: a number of 1 to 1000, bold, or else normal *)
+fn _weight_value {l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}
+  (bytes: !$A.cborrow(l, n, cs), offset: int o, length: int k): [w:int | 1 <= w; w <= 1000] int w =
+  if length <= 0 then 400
+  else if _span_is(bytes, offset, length, "bold") then 700
+  else let
+    val value = g1ofg0(_span_number(bytes, offset, length, 0, 0))
+  in if value >= 1 then (if value <= 1000 then value else 400) else 400 end
+
+fn _style_value {l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}
+  (bytes: !$A.cborrow(l, n, cs), offset: int o, length: int k): [s:int | 0 <= s; s <= 2] int s =
+  if _span_is(bytes, offset, length, "italic") then 1
+  else if _span_is(bytes, offset, length, "oblique") then 2
+  else 0
+
+fun _refs_weight {l:agz}{n:pos}{cs:$A.cells}{r:nat} .<r>.
+  (bytes: !$A.cborrow(l, n, cs), refs: !$CB.book_refs(n, r), num: int): [w:int | 1 <= w; w <= 1000] int w =
+  case+ refs of
+  | $CB.BRefsNil() => 400
+  | $CB.BRefImport(_, _, rest) => _refs_weight(bytes, rest, num)
+  | $CB.BRefFaceSrc(_, _, _, rest) => _refs_weight(bytes, rest, num)
+  | $CB.BRefFaceStyle(_, _, _, rest) => _refs_weight(bytes, rest, num)
+  | $CB.BRefFaceWeight(face, o, k, rest) =>
+      if face = num then _weight_value(bytes, o, k) else _refs_weight(bytes, rest, num)
+
+fun _refs_style {l:agz}{n:pos}{cs:$A.cells}{r:nat} .<r>.
+  (bytes: !$A.cborrow(l, n, cs), refs: !$CB.book_refs(n, r), num: int): [s:int | 0 <= s; s <= 2] int s =
+  case+ refs of
+  | $CB.BRefsNil() => 0
+  | $CB.BRefImport(_, _, rest) => _refs_style(bytes, rest, num)
+  | $CB.BRefFaceSrc(_, _, _, rest) => _refs_style(bytes, rest, num)
+  | $CB.BRefFaceWeight(_, _, _, rest) => _refs_style(bytes, rest, num)
+  | $CB.BRefFaceStyle(face, o, k, rest) =>
+      if face = num then _style_value(bytes, o, k) else _refs_style(bytes, rest, num)
+
+(* A font file of a face: its entry is kept to be read. The face number is css's own int; it is found among 0 to 31 so that its type says it is one *)
+fun _font_job_push {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{cs:$A.cells}{o,k:nat | o + k <= n}{r:nat}{i:nat | i <= 32} .<32 - i>.
+  (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len,
+   bytes: !$A.borrow(byte, l, n), n: int n, cells: !$A.cborrow(l, n, cs), all: !$CB.book_refs(n, r),
+   number: int, o: int o, k: int k, i: int i): void =
+  if i >= 32 then ()
+  else if number = i then
+    (case+ book_find_relative(serial, file_size, name_offset, dir_len, bytes, n, o, k) of
+     | ~EntryHit(data_offset, data_size, method, found_offset, _) => let
+         val weight = _refs_weight(cells, all, number)
+         val style = _refs_style(cells, all, number)
+         val () = !_font_total := !_font_total + 1
+       in
+         case+ _font_jobs_take() of
+         | ~FontJobsCell(xs) => _font_jobs_put(FontJobsCell(FontJobsCons(file_size, data_offset, data_size, method, found_offset, i, weight, style, xs)))
+       end
+     | ~EntryMiss() => ())
+  else _font_job_push(serial, file_size, name_offset, dir_len, bytes, n, cells, all, number, o, k, i + 1)
+
+fun _font_jobs_collect {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{cs:$A.cells}{a,r:nat} .<r>.
+  (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len,
+   bytes: !$A.borrow(byte, l, n), n: int n, cells: !$A.cborrow(l, n, cs), all: !$CB.book_refs(n, a), cur: !$CB.book_refs(n, r)): void =
+  case+ cur of
+  | $CB.BRefsNil() => ()
+  | $CB.BRefImport(_, _, rest) => _font_jobs_collect(serial, file_size, name_offset, dir_len, bytes, n, cells, all, rest)
+  | $CB.BRefFaceWeight(_, _, _, rest) => _font_jobs_collect(serial, file_size, name_offset, dir_len, bytes, n, cells, all, rest)
+  | $CB.BRefFaceStyle(_, _, _, rest) => _font_jobs_collect(serial, file_size, name_offset, dir_len, bytes, n, cells, all, rest)
+  | $CB.BRefFaceSrc(number, o, k, rest) => let
+      val () = (if !_font_total < 64 then _font_job_push(serial, file_size, name_offset, dir_len, bytes, n, cells, all, number, o, k, 0) else ())
+    in _font_jobs_collect(serial, file_size, name_offset, dir_len, bytes, n, cells, all, rest) end
+
+(* The font text either added as a face of the container of the chapter, when the chapter is still the one in hand *)
+fn _font_added {face:nat | face < 32}{weight:int | 1 <= weight; weight <= 1000}{style:int | 0 <= style; style <= 2}
+  (generation: int, face: int face, weight: int weight, style: int style, either: text_either): int =
+  case+ either of
+  | ~TextEither(taken, length, own | owner, array, size, as_outside) => let
+      val @(frozen, cells) = $A.barr_freeze(array)
+      val added = (if as_outside then (if generation = !_load_generation then let
+          prval OUTSIDE_OPT_yes(readable) = own
+          val added = outside_face_add(readable | cells, 0, size, face, weight, style)
+        in (if added then 1 else 0) end
+        else 0) else 0): int
+      val () = $A.cborrow_drop(frozen, cells)
+      val () = text_give_back(owner, $A.barr_thaw(frozen))
+    in added end
+  | ~TextEitherNone() => 0
+  | ~TextEitherNoRoom() => 0
+
+fun _font_jobs_chain {count:nat} .<count>.
+  (serial: int, generation: int, jobs: font_jobs(count)): $P.promise(int, $P.Chained) =
+  case+ jobs of
+  | ~FontJobsNil() => $P.ret<int>(0)
+  | ~FontJobsCons(fs, data_offset, data_size, method, name_offset, face, weight, style, rest) =>
+    if generation <> !_load_generation then let val () = _font_jobs_free(rest) in $P.ret<int>(0) end
+    else
+      $P.and_then<text_either><int>(_chapter_text(serial, fs, data_offset, data_size, method, name_offset), llam(either) =>
+        $P.and_then<int><int>(_font_jobs_chain(serial, generation, rest), llam(more) =>
+          $P.ret<int>(_font_added(generation, face, weight, style, either) + more)))
+
+(* The sheet text either added to the container of the chapter, when the chapter is still the one in hand: 1 when it was; its fonts are kept to be read *)
+fn _sheet_added {file_size:pos}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+  (serial: int, file_size: int file_size, name_offset: int name_offset, name_len: int name_len, generation: int, either: text_either): int =
+  case+ either of
+  | ~TextEither(taken, length, own | owner, array, size, as_outside) => let
+      val @(frozen, cells) = $A.barr_freeze(array)
+      val added = (if as_outside then (if generation = !_load_generation then let
+          prval OUTSIDE_OPT_yes(readable) = own
+          val read = $CB.book_sheet_read(cells, size, 1, @(250, 248, 245), @(240, 230, 210))
+          val added = outside_sheet_add(readable | cells, read)
+          val bytes = $A.cborrow_view(frozen, cells)
+          val refs = $CB.book_refs_of(cells, read)
+          val all = $CB.book_refs_of(cells, read)
+          val dir_len = _opf_prefix_len(serial, file_size, name_offset, name_len)
+          val () = _font_jobs_collect(serial, file_size, name_offset, dir_len, bytes, size, cells, all, refs)
+          val () = $CB.book_refs_free(refs)
+          val () = $CB.book_refs_free(all)
+          val () = $A.cborrow_view_drop(frozen, bytes)
+          val () = $CB.book_read_free(read)
+        in (if added then 1 else 0) end
+        else 0) else 0): int
+      val () = $A.cborrow_drop(frozen, cells)
+      val () = text_give_back(owner, $A.barr_thaw(frozen))
+    in added end
+  | ~TextEitherNone() => 0
+  | ~TextEitherNoRoom() => 0
+
+(* The sheet of the book that is the entry name[name_offset, name_offset + name_len): its imports first (four deep at most), then it *)
+fun _sheet_named {file_size,name_offset,name_len:int}{depth:nat | depth <= 5} .<5-depth, 0>.
+  (serial: int, file_size: int file_size, name_offset: int name_offset, name_len: int name_len, depth: int depth, generation: int): $P.promise(int, $P.Chained) =
+  if generation <> !_load_generation then $P.ret<int>(0)
+  else if depth >= 5 then $P.ret<int>(0)
+  else if !_sheet_total >= 32 then $P.ret<int>(0)
+  else if file_size <= 0 then $P.ret<int>(0)
+  else if name_offset < 0 then $P.ret<int>(0)
+  else if name_len <= 0 then $P.ret<int>(0)
+  else if name_len >= 65536 then $P.ret<int>(0)
+  else if name_offset + name_len > file_size then $P.ret<int>(0)
+  else let
+    val () = !_sheet_total := !_sheet_total + 1
+    val name = $A.alloc<byte>(name_len)
+    val _ = book_read(serial, file_size, name_offset, name, name_len)
+    val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
+    val hit = book_find_entry(serial, file_size, name_bytes, name_len)
+    val () = release_bytes(name_frozen, name_bytes)
+  in
+    case+ hit of
+    | ~EntryMiss() => $P.ret<int>(0)
+    | ~EntryHit(data_offset, data_size, method, found_offset, found_len) =>
+      $P.and_then<text_either><int>(_chapter_text(serial, file_size, data_offset, data_size, method, found_offset), llam(first) => let
+        val ~SheetNamesCell(names) = _sheet_imports_of(serial, file_size, found_offset, found_len, first)
+      in
+        $P.and_then<int><int>(_sheets_chain(serial, file_size, names, depth + 1, generation), llam(_) =>
+          $P.and_then<text_either><int>(_chapter_text(serial, file_size, data_offset, data_size, method, found_offset), llam(second) =>
+            $P.ret<int>(_sheet_added(serial, file_size, found_offset, found_len, generation, second))))
+      end)
+  end
+
+and _sheets_chain {file_size:int}{depth:nat | depth <= 5}{count:nat} .<5-depth, count>.
+  (serial: int, file_size: int file_size, names: sheet_names(count), depth: int depth, generation: int): $P.promise(int, $P.Chained) =
+  case+ names of
+  | ~SheetNamesNil() => $P.ret<int>(0)
+  | ~SheetNamesCons(name_offset, name_len, rest) =>
+    $P.and_then<int><int>(_sheet_named(serial, file_size, name_offset, name_len, depth, generation), llam(first) =>
+      $P.and_then<int><int>(_sheets_chain(serial, file_size, rest, depth, generation), llam(more) => $P.ret<int>(first + more)))
+
+(* The entries the paths of a chapter's links name, relative to the chapter's directory, in the order they were linked *)
+fun _sheet_paths_names {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{count,a:nat} .<count>.
+  (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len, xs: sheet_paths(count), acc: sheet_names(a)): [m:nat] sheet_names(m) =
+  case+ xs of
+  | ~SheetPathsNil() => acc
+  | ~SheetPathsCons(buf, k, rest) => let
+      val @(frozen, bytes) = $A.freeze<byte>(buf)
+      val acc = (case+ book_find_relative(serial, file_size, name_offset, dir_len, bytes, k, 0, k) of
+        | ~EntryHit(_, _, _, found_offset, found_len) => SheetNamesCons(found_offset, found_len, acc)
+        | ~EntryMiss() => acc): [m:nat] sheet_names(m)
+      val () = release_bytes(frozen, bytes)
+    in _sheet_paths_names(serial, file_size, name_offset, dir_len, rest, acc) end
+
+(* The sheets the chapter's head links, read from the book and added to its container (keyword: book sheets): how many were *)
+fn _sheets_load {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}
+  (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len, generation: int): $P.promise(int, $P.Chained) = let
+  val ~SheetPathsCell(paths) = _sheet_paths_take()
+in
+  if outside_sheet_ready() then
+    $P.and_then<int><int>(_sheets_chain(serial, file_size, _sheet_paths_names(serial, file_size, name_offset, dir_len, paths, SheetNamesNil()), 0, generation), llam(sheets) =>
+      (case+ _font_jobs_take() of
+       | ~FontJobsCell(jobs) =>
+         $P.and_then<int><int>(_font_jobs_chain(serial, generation, jobs), llam(fonts) => $P.ret<int>(sheets + fonts))))
+  else let val () = _sheet_paths_free(paths) in $P.ret<int>(0) end
+end
+
 (* Shows chapter facing_index of book serial in the facing box of a
    spread, its content nodes going on from the page's, its size its
    viewport's (else the page's), its links and images its own. Shown
@@ -4806,27 +5298,9 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
   | ~ChaptersUnknown() => $P.ret<load_outcome>(SpineNotRead())
   | ~ChapterNone(_) => $P.ret<load_outcome>(NoSuchChapter())
   | ~ChapterGot(file_size, chapter_start, compressed_size, method, chapter_name_offset, _, dir_len, _, _) =>
-    (case+ piece_new(compressed_size) of
-     | ~NoPiece() => $P.ret<load_outcome>(NoRoomForChapter())
-     | ~Piece(compressed_owner, compressed) => let
-         val facing_sum = book_entry_sum(serial, chapter_name_offset)
-         val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
-         (* the entry's bytes are lent as a barr and taken with the proofs the walks take (#849), the sum
-            compared on the inflated cells; an unknown sum is no text, and an entry of over 1048576 bytes, stored
-            or deflated, is taken whole (arena-text) *)
-         val taken_text = (case+ facing_sum of
-           | ~SumUnknown() => let
-               val () = piece_free(compressed_owner, compressed)
-             in TextMalformed{$Z.inflate_stored()}{$A.cnil()}() end
-           | ~SumKnown(want_high, want_low) =>
-             let
-               val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
-               val @(compressed_back, text) = take_text_proved_sum(compressed_length | entry_method_of(method), compressed_barr, compressed_size, want_high, want_low)
-               val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
-             in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
-       in
-         (case+ taken_text of
-           | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) =>
+    $P.and_then<text_either><load_outcome>(_chapter_text(serial, file_size, chapter_start, compressed_size, method, chapter_name_offset), llam(either) =>
+      case+ either of
+      | ~TextEither(taken, _, outside_own | text_array_owner, xhtml, xhtml_size, as_outside) =>
              if generation <> !_load_generation then let
                val () = text_give_back(text_array_owner, xhtml)
              in $P.ret<load_outcome>(ChapterSuperseded()) end
@@ -4835,7 +5309,6 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
                   the cells of the text are in the type for the cut (#568), and the
                   plain borrow the parser and the page read through is a view of the
                   same bytes *)
-               prval taken = TAKEN_of(inflates, text_of, held)
                val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
@@ -4843,7 +5316,7 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
                val doc = $D.open_document($A.text_lit("bats-root"), 9)
                val () = !_render_into := IntoFacingBox()
                val no_fragment = FragmentNone()
-               val found = _render_nodes(taken | doc, xhtml_bytes, xhtml_cells, xhtml_size, ~1, nodes, images_nil(), no_fragment)
+               val found = _render_nodes(taken, OUTSIDE_OPT_no() | doc, xhtml_bytes, xhtml_cells, xhtml_size, false, ~1, nodes, images_nil(), no_fragment)
                val () = _fragment_free(no_fragment)
                val () = !_render_into := IntoPage()
                val () = $D.destroy(doc)
@@ -4854,10 +5327,8 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
                val () = text_give_back(text_array_owner, $A.barr_thaw(xhtml_frozen))
                val () = _fixed_fit()
              in $P.ret<load_outcome>(ChapterShown()) end
-           | other => let
-               val () = text_taken_free(other)
-             in $P.ret<load_outcome>(ChapterNotRead()) end)
-       end)
+      | ~TextEitherNoRoom() => $P.ret<load_outcome>(NoRoomForChapter())
+      | ~TextEitherNone() => $P.ret<load_outcome>(ChapterNotRead()))
 
 (* Shows chapter chapter_index of book serial, from its chapters, its
    overlay's clips matched to its content nodes as they are made *)
@@ -4875,31 +5346,10 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
       val () = (case+ reading_get() of
         | @(page, page_count, chapter, _) => reading_set(@(page, page_count, chapter, chapter_count)))
     in
-      case+ piece_new(compressed_size) of
-      | ~NoPiece() => let
-          val () = _overlay_pending_put(NoOverlayPending())
-        in $P.ret<load_outcome>(NoRoomForChapter()) end
-      | ~Piece(compressed_owner, compressed) => let
-              (* the CRC-32 the archive states for the chapter (quire#529) *)
-              val chapter_sum = book_entry_sum(serial, chapter_name_offset)
-              val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
-              (* taken as the facing page's is (#849) *)
-              val taken_text = (case+ chapter_sum of
-                | ~SumUnknown() => let
-                    val () = piece_free(compressed_owner, compressed)
-                  in TextMalformed{$Z.inflate_stored()}{$A.cnil()}() end
-                | ~SumKnown(want_high, want_low) =>
-                  let
-                    val (compressed_length, compressed_lent | compressed_barr) = $A.barr_of_arrx(compressed)
-                    val @(compressed_back, text) = take_text_proved_sum(compressed_length | entry_method_of(method), compressed_barr, compressed_size, want_high, want_low)
-                    val () = piece_free(compressed_owner, $A.barr_to_arrx(compressed_lent | compressed_back))
-                  in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
-            in
-              (* Stage 3: parse HTML and render *)
-              (case+ taken_text of
-                | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
+      $P.and_then<text_either><load_outcome>(_chapter_text(serial, file_size, chapter_start, compressed_size, method, chapter_name_offset), llam(either) =>
+      case+ either of
+      | ~TextEither(taken, _, outside_own | text_array_owner, xhtml, xhtml_size, as_outside) => let
                   (* the text is the barr of the take, as the facing page's is (#568, #849) *)
-                  prval taken = TAKEN_of(inflates, text_of, held)
                   val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                   val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                 in
@@ -4925,8 +5375,19 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
                   val () = $D.remove_children(doc, page_id_bytes, page_id_len)
                   val () = release_bytes(page_id_frozen, page_id_bytes)
+                  (* the page is empty before the book's container is made in it (keyword: book container) *)
+                  val () = $D.destroy(doc)
+                  val doc = $D.open_document($A.text_lit("bats-root"), 9)
+                  val _ = (case+ layout of
+                    | PrePaginated() => false
+                    | Reflowable() =>
+                      if as_outside then (if (case+ set_book_styles_get() of BookStylesOn() => true | BookStylesOff() => false) then let
+                        prval OUTSIDE_OPT_yes(readable) = outside_own
+                      in outside_sink_open(readable | xhtml_cells, xhtml_size) end
+                      else false) else false)
                   val () = !_content_count := 0
                   val () = !_part_count := 0
+                  val () = _sheets_reset()
                   val () = _links_put(LinksCell(links_nil()))
                   val () = _pictures_put(PicturesCell(pictures_nil()))
                   val () = _breaks_put(BreaksCell(breaks_nil()))
@@ -4967,10 +5428,11 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val fragment = _fragment_take()
                   (* the sizes the publisher gave its elements, loaded with the chapter *)
                   val () = publisher_sizes_begin(chapter_index, generation)
-                  val found = _render_nodes(taken | doc, xhtml_bytes, xhtml_cells, xhtml_size, ~1, nodes, images_nil(), fragment)
+                  val found = _render_nodes(taken, outside_own | doc, xhtml_bytes, xhtml_cells, xhtml_size, as_outside, ~1, nodes, images_nil(), fragment)
                   val () = publisher_sizes_end()
                   val () = !_render_into := IntoPage()
                   val () = _fragment_put(fragment)
+                  val () = outside_sink_close()
                   val () = $D.destroy(doc)
                   val () = $X.free_nodes(nodes)
                   (* only the clip table is kept, for the narration *)
@@ -4986,12 +5448,15 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   (* The chapter's title in the top bar *)
                   val () = toc_title(chapter_index)
                   val () = (case+ reading_get() of @(_, _, _, chapter_count) => _ticks_show(chapter_count))
-                  val () = _tcy_refit()
-                  val () = _measure_pagination()
                   (* an annotation that names a node this chapter has not is not found in it *)
                   val () = annot_chapter_shown(!_content_count)
                   val () = annot_marks()
                 in
+                  (* the book's sheets are read before the pages are counted (keyword: book sheets) *)
+                  $P.and_then<int><load_outcome>(_sheets_load(serial, file_size, chapter_name_offset, dir_len, generation), llam(_) => let
+                  val () = _tcy_refit()
+                  val () = _measure_pagination()
+                  in
                   (* the facing page, on the other side; the page is
                      shown whatever becomes of it *)
                   case+ shape of
@@ -5002,13 +5467,15 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   | Single() => $P.ret<load_outcome>(ChapterShown())
                   | AloneLeft() => $P.ret<load_outcome>(ChapterShown())
                   | AloneRight() => $P.ret<load_outcome>(ChapterShown())
+                  end)
                 end
                 end
-                | other => let
-                    val () = text_taken_free(other)
-                    val () = _overlay_pending_put(NoOverlayPending())
-                  in $P.ret<load_outcome>(ChapterNotRead()) end)
-            end
+      | ~TextEitherNoRoom() => let
+          val () = _overlay_pending_put(NoOverlayPending())
+        in $P.ret<load_outcome>(NoRoomForChapter()) end
+      | ~TextEitherNone() => let
+          val () = _overlay_pending_put(NoOverlayPending())
+        in $P.ret<load_outcome>(ChapterNotRead()) end)
     end
 
 (* The type of the audio entry whose name is [name_offset, name_offset +
@@ -5959,8 +6426,8 @@ fn _scan_piece {data_location,query_location:agz}{data_size:pos}{offset,piece_le
 
 (* The pieces of text data[offset, offset + text_len), as _text_spans makes them,
    from a content node: their hits, and the next node's number *)
-fun _scan_text {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{offset,text_len:nat | offset + text_len <= data_size}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<text_len>.
-  (taken: TAKEN(kind, compressed, cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), offset: int offset, text_len: int text_len, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
+fun _scan_text {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_len <= data_size}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<text_len>.
+  (taken: TEXT_TAKEN(cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), offset: int offset, text_len: int text_len, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
    chapter: Int, node: Nat, found: hits(hit_count), hit_count: int hit_count)
   : [count:pos][new_count:nat | new_count <= HIT_MAX] (PIECES(cs, offset, text_len, count) | @(Nat, hits(new_count), int new_count)) =
   if text_len < 65536 then let
@@ -5974,8 +6441,8 @@ fun _scan_text {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{ki
 
 (* The numbers _scan_text takes for text data[offset, offset + text_len),
    as _text_spans makes its pieces, with nothing searched *)
-fn _text_count {data_location:agz}{data_size:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{offset,text_len:nat | offset + text_len <= data_size}
-  (taken: TAKEN(kind, compressed, cs, data_size) | bytes: !$A.cborrow(data_location, data_size, cs), offset: int offset, text_len: int text_len, node: Nat): Nat = let
+fn _text_count {data_location:agz}{data_size:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_len <= data_size}
+  (taken: TEXT_TAKEN(cs, data_size) | bytes: !$A.cborrow(data_location, data_size, cs), offset: int offset, text_len: int text_len, node: Nat): Nat = let
   val (_ | count) = pieces_find(bytes, offset, text_len)
 in node + count end
 
@@ -6031,8 +6498,8 @@ in
   else is(data, ruby_parenthesis, 2)
 end
 
-fun _scan_nodes {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 1>.
-  (taken: TAKEN(kind, compressed, cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), nodes: !$X.xml_node_list(data_size, tree_size), top: bool, searched: bool,
+fun _scan_nodes {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{tree_size:nat}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 1>.
+  (taken: TEXT_TAKEN(cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), nodes: !$X.xml_node_list(data_size, tree_size), top: bool, searched: bool,
    query: !$A.arr(byte, query_location, query_size), query_len: int query_len, chapter: Int, content_node: Nat, found: hits(hit_count), hit_count: int hit_count)
   : [new_count:nat | new_count <= HIT_MAX] @(Nat, hits(new_count), int new_count) =
   case+ nodes of
@@ -6041,8 +6508,8 @@ fun _scan_nodes {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{k
     in _scan_nodes(taken | data, bytes, rest, top, searched, query, query_len, chapter, next_node, found_after, new_count) end
   | $X.xml_nodes_nil() => @(content_node, found, hit_count)
 
-and _scan_node {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:pos}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 0>.
-  (taken: TAKEN(kind, compressed, cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), node: !$X.xml_node(data_size, tree_size), top: bool, searched: bool,
+and _scan_node {data_location,query_location:agz}{data_size:pos}{cs:$A.cells}{tree_size:pos}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 0>.
+  (taken: TEXT_TAKEN(cs, data_size) | data: !$A.borrow(byte, data_location, data_size), bytes: !$A.cborrow(data_location, data_size, cs), node: !$X.xml_node(data_size, tree_size), top: bool, searched: bool,
    query: !$A.arr(byte, query_location, query_size), query_len: int query_len, chapter: Int, content_node: Nat, found: hits(hit_count), hit_count: int hit_count)
   : [new_count:nat | new_count <= HIT_MAX] @(Nat, hits(new_count), int new_count) =
   case+ node of
@@ -6251,8 +6718,8 @@ fun _hits_locate {count:nat} .<count>. (found: !hits(count), fresh: Int, chapter
       in end)
 
 (* The hits of the chapter data[0, n) (the chapter given), added *)
-fn _search_add {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}
-  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
+fn _search_add {l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}
+  (taken: TEXT_TAKEN(cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
   case+ _search_take() of
   | ~SearchNone() => ()
   | ~SearchCell(found, hit_count, query, query_len) => let
@@ -6262,8 +6729,8 @@ fn _search_add {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.c
       val () = _hits_locate(found_after, count_after - hit_count, chapter, total_nodes, layout)
     in _search_put(SearchCell(found_after, count_after, query, query_len)) end
 
-fn _search_add_if {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}
-  (taken: TAKEN(kind, compressed, cs, n) | generation: int, data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
+fn _search_add_if {l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}
+  (taken: TEXT_TAKEN(cs, n) | generation: int, data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
   if generation = !_search_generation then _search_add(taken | data, bytes, nodes, chapter, layout) else ()
 
 fn _search_full (): bool =
@@ -6301,7 +6768,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
              in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
            val () = (case+ taken_text of
              | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
-                 prval taken = TAKEN_of(inflates, text_of, held)
+                 prval taken = TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held))
                  val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                  val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                  val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
@@ -6320,8 +6787,8 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
 val _places_generation = ref<int>(0)
 
 (* Counts the content nodes of the chapter data[0, n), as render and a search number them *)
-fn _count_nodes {data_location:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}
-  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, data_location, n), bytes: !$A.cborrow(data_location, n, cs), nodes: !$X.xml_node_list(n, tree_size)): Nat = let
+fn _count_nodes {data_location:agz}{n:pos}{cs:$A.cells}{tree_size:nat}
+  (taken: TEXT_TAKEN(cs, n) | data: !$A.borrow(byte, data_location, n), bytes: !$A.cborrow(data_location, n, cs), nodes: !$X.xml_node_list(n, tree_size)): Nat = let
   val query = $A.alloc<byte>(1)
   val () = _tail_begin()
   val @(total, found, _) = _scan_nodes(taken | data, bytes, nodes, true, false, query, 1, 0, 0, hits_nil(), 0)
@@ -6360,7 +6827,7 @@ fun _places_chapters {after:int | after >= ~1}{bound:nat} .<max(bound - after, 0
                in text end): [kind:$Z.inflate_kind][cs:$A.cells] text_taken(kind, cs)
              val () = (case+ taken_text of
                | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
-                   prval taken = TAKEN_of(inflates, text_of, held)
+                   prval taken = TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held))
                    val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                    val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                    val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
@@ -7563,8 +8030,8 @@ fun _text_runs_reverse {n:int}{count,reversed_count:nat} .<count>.
 (* The pieces of text data[offset, offset + text_len), as _text_spans
    makes them, from a content node on: as runs of block, and the next
    node's number *)
-fun _runs_text {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{offset,text_len:nat | offset + text_len <= n}{count:nat} .<text_len>.
-  (taken: TAKEN(kind, compressed, cs, n) | bytes: !$A.cborrow(l, n, cs), offset: int offset, text_len: int text_len, block: Nat, node: Nat, found: text_runs(n, count))
+fun _runs_text {l:agz}{n:pos}{cs:$A.cells}{offset,text_len:nat | offset + text_len <= n}{count:nat} .<text_len>.
+  (taken: TEXT_TAKEN(cs, n) | bytes: !$A.cborrow(l, n, cs), offset: int offset, text_len: int text_len, block: Nat, node: Nat, found: text_runs(n, count))
   : [pieces:pos][new_count:nat] (PIECES(cs, offset, text_len, pieces) | @(Nat, text_runs(n, new_count))) =
   if text_len < 65536 then (PIECES_last() | @(node + 1, TextRun(block, node, offset, text_len, found)))
   else let
@@ -7579,8 +8046,8 @@ fun _runs_text {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.c
    not read, nor a ruby's readings and parentheses (rt, rtc, rp), whose
    nodes are counted all the same. The next content node's number, the
    blocks' count, and the runs found (the latest first) *)
-fun _runs_nodes {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}{count:nat} .<tree_size, 1>.
-  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), top: bool, readable: bool,
+fun _runs_nodes {l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}{count:nat} .<tree_size, 1>.
+  (taken: TEXT_TAKEN(cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), top: bool, readable: bool,
    block: Int, blocks: Nat, content_node: Nat, found: text_runs(n, count))
   : [new_count:nat] @(Nat, Nat, text_runs(n, new_count)) =
   case+ nodes of
@@ -7589,8 +8056,8 @@ fun _runs_nodes {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.
     in _runs_nodes(taken | data, bytes, rest, top, readable, block, next_blocks, next_node, found_after) end
   | $X.xml_nodes_nil() => @(content_node, blocks, found)
 
-and _runs_node {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:pos}{count:nat} .<tree_size, 0>.
-  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), node: !$X.xml_node(n, tree_size), top: bool, readable: bool,
+and _runs_node {l:agz}{n:pos}{cs:$A.cells}{tree_size:pos}{count:nat} .<tree_size, 0>.
+  (taken: TEXT_TAKEN(cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), node: !$X.xml_node(n, tree_size), top: bool, readable: bool,
    block: Int, blocks: Nat, content_node: Nat, found: text_runs(n, count))
   : [new_count:nat] @(Nat, Nat, text_runs(n, new_count)) =
   case+ node of
@@ -7924,8 +8391,8 @@ implement $P.dispose<script>(script) = script_free(script)
 
 (* The script of the chapter data[0, n), whose nodes are nodes, of
    index chapter *)
-fn _script_make {l:agz}{n:pos}{cs:$A.cells}{kind:$Z.inflate_kind}{compressed:$A.cells}{tree_size:nat}
-  (taken: TAKEN(kind, compressed, cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Nat): script = let
+fn _script_make {l:agz}{n:pos}{cs:$A.cells}{tree_size:nat}
+  (taken: TEXT_TAKEN(cs, n) | data: !$A.borrow(byte, l, n), bytes: !$A.cborrow(l, n, cs), nodes: !$X.xml_node_list(n, tree_size), chapter: Nat): script = let
   val () = _lang_drop(_run_lang_swap(NoBookLang()))
   val () = _block_langs_free(_block_langs_swap(_block_langs_empty()))
   val @(_, _, found) = _runs_nodes(taken | data, bytes, nodes, true, true, ~1, 0, 0, TextRunsEnd())
@@ -7982,7 +8449,7 @@ in
        in
          (case+ taken_text of
            | ~TextTaken(inflates, text_of, held, length | text_array_owner, xhtml, xhtml_size) => let
-               prval taken = TAKEN_of(inflates, text_of, held)
+               prval taken = TEXT_TAKEN_inflated(TAKEN_of(inflates, text_of, held))
                val @(xhtml_frozen, xhtml_cells) = $A.barr_freeze(xhtml)
                val xhtml_bytes = $A.cborrow_view(xhtml_frozen, xhtml_cells)
                val nodes = xhtml_parse(xhtml_bytes, xhtml_size)

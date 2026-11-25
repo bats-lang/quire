@@ -133,7 +133,7 @@ test('fixed margins, paddings and widths do not push text off the page or fight 
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   // the margins setting still sets the page's own
-  const first = bookPage(page).locator('p').first();
+  const first = bookPage(page).locator('[data-book-container]').first();
   const before = (await styleOf(first, ['paddingLeft'])).paddingLeft;
   await openReadingSettings(page, 'Page');
   await readingSettings(page).getByRole('slider', { name: 'Margins' }).fill('4');
