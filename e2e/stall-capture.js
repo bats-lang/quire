@@ -1327,6 +1327,7 @@ export function stallWatch(browser, testInfo) {
         await attachFlight(testInfo, state.flight);
       }
       if (failed) await keepPressRecord();
+      press.release();
       leaveSampler();
       for (const pending of sessions.values()) pending.then((session) => session.detach()).catch(() => {});
       // a red whose evidence is missing is its own failure, named, and the one to fix first

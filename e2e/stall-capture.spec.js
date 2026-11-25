@@ -21,6 +21,7 @@ import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { test, expect } from './fixtures.js';
+import { inputCalls } from './press-record.js';
 import { attempted, attemptsOf, metricsBetween, noted } from './attempt-log.js';
 import { SAMPLE_EVERY_MS, runnerLoad, sampleRunner } from './runner-load.js';
 import { keepHistory } from './page-history.js';
@@ -196,6 +197,38 @@ test('a page in an endless script loop is captured, and gdb is not attached to i
   await endLoop(page, stallWatch);
   // a loop is busy, not frozen: it spends a second of CPU a second
   expectBusyNotFrozen(capture);
+});
+
+// The record of the client's pointer calls, on a stand-in for the client's instrumentation: a call is a press from its begin to its end,
+// a button down is a press until its up, a move is none, and an instrumentation that cannot take a listener is said as not followed.
+test('the pointer calls of the client: a click in flight, a button held, a move that is none (quire#1117)', () => {
+  const listeners = [];
+  const instrumentation = { addListener: (listener) => listeners.push(listener), removeListener: (listener) => listeners.splice(listeners.indexOf(listener), 1) };
+  const calls = inputCalls(instrumentation);
+  const begin = (zone, type, method) => listeners.forEach((listener) => listener.onApiCallBegin(zone, { type, method }));
+  const end = (zone) => listeners.forEach((listener) => listener.onApiCallEnd(zone));
+  expect(calls.followed).toBe(true);
+  expect(calls.pressing()).toBe(false);
+  const move = {}; begin(move, 'Page', 'mouseMove');
+  const hover = {}; begin(hover, 'Frame', 'hover');
+  expect(calls.pressing(), 'a move or a hover is no press').toBe(false);
+  end(move); end(hover);
+  const click = {}; begin(click, 'Frame', 'click');
+  expect(calls.pressing()).toBe(true);
+  end(click);
+  expect(calls.pressing(), 'the click is over').toBe(false);
+  const down = {}; begin(down, 'Page', 'mouseDown');
+  expect(calls.pressing(), 'the down call has not returned, and holds nothing yet').toBe(false);
+  end(down);
+  expect(calls.pressing(), 'the button is held after the call returned').toBe(true);
+  const up = {}; begin(up, 'Page', 'mouseUp'); end(up);
+  expect(calls.pressing()).toBe(false);
+  const failed = { error: new Error('no') }; begin(failed, 'Page', 'mouseDown'); end(failed);
+  expect(calls.pressing(), 'a down that failed holds no button').toBe(false);
+  calls.release();
+  expect(listeners.length).toBe(0);
+  expect(inputCalls({}).followed).toBe(false);
+  expect(inputCalls(undefined).pressing()).toBe(false);
 });
 
 test('a page\'s recent console messages, errors and requests are in its capture, with the requests in flight (#575)', async ({ page, stallWatch }) => {
