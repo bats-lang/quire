@@ -206,11 +206,13 @@ const FUTEX_WAITS = new Set([0, 9, 11, 13]);
 const FUTEX_WAKES = new Set([1, 3, 4, 5, 10, 12]);
 const { RING_LINE } = tracefs; // the one reading of a ring line (flight-tracefs.js), the task to the first `-<pid> [<cpu>]`
 // the kernel prints the arguments in hex with a 0x on some versions (6.18) and without on others (7.0, the runners'): both are read
+const SEGMENT_COUNTS = /^# entries-in-buffer\/entries-written: (\d+)\/(\d+)/;
+const SEGMENT_MARK = /^# the snapshot of the ring taken for this capture/;
 const FUTEX_CALL = /sys_futex\(uaddr: (?:0x)?([0-9a-f]+), op: (?:0x)?([0-9a-f]+), val: (\S+), utime: (\S+?),/;
 
 /**
  * What a ring file proves of a wait (keyword: ring reach, quire#993): 'reaches' when every CPU's buffer holds all its events from `ringCompleteFrom`
- * (the latest of the CPUs' first events: each CPU's buffer overwrites by itself) and the wait cannot have begun before that, 'misses' when even the
+ * (futexAnalysis: the latest first event of the segments that overwrote, ring segments, #1137) and the wait cannot have begun before that, 'misses' when even the
  * oldest event of any CPU (`ringStart`) is later than the wait's entry, and 'unknown' between, where the file proves neither. `waitBegan` is the
  * watchdog's bound on the wait's entry in the ring's clock: not before the scan that last saw the main thread run (`notBefore`, null when there was
  * none), not after the scan that saw it blocked (`notAfter`). A ring of no events misses.
@@ -227,6 +229,12 @@ export function ringReach({ ringStart, ringCompleteFrom, waitBegan }) {
  * (its op and whether it has a timeout), every wait and wake on the address, who woke the waiter last and when, and
  * how long the ring has been silent about it. `address` is hex (no 0x), `tid` the waiter's. Streams the gzipped
  * ring; keeps the last 40 events on the address.
+ * Ring segments (#1137): a capture's file is the gzip members of the segments before it and then its own snapshot, each begun by the header line
+ * `# entries-in-buffer/entries-written: <in the buffer>/<written>` and the line `# the snapshot of the ring taken for this capture`. A snapshot is the live
+ * ring since the swap before it, and the buffers wrap by themselves: `written - entries` of a segment is what its buffers overwrote, 0 when nothing was lost. `segments`
+ * says so for each, with the first event of each CPU in it, and `ringCompleteFrom` is the latest time from which every CPU's events are all there: the latest first
+ * event of each segment that overwrote (or whose count is not a number), the ring's start when none did. The first event of each CPU over the whole file (`cpuStarts`)
+ * is the earliest segment's: CI's run 45630690254 had all four at 513.19 where the segment of the wait began at 577.83, 578.23, 578.85 and 579.70.
  */
 export async function futexAnalysis(ringFile, { address, tid }) {
   if (!existsSync(ringFile)) throw new Error(`${ringFile} is not there`);
@@ -235,9 +243,16 @@ export async function futexAnalysis(ringFile, { address, tid }) {
   const wakers = new Map();
   const waiterWaits = [];
   let lastWait = null, wokenLast = null, switchedOut = null, ringStart = null, ringEnd = 0, cpuStarts = new Map(), lines = 0, onAddress = 0;
+  const segments = [];
+  let counted = { entries: null, written: null }, segment = null;
   const reader = createInterface({ input: createReadStream(ringFile).pipe(createGunzip()), crlfDelay: Infinity });
   for await (const line of reader) {
-    if (line.startsWith('#')) continue;
+    if (line.startsWith('#')) {
+      const counts = SEGMENT_COUNTS.exec(line);
+      if (counts) counted = { entries: Number(counts[1]), written: Number(counts[2]) };
+      else if (SEGMENT_MARK.test(line)) { segment = { ...counted, cpuStarts: new Map() }; segments.push(segment); }
+      continue;
+    }
     const parts = RING_LINE.exec(line);
     if (!parts) continue;
     lines += 1;
@@ -245,6 +260,8 @@ export async function futexAnalysis(ringFile, { address, tid }) {
     const at = Number(stamp);
     if (ringStart === null) ringStart = at;
     if (!cpuStarts.has(cpu)) cpuStarts.set(cpu, at);
+    if (segment === null) { segment = { ...counted, cpuStarts: new Map() }; segments.push(segment); } // a file with no segment line is one segment
+    if (!segment.cpuStarts.has(cpu)) segment.cpuStarts.set(cpu, at);
     ringEnd = at;
     const call = FUTEX_CALL.exec(text);
     if (call) {
@@ -271,10 +288,15 @@ export async function futexAnalysis(ringFile, { address, tid }) {
     const switched = /^sched_switch: prev_comm=.* prev_pid=(\d+) prev_prio=\d+ prev_state=(\S+) ==>/.exec(text);
     if (switched && Number(switched[1]) === tid) switchedOut = { at, state: switched[2] };
   }
+  const seen = segments.filter((each) => each.cpuStarts.size > 0).map((each) => {
+    const overwritten = Number.isFinite(each.entries) && Number.isFinite(each.written) ? each.written - each.entries : null;
+    return { entries: each.entries, written: each.written, overwritten, cpuStarts: Object.fromEntries(each.cpuStarts), completeFrom: overwritten === 0 ? null : Math.max(...each.cpuStarts.values()) };
+  });
+  const completeFrom = seen.reduce((latest, each) => (each.completeFrom !== null && each.completeFrom > latest ? each.completeFrom : latest), ringStart);
   return {
-    address: `0x${wanted}`, waiterTid: tid, ringLines: lines, ringStart, ringCompleteFrom: cpuStarts.size ? Math.max(...cpuStarts.values()) : null, ringEnd,
-    // #1095: each CPU's first event, so a wait missing from the file shows whether its CPU's buffer began after the wait (keyword: waiter-waits)
-    cpuStarts: Object.fromEntries(cpuStarts),
+    address: `0x${wanted}`, waiterTid: tid, ringLines: lines, ringStart, ringCompleteFrom: ringStart === null ? null : completeFrom, ringEnd,
+    // #1095: each CPU's first event over the whole file; #1137: the file's segments hold the ones that say where a wait could be lost (keyword: waiter-waits, ring segments)
+    cpuStarts: Object.fromEntries(cpuStarts), segments: seen,
     waiter: {
       lastWait, switchedOut, wokenLast, waits: waiterWaits,
       silentMs: wokenLast ? Math.round((ringEnd - wokenLast.at) * 1000) : null,
