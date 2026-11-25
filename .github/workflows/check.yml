@@ -280,7 +280,6 @@ jobs:
 
       # The app's probes beside the project's smoke-test.sh (keyword: android-smoke, pwa#267, #1030)
       - name: Put the smoke probes beside the Android project
-        if: steps.app.outcome == 'success'
         run: cp scripts/android/smoke-open.js scripts/android/smoke-ready.js scripts/android/smoke-select-point.js scripts/android/smoke-tap-points.js scripts/android/smoke-tap-result.js dist/android/
 
       # The same commit always gives the same version, whatever the clock
