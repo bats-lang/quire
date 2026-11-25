@@ -2,27 +2,16 @@
  * Evidence for a page that stops answering (#244): where its main thread
  * is when it hangs, taken while it hangs.
  *
- * A page's renderer answers a DevTools command on its main thread, so a
- * page that is already stuck in a loop cannot be attached to, and cannot
- * have its debugger enabled, any more: both wait for the main thread.
- * Only a few commands interrupt running script (Debugger.pause,
- * Debugger.setBreakpointsActive, Runtime.terminateExecution). So each page
- * is armed when it is first seen: a DevTools session of its own with the
- * debugger enabled and every breakpoint (and `debugger;` statement) made
- * inactive, which costs nothing until a pause is asked for, except that V8
- * keeps a page's wasm on its baseline compiler (Liftoff) while a debugger
- * is enabled.
+ * This watch makes no DevTools client of its own (pwa#289, quire#1133): the
+ * page's one DevTools client is gen-pwa test's preload (pwa's `src/test_run.bats`),
+ * which enables the debugger, pauses a page that does not answer and takes the
+ * profile. What is left here needs none: Playwright's own connection and /proc.
  *
- * Then a watch (`stallWatch`) asks each page to evaluate `1` every 2 s.
+ * A watch (`stallWatch`) asks each page to evaluate `1` every 2 s.
  * A page that does not answer within 5 s, and every page of a test that
  * is about to time out, is captured (`capture`):
- *   - which DevTools commands its renderer still answers: an
- *     interrupting one (V8 alive) and a task (its main thread free; an answer
- *     given in another DevTools client's pause is not one, keyword: other client pause);
- *   - Debugger.pause: the call frames it pauses in (script URL, function,
- *     line and column; for wasm, `wasm://` and the byte offset);
- *   - when it does not pause, a 2 s CPU profile (Profiler), if it can be
- *     taken;
+ *   - whether the page answers an evaluate (`evaluate`), and what its renderer
+ *     answers when it does not;
  *   - each renderer process's CPU time over 1 s, which tells a busy main
  *     thread (a loop: about 1 s) from a blocked one (about 0);
  *   - when the page is frozen (it answers nothing and its renderer used
@@ -57,23 +46,18 @@ import { diskEvidence, futexEvidence, futexWordMemory, missingEvidence, pageProb
 import { runnerLoad, sampleRunner } from './runner-load.js';
 import { pressRecord } from './press-record.js';
 
-// the duration of an instrument (the CPU window, the profile, the probe's cadence) is `lasting` of preflight.js, the one span helper (quire#976, keyword: window)
+// the duration of an instrument (the CPU window, the probe's cadence) is `lasting` of preflight.js, the one span helper (quire#976, keyword: window)
 export { lasting };
 
 const ANSWER_MS = 5000;     // a page that takes longer to evaluate is captured
 const PROBE_EVERY_MS = 2000;
 const SCAN_EVERY_MS = 1000; // new contexts and pages are armed this often
 const COMMAND_MS = 2000;    // how long a DevTools command is waited for
-const PAUSE_MS = 3000;
-export const PRESS_MS = 3000;      // how long the pause waits for a press the page has begun to be released (quire#1102)
-const PRESS_POLL_MS = 20;   // how often it looks (a cadence, not a wait for a step)
-const PROFILE_MS = 2000;
-const METRICS_MS = 1000;    // Performance.getMetrics, around an attempt (#600): a busy page is noted, not waited for
 const HARVEST_MS = 1000;
 // After a read the page did not answer, none is made for this long (#715), unless the
 // probe hears from the page sooner (it asks every PROBE_EVERY_MS and resets it). 5 s,
 // by what comparable breakers do: Hystrix's circuit stays open for sleepWindowInMilliseconds
-// 5000 after calls that time out at 1000 ms, the same ratio as METRICS_MS here (the
+// 5000 after calls that time out at 1000 ms, the same ratio as HARVEST_MS here (the
 // Hystrix wiki, Configuration); resilience4j's waitDurationInOpenState (60 s) and Envoy's
 // outlier base_ejection_time (30 s) protect a service from load and guard a remote
 // dependency, where this guards only a diagnostic read, whose cost is a lost sample, so it
@@ -122,15 +106,11 @@ export const TEARDOWN_MOST_MS = TEARDOWN_MS + HELPER_MS + 1500;
 /**
  * The longest a capture of a page that answers can take, every wait in
  * `record` and `captureArmed` run out one after another: the arming
- * waited for (1 command); the interrupting command, the task and
- * Debugger.pause (3); the pause itself (PAUSE_MS); the debugger
- * disabled, enabled and its breakpoints made inactive again (3);
- * Profiler.enable and Profiler.start (2); the profile (PROFILE_MS);
- * Profiler.stop (1); the kernel's log (dmesg, HELPER_MS). The renderers' CPU
- * time (a session, two reads and 1 s between them) is taken alongside, and is
- * shorter. 10 x 2 s + 3 s + 2 s + 5 s = 30 s.
+ * waited for (1 command); the page's evaluate (1); the kernel's log (dmesg,
+ * HELPER_MS). The renderers' CPU time (a session, two reads and 1 s between
+ * them) is taken alongside, and is shorter. 2 x 2 s + 5 s = 9 s.
  */
-export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PRESS_MS + PROFILE_MS + HELPER_MS;
+export const CAPTURE_MOST_MS = 2 * COMMAND_MS + HELPER_MS;
 /**
  * The most a crash's record takes after the browser is gone (quire#1055): the kernel ring's snapshot (its sudo call lives ROOT_MOST_MS, the ring lock
  * inside it up to 40 s, then the read of the whole ring) and the browser's trace (TRACE_END_MS for the end and again for its completion). The test waits
@@ -140,7 +120,7 @@ export const CRASH_RECORD_MOST_MS = ROOT_MOST_MS + 2 * TRACE_END_MS;
 
 /**
  * What the native stacks of a frozen page add, every wait run out: an
- * evaluate of an unarmed page (1 command); the renderers' CPU time awaited
+ * evaluate of the page (1 command); the renderers' CPU time awaited
  * (the browser session, two reads and CPU_WINDOW_MS: 3 commands and the
  * window, all of it counted, though it began alongside the probes above);
  * gdb's version; per renderer (side by side) readelf (the binary's
@@ -163,107 +143,13 @@ async function within(promise, ms) {
   try { return await Promise.race([outcome, silent]); } finally { clearTimeout(timer); }
 }
 
-// QUIRE_NO_STALL_ARM=1 (anything but empty or 0) skips arming: the debugger is
-// never enabled, so a run can be compared with and without it (#575, #591: the
-// frozen renderers all had it armed, which is a suspect, not evidence). The
-// watch still probes and still takes the native stacks; it loses what needs
-// the debugger (the pause, the profile, the answers). Read at each arming.
-// Nothing sets it: it is for a run someone chooses to make.
-const NO_ARM = 'QUIRE_NO_STALL_ARM';
-const armingOff = () => !['', '0'].includes(process.env[NO_ARM] || '');
-
-// Keyword: own script (#1072). The watch asks the page to run script of its
-// own (the probe's evaluate, the harvest, the task a capture asks for). A
-// Debugger.pause is taken by the next script the page runs, whoever made it, so
-// the capture of a page that answers reported "paused" in the watch's own
-// probe: an anonymous function at line 1 column 1 with no URL. The scripts the
-// watch sends through DevTools carry this sourceURL, every call of its own is
-// noted while it runs (`ownCall`), the capture waits for them before it pauses,
-// and a pause of a page that answers which stopped in a script of a debugger
-// client (clientScript) is not the page's: it is `clientPause`, not `paused`.
-const OWN_SCRIPT = 'quire-stall-watch/';
-const sourceUrlOf = (name) => `\n//# sourceURL=${OWN_SCRIPT}${name}.js`;
-
-// Keyword: other client pause (#1077). A page in a script loop answers no task: its queue is not served. But a Debugger.pause
-// of ANY DevTools client stops the loop in a nested message loop, and that loop answers the commands queued behind it, a task
-// evaluate included. gen-pwa test arms every page with a DevTools client of its own (its page watch, pwa#132: debugger on, a
-// probe every 2 s, a pause when one is not answered), so on CI two watches look at the page and the other's pause can come just
-// before this watch asks its task (run 42343081463: its Debugger.pause 2 ms before the task, which was answered in 8 ms, the
-// page still in spinForever). An answer given in a pause this watch did not ask for says nothing of the task queue, so it is
-// not counted as one (`taskAnswered`), and the capture names the pause (`answeredInPauseOfAnotherClient`).
-
 /**
- * Whether a pause this watch did not ask for was in effect for any part of a question: when the question began (`before`) or
- * ends (`after`), or began in between (the count moved). Each is `armed.unaskedPause`: { paused, count }.
- */
-export function pausedDuring(before, after) {
-  return before.paused || after.paused || after.count !== before.count;
-}
-
-/** Whether the page's own task queue answered: an answer given in a pause nobody here asked for was a nested loop's. */
-export function taskAnswered(answered, pause) {
-  return answered && !pause;
-}
-
-/** Notes a page-side call of the watch's own while it runs, and gives the promise back. */
-function ownCall(armed, name, promise) {
-  const call = { name, settled: Promise.resolve(promise).then(() => {}, () => {}) };
-  armed.running.add(call);
-  call.settled.then(() => armed.running.delete(call));
-  return promise;
-}
-
-/**
- * Whether a pause stopped in a script a debugger client made, not in one the
- * page runs: the watch's own (by its sourceURL), or the first statement of a
- * script with no URL, no function and no caller (what Runtime.evaluate of a
- * client starts as: line 1 column 1). It names the script, else null.
- */
-export function clientScript(frames) {
-  const top = frames[0];
-  if (!top) return null;
-  if (top.url.startsWith(OWN_SCRIPT)) return top.url;
-  if (frames.length === 1 && !top.url && top.functionName === '(anonymous)' && top.line === 1 && top.column === 1) {
-    return 'a script with no URL, made by a debugger client (line 1 column 1, no caller)';
-  }
-  return null;
-}
-
-/**
- * A page's DevTools session, made while the page still answers, with
- * the debugger enabled; `scripts` maps a script id to its URL.
+ * A page's watch: its history and its timing. No DevTools client is made (pwa#289, quire#1133: gen-pwa test's preload is the page's one),
+ * so a page that is already stuck in a loop is watched all the same, and a test that freezes one asks for a session of its own first
+ * (`session` of the watch).
  */
 export async function arm(page) {
-  const armed = { session: null, scripts: new Map(), error: null, pausing: false, running: new Set(), unaskedPause: { paused: false, count: 0, frames: null }, history: armingOff() ? null : keepHistory(page) };
-  if (armingOff()) {
-    // the capture then says the page was not armed (`armed: false`, this reason)
-    armed.error = `not armed: ${NO_ARM}=${process.env[NO_ARM]} (the debugger is never enabled)`;
-    await watchTiming(page, armed);
-    return armed;
-  }
-  try {
-    const session = await page.context().newCDPSession(page);
-    armed.session = session;
-    session.on('Debugger.scriptParsed', (event) => {
-      // a script made with a sourceURL comment (OWN_SCRIPT) has that name
-      const url = event.url || event.sourceURL;
-      if (url) armed.scripts.set(event.scriptId, url);
-    });
-    // a pause no capture waits for (one asked for that came too late, or another DevTools client's: gen-pwa test's page watch
-    // is one) is noted (keyword: other client pause, #1077) and ended at once, so the page never stays paused
-    session.on('Debugger.paused', (event) => {
-      if (armed.pausing) return;
-      armed.unaskedPause.paused = true;
-      armed.unaskedPause.count += 1;
-      armed.unaskedPause.frames = event.callFrames.slice(0, 3).map((frame) => frameOf(frame, armed.scripts));
-      session.send('Debugger.resume').catch(() => {});
-    });
-    session.on('Debugger.resumed', () => { armed.unaskedPause.paused = false; });
-    await session.send('Debugger.enable');
-    await session.send('Debugger.setBreakpointsActive', { active: false });
-  } catch (error) {
-    armed.error = String(error && error.message || error);
-  }
+  const armed = { history: keepHistory(page) };
   await watchTiming(page, armed);
   return armed;
 }
@@ -271,13 +157,13 @@ export async function arm(page) {
 /**
  * What decides a failure on a page that was slow to answer, not frozen (#600),
  * kept while the page is alive, since its pages are closed before a failed
- * test's fixtures end: DevTools' Performance metrics (read around each attempt
- * of a helper, attempt-log.js), the long tasks and long animation frames the
+ * test's fixtures end: the long tasks and long animation frames the
  * page's own PerformanceObserver saw (the page's script keeps them in
  * `__quireStall`, a property nothing enumerates; the probe takes them every
  * 2 s), and the attempts themselves. Nothing here fails: a read that cannot
  * be made is written as "not available: why".
  */
+const NO_METRICS = 'Performance.getMetrics needs a DevTools client, and this watch makes none (pwa#289)';
 const OBSERVE_LONG_TASKS = `(() => { try {
   if (globalThis.__quireStall) return;
   const kept = [];
@@ -291,41 +177,25 @@ const OBSERVE_LONG_TASKS = `(() => { try {
   for (const type of ['longtask', 'long-animation-frame']) {
     try { new PerformanceObserver((list) => list.getEntries().forEach(note)).observe({ type, buffered: true }); } catch (unsupported) { /* this browser lacks the type */ }
   }
-} catch (failure) { /* the page goes on without it */ } })()${sourceUrlOf('observe')}`;
+} catch (failure) { /* the page goes on without it */ } })()`;
 
 async function watchTiming(page, armed) {
   const timing = { entries: [], longTasks: [], notes: [], unavailable: null };
   armed.timing = timing;
-  const session = armed.session;
   timing.push = (entry) => { timing.entries.push(entry); if (timing.entries.length > ATTEMPTS_MOST) timing.entries.shift(); };
-  // A page that did not answer a read just now will not answer the next one
-  // (#715): waiting METRICS_MS before and after every attempt, and HARVEST_MS
-  // after a failed one, came out of toLibrary's tries and clickControl's 20 s
-  // for a frozen page. The first read that times out pays METRICS_MS; the reads
-  // in the DEAF_MS after it are not made and say so. Any read that is answered
-  // ends it.
-  let deafSince = 0;
-  const deaf = () => deafSince !== 0 && Date.now() - deafSince < DEAF_MS;
-  // the same for the harvest (an evaluate in the page), which a page can refuse while it answers getMetrics
+  // A page that did not answer the harvest just now will not answer the next (#715): the harvest after a failed one waits HARVEST_MS, and
+  // the reads in the DEAF_MS after it are not made. Any read that is answered ends it.
   let harvestDeafSince = 0;
   const harvestDeaf = () => harvestDeafSince !== 0 && Date.now() - harvestDeafSince < DEAF_MS;
-  // the probe had an answer from the page: it is not deaf to either read
-  timing.heardFrom = () => { deafSince = 0; harvestDeafSince = 0; };
-  timing.metrics = async () => {
-    if (!session || armed.error) return { unavailable: armed.error || 'the page was not armed' };
-    if (deaf()) return { unavailable: `Performance.getMetrics not asked: the page did not answer one less than ${DEAF_MS} ms ago` };
-    const read = await within(session.send('Performance.getMetrics'), METRICS_MS);
-    deafSince = read.answered ? 0 : Date.now();
-    if (!read.answered) return { unavailable: `Performance.getMetrics was not answered within ${METRICS_MS} ms: the page's main thread was busy` };
-    if (read.error || !read.value) return { unavailable: read.error || 'no metrics' };
-    return Object.fromEntries(read.value.metrics.map((metric) => [metric.name, metric.value]));
-  };
+  // the probe had an answer from the page: it is not deaf to the harvest
+  timing.heardFrom = () => { harvestDeafSince = 0; };
+  // DevTools' Performance metrics need a DevTools client, which this watch does not make (pwa#289): an attempt says so
+  timing.metrics = async () => ({ unavailable: NO_METRICS });
   // the long tasks seen since the last harvest: the page keeps them, this takes them
   // `answering`: the probe has just had an answer from the page, whatever the last read did
   timing.harvest = async (answering = false) => {
-    // not while the page is captured: a pause asked for then would stop in this evaluate (#1072)
-    if (page.isClosed() || armed.capturing || (!answering && harvestDeaf())) return;
-    const read = await within(ownCall(armed, 'harvest evaluate', page.evaluate(() => { const kept = globalThis.__quireStall; return kept ? kept.splice(0) : []; })), HARVEST_MS);
+    if (page.isClosed() || (!answering && harvestDeaf())) return;
+    const read = await within(page.evaluate(() => { const kept = globalThis.__quireStall; return kept ? kept.splice(0) : []; }), HARVEST_MS);
     harvestDeafSince = read.answered ? 0 : Date.now();
     if (Array.isArray(read.value)) {
       timing.longTasks.push(...read.value);
@@ -333,56 +203,20 @@ async function watchTiming(page, armed) {
     }
   };
   timing.snapshot = () => ({
-    note: 'long tasks are the page\'s PerformanceObserver entries (longtask: a task over 50 ms; long-animation-frame: a frame over 50 ms, with its blocking time and where style and layout began), `at` in epoch ms, the same clock as an attempt\'s startedAt; devtools is Performance.getMetrics between the attempt\'s start and end',
+    note: 'long tasks are the page\'s PerformanceObserver entries (longtask: a task over 50 ms; long-animation-frame: a frame over 50 ms, with its blocking time and where style and layout began), `at` in epoch ms, the same clock as an attempt\'s startedAt; devtools is not available: this watch makes no DevTools client',
     notAvailable: timing.unavailable,
     attempts: timing.entries,
     longTasks: timing.longTasks,
   });
   bindAttempts(page, timing);
-  if (!session || armed.error) { timing.unavailable = `not available: ${armed.error || 'the page was not armed'}`; return; }
+  timing.unavailable = `not available: ${NO_METRICS}`;
+  // the page's own observer, for the pages made later by a navigation and the one already there (page.evaluate: no DevTools client)
   try {
-    const enabled = await within(session.send('Performance.enable'), COMMAND_MS);
-    if (!enabled.answered || enabled.error) timing.unavailable = `not available: Performance.enable ${enabled.error || 'was not answered'}`;
-    // for the pages made later by a navigation, and the one already there
-    await within(session.send('Page.addScriptToEvaluateOnNewDocument', { source: OBSERVE_LONG_TASKS }), COMMAND_MS);
-    await within(session.send('Runtime.evaluate', { expression: OBSERVE_LONG_TASKS }), COMMAND_MS);
+    await page.addInitScript(OBSERVE_LONG_TASKS);
+    await within(page.evaluate(OBSERVE_LONG_TASKS), COMMAND_MS);
   } catch (error) {
     timing.unavailable = `not available: ${String(error && error.message || error)}`;
   }
-}
-
-function frameOf(frame, scripts) {
-  const url = frame.url || scripts.get(frame.location.scriptId) || '';
-  const column = frame.location.columnNumber || 0;
-  return {
-    functionName: frame.functionName || '(anonymous)',
-    url,
-    line: frame.location.lineNumber + 1,
-    column: column + 1,
-    // in a wasm frame, the column is the code's offset in the module
-    ...(url.startsWith('wasm://') ? { byteOffset: column } : {}),
-  };
-}
-
-/** The functions a CPU profile spent its samples in, most first, each with its stack. */
-function profileSummary(profile) {
-  const nodes = new Map(profile.nodes.map((node) => [node.id, node]));
-  const parent = new Map();
-  for (const node of profile.nodes) for (const child of node.children || []) parent.set(child, node.id);
-  const hits = new Map();
-  for (const sample of profile.samples || []) hits.set(sample, (hits.get(sample) || 0) + 1);
-  const top = [...hits.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
-  return {
-    samples: (profile.samples || []).length,
-    top: top.map(([id, count]) => {
-      const stack = [];
-      for (let at = id; at !== undefined; at = parent.get(at)) {
-        const frame = nodes.get(at).callFrame;
-        stack.push({ functionName: frame.functionName || '(anonymous)', url: frame.url, line: frame.lineNumber + 1, column: frame.columnNumber + 1 });
-      }
-      return { samples: count, stack };
-    }),
-  };
 }
 
 /**
@@ -1021,39 +855,17 @@ export async function nativeStacks(renderers, scope, corePathFor, others = [], b
 
 /** Where a page's main thread is: see the top of this file. */
 export async function capture(page, armed, reason, browser, save = () => {}, scope = nativeScope(), corePathFor = null, flight = null) {
-  armed.capturing = true;
-  try { return await captureArmed(page, armed, reason, browser, save, scope, corePathFor, flight); } finally { armed.capturing = false; }
+  return captureArmed(page, armed, reason, browser, save, scope, corePathFor, flight);
 }
 
 async function captureArmed(page, armed, reason, browser, save, scope, corePathFor, flight) {
-  const result = { reason, at: new Date().toISOString(), url: page.url(), armed: !armed.error, armError: armed.error };
-  result.history = armed.history ? armed.history.snapshot() : 'not available: the page was not watched';
-  const session = armed.session;
+  const result = { reason, at: new Date().toISOString(), url: page.url() };
+  result.history = armed.history ? armed.history.snapshot() : 'not available: the page was still being watched when it stopped answering';
   const cpu = browser ? rendererCpu(browser, CPU_WINDOW_MS) : Promise.resolve(null);
-  // Does the page's main thread run a task? Asked of the armed session; a page
-  // that is not armed (no debugger, or it stopped answering before it was
-  // armed) is asked with an evaluate of its own, so armed and unarmed pages
-  // are judged alike, whatever the reason of the capture
-  let answers = false;
-  if (session && !armed.error) {
-    // An interrupting command (answered while script runs) and a task
-    const unasked = armed.unaskedPause;
-    const before = { paused: unasked.paused, count: unasked.count };
-    const interrupt = await within(session.send('Debugger.setBreakpointsActive', { active: false }), COMMAND_MS);
-    const task = await within(ownCall(armed, 'task evaluate', session.send('Runtime.evaluate', { expression: `1${sourceUrlOf('task')}` })), COMMAND_MS);
-    // the pause of another client lets the queued task run in its nested loop (keyword: other client pause, #1077); its event
-    // comes before the answer, on the same pipe
-    const pause = pausedDuring(before, unasked);
-    answers = taskAnswered(task.answered, pause);
-    result.answers = {
-      interrupt: { answered: interrupt.answered, ms: interrupt.ms, error: interrupt.error },
-      task: { answered: answers, ms: task.ms, error: task.error, ...(task.answered && pause ? { answeredInPauseOfAnotherClient: unasked.frames } : {}) },
-    };
-  } else {
-    const evaluated = await within(ownCall(armed, 'unarmed evaluate', page.evaluate(() => 1)), COMMAND_MS);
-    result.evaluate = { answered: evaluated.answered, ms: evaluated.ms, error: evaluated.error };
-    answers = evaluated.answered;
-  }
+  // Does the page's main thread run a task? Asked with an evaluate of the watch's own: Playwright's connection, no DevTools client of ours
+  const evaluated = await within(page.evaluate(() => 1), COMMAND_MS);
+  result.evaluate = { answered: evaluated.answered, ms: evaluated.ms, error: evaluated.error };
+  const answers = evaluated.answered;
   let processes = null;
   const before = new Map(); // a frozen renderer's pid -> { kernel, futexMemory }, read before the rings and the native step
   const kernelOf = (list) => kernelEvidence(Array.isArray(list) ? list.filter((process) => process.type === 'renderer').map((process) => process.pid) : [], scope).catch((error) => ({ error: String(error && error.stack || error) }));
@@ -1061,8 +873,7 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
     // No answer, and only then: the renderers that also used (almost) no CPU
     // are frozen, as #575 and #591 were. One that used a second a second is
     // busy (a loop, a heavy layout), still running, and is left alone: gdb
-    // stops the process it is attached to. So the native stacks come first,
-    // before the pause and the profile below change what a frozen renderer does
+    // stops the process it is attached to
     processes = await cpu;
     if (Array.isArray(processes)) {
       // Which renderer is the page's own is not known (no pid for a target in
@@ -1100,52 +911,6 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
       }
     }
   }
-  if (session && !armed.error) {
-    // the watch's own calls into the page end first, so none is left to take the pause (#1072, keyword: own script)
-    // (a page that answers nothing keeps its calls pending, and is not waited for)
-    if (answers) await within(Promise.all([...armed.running].map((call) => call.settled)), COMMAND_MS);
-    // Keyword: press open (quire#1102). A page paused by the debugger drops the input it is sent (the mouseup of a click whose mousedown it
-    // had: the click returned, the page never saw a release), so the pause waits for a press to be released, up to PRESS_MS. A press is open
-    // as the page told (it dispatched pointerdown) or as Playwright's client has begun it (quire#1117: a busy page has not dispatched the
-    // mousedown of a click whose mouseup is queued behind it, and the pause, an interrupt, is taken by the first script it runs, that press's own listener).
-    if (armed.pressOpen && armed.pressOpen()) {
-      const began = Date.now();
-      while (armed.pressOpen() && Date.now() - began < PRESS_MS) await lasting(PRESS_POLL_MS);
-      result.pressWait = { waitedMs: Date.now() - began, stillOpen: armed.pressOpen() };
-    }
-    armed.pausing = true;
-    const paused = new Promise((resolve) => session.once('Debugger.paused', resolve));
-    const pause = await within(session.send('Debugger.pause'), COMMAND_MS);
-    const stop = await within(paused, PAUSE_MS);
-    armed.pausing = false;
-    let clientPause = null;
-    if (stop.value) {
-      const frames = stop.value.callFrames.map((frame) => frameOf(frame, armed.scripts));
-      // a page that answers a task runs no script of its own: a pause in a client's script is not where it is
-      clientPause = answers ? clientScript(frames) : null;
-      if (clientPause) result.clientPause = { reason: stop.value.reason, script: clientPause, frames, ownCallsRunning: [...armed.running].map((call) => call.name) };
-      else result.paused = { reason: stop.value.reason, frames };
-      await within(session.send('Debugger.resume'), COMMAND_MS);
-    }
-    if (!stop.value || clientPause) {
-      // the pause asked for is still pending: disabling the debugger
-      // drops it, so the page's next script does not stop in it
-      await within(session.send('Debugger.disable'), COMMAND_MS);
-      await within(session.send('Debugger.enable'), COMMAND_MS);
-      await within(session.send('Debugger.setBreakpointsActive', { active: false }), COMMAND_MS);
-      result.pauseError = clientPause ? `the page ran no script of its own: the pause stopped in ${clientPause}`
-        : pause.error || (pause.answered ? `did not pause within ${PAUSE_MS} ms` : 'Debugger.pause was not answered');
-      const enabled = await within(session.send('Profiler.enable'), COMMAND_MS);
-      const started = enabled.answered && !enabled.error && await within(session.send('Profiler.start'), COMMAND_MS);
-      if (started && started.answered && !started.error) {
-        await lasting(PROFILE_MS);
-        const stopped = await within(session.send('Profiler.stop'), COMMAND_MS);
-        result.profile = stopped.value ? profileSummary(stopped.value.profile) : { error: stopped.error || 'Profiler.stop was not answered' };
-      } else {
-        result.profile = { error: (started && started.error) || enabled.error || 'Profiler.enable or Profiler.start was not answered' };
-      }
-    }
-  }
   processes = processes || await cpu;
   if (Array.isArray(processes)) {
     for (const process of processes) {
@@ -1180,37 +945,13 @@ async function captureArmed(page, armed, reason, browser, save, scope, corePathF
 }
 
 function verdict(result) {
-  if (!result.armed) return 'the page was not armed, so it could not be paused';
-  const top = result.paused && result.paused.frames[0];
-  const at = top ? `${top.functionName} (${top.url}:${top.line}:${top.column})` : '';
-  if (result.answers && result.answers.task.answered) {
-    return `the main thread is free: it answers a task${top ? `, and paused next in ${at}` : ''}`;
-  }
-  if (top) return `the main thread is running script, in ${at}`;
-  if (result.answers && !result.answers.interrupt.answered) {
-    return 'the renderer answers no DevTools command: its main thread is blocked outside script, or the renderer is frozen';
-  }
-  return 'no script on the stack, and the main thread runs no task';
+  if (result.evaluate.answered) return 'the main thread is free: it answers an evaluate';
+  return 'the page answers no evaluate: its main thread is busy or blocked, or the renderer is frozen (the renderers\' CPU says which)';
 }
 
 export function summary(result) {
   const lines = [`[stall-capture] ${result.reason}: ${result.url}`, `  ${result.verdict}`];
   if (result.test) lines.push(`  test: ${result.test} (${result.project}); the page was ${result.pageAgeMs} ms old at the capture, armed after ${result.armedAfterMs} ms`);
-  if (result.answers) lines.push(`  answers: interrupt ${result.answers.interrupt.answered}, task ${result.answers.task.answered}`);
-  if (result.answers && result.answers.task.answeredInPauseOfAnotherClient) {
-    const frame = (result.answers.task.answeredInPauseOfAnotherClient[0] || { functionName: 'no frame', url: '', line: 0, column: 0 });
-    lines.push(`  the task was answered in a pause of another DevTools client (in ${frame.functionName}, ${frame.url}:${frame.line}:${frame.column}), so it says nothing of the page's task queue`);
-  }
-  if (result.paused) for (const frame of result.paused.frames.slice(0, 12)) {
-    lines.push(`    at ${frame.functionName} (${frame.url}:${frame.line}:${frame.column})`);
-  }
-  if (result.clientPause) {
-    const own = result.clientPause.ownCallsRunning;
-    lines.push(`  pause stopped in ${result.clientPause.script} (reason ${result.clientPause.reason}; the watch's own calls running: ${own.length ? own.join(', ') : 'none'}), so the page runs no script of its own`);
-  }
-  if (result.profile && result.profile.top) for (const entry of result.profile.top.slice(0, 3)) {
-    lines.push(`    ${entry.samples} samples: ${entry.stack.map((frame) => frame.functionName).join(' < ')}`);
-  }
   if (Array.isArray(result.rendererCpu)) {
     lines.push(`  renderer CPU over 1 s: ${result.rendererCpu.map((process) => `${process.pid} ${process.cpuSeconds}s`).join(', ')}`);
     for (const process of result.rendererCpu) {
@@ -1304,8 +1045,9 @@ export function summary(result) {
  * its probes to be answered.
  */
 export function stallWatch(browser, testInfo) {
-  const armed = new Map();     // page -> its armed session (a promise)
-  const ready = new Map();     // page -> its armed session, once armed
+  const armed = new Map();     // page -> its watch (a promise)
+  const ready = new Map();     // page -> its watch, once made
+  const sessions = new Map();  // page -> a test's DevTools session (a promise), made by `session`
   const seen = new Map();      // page -> when the watch first saw it, and how long arming took
   const state = { frozen: false, captureFile: null, flight: null, browserGone: false }; // what the failure check reads (missingEvidence)
   const watchedContexts = new Set();
@@ -1329,8 +1071,7 @@ export function stallWatch(browser, testInfo) {
     pending.then((done) => { ready.set(page, done); seen.get(page).armedAfterMs = Date.now() - seen.get(page).at; });
     probe(page);
   };
-  // The press record (press-record.js, quire#1079; moves with pwa#289): the context's DevTools clients are followed from here on, before this
-  // watch makes its own, and its pages report their pointer events through a binding and an init script, with no DevTools client of ours.
+  // The press record (press-record.js, quire#1079; moves with pwa#289): the context's DevTools clients are followed from here on, and its pages report their pointer events through a binding and an init script, with no DevTools client of ours.
   const press = pressRecord();
   const listening = new Map(); // context -> the promise of its init script, which a caller waits for before the context makes its first page
   const watchContext = (context) => {
@@ -1346,9 +1087,7 @@ export function stallWatch(browser, testInfo) {
 
   const record = async (page, reason) => {
     const arming = await within(armed.get(page), COMMAND_MS);
-    const armedPage = arming.value || { session: null, scripts: new Map(), running: new Set(),
-      error: 'the page was still being armed: it stopped answering before its debugger was enabled' };
-    armedPage.pressOpen = () => press.open(page);
+    const armedPage = arming.value || { history: null };
     count += 1;
     const path = testInfo.outputPath(`stall-capture-${count}.json`);
     // written when the native stacks are in and again at the end, so what the
@@ -1404,10 +1143,7 @@ export function stallWatch(browser, testInfo) {
 
   async function probe(page) {
     while (!stopped && !page.isClosed()) {
-      // not while the page is captured: its pause would stop in the probe
-      if (ready.has(page) && ready.get(page).capturing) { await lasting(PROBE_EVERY_MS); continue; }
-      const evaluating = page.evaluate(() => 1);
-      const answer = await within(ready.has(page) ? ownCall(ready.get(page), 'probe evaluate', evaluating) : evaluating, ANSWER_MS);
+      const answer = await within(page.evaluate(() => 1), ANSWER_MS);
       if (stopped || page.isClosed()) return;
       if (!answer.answered) {
         start(page, `page did not answer an evaluate within ${ANSWER_MS / 1000} s`);
@@ -1549,10 +1285,13 @@ export function stallWatch(browser, testInfo) {
     async ringing(page, ms) {
       await waitFor(() => (ringing.includes(page) ? true : undefined), ms, 'the capture of the page did not come to the rings');
     },
-    /** The page's armed session (null when arming failed): its commands still reach a page that hangs. */
+    /**
+     * A DevTools session for a test that freezes or loops its page, made on the first call (the watch makes none of its own, pwa#289) and
+     * ended by stop(): ask for it while the page answers, a page already stuck in a loop can no longer be attached to.
+     */
     async session(page) {
-      const pending = armed.get(page);
-      return pending ? (await pending).session : null;
+      if (!sessions.has(page)) sessions.set(page, page.context().newCDPSession(page));
+      return sessions.get(page);
     },
     /**
      * The test is over: no capture starts, and the ones running are waited for, but not for ever (a native step started at the margin
@@ -1590,10 +1329,7 @@ export function stallWatch(browser, testInfo) {
       if (failed) await keepPressRecord();
       press.release();
       leaveSampler();
-      for (const pending of armed.values()) {
-        const arming = await within(pending, COMMAND_MS);
-        if (arming.value && arming.value.session) arming.value.session.detach().catch(() => {});
-      }
+      for (const pending of sessions.values()) pending.then((session) => session.detach()).catch(() => {});
       // a red whose evidence is missing is its own failure, named, and the one to fix first
       const missing = await this.verify();
       if (missing.length) throw new Error(`EVIDENCE MISSING: ${missing.join('; ')}`);

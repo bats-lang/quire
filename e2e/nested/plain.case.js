@@ -4,9 +4,8 @@ import { join } from 'node:path';
 import { test, expect } from '../fixtures.js';
 import { fileAppears } from '../changed.js';
 
-test('plain failure', async ({ page, stallWatch }) => {
+test('plain failure', async ({ page }) => {
   await page.setContent('<p>plain</p>');
-  await stallWatch.session(page);   // the page is armed from here
   if (process.env.QUIRE_NESTED_GO) expect(await fileAppears(join(process.cwd(), 'go'), 600000), 'the run made go').toBe(true);
   expect(1, 'a plain assertion').toBe(2);
 });

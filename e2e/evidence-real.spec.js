@@ -551,8 +551,6 @@ test('a press whose release is lost: the failed test keeps the trace and the pre
   const sentBefore = own.commandsBeforePress.map((each) => `${each.method} ${each.detail}`);
   expect(sentBefore, 'the 5 s before the press').toContain('Input.dispatchMouseEvent mouseMoved');
   expect([...sentBefore, ...own.commandsSincePress.map((each) => `${each.method} ${each.detail}`)], 'the press itself').toContain('Input.dispatchMouseEvent mousePressed');
-  const watch = record.devtoolsClients.find((each) => /stall-capture\.js/.test(each.createdBy));
-  expect(watch && watch.attached, 'the stall watch\'s own session is listed too').toBe(true);
 });
 
 test('a plain failed test whose ring is gone is EVIDENCE MISSING in the report Playwright wrote, and in the job-level check', async ({}, testInfo) => {

@@ -112,7 +112,7 @@ test('an untimed futex wait in the renderer\'s main thread: the word, its neighb
   expect(found.disk.length).toBeGreaterThanOrEqual(3);
 });
 
-test('a script spin: the capture names the function, and no native attach is made to a busy renderer', async ({ page, stallWatch }, testInfo) => {
+test('a script spin: the page answers no evaluate, and no native attach is made to a busy renderer', async ({ page, stallWatch }, testInfo) => {
   desktopOnly(testInfo);
   await recorderOn();
   test.setTimeout(testInfo.timeout + CAPTURE_MOST_MS);
@@ -120,7 +120,7 @@ test('a script spin: the capture names the function, and no native attach is mad
   const session = await stallWatch.session(page);
   await session.send('Runtime.evaluate', { expression: 'setTimeout(function spinForeverForEvidence() { for (;;) {} }, 0)' });
   const found = await stallWatch.next(page, 30000 + CAPTURE_MOST_MS);
-  expect(found.paused.frames[0].functionName).toBe('spinForeverForEvidence');
+  expect(found.evaluate.answered).toBe(false);
   expect(found.presumedBusy).toBeTruthy();
   expect(found.native).toBeUndefined();
   await session.send('Runtime.terminateExecution');
@@ -220,7 +220,7 @@ test('a frozen compositor (the GPU process stopped): the page answers but makes 
   process.kill(gpu, 'SIGSTOP');
   let found;
   try { found = await capture(page, armed, 'induced: the GPU process is stopped', browser); } finally { process.kill(gpu, 'SIGCONT'); }
-  expect(found.answers.task.answered, 'the main thread answers').toBe(true);
+  expect(found.evaluate.answered, 'the main thread answers').toBe(true);
   expect(found.frames.answered, 'but no frame is produced').toBe(false);
   const stopped = found.otherProcesses.find((each) => each.pid === gpu);
   expect(stopped.threads.join(' '), 'the GPU process is stopped').toMatch(/ T /);
@@ -447,7 +447,8 @@ test('a renderer gone when the capture has finished its rings: what /proc held o
   try {
     const page = await (await own.newContext()).newPage();
     const armed = await arm(page);
-    const hang = await hangPage(page, { session: async () => armed.session });
+    const hangSession = await page.context().newCDPSession(page); // the watch makes none (pwa#289)
+    const hang = await hangPage(page, { session: async () => hangSession });
     try {
       // the rings are the step after which a context that closes under the capture has taken the renderers (on a runner they take longer than the
       // test): here the step kills every renderer and returns when /proc has lost them, so the capture reads what is left after the rings, every run
@@ -1033,7 +1034,8 @@ test('a capture is reading the ring while a renderer in another page begins an u
     const written = (await ringStats(process.env)).written;
     // the renderer begins its wait now, while the capture is in the middle of reading
     const hangAt = Number(process.hrtime.bigint()) / 1e9;
-    hang = await hangPage(page, { session: async () => armed.session });
+    const hangSession = await page.context().newCDPSession(page); // the watch makes none (pwa#289)
+    hang = await hangPage(page, { session: async () => hangSession });
     // #1095 (runs 42660119349 and 42688747248: the ring's last wait of the renderer was not the wait /proc showed): the hang is in force only when its request has reached the
     // server, so the renderer is read after that. Before it, an untimed wait of a renderer's main thread that is not the hang (or one that began before the snapshot) was taken for it
     let arrived = false;
@@ -1274,7 +1276,7 @@ test('a network stall (a fetch to a server that never answers, the page free): t
     // the request is in flight for 2 s (the age the capture is to say): the history, which is the page's own, says when it is
     await expect.poll(() => armed.history.snapshot().inFlight.some((each) => each.url === url && each.ageMs >= 2000), { timeout: 20000 }).toBe(true);
     const found = await capture(page, armed, 'induced: a fetch nobody answers', browser);
-    expect(found.answers.task.answered, 'the page is free').toBe(true);
+    expect(found.evaluate.answered, 'the page is free').toBe(true);
     expect(found.history.inFlight.some((each) => each.url === url && each.ageMs >= 2000)).toBe(true);
     const kept = await keepBoth(browser, (name) => testInfo.outputPath(`net-${name}`), process.env, true);
     expect(kept.browserTrace.pendingRequests.some((each) => each.url === url && each.ageMs >= 2000), JSON.stringify(kept.browserTrace.pendingRequests)).toBe(true);
@@ -1297,7 +1299,7 @@ test('a page that is slow, not frozen (quire#600): the long task, the page\'s at
   // the page's observer has the long task (it is delivered after the task, not with it)
   await expect.poll(() => page.evaluate(() => (globalThis.__quireStall || []).some((each) => each.ms >= 1000)), { timeout: 20000 }).toBe(true);
   const found = await capture(page, armed, 'induced: a slow page', browser);
-  expect(found.answers.task.answered).toBe(true);
+  expect(found.evaluate.answered).toBe(true);
   // the page's tasks are taken by whichever session harvests first (the test's own, here, and the watch's probe every 2 s): between them they hold the task
   expect(Array.isArray(found.pageTiming.longTasks) && Array.isArray(found.pageTiming.attempts), 'the capture has the fields').toBe(true);
   const watched = await stallWatch.evidence();
