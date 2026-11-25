@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { createGunzip, createGzip, gunzipSync } from 'node:zlib';
+import { createGunzip, createGzip, gunzipSync, gzipSync } from 'node:zlib';
 import { createInterface } from 'node:readline';
 import { test, expect } from './fixtures.js';
 import { arm, capture, CAPTURE_MOST_MS, CRASH_RECORD_MOST_MS, NATIVE_MOST_MS, stallWatch as makeWatch } from './stall-capture.js';
@@ -997,6 +997,43 @@ async function widestSilence(file, since, until) {
   return widest;
 }
 
+/** Every renderer whose main thread is in an untimed futex wait now: [{ pid, address, syscall, readAt }] (FUTEX_WAIT_BITSET, a null timeout). A wait that resumes is not the hang (#1129). */
+async function untimedWaits(browser) {
+  const found = [];
+  for (const renderer of (await processes(browser)).filter((each) => each.type === 'renderer')) {
+    const answer = await readSyscall(renderer.id);
+    const call = /^202 (0x[0-9a-f]+) (0x[0-9a-f]+) (0x[0-9a-f]+) (0x[0-9a-f]+)/.exec(answer.syscall || '');
+    if (call && (parseInt(call[2], 16) & 0x7f) === 9 && /^0x0+$/.test(call[4])) found.push({ pid: renderer.id, address: call[1].slice(2), syscall: answer.syscall, readAt: Number(process.hrtime.bigint()) / 1e9 });
+  }
+  return found;
+}
+
+/** The hang is the wait that is still the same wait (same thread, same address) at a later read: a renderer's main thread also waits untimed for a moment, then runs on (#1129). */
+const stillBlocked = (earlier, now) => now.find((each) => earlier.some((before) => before.pid === each.pid && before.address === each.address)) || null;
+
+/** #1129: the lines of one thread in a kept ring from `from` on (at most `most`), and each CPU's last event, for the artifact of a failure: the lines say what the thread did after its last wait the analysis saw, the CPU ends whether one CPU's buffer stops before the others. */
+async function ringOfThread(file, tid, from, most) {
+  const lines = [];
+  const cpuStarts = {};
+  const cpuEnds = {};
+  const reader = createInterface({ input: createReadStream(file).pipe(createGunzip()), crlfDelay: Infinity });
+  for await (const line of reader) {
+    const parts = RING_LINE.exec(line);
+    if (!parts) continue;
+    if (!(parts[3] in cpuStarts)) cpuStarts[parts[3]] = Number(parts[4]);
+    cpuEnds[parts[3]] = Number(parts[4]);
+    if (Number(parts[2]) === tid && Number(parts[4]) >= from && lines.length < most) lines.push(line.trim());
+  }
+  return { lines, cpuStarts, cpuEnds };
+}
+
+/** #1129 (keyword: ring-record): what a failure of the ring-capture test keeps, as the attachments the job's `flight-*.gz` glob uploads: `flight-untimed-waiters` (the record with each CPU's first and last event of the second capture's ring and the lines of the thread read) and, when the test failed, `flight-after-capture` (that ring whole). */
+async function keepRingRecord(testInfo, record, failed) {
+  if (record.nextFile && record.taken) record.ringOfThread = await ringOfThread(record.nextFile, record.taken.pid, record.from, 400).catch((error) => ({ error: String(error && error.message || error) }));
+  await testInfo.attach('flight-untimed-waiters', { body: gzipSync(JSON.stringify(record, null, 2)), contentType: 'application/gzip' }).catch(() => {});
+  if (failed && record.nextFile) await testInfo.attach('flight-after-capture', { path: record.nextFile, contentType: 'application/gzip' }).catch(() => {});
+}
+
 // The ticket's event (#910, run 40313494155): a capture of one worker held the ring paused for 13 s, a renderer in the other worker began its untimed
 // wait in that window, and the ring never held the wait. The capture here is real (keepKernel, the root step and all) and cannot end: its file is a pipe
 // that nobody reads, so it holds the ring lock and has taken its snapshot, and stays in the middle of reading the ring until the test reads the pipe.
@@ -1017,6 +1054,9 @@ test('a capture is reading the ring while a renderer in another page begins an u
   let reading = null;
   let draining = null;
   let ticking = null;
+  let finished = false;
+  // #1129: what the test read, kept in its artifact so that a failure says which thread it took (the failing run's evidence did not)
+  const record = { early: [], taken: null, waiter: null, ring: null, ringOfThread: null, readAgain: null, nextFile: null, from: 0 };
   try {
     const page = await (await own.newContext()).newPage();
     const armed = await arm(page);
@@ -1040,15 +1080,10 @@ test('a capture is reading the ring while a renderer in another page begins an u
     void hang.reached.then(() => { arrived = true; });
     await expect.poll(() => arrived, { timeout: 30000, message: 'the page\'s synchronous request reached the server' }).toBe(true);
     const arrivedAt = Number(process.hrtime.bigint()) / 1e9;
-    let waiting = null;
-    await expect.poll(async () => {
-      for (const renderer of (await processes(own)).filter((each) => each.type === 'renderer')) {
-        const answer = await readSyscall(renderer.id);
-        const call = /^202 (0x[0-9a-f]+) (0x[0-9a-f]+) (0x[0-9a-f]+) (0x[0-9a-f]+)/.exec(answer.syscall || '');
-        if (call && (parseInt(call[2], 16) & 0x7f) === 9 && /^0x0+$/.test(call[4])) { waiting = { pid: renderer.id, address: call[1].slice(2), syscall: answer.syscall, readAt: Number(process.hrtime.bigint()) / 1e9 }; return true; }
-      }
-      return false;
-    }, { timeout: 30000, message: 'a renderer is in an untimed futex wait' }).toBe(true);
+    let early = [];
+    await expect.poll(async () => { early = await untimedWaits(own); return early.length > 0; }, { timeout: 30000, message: 'a renderer is in an untimed futex wait' }).toBe(true);
+    record.early = early;
+    const waiting = early[0];
     expect(capturing, 'the capture is still reading when the wait has begun (else this test shows nothing)').toBe(true);
     // the ring recorded all the while: events came in during the capture
     await expect.poll(async () => (await ringStats(process.env)).written, { timeout: 30000, message: 'the ring takes events while a capture reads it' }).toBeGreaterThan(written);
@@ -1065,12 +1100,24 @@ test('a capture is reading the ring while a renderer in another page begins an u
     // no hole: from the first capture's snapshot to the end of the next one the ring has no silence of seconds (a ring paused for the capture has the length of the capture)
     const silence = await widestSilence(next.file, snapshotAt, Number(process.hrtime.bigint()) / 1e9);
     expect.soft(silence.seconds, `the widest silence of the ring after the first capture's snapshot began at ${silence.from}`).toBeLessThan(1.5);
-    const history = await futexAnalysis(next.file, { address: waiting.address, tid: waiting.pid });
-    expect(history.waiter.lastWait, `the ring holds the renderer's wait (${waiting.syscall}): ${JSON.stringify(history.waiter)}`).not.toBeNull();
-    expect(history.waiter.lastWait.untimed).toBe(true);
-    expect(history.onAddress.events, `and the address it waits on (${history.address}; /proc said ${waiting.syscall}; the waiter's last waits in the ring: ${JSON.stringify(history.waiter.waits)}; ${history.ringLines} ring lines from ${history.ringStart} to ${history.ringEnd}, each CPU's first event ${JSON.stringify(history.cpuStarts)}; snapshot ${snapshotAt}, hang asked ${hangAt}, request arrived ${arrivedAt}, wait read ${waiting.readAt})`).toBeGreaterThan(0);
+    // #1129: the first read can be a wait that ended (a renderer's main thread waits untimed for a moment while it starts); the hang is the wait still held after both captures
+    let held = null;
+    await expect.poll(async () => { held = stillBlocked(early, await untimedWaits(own)); return held !== null; }, { timeout: 30000, message: `a renderer is still in the untimed wait it was in before the captures: ${JSON.stringify(early)}` }).toBe(true);
+    record.taken = held;
+    const history = await futexAnalysis(next.file, { address: held.address, tid: held.pid });
+    record.waiter = history.waiter;
+    // #1129: run 45170031683 had the thread's waits in the ring all timed and none at the address /proc showed: where the ring begins and ends, and what the thread did from its first kept wait on, say whether the wait is missing from the ring or never began
+    record.ring = { address: history.address, lines: history.ringLines, start: history.ringStart, end: history.ringEnd, cpuStarts: history.cpuStarts, onAddress: history.onAddress.events, snapshotAt, hangAt, arrivedAt, readAt: held.readAt };
+    record.nextFile = next.file;
+    record.from = history.waiter.waits.length ? history.waiter.waits[0].at : snapshotAt;
+    record.readAgain = { at: Number(process.hrtime.bigint()) / 1e9, waits: await untimedWaits(own) };
+    expect(history.waiter.lastWait, `the ring holds the renderer's wait (${held.syscall}): ${JSON.stringify(history.waiter)}`).not.toBeNull();
+    expect(history.waiter.lastWait.untimed, `the waiter's last waits in the ring: ${JSON.stringify(history.waiter.waits)}; first read ${JSON.stringify(early)}`).toBe(true);
+    expect(history.onAddress.events, `and the address it waits on (${history.address}; /proc said ${held.syscall}; the waiter's last waits in the ring: ${JSON.stringify(history.waiter.waits)}; ${history.ringLines} ring lines from ${history.ringStart} to ${history.ringEnd}, each CPU's first event ${JSON.stringify(history.cpuStarts)}; snapshot ${snapshotAt}, hang asked ${hangAt}, request arrived ${arrivedAt}, wait read ${waiting.readAt})`).toBeGreaterThan(0);
     expect(history.waiter.lastWait.at, 'the wait began after the capture took its snapshot').toBeGreaterThan(snapshotAt);
+    finished = true;
   } finally {
+    await keepRingRecord(testInfo, record, !finished);
     if (ticking) clearInterval(ticking);
     if (hang) hang.release();
     if (!draining) { draining = (async () => { for await (const chunk of createReadStream(pipe)) { void chunk; } })(); }
@@ -1078,6 +1125,35 @@ test('a capture is reading the ring while a renderer in another page begins an u
     await draining.catch(() => {});
     await own.close().catch(() => {});
   }
+});
+
+test('a renderer that waits untimed for a moment and runs on is not taken for the hang: the wait still held is, and the ring holds it untimed (#1129)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  // the losing order of CI's run 45121069443 forced: thread 4242 waits untimed at 10.0 and runs on (a timed wait at 11.0), thread 4343 waits untimed at 10.5 and never wakes
+  const line = (task, pid, at, address, op, utime) => `  ${task}-${pid}    [001] .....   ${at}: sys_futex(uaddr: 0x${address}, op: 0x${op}, val: 0x0, utime: 0x${utime}, uaddr2: 0x0, val3: 0x0)`;
+  const ring = testInfo.outputPath('ring.txt.gz');
+  writeFileSync(ring, gzipSync(`${[line('chrome-headless', 4242, '10.000000', 'aaaa', '89', '0'), line('chrome-headless', 4343, '10.500000', 'bbbb', '89', '0'), line('chrome-headless', 4242, '11.000000', 'cccc', '89', '7ffe0100')].join('\n')}\n`));
+  const first = [{ pid: 4242, address: 'aaaa' }, { pid: 4343, address: 'bbbb' }];
+  const later = [{ pid: 4343, address: 'bbbb' }];
+  const old = await futexAnalysis(ring, { address: first[0].address, tid: first[0].pid });
+  expect(old.waiter.lastWait.untimed, 'the old choice (the first thread read) is the wait that ran on: its last wait is timed').toBe(false);
+  const held = stillBlocked(first, later);
+  expect(held.pid, 'the wait still held is the hang').toBe(4343);
+  expect((await futexAnalysis(ring, { address: held.address, tid: held.pid })).waiter.lastWait.untimed, 'and the ring holds it untimed').toBe(true);
+  expect(stillBlocked(first, []), 'no wait still held: none is chosen').toBeNull();
+  // the record of a failure, made as the ring-capture test makes it: both attachments are read back here (the names are the ones the job's flight-*.gz glob uploads)
+  const record = { early: first, taken: { pid: held.pid, address: held.address }, nextFile: ring, from: 10.5 };
+  await keepRingRecord(testInfo, record, true);
+  const attached = (name) => testInfo.attachments.find((each) => each.name === name);
+  expect(readFileSync(attached('flight-after-capture').path).equals(readFileSync(ring)), 'the second capture\'s whole ring is attached, byte for byte').toBe(true);
+  expect(attached('flight-after-capture').path, 'under a name of the flight-*.gz glob').toMatch(/\/flight-[^/]*\.gz$/);
+  const waiters = JSON.parse(gunzipSync(attached('flight-untimed-waiters').body).toString());
+  expect(waiters.ringOfThread.cpuStarts, 'each CPU\'s first event').toEqual({ '001': 10 });
+  expect(waiters.ringOfThread.cpuEnds, 'each CPU\'s last event').toEqual({ '001': 11 });
+  expect(waiters.ringOfThread.lines.map((each) => each.split(/\s+/).slice(2, 4).join(' ')), 'the lines of the thread read: its own, from the time asked').toEqual(['..... 10.500000:']);
+  expect(waiters.taken.pid, 'and the wait still held').toBe(4343);
+  await keepRingRecord(testInfo, { ...record, nextFile: null }, false);
+  expect(testInfo.attachments.filter((each) => each.name === 'flight-after-capture').length, 'a test that passed attaches no ring').toBe(1);
 });
 
 test('a line of the ring is read at its own task, pid and stamp, though a write it records carries the text of another ring line; the reader of the ring leaves the ring (#910)', async ({}, testInfo) => {
