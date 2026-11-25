@@ -1059,17 +1059,27 @@ test('a capture is reading the ring while a renderer in another page begins an u
     const first = await reading;
     await draining;
     expect(first.file, JSON.stringify(first)).toBeTruthy();
-    // the next capture, whichever worker or watchdog makes it, has the wait: it began after the first one's snapshot, in the live ring
+    // the next capture, whichever worker or watchdog makes it, has the wait unless the live ring wrapped past it (below): it began after the first one's snapshot, in the live ring
     const next = await keepKernel(testInfo.outputPath('after.txt.gz'), process.env);
     expect(next.file, JSON.stringify(next)).toBeTruthy();
     // no hole: from the first capture's snapshot to the end of the next one the ring has no silence of seconds (a ring paused for the capture has the length of the capture)
     const silence = await widestSilence(next.file, snapshotAt, Number(process.hrtime.bigint()) / 1e9);
     expect.soft(silence.seconds, `the widest silence of the ring after the first capture's snapshot began at ${silence.from}`).toBeLessThan(1.5);
     const history = await futexAnalysis(next.file, { address: waiting.address, tid: waiting.pid });
-    expect(history.waiter.lastWait, `the ring holds the renderer's wait (${waiting.syscall}): ${JSON.stringify(history.waiter)}`).not.toBeNull();
-    expect(history.waiter.lastWait.untimed).toBe(true);
-    expect(history.onAddress.events, `and the address it waits on (${history.address}; /proc said ${waiting.syscall}; the waiter's last waits in the ring: ${JSON.stringify(history.waiter.waits)}; ${history.ringLines} ring lines from ${history.ringStart} to ${history.ringEnd}, each CPU's first event ${JSON.stringify(history.cpuStarts)}; snapshot ${snapshotAt}, hang asked ${hangAt}, request arrived ${arrivedAt}, wait read ${waiting.readAt})`).toBeGreaterThan(0);
-    expect(history.waiter.lastWait.at, 'the wait began after the capture took its snapshot').toBeGreaterThan(snapshotAt);
+    // #1137 (CI's run 45630690254): the snapshot is the live ring since the first capture's swap, and a CPU's buffer wraps by itself, so a wait whose CPU wrapped past it is
+    // not in the file (the other worker's tests recorded 1.2 million events a second into the shared ring, 6.07 s between the swaps, the buffers held 4.3 to 5.7 s). The file
+    // says whether it holds the hang (ring reach, #993): when it does the wait is asserted, and when the last segment overwrote the file says that instead of the wait.
+    const reach = ringReach({ ringStart: history.ringStart, ringCompleteFrom: history.ringCompleteFrom, waitBegan: { notBefore: hangAt, notAfter: waiting.readAt } });
+    const where = `/proc said ${waiting.syscall}; ${history.ringLines} ring lines from ${history.ringStart} to ${history.ringEnd}, complete from ${history.ringCompleteFrom}, the segments ${JSON.stringify(history.segments)}; snapshot ${snapshotAt}, hang asked ${hangAt}, request arrived ${arrivedAt}, wait read ${waiting.readAt}`;
+    if (reach === 'reaches') {
+      expect(history.waiter.lastWait, `the ring holds the renderer's wait (${where}): ${JSON.stringify(history.waiter)}`).not.toBeNull();
+      expect(history.waiter.lastWait.untimed).toBe(true);
+      expect(history.onAddress.events, `and the address it waits on (${history.address}; the waiter's last waits in the ring: ${JSON.stringify(history.waiter.waits)}; ${where})`).toBeGreaterThan(0);
+      expect(history.waiter.lastWait.at, 'the wait began after the capture took its snapshot').toBeGreaterThan(snapshotAt);
+    } else {
+      expect(reach, `a ring that is not complete from the hang is one whose buffers wrapped (${where})`).toBe('unknown');
+      expect(history.segments[history.segments.length - 1].overwritten, `the last segment, the live ring since the first capture's swap, overwrote events (${where})`).toBeGreaterThan(0);
+    }
   } finally {
     if (ticking) clearInterval(ticking);
     if (hang) hang.release();
@@ -1551,6 +1561,47 @@ test('a ring that begins between the wait and the scan that saw it, or on one CP
   // 4. no scan before: nothing bounds the wait from below, so a ring never reaches; a ring that begins after the scan that saw it misses
   expect(ringReach({ ringStart: 90.0, ringCompleteFrom: 91.0, waitBegan: { notBefore: null, notAfter: 96.0 } })).toBe('unknown');
   expect(ringReach({ ringStart: 96.5, ringCompleteFrom: 96.5, waitBegan: began })).toBe('misses');
+});
+
+test('a ring file of two captures whose later snapshot wrapped past a wait is not complete from it; one that overwrote nothing is, and a wait missing from it is a hole (quire#1137, ring reach)', async ({}, testInfo) => {
+  desktopOnly(testInfo);
+  const { gzipSync } = await import('node:zlib');
+  const call = 'sys_futex(uaddr: 0x7ffd1209ede8, op: 0x189, val: 0, utime: 0, uaddr2: 0, val3: 0xffffffff)';
+  const quiet = (cpu, at) => `  libuv-worker-4372    [00${cpu}] .....   ${at.toFixed(6)}: sys_futex -> 0x0`;
+  // the file of run 45630690254, in miniature: the first capture's segment holds every CPU from 10.0; the next capture's snapshot is the live ring since the swap at 20.0, and the
+  // buffers of CPUs 0, 1 and 3 wrapped (written 12, in the buffer 6: 6 overwritten), so they begin at 21.0, 22.0 and 21.5; the waiter entered its wait at 20.5 on CPU 1
+  const member = (counts, rows) => gzipSync([`# entries-in-buffer/entries-written: ${counts}   #P:4`, '# the snapshot of the ring taken for this capture; clock: mono', ...rows].join('\n') + '\n');
+  const first = member('4/4', [0, 1, 2, 3].map((cpu) => quiet(cpu, 10 + cpu / 10)));
+  const read = async (name, counts, rows) => {
+    const file = testInfo.outputPath(`${name}.txt.gz`);
+    writeFileSync(file, Buffer.concat([first, member(counts, rows)]));
+    return futexAnalysis(file, { address: '7ffd1209ede8', tid: 3289 });
+  };
+  const began = { notBefore: 20.2, notAfter: 20.9 }; // the hang asked at 20.2, the wait read at 20.9
+  const wrappedRows = [quiet(2, 20.1), quiet(2, 20.3), quiet(0, 21.0), quiet(3, 21.5), quiet(1, 22.0), quiet(2, 23.0)];
+  const wrapped = await read('wrapped', '6/12', wrappedRows);
+  expect(wrapped.waiter.lastWait, 'the wait of CPU 1 is not in the file').toBeNull();
+  // the reading of the test before #1137 (the first event of each CPU over the whole file, which the first segment gives all four of at 10.0 to 10.3)
+  expect(ringReach({ ringStart: wrapped.ringStart, ringCompleteFrom: Math.max(...Object.values(wrapped.cpuStarts)), waitBegan: began }), 'the whole-file reading says the ring reaches the hang, and the spec then asserted the wait').toBe('reaches');
+  expect(wrapped.segments.map((each) => each.overwritten), 'the first segment lost nothing and the last overwrote 6').toEqual([0, 6]);
+  expect(wrapped.segments[1].cpuStarts, 'the first event of each CPU in the segment that wrapped').toEqual({ '002': 20.1, '000': 21.0, '003': 21.5, '001': 22.0 });
+  expect(wrapped.ringCompleteFrom, 'the file is complete from the latest first event of the segment that wrapped').toBe(22.0);
+  expect(ringReach({ ringStart: wrapped.ringStart, ringCompleteFrom: wrapped.ringCompleteFrom, waitBegan: began }), 'and says it does not know whether it holds the wait').toBe('unknown');
+  // the same file with the buffers whole (6 written, 6 in the buffer) and the wait missing: nothing wrapped, so the missing wait is a hole (a ring paused for the capture): reaches, and the spec asserts the wait
+  const paused = await read('paused', '6/6', wrappedRows);
+  expect(paused.segments.map((each) => each.overwritten)).toEqual([0, 0]);
+  expect(paused.waiter.lastWait).toBeNull();
+  expect(ringReach({ ringStart: paused.ringStart, ringCompleteFrom: paused.ringCompleteFrom, waitBegan: began }), 'a ring that wrapped nowhere is complete: a wait missing from it is a hole').toBe('reaches');
+  // the wait in a ring that wrapped on the other CPUs only (the waiter's CPU 2 begins at 20.1): the ring is complete from the latest first event, and holds the wait
+  const found = await read('found', '6/12', [quiet(2, 20.1), `  chrome-headless-3289    [002] .....   20.500000: ${call}`, quiet(0, 21.0), quiet(3, 21.5), quiet(1, 22.0), quiet(2, 23.0)]);
+  expect(found.waiter.lastWait).toMatchObject({ untimed: true, kind: 'wait' });
+  expect(found.onAddress.events).toBe(1);
+  // a file with no segment line and no count (the stand-in rings above) is one segment whose count is not a number: the first event of each CPU decides, as it did
+  const plain = testInfo.outputPath('plain.txt.gz');
+  writeFileSync(plain, gzipSync(['# entries-in-buffer/entries-written: x/x   #P:4', quiet(1, 90.0), quiet(3, 98.0), quiet(3, 100.0)].join('\n')));
+  const unnumbered = await futexAnalysis(plain, { address: '7ffd1209ede8', tid: 3289 });
+  expect(unnumbered.segments).toEqual([{ entries: null, written: null, overwritten: null, cpuStarts: { '001': 90.0, '003': 98.0 }, completeFrom: 98.0 }]);
+  expect(unnumbered.ringCompleteFrom).toBe(98.0);
 });
 
 test('the press record reads a press that was released, one that was not, and one that a capture listener on window stopped (quire#1079)', async ({}, testInfo) => {
