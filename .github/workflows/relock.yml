@@ -30,6 +30,7 @@ jobs:
         bats-lang/pwa/.github/actions/queue-passed
         bats-lang/repository-prototype/.github/workflows/relock-pins.yml
         bats-lang/repository-prototype/.github/workflows/text-lint-check.yml
+        bats-lang/repository-prototype/.github/workflows/canonical-files-check.yml
         bats-lang/bats/.github/actions/setup
         bats-lang/repository-prototype/.github/actions/check-aggregate
       # check.yml repeats each pin's commit as pwa-ref, which pwa's android.yml and
@@ -40,3 +41,4 @@ jobs:
         bats-lang/pwa/.github/workflows/android.yml pwa-ref
         bats-lang/pwa/.github/workflows/play-release.yml pwa-ref
         bats-lang/repository-prototype/.github/workflows/text-lint-check.yml tools-ref
+        bats-lang/repository-prototype/.github/workflows/canonical-files-check.yml tools-ref
