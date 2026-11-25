@@ -62,10 +62,15 @@ usage:
   --known FILE  accepted mutants that are explained (`file | lemma | operator | reason`, operator
                 `*` for all of the lemma's): an equivalent mutant, e.g. a lemma proved from FALSEP(),
                 for which every statement is true. Any other accepted mutant fails the check
+env QUIRE_MUTATION_MEMO=DIR  keep the compiler's answer for each check of the work copy in DIR, under the
+                sha256 of the compiler, patsopt, the build's stamp, the lock and every file of src/ (`Memo`)
 """
 import argparse
+import hashlib
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -639,15 +644,95 @@ def errors(log):
     return found
 
 
+# ---- the memo of the compiler's answers (#1113, keyword: mutation memo)
+
+MEMO_FORMAT = 'quire-mutation-memo 1'
+MEMO = None  # a Memo, set by main from QUIRE_MUTATION_MEMO; None keeps no memo
+
+
+def digest_file(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as stream:
+        for block in iter(lambda: stream.read(1 << 20), b''):
+            h.update(block)
+    return h.hexdigest()
+
+
+class Memo:
+    """The answer (exit status and log) of one `bats check` of the work copy, kept under the
+    sha256 of everything that answer is a function of: the command, the compiler's binary, the
+    patsopt of the ATS home the run uses, the build's stamp (bats's own judgement of its
+    toolchain), the lock and manifest, every file of src/ with the module as this run wrote it.
+    A different compiler, solver, source or lock is a different key, so a pin move finds nothing
+    (the answer of another compiler is not this one's). No time is read. Without the stamp of
+    the build there is no key and nothing is kept or served. The cache of CI is only a locator
+    for the directory; a hit stands in for the compiler's answer and for nothing else."""
+
+    def __init__(self, directory, check_command):
+        self.directory, self.check_command = Path(directory), check_command
+
+    def key(self, work, file, lines):
+        stamp = work / 'build' / '.bats_stamp'
+        if not stamp.is_file():
+            return None
+        h = hashlib.sha256()
+
+        def put(label, text):
+            h.update(f'{label} {len(text)}\n'.encode() + text.encode() + b'\n')
+
+        put('format', MEMO_FORMAT)
+        put('command', self.check_command)
+        words = self.check_command.split()
+        program = shutil.which(words[0]) if words else None
+        put('compiler', digest_file(program) if program else 'none')
+        patsopt = Path(os.environ.get('HOME', '/root')) / '.bats' / 'ats2' / 'bin' / 'patsopt'
+        put('patsopt', digest_file(patsopt) if patsopt.is_file() else 'none')
+        put('stamp', stamp.read_text())
+        for name in ('bats.toml', 'bats.lock'):
+            put(name, digest_file(work / name) if (work / name).is_file() else 'none')
+        src = work / 'src'
+        for path in sorted(p for p in src.rglob('*') if p.is_file()) if src.is_dir() else []:
+            relative = path.relative_to(work).as_posix()
+            if relative == file:
+                put(relative, hashlib.sha256('\n'.join(lines).encode()).hexdigest())
+            else:
+                put(relative, digest_file(path))
+        return h.hexdigest()
+
+    def path(self, key):
+        return self.directory / 'mutation' / key[:2] / f'{key}.json'
+
+    def get(self, key):
+        try:
+            entry = json.loads(self.path(key).read_text())
+            return int(entry['code']), str(entry['log'])
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+    def put(self, key, code, log):
+        target = self.path(key)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        beside = target.with_suffix(f'.{os.getpid()}.tmp')
+        beside.write_text(json.dumps({'code': code, 'log': log}))
+        os.replace(beside, target)
+
+
 def run_check(work, file, lines, check_command):
-    (work / file).write_text('\n'.join(lines))
-    done = subprocess.run(check_command, cwd=work, shell=True, capture_output=True, text=True)
-    log = done.stdout + done.stderr
+    key = MEMO.key(work, file, lines) if MEMO else None
+    served = MEMO.get(key) if key else None
+    if served:
+        code, log = served
+    else:
+        (work / file).write_text('\n'.join(lines))
+        done = subprocess.run(check_command, cwd=work, shell=True, capture_output=True, text=True)
+        code, log = done.returncode, done.stdout + done.stderr
+        if key:
+            MEMO.put(key, code, log)
     if os.environ.get('MUTATION_LOGS'):
         directory = Path(os.environ['MUTATION_LOGS'])
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / f'{len(list(directory.glob("*.log"))):03d}-{Path(file).name}.log').write_text(f'rc={done.returncode}\n' + log)
-    return done.returncode, log, [e for e in errors(log) if e[0].endswith(file)]
+        (directory / f'{len(list(directory.glob("*.log"))):03d}-{Path(file).name}.log').write_text(f'rc={code}\n' + log)
+    return code, log, [e for e in errors(log) if e[0].endswith(file)]
 
 
 def classify(mutants, errs):
@@ -793,6 +878,8 @@ def main(argv):
     if args.ats_home:
         use_ats_home(args.ats_home)
     check_command = os.environ.get('BATS_CHECK', 'bats check')
+    global MEMO
+    MEMO = Memo(os.environ['QUIRE_MUTATION_MEMO'], check_command) if os.environ.get('QUIRE_MUTATION_MEMO') else None
     report = Report(known)
     work = Path(args.run).resolve() if args.run else None
     for file in args.files:
