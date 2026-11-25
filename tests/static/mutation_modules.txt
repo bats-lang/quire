@@ -5,7 +5,7 @@
 src/bytes.bats 2
 src/bytesarr.bats
 src/chunk.bats
-src/cut.bats
+src/cut.bats 2
 src/crc.bats 5
 src/fields.bats
 src/seq.bats
